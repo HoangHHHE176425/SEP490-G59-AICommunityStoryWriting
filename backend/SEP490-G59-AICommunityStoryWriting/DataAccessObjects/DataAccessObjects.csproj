@@ -7,10 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="Context\" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\BusinessObjects\BusinessObjects.csproj" />
   </ItemGroup>
 
