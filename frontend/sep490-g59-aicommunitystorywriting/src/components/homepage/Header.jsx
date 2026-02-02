@@ -177,13 +177,14 @@ export function Header() {
                                                     <p className="text-sm text-slate-500 dark:text-slate-400">{user?.email || ''}</p>
                                                 </div>
 
-                                                <a
-                                                    href="#"
+                                                <Link
+                                                    to="/profile"
                                                     className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
+                                                    onClick={() => setIsUserMenuOpen(false)}
                                                 >
                                                     <User className="w-4 h-4" />
                                                     Thông tin cá nhân
-                                                </a>
+                                                </Link>
 
                                                 <a
                                                     href="#"
@@ -305,10 +306,13 @@ export function Header() {
                                     <div className="border-t border-slate-200 dark:border-slate-700 my-2"></div>
 
                                     {/* User Menu Mobile */}
-                                    <a className="flex items-center gap-3 text-slate-600 dark:text-slate-300 hover:text-primary transition-colors font-semibold" href="#">
+                                    <Link
+                                        to="/profile"
+                                        className="flex items-center gap-3 text-slate-600 dark:text-slate-300 hover:text-primary transition-colors font-semibold"
+                                    >
                                         <User className="w-4 h-4" />
                                         Thông tin cá nhân
-                                    </a>
+                                    </Link>
                                     <a className="flex items-center gap-3 text-slate-600 dark:text-slate-300 hover:text-primary transition-colors font-semibold" href="#">
                                         <Library className="w-4 h-4" />
                                         Tủ sách
