@@ -1,0 +1,687 @@
+import { useState } from 'react';
+import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut } from 'lucide-react';
+import { StoryEditor } from './StoryEditor';
+import { StoryInfoEditor } from './StoryInfoEditor';
+import { ChapterListManager } from '../author/ChapterListManager';
+import { StoryCommentsViewer } from './StoryCommentsViewer';
+import { ChapterEditorPage } from '../author/ChapterEditorPage';
+import { Footer } from '../../components/homepage/Footer';
+import { Header } from '../../components/homepage/Header';
+
+export function AuthorStoryManagement({ onBack }) {
+    const [activeView, setActiveView] = useState('stories'); // 'stories' | 'profile' | 'editInfo' | 'chapterList' | 'comments' | 'createStory' | 'editChapter' | 'addChapter'
+    const [activeMenu, setActiveMenu] = useState('stories');
+    const [currentStory, setCurrentStory] = useState(null);
+    const [currentChapter, setCurrentChapter] = useState(null);
+
+    const [stories, setStories] = useState([
+        {
+            id: 1,
+            title: 'Tu Tiên Chi Lộ: Hành Trình Vạn Năm',
+            cover: 'https://images.unsplash.com/photo-1589998059171-988d887df646?w=200&h=300&fit=crop',
+            storyType: 'long',
+            categories: ['Tiên hiệp', 'Huyền huyễn'],
+            status: 'published',
+            chapters: 450,
+            totalViews: 5200000,
+            follows: 8900,
+            rating: 4.8,
+            lastUpdate: 'Cập nhật 21:07 25/01/2026',
+            publishStatus: 'Đang ra',
+        },
+        {
+            id: 2,
+            title: 'Kiếm Đạo Độc Tôn',
+            cover: 'https://images.unsplash.com/photo-1612036801632-8e4cf4e2e1b7?w=200&h=300&fit=crop',
+            storyType: 'long',
+            categories: ['Kiếm hiệp'],
+            status: 'draft',
+            chapters: 25,
+            totalViews: 125000,
+            follows: 340,
+            rating: 4.5,
+            lastUpdate: 'Cập nhật 15:13 25/01/2026',
+            publishStatus: 'Lưu tạm',
+        },
+    ]);
+
+    // Mock comments data
+    const mockComments = [
+        {
+            id: 1,
+            userName: 'Nguyễn Văn A',
+            userAvatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=user1',
+            time: '2 giờ trước',
+            content: 'Truyện hay quá! Mong tác giả cập nhật thêm nhiều chương.',
+            likes: 15
+        },
+        {
+            id: 2,
+            userName: 'Trần Thị B',
+            userAvatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=user2',
+            time: '5 giờ trước',
+            content: 'Nhân vật chính rất hay, tính cách rõ ràng.',
+            likes: 8
+        },
+    ];
+
+    const userStats = {
+        published: stories.filter(s => s.status === 'published').length,
+        totalChapters: stories.reduce((acc, s) => acc + s.chapters, 0),
+        followers: 0,
+        recommendations: 0,
+    };
+
+    const handleCreateStory = () => {
+        setCurrentStory(null);
+        setActiveView('createStory');
+    };
+
+    const handleEditStory = (story) => {
+        setCurrentStory(story);
+        setActiveView('editInfo');
+    };
+
+    const handleViewChapters = (story) => {
+        setCurrentStory(story);
+        setActiveView('chapterList');
+    };
+
+    const handleViewComments = (story) => {
+        setCurrentStory(story);
+        setActiveView('comments');
+    };
+
+    const handleAddChapter = (story) => {
+        setCurrentStory(story);
+        setCurrentChapter(null);
+        setActiveView('addChapter');
+    };
+
+    const handleEditChapter = (chapter) => {
+        setCurrentChapter(chapter);
+        setActiveView('editChapter');
+    };
+
+    const handleSaveChapter = (chapterData) => {
+        // TODO: Save chapter to backend
+        console.log('Saving chapter:', chapterData);
+        setActiveView('chapterList');
+        setCurrentChapter(null);
+    };
+
+    const handleDeleteStory = (storyId) => {
+        if (window.confirm('Bạn có chắc chắn muốn xóa truyện này?')) {
+            setStories(stories.filter(s => s.id !== storyId));
+        }
+    };
+
+    const handleSaveStory = (storyData) => {
+        if (currentStory) {
+            setStories(stories.map(s => s.id === currentStory.id ? { ...s, ...storyData } : s));
+        } else {
+            const newStory = {
+                ...storyData,
+                id: Date.now(),
+                totalViews: 0,
+                follows: 0,
+                rating: 0,
+                lastUpdate: 'Vừa xong',
+            };
+            setStories([newStory, ...stories]);
+        }
+        setActiveView('stories');
+        setCurrentStory(null);
+    };
+
+    const handleSaveInfo = (infoData) => {
+        setStories(stories.map(s => s.id === currentStory.id ? { ...s, ...infoData } : s));
+        setActiveView('stories');
+        setCurrentStory(null);
+    };
+
+    // Render different views
+    if (activeView === 'createStory') {
+        return (
+            <StoryEditor
+                story={null}
+                onSave={handleSaveStory}
+                onCancel={() => {
+                    setActiveView('stories');
+                    setCurrentStory(null);
+                }}
+            />
+        );
+    }
+
+    if (activeView === 'editInfo') {
+        return (
+            <StoryInfoEditor
+                story={currentStory}
+                onSave={handleSaveInfo}
+                onCancel={() => {
+                    setActiveView('stories');
+                    setCurrentStory(null);
+                }}
+            />
+        );
+    }
+
+    if (activeView === 'chapterList') {
+        return (
+            <ChapterListManager
+                story={currentStory}
+                onBack={() => {
+                    setActiveView('stories');
+                    setCurrentStory(null);
+                }}
+                onAddChapter={() => handleAddChapter(currentStory)}
+                onEditChapter={(chapter) => handleEditChapter(chapter)}
+            />
+        );
+    }
+
+    if (activeView === 'addChapter' || activeView === 'editChapter') {
+        return (
+            <ChapterEditorPage
+                story={currentStory}
+                chapter={currentChapter}
+                onSave={handleSaveChapter}
+                onCancel={() => {
+                    setActiveView('chapterList');
+                    setCurrentChapter(null);
+                }}
+            />
+        );
+    }
+
+    if (activeView === 'comments') {
+        return (
+            <StoryCommentsViewer
+                story={currentStory}
+                comments={mockComments}
+                onBack={() => {
+                    setActiveView('stories');
+                    setCurrentStory(null);
+                }}
+            />
+        );
+    }
+
+    return (
+        <div>
+            <Header />
+            <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5', display: 'flex' }}>
+                {/* Sidebar */}
+                <div style={{ width: '250px', backgroundColor: '#ffffff', borderRight: '1px solid #e0e0e0', padding: '2rem 0' }}>
+                    <div style={{ padding: '0 1.5rem 1.5rem', borderBottom: '1px solid #e0e0e0' }}>
+                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', margin: '0 0 1rem 0' }}>
+                            Quyền Đình
+                        </h2>
+                    </div>
+
+                    <nav style={{ marginTop: '1rem' }}>
+                        <button
+                            onClick={() => {
+                                setActiveMenu('profile');
+                                setActiveView('profile');
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '0.75rem 1.5rem',
+                                backgroundColor: activeMenu === 'profile' ? '#f5f5f5' : 'transparent',
+                                border: 'none',
+                                textAlign: 'left',
+                                fontSize: '0.875rem',
+                                color: '#333333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'background-color 0.2s'
+                            }}
+                        >
+                            <User style={{ width: '18px', height: '18px' }} />
+                            Hồ sơ tác giả
+                            <ChevronRight style={{ width: '16px', height: '16px', marginLeft: 'auto' }} />
+                        </button>
+
+                        <button
+                            onClick={() => {
+                                setActiveMenu('stories');
+                                setActiveView('stories');
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '0.75rem 1.5rem',
+                                backgroundColor: activeMenu === 'stories' ? '#f5f5f5' : 'transparent',
+                                border: 'none',
+                                textAlign: 'left',
+                                fontSize: '0.875rem',
+                                color: '#333333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'background-color 0.2s'
+                            }}
+                        >
+                            <Book style={{ width: '18px', height: '18px' }} />
+                            Truyện của tôi
+                            <ChevronRight style={{ width: '16px', height: '16px', marginLeft: 'auto' }} />
+                        </button>
+
+                        <button
+                            onClick={onBack}
+                            style={{
+                                width: '100%',
+                                padding: '0.75rem 1.5rem',
+                                backgroundColor: 'transparent',
+                                border: 'none',
+                                textAlign: 'left',
+                                fontSize: '0.875rem',
+                                color: '#333333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'background-color 0.2s'
+                            }}
+                        >
+                            <LogOut style={{ width: '18px', height: '18px' }} />
+                            Đăng xuất
+                            <ChevronRight style={{ width: '16px', height: '16px', marginLeft: 'auto' }} />
+                        </button>
+                    </nav>
+                </div>
+
+                {/* Main Content */}
+                <div style={{ flex: 1, padding: '2rem' }}>
+                    {activeView === 'profile' ? (
+                        <div style={{ maxWidth: '900px' }}>
+                            {/* Thành tích */}
+                            <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', padding: '1.5rem', marginBottom: '1.5rem', border: '1px solid #e0e0e0' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                                    <div style={{ width: '20px', height: '20px', color: '#6b7280' }}>🌱</div>
+                                    <h3 style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>Thành tích</h3>
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
+                                    <div style={{ textAlign: 'center' }}>
+                                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#d4fce3', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem' }}>
+                                            <Book style={{ width: '24px', height: '24px', color: '#13ec5b' }} />
+                                        </div>
+                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', marginBottom: '0.25rem' }}>
+                                            {userStats.published}
+                                        </div>
+                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                            Truyện đã đăng
+                                        </div>
+                                    </div>
+
+                                    <div style={{ textAlign: 'center' }}>
+                                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#d4fce3', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem' }}>
+                                            <div style={{ fontSize: '1.25rem' }}>📄</div>
+                                        </div>
+                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', marginBottom: '0.25rem' }}>
+                                            {userStats.totalChapters}
+                                        </div>
+                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                            Chương đã đăng
+                                        </div>
+                                    </div>
+
+                                    <div style={{ textAlign: 'center' }}>
+                                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#d4fce3', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem' }}>
+                                            <Heart style={{ width: '24px', height: '24px', color: '#13ec5b' }} />
+                                        </div>
+                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', marginBottom: '0.25rem' }}>
+                                            {userStats.followers}
+                                        </div>
+                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                            Người theo dõi
+                                        </div>
+                                    </div>
+
+                                    <div style={{ textAlign: 'center' }}>
+                                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#d4fce3', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem' }}>
+                                            <Star style={{ width: '24px', height: '24px', color: '#13ec5b' }} />
+                                        </div>
+                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', marginBottom: '0.25rem' }}>
+                                            {userStats.recommendations}
+                                        </div>
+                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                            Đề cử
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Thông tin cá nhân */}
+                            <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', padding: '1.5rem', border: '1px solid #e0e0e0' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <div style={{ width: '20px', height: '20px', color: '#6b7280' }}>👤</div>
+                                        <h3 style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>Thông tin cá nhân</h3>
+                                    </div>
+                                    <button
+                                        style={{
+                                            padding: '0.5rem 1.25rem',
+                                            backgroundColor: '#13ec5b',
+                                            border: 'none',
+                                            borderRadius: '4px',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            color: '#ffffff',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        CẬP NHẬT
+                                    </button>
+                                </div>
+
+                                <div style={{ display: 'grid', gap: '1rem' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1rem', alignItems: 'center' }}>
+                                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Tên hiển thị</div>
+                                        <div style={{ fontSize: '0.875rem', color: '#333333', fontWeight: 500 }}>Quyền Đình</div>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1rem', alignItems: 'center' }}>
+                                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Giới thiệu</div>
+                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>Đang cập nhật</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div style={{ maxWidth: '1200px' }}>
+                            {/* Header */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <div style={{ width: '20px', height: '20px', color: '#6b7280' }}>📚</div>
+                                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>
+                                        Truyện của tôi
+                                    </h2>
+                                </div>
+                                <button
+                                    onClick={handleCreateStory}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        padding: '0.625rem 1.25rem',
+                                        backgroundColor: '#13ec5b',
+                                        border: 'none',
+                                        borderRadius: '9999px',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 700,
+                                        color: '#ffffff',
+                                        cursor: 'pointer',
+                                        transition: 'background-color 0.2s'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.backgroundColor = '#10d452';
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.backgroundColor = '#13ec5b';
+                                    }}
+                                >
+                                    <Plus style={{ width: '16px', height: '16px' }} />
+                                    THÊM TRUYỆN MỚI
+                                </button>
+                            </div>
+
+                            {/* Stories List */}
+                            {stories.length === 0 ? (
+                                <div style={{
+                                    backgroundColor: '#ffffff',
+                                    borderRadius: '8px',
+                                    padding: '3rem',
+                                    textAlign: 'center',
+                                    border: '1px solid #e0e0e0'
+                                }}>
+                                    <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📖</div>
+                                    <h3 style={{ fontSize: '1.125rem', color: '#6b7280', marginBottom: '0.5rem' }}>
+                                        Chưa có truyện nào
+                                    </h3>
+                                    <p style={{ fontSize: '0.875rem', color: '#9ca3af', marginBottom: '1.5rem' }}>
+                                        Bắt đầu sáng tác truyện đầu tiên của bạn
+                                    </p>
+                                    <button
+                                        onClick={handleCreateStory}
+                                        style={{
+                                            padding: '0.75rem 1.5rem',
+                                            backgroundColor: '#13ec5b',
+                                            border: 'none',
+                                            borderRadius: '9999px',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 700,
+                                            color: '#ffffff',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        Tạo truyện mới
+                                    </button>
+                                </div>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                    {stories.map((story) => (
+                                        <div
+                                            key={story.id}
+                                            style={{
+                                                backgroundColor: '#ffffff',
+                                                borderRadius: '8px',
+                                                padding: '1.25rem',
+                                                border: '1px solid #e0e0e0',
+                                                display: 'flex',
+                                                gap: '1.25rem'
+                                            }}
+                                        >
+                                            {/* Cover */}
+                                            <img
+                                                src={story.cover}
+                                                alt={story.title}
+                                                style={{
+                                                    width: '80px',
+                                                    height: '107px',
+                                                    objectFit: 'cover',
+                                                    borderRadius: '4px',
+                                                    flexShrink: 0
+                                                }}
+                                            />
+
+                                            {/* Info */}
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <h3 style={{
+                                                            fontSize: '1rem',
+                                                            fontWeight: 'bold',
+                                                            color: '#333333',
+                                                            margin: '0 0 0.5rem 0',
+                                                            overflow: 'hidden',
+                                                            textOverflow: 'ellipsis',
+                                                            whiteSpace: 'nowrap'
+                                                        }}>
+                                                            {story.title}
+                                                        </h3>
+                                                        <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                                                            {story.lastUpdate}
+                                                        </div>
+                                                    </div>
+                                                    <div style={{
+                                                        padding: '0.25rem 0.75rem',
+                                                        backgroundColor: story.status === 'published' ? '#d1fae5' : '#fef3c7',
+                                                        borderRadius: '4px',
+                                                        fontSize: '0.75rem',
+                                                        color: story.status === 'published' ? '#065f46' : '#92400e',
+                                                        marginLeft: '1rem',
+                                                        flexShrink: 0
+                                                    }}>
+                                                        {story.publishStatus}
+                                                    </div>
+                                                </div>
+
+                                                {/* Stats */}
+                                                <div style={{
+                                                    display: 'grid',
+                                                    gridTemplateColumns: 'repeat(4, 1fr)',
+                                                    gap: '1rem',
+                                                    padding: '0.75rem 0',
+                                                    borderTop: '1px solid #f3f4f6',
+                                                    borderBottom: '1px solid #f3f4f6',
+                                                    marginBottom: '1rem'
+                                                }}>
+                                                    <div>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
+                                                            <Book style={{ width: '14px', height: '14px', color: '#6b7280' }} />
+                                                            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Chương</span>
+                                                        </div>
+                                                        <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
+                                                            {story.chapters}
+                                                        </div>
+                                                    </div>
+
+                                                    <div>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
+                                                            <Eye style={{ width: '14px', height: '14px', color: '#6b7280' }} />
+                                                            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Lượt đọc</span>
+                                                        </div>
+                                                        <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
+                                                            {story.totalViews.toLocaleString()}
+                                                        </div>
+                                                    </div>
+
+                                                    <div>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
+                                                            <Heart style={{ width: '14px', height: '14px', color: '#6b7280' }} />
+                                                            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Theo dõi</span>
+                                                        </div>
+                                                        <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
+                                                            {story.follows}
+                                                        </div>
+                                                    </div>
+
+                                                    <div>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
+                                                            <Star style={{ width: '14px', height: '14px', color: '#6b7280' }} />
+                                                            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Đề cử</span>
+                                                        </div>
+                                                        <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
+                                                            0
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Status */}
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                                        Trạng thái xuất bản
+                                                    </div>
+                                                    <div style={{
+                                                        padding: '0.25rem 0.75rem',
+                                                        backgroundColor: story.status === 'draft' ? '#fef3c7' : '#d1fae5',
+                                                        borderRadius: '4px',
+                                                        fontSize: '0.75rem',
+                                                        color: story.status === 'draft' ? '#92400e' : '#065f46'
+                                                    }}>
+                                                        {story.status === 'draft' ? 'Lưu tạm' : 'Xuất bản'}
+                                                    </div>
+                                                    {story.status === 'draft' && (
+                                                        <div style={{ fontSize: '0.75rem', color: '#ef4444' }}>
+                                                            Cần thêm 1 chương để có thể xuất bản
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Action Buttons */}
+                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flexShrink: 0 }}>
+                                                <button
+                                                    onClick={() => handleViewComments(story)}
+                                                    style={{
+                                                        padding: '0.5rem 1rem',
+                                                        backgroundColor: 'transparent',
+                                                        border: '1px solid #e0e0e0',
+                                                        borderRadius: '4px',
+                                                        fontSize: '0.75rem',
+                                                        color: '#333333',
+                                                        cursor: 'pointer',
+                                                        whiteSpace: 'nowrap'
+                                                    }}
+                                                >
+                                                    Danh sách bình luận
+                                                </button>
+                                                <button
+                                                    onClick={() => handleEditStory(story)}
+                                                    style={{
+                                                        padding: '0.5rem 1rem',
+                                                        backgroundColor: 'transparent',
+                                                        border: '1px solid #e0e0e0',
+                                                        borderRadius: '4px',
+                                                        fontSize: '0.75rem',
+                                                        color: '#333333',
+                                                        cursor: 'pointer',
+                                                        whiteSpace: 'nowrap'
+                                                    }}
+                                                >
+                                                    Chỉnh sửa
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteStory(story.id)}
+                                                    style={{
+                                                        padding: '0.5rem 1rem',
+                                                        backgroundColor: 'transparent',
+                                                        border: '1px solid #e0e0e0',
+                                                        borderRadius: '4px',
+                                                        fontSize: '0.75rem',
+                                                        color: '#333333',
+                                                        cursor: 'pointer',
+                                                        whiteSpace: 'nowrap'
+                                                    }}
+                                                >
+                                                    Xóa
+                                                </button>
+                                                <button
+                                                    onClick={() => handleViewChapters(story)}
+                                                    style={{
+                                                        padding: '0.5rem 1rem',
+                                                        backgroundColor: '#13ec5b',
+                                                        border: 'none',
+                                                        borderRadius: '4px',
+                                                        fontSize: '0.75rem',
+                                                        fontWeight: 600,
+                                                        color: '#ffffff',
+                                                        cursor: 'pointer',
+                                                        whiteSpace: 'nowrap'
+                                                    }}
+                                                >
+                                                    + Thêm chương
+                                                </button>
+                                                <button
+                                                    onClick={() => handleViewChapters(story)}
+                                                    style={{
+                                                        padding: '0.5rem 1rem',
+                                                        backgroundColor: 'transparent',
+                                                        border: '1px solid #e0e0e0',
+                                                        borderRadius: '4px',
+                                                        fontSize: '0.75rem',
+                                                        color: '#333333',
+                                                        cursor: 'pointer',
+                                                        whiteSpace: 'nowrap'
+                                                    }}
+                                                >
+                                                    Danh sách chương
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+            <Footer />
+        </div>
+    );
+}
