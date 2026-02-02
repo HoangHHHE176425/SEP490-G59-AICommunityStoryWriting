@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using StoryPlatform.Helpers;
 using StoryPlatform.Models;
 using System.Text;
 
@@ -12,9 +13,14 @@ builder.Services.AddDbContext<StoryPlatformContext>(options =>
 {
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection"));
 });
+// Services DI
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IAccountService, AccountService>();
+builder.Services.AddScoped<JwtHelper>();
 
 // Controllers
 builder.Services.AddControllers();
+
 
 // JWT Config
 var jwtKey = builder.Configuration["Jwt:Key"];

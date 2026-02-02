@@ -139,3 +139,4 @@ D:\FPT NO1\đồ án\StoryPlatform\obj\Debug\net8.0\refint\StoryPlatform.dll
 D:\FPT NO1\đồ án\StoryPlatform\obj\Debug\net8.0\StoryPlatform.pdb
 D:\FPT NO1\đồ án\StoryPlatform\obj\Debug\net8.0\StoryPlatform.genruntimeconfig.cache
 D:\FPT NO1\đồ án\StoryPlatform\obj\Debug\net8.0\ref\StoryPlatform.dll
+D:\FPT NO1\đồ án\StoryPlatform\obj\Debug\net8.0\StoryPlatform.sourcelink.json

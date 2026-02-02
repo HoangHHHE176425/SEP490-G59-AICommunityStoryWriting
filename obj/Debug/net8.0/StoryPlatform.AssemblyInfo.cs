@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("StoryPlatform")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e040273f4bf6e9c5f9b94a5ab75bab4c09394138")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+79fb71dcfa6bdeb811a6e3a75b2217b158c9cde9")]
 [assembly: System.Reflection.AssemblyProductAttribute("StoryPlatform")]
 [assembly: System.Reflection.AssemblyTitleAttribute("StoryPlatform")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
