@@ -18,13 +18,13 @@ public class AccountController : ControllerBase
     private string UserId => User.FindFirstValue(ClaimTypes.NameIdentifier)
         ?? User.FindFirstValue("sub")!;
 
-    [HttpGet("me")]
+    [HttpGet("getprofile")]
     public async Task<IActionResult> Me()
     {
         return Ok(await _service.GetProfileAsync(UserId));
     }
 
-    [HttpPut("profile")]
+    [HttpPut("updateprofile")]
     public async Task<IActionResult> Update(UpdateProfileRequest request)
     {
         await _service.UpdateProfileAsync(UserId, request);

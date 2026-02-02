@@ -18,7 +18,7 @@
   {
     "ContainingType": "AccountController",
     "Method": "Me",
-    "RelativePath": "api/account/me",
+    "RelativePath": "api/account/getprofile",
     "HttpMethod": "GET",
     "IsController": true,
     "Order": 0,
@@ -28,7 +28,7 @@
   {
     "ContainingType": "AccountController",
     "Method": "Update",
-    "RelativePath": "api/account/profile",
+    "RelativePath": "api/account/updateprofile",
     "HttpMethod": "PUT",
     "IsController": true,
     "Order": 0,

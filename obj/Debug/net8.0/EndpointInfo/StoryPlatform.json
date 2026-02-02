@@ -5,7 +5,7 @@
     "version": "v1"
   },
   "paths": {
-    "/api/account/me": {
+    "/api/account/getprofile": {
       "get": {
         "tags": [
           "Account"
@@ -17,7 +17,7 @@
         }
       }
     },
-    "/api/account/profile": {
+    "/api/account/updateprofile": {
       "put": {
         "tags": [
           "Account"

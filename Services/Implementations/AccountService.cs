@@ -25,8 +25,15 @@ public class AccountService : IAccountService
             user.Email,
             user.Role,
             user.Status,
-            Profile = user.UserProfile
+            Profile = user.UserProfile == null ? null : new
+            {
+                user.UserProfile.Nickname,
+                user.UserProfile.AvatarUrl,
+                user.UserProfile.Bio,
+                user.UserProfile.Description
+            }
         };
+
     }
 
     public async Task UpdateProfileAsync(string userId, UpdateProfileRequest request)
