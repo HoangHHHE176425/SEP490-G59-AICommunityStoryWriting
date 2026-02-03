@@ -18,6 +18,12 @@ namespace DataAccessObjects.DAOs
             return context.stories.FirstOrDefault(s => s.id == id);
         }
 
+        public static story? GetBySlug(string slug)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.stories.FirstOrDefault(s => s.slug == slug);
+        }
+
         public static void Add(story story)
         {
             using var context = new StoryPlatformDbContext();
