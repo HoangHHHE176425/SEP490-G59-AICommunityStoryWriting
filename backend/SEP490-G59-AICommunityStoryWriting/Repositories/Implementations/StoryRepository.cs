@@ -11,6 +11,9 @@ namespace Repositories
         public story? GetById(int id)
             => StoryDAO.GetById(id);
 
+        public story? GetBySlug(string slug)
+            => StoryDAO.GetBySlug(slug);
+
         public void Add(story story)
             => StoryDAO.Add(story);
 

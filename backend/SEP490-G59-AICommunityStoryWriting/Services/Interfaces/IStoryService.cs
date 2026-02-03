@@ -1,31 +1,14 @@
-﻿using BusinessObjects.Entities;
+﻿using Services.DTOs.Stories;
 
 public interface IStoryService
 {
-    story Create(
-        string title,
-        string summary,
-        int categoryId,
-        int authorId,            
-        string? coverImageUrl,
-        int expectedChapters,
-        int releaseFrequencyDays,
-        string ageRating
-    );
-
-    IEnumerable<story> GetAll();
-
-    story? GetById(int id);
-
-    IEnumerable<story> GetByAuthor(int authorId);
-
-    bool Update(
-        int id,
-        string title,
-        string? summary,
-        int categoryId,
-        string status
-    );
-
+    StoryResponseDto Create(CreateStoryRequestDto request, int authorId, string? coverImageUrl);
+    PagedResultDto<StoryListItemDto> GetAll(StoryQueryDto query);
+    StoryResponseDto? GetById(int id);
+    StoryResponseDto? GetBySlug(string slug);
+    PagedResultDto<StoryListItemDto> GetByAuthor(int authorId, StoryQueryDto query);
+    bool Update(int id, UpdateStoryRequestDto request);
     bool Delete(int id);
+    bool Publish(int id);
+    bool Unpublish(int id);
 }
