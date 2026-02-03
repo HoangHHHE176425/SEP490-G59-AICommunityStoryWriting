@@ -1,0 +1,234 @@
+﻿// API Base URL
+const API_BASE_URL = 'http://localhost:5000/api';
+
+// API Service Class
+class ApiService {
+    static async request(url, options = {}) {
+        try {
+            const response = await fetch(`${API_BASE_URL}${url}`, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                },
+                ...options
+            });
+
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ message: response.statusText }));
+                throw new Error(error.message || `HTTP error! status: ${response.status}`);
+            }
+
+            // Handle NoContent responses
+            if (response.status === 204) {
+                return null;
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('API Request Error:', error);
+            throw error;
+        }
+    }
+
+    // Categories API
+    static async getCategories(includeInactive = false) {
+        return this.request(`/categories?includeInactive=${includeInactive}`);
+    }
+
+    static async getCategoryById(id) {
+        return this.request(`/categories/${id}`);
+    }
+
+    static async getCategoryBySlug(slug) {
+        return this.request(`/categories/slug/${slug}`);
+    }
+
+    static async createCategory(data) {
+        return this.request('/categories', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    static async updateCategory(id, data) {
+        return this.request(`/categories/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    }
+
+    static async deleteCategory(id) {
+        return this.request(`/categories/${id}`, {
+            method: 'DELETE'
+        });
+    }
+
+    static async toggleCategoryActive(id) {
+        return this.request(`/categories/${id}/toggle-active`, {
+            method: 'PATCH'
+        });
+    }
+
+    // Stories API
+    static async getStories(query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach(key => {
+            if (query[key] !== null && query[key] !== undefined && query[key] !== '') {
+                params.append(key, query[key]);
+            }
+        });
+        const queryString = params.toString();
+        return this.request(`/stories${queryString ? '?' + queryString : ''}`);
+    }
+
+    static async getStoryById(id) {
+        return this.request(`/stories/${id}`);
+    }
+
+    static async getStoryBySlug(slug) {
+        return this.request(`/stories/slug/${slug}`);
+    }
+
+    static async getStoriesByAuthor(authorId, query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach(key => {
+            if (query[key] !== null && query[key] !== undefined && query[key] !== '') {
+                params.append(key, query[key]);
+            }
+        });
+        const queryString = params.toString();
+        return this.request(`/stories/author/${authorId}${queryString ? '?' + queryString : ''}`);
+    }
+
+    static async createStory(formData) {
+        return fetch(`${API_BASE_URL}/stories`, {
+            method: 'POST',
+            body: formData
+        }).then(async (response) => {
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ message: response.statusText }));
+                throw new Error(error.message || `HTTP error! status: ${response.status}`);
+            }
+            return await response.json();
+        });
+    }
+
+    static async updateStory(id, formData) {
+        return fetch(`${API_BASE_URL}/stories/${id}`, {
+            method: 'PUT',
+            body: formData
+        }).then(async (response) => {
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ message: response.statusText }));
+                throw new Error(error.message || `HTTP error! status: ${response.status}`);
+            }
+            return response.status === 204 ? null : await response.json();
+        });
+    }
+
+    static async deleteStory(id) {
+        return this.request(`/stories/${id}`, {
+            method: 'DELETE'
+        });
+    }
+
+    static async publishStory(id) {
+        return this.request(`/stories/${id}/publish`, {
+            method: 'POST'
+        });
+    }
+
+    static async unpublishStory(id) {
+        return this.request(`/stories/${id}/unpublish`, {
+            method: 'POST'
+        });
+    }
+
+    // Chapters API
+    static async getChapters(query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach(key => {
+            if (query[key] !== null && query[key] !== undefined && query[key] !== '') {
+                params.append(key, query[key]);
+            }
+        });
+        const queryString = params.toString();
+        return this.request(`/chapters${queryString ? '?' + queryString : ''}`);
+    }
+
+    static async getChapterById(id) {
+        return this.request(`/chapters/${id}`);
+    }
+
+    static async getChaptersByStoryId(storyId) {
+        return this.request(`/chapters/story/${storyId}`);
+    }
+
+    static async getChapterByStoryIdAndOrder(storyId, orderIndex) {
+        return this.request(`/chapters/story/${storyId}/order/${orderIndex}`);
+    }
+
+    static async createChapter(data) {
+        return this.request('/chapters', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    static async updateChapter(id, data) {
+        return this.request(`/chapters/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data)
+        });
+    }
+
+    static async deleteChapter(id) {
+        return this.request(`/chapters/${id}`, {
+            method: 'DELETE'
+        });
+    }
+
+    static async publishChapter(id) {
+        return this.request(`/chapters/${id}/publish`, {
+            method: 'POST'
+        });
+    }
+
+    static async unpublishChapter(id) {
+        return this.request(`/chapters/${id}/unpublish`, {
+            method: 'POST'
+        });
+    }
+
+    static async reorderChapter(id, newOrderIndex) {
+        return this.request(`/chapters/${id}/reorder`, {
+            method: 'POST',
+            body: JSON.stringify(newOrderIndex)
+        });
+    }
+}
+
+// Utility functions
+const Utils = {
+    showAlert: (message, type = 'info') => {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+        alertDiv.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        document.body.insertBefore(alertDiv, document.body.firstChild);
+        setTimeout(() => alertDiv.remove(), 5000);
+    },
+
+    formatDate: (dateString) => {
+        if (!dateString) return 'N/A';
+        const date = new Date(dateString);
+        return date.toLocaleString('vi-VN');
+    },
+
+    formatNumber: (num) => {
+        if (num === null || num === undefined) return '0';
+        return new Intl.NumberFormat('vi-VN').format(num);
+    }
+};
