@@ -2,7 +2,7 @@
 {
     public class CategoryResponseDto
     {
-        public int Id { get; set; }
+        public Guid Id { get; set; }
         public string Name { get; set; } = null!;
         public string Slug { get; set; } = null!;
         public string? Description { get; set; }
@@ -10,5 +10,7 @@
         public bool IsActive { get; set; }
         public DateTime? CreatedAt { get; set; }
         public int StoryCount { get; set; }
+        public Guid? ParentId { get; set; }
+        public string? ParentName { get; set; }
     }
 }
