@@ -9,9 +9,11 @@ import {
     EyeOff,
     MoreVertical,
     Download,
-    Upload
+    Upload,
+    Info
 } from 'lucide-react';
-import { CategoryModal } from './CategoryModal';
+import { CategoryModal } from '../../../components/admin/category/CategoryModal';
+import { Pagination } from '../../../components/pagination/Pagination';
 
 export function CategoryManagement() {
     const [searchTerm, setSearchTerm] = useState('');
@@ -19,6 +21,7 @@ export function CategoryManagement() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCategory, setEditingCategory] = useState(null);
     const [selectedCategories, setSelectedCategories] = useState([]);
+    const [viewingCategory, setViewingCategory] = useState(null);
 
     // Mock data - Replace with API call
     const [categories, setCategories] = useState([
@@ -176,6 +179,11 @@ export function CategoryManagement() {
             hour: '2-digit',
             minute: '2-digit'
         });
+    };
+
+    const handleViewCategory = (category) => {
+        setViewingCategory(category);
+        setIsModalOpen(true);
     };
 
     return (
@@ -556,6 +564,23 @@ export function CategoryManagement() {
                                             >
                                                 <Trash2 style={{ width: '16px', height: '16px' }} />
                                             </button>
+                                            <button
+                                                onClick={() => handleViewCategory(category)}
+                                                style={{
+                                                    padding: '0.5rem',
+                                                    border: 'none',
+                                                    background: 'transparent',
+                                                    borderRadius: '0.5rem',
+                                                    cursor: 'pointer',
+                                                    color: '#64748b',
+                                                    transition: 'background-color 0.2s'
+                                                }}
+                                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(100, 116, 139, 0.1)'}
+                                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                                                title="Xem chi tiết"
+                                            >
+                                                <Info style={{ width: '16px', height: '16px' }} />
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -564,51 +589,36 @@ export function CategoryManagement() {
                     </table>
                 </div>
 
+                {/* Empty State */}
                 {filteredCategories.length === 0 && (
                     <div style={{ padding: '3rem', textAlign: 'center' }}>
-                        <p style={{ color: '#64748b', margin: 0 }}>
+                        <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>
                             Không tìm thấy thể loại nào
                         </p>
                     </div>
                 )}
 
                 {/* Pagination */}
-                <div style={{ padding: '1rem', borderTop: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-                    <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
-                        Hiển thị <span style={{ fontWeight: 600 }}>{filteredCategories.length}</span> / {categories.length} thể loại
-                    </p>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button style={{ padding: '0.375rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: '0.5rem', fontSize: '0.875rem', backgroundColor: '#ffffff', color: '#1e293b', cursor: 'pointer', transition: 'background-color 0.2s' }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ffffff'}
-                        >
-                            Trước
-                        </button>
-                        <button style={{ padding: '0.375rem 0.75rem', border: 'none', borderRadius: '0.5rem', fontSize: '0.875rem', backgroundColor: '#13ec5b', color: '#ffffff', cursor: 'pointer' }}>
-                            1
-                        </button>
-                        <button style={{ padding: '0.375rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: '0.5rem', fontSize: '0.875rem', backgroundColor: '#ffffff', color: '#1e293b', cursor: 'pointer', transition: 'background-color 0.2s' }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ffffff'}
-                        >
-                            2
-                        </button>
-                        <button style={{ padding: '0.375rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: '0.5rem', fontSize: '0.875rem', backgroundColor: '#ffffff', color: '#1e293b', cursor: 'pointer', transition: 'background-color 0.2s' }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ffffff'}
-                        >
-                            Sau
-                        </button>
-                    </div>
-                </div>
+                <Pagination
+                    currentPage={1}
+                    totalPages={Math.ceil(categories.length / 10)}
+                    totalItems={categories.length}
+                    itemsPerPage={10}
+                    onPageChange={(page) => console.log('Page:', page)}
+                    itemLabel="thể loại"
+                />
             </div>
 
             {/* Category Modal */}
             <CategoryModal
                 isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
+                onClose={() => {
+                    setIsModalOpen(false);
+                    setViewingCategory(null);
+                }}
                 onSave={handleSaveCategory}
-                category={editingCategory}
+                category={viewingCategory || editingCategory}
+                isViewOnly={!!viewingCategory}
             />
         </div>
     );
