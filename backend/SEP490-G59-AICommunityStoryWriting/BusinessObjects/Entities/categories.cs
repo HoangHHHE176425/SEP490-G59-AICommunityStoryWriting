@@ -5,9 +5,9 @@ namespace BusinessObjects.Entities;
 
 public partial class categories
 {
-    public int id { get; set; }
+    public Guid id { get; set; }
 
-    public int? parent_id { get; set; }
+    public Guid? parent_category_id { get; set; }
 
     public string name { get; set; } = null!;
 
@@ -21,5 +21,9 @@ public partial class categories
 
     public DateTime? created_at { get; set; }
 
-    public virtual ICollection<stories> stories { get; set; } = new List<stories>();
+    public virtual ICollection<categories> Inverseparent_category { get; set; } = new List<categories>();
+
+    public virtual categories? parent_category { get; set; }
+
+    public virtual ICollection<stories> story { get; set; } = new List<stories>();
 }

@@ -15,13 +15,30 @@ namespace AIStory.API.Controllers
             _categoryService = categoryService;
         }
 
-        /// Tạo thể loại mới
+        /// <summary>Tạo thể loại mới (multipart: Name, Description, IsActive, IconImage)</summary>
         [HttpPost]
-        public IActionResult Create([FromBody] CreateCategoryRequestDto request)
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> Create([FromForm] CreateCategoryWithImageRequestDto request)
         {
             try
             {
-                var category = _categoryService.Create(request);
+                string? iconUrl = null;
+
+                if (request.IconImage != null && request.IconImage.Length > 0)
+                {
+                    iconUrl = await SaveIconFile(request.IconImage);
+                }
+
+                var dto = new CreateCategoryRequestDto
+                {
+                    Name = request.Name,
+                    Description = request.Description,
+                    IsActive = request.IsActive,
+                    IconUrl = iconUrl,
+                    ParentId = request.ParentId
+                };
+
+                var category = _categoryService.Create(dto);
                 return Created($"api/categories/{category.Id}", category);
             }
             catch (InvalidOperationException ex)
@@ -30,23 +47,23 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Lấy tất cả thể loại (chỉ lấy các thể loại đang active)
+        /// <summary>Lấy thể loại. rootsOnly=true: chỉ loại truyện gốc; parentId: thể loại con của parent.</summary>
         [HttpGet]
-        public IActionResult GetAll([FromQuery] bool includeInactive = false)
+        public IActionResult GetAll([FromQuery] bool includeInactive = false, [FromQuery] Guid? parentId = null, [FromQuery] bool rootsOnly = false)
         {
-            var categories = _categoryService.GetAll(includeInactive);
+            var categories = _categoryService.GetAll(includeInactive, parentId, rootsOnly);
             return Ok(categories);
         }
 
-        /// Lấy thể loại theo ID
-        [HttpGet("{id:int}")]
-        public IActionResult GetById(int id)
+        /// <summary>Lấy thể loại theo ID</summary>
+        [HttpGet("{id:guid}")]
+        public IActionResult GetById(Guid id)
         {
             var category = _categoryService.GetById(id);
             return category == null ? NotFound() : Ok(category);
         }
 
-        /// Lấy thể loại theo slug
+        /// <summary>Lấy thể loại theo slug</summary>
         [HttpGet("slug/{slug}")]
         public IActionResult GetBySlug(string slug)
         {
@@ -54,13 +71,41 @@ namespace AIStory.API.Controllers
             return category == null ? NotFound() : Ok(category);
         }
 
-        /// Cập nhật thể loại
-        [HttpPut("{id:int}")]
-        public IActionResult Update(int id, [FromBody] UpdateCategoryRequestDto request)
+        /// <summary>Cập nhật thể loại (multipart: Name, Description, IsActive, IconImage)</summary>
+        [HttpPut("{id:guid}")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> Update(Guid id, [FromForm] UpdateCategoryWithImageRequestDto request)
         {
             try
             {
-                var updated = _categoryService.Update(id, request);
+                string? iconUrl = null;
+
+                if (request.IconImage != null && request.IconImage.Length > 0)
+                {
+                    var existing = _categoryService.GetById(id);
+                    if (existing != null && !string.IsNullOrEmpty(existing.IconUrl))
+                    {
+                        DeleteIconFile(existing.IconUrl);
+                    }
+                    iconUrl = await SaveIconFile(request.IconImage);
+                }
+                else
+                {
+                    var existing = _categoryService.GetById(id);
+                    if (existing != null && !string.IsNullOrEmpty(existing.IconUrl))
+                        iconUrl = existing.IconUrl;
+                }
+
+                var dto = new UpdateCategoryRequestDto
+                {
+                    Name = request.Name,
+                    Description = request.Description,
+                    IsActive = request.IsActive,
+                    IconUrl = iconUrl,
+                    ParentId = request.ParentId
+                };
+
+                var updated = _categoryService.Update(id, dto);
                 return updated ? NoContent() : NotFound();
             }
             catch (InvalidOperationException ex)
@@ -69,12 +114,17 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Xóa thể loại
-        [HttpDelete("{id:int}")]
-        public IActionResult Delete(int id)
+        /// <summary>Xóa thể loại</summary>
+        [HttpDelete("{id:guid}")]
+        public IActionResult Delete(Guid id)
         {
             try
             {
+                var existing = _categoryService.GetById(id);
+                if (existing != null && !string.IsNullOrEmpty(existing.IconUrl))
+                {
+                    DeleteIconFile(existing.IconUrl);
+                }
                 var deleted = _categoryService.Delete(id);
                 return deleted ? NoContent() : NotFound();
             }
@@ -84,12 +134,58 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Bật/tắt trạng thái active của thể loại
-        [HttpPatch("{id:int}/toggle-active")]
-        public IActionResult ToggleActive(int id)
+        /// <summary>Bật/tắt trạng thái active</summary>
+        [HttpPatch("{id:guid}/toggle-active")]
+        public IActionResult ToggleActive(Guid id)
         {
             var toggled = _categoryService.ToggleActive(id);
             return toggled ? NoContent() : NotFound();
+        }
+
+        private static async Task<string> SaveIconFile(IFormFile file)
+        {
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg" };
+            var fileExtension = Path.GetExtension(file.FileName).ToLower();
+            if (!allowedExtensions.Contains(fileExtension))
+            {
+                throw new ArgumentException("Invalid file type. Allowed: jpg, jpeg, png, gif, webp, svg");
+            }
+            if (file.Length > 2 * 1024 * 1024) // 2MB for icons
+            {
+                throw new ArgumentException("File size exceeds 2MB limit");
+            }
+
+            var uploadsFolder = Path.Combine(
+                Directory.GetCurrentDirectory(),
+                "wwwroot",
+                "uploads",
+                "icons"
+            );
+
+            if (!Directory.Exists(uploadsFolder))
+                Directory.CreateDirectory(uploadsFolder);
+
+            var fileName = $"{Guid.NewGuid()}{fileExtension}";
+            var filePath = Path.Combine(uploadsFolder, fileName);
+
+            using var stream = new FileStream(filePath, FileMode.Create);
+            await file.CopyToAsync(stream);
+
+            return $"/uploads/icons/{fileName}";
+        }
+
+        private static void DeleteIconFile(string iconUrl)
+        {
+            if (string.IsNullOrEmpty(iconUrl)) return;
+            var filePath = Path.Combine(
+                Directory.GetCurrentDirectory(),
+                "wwwroot",
+                iconUrl.TrimStart('/')
+            );
+            if (System.IO.File.Exists(filePath))
+            {
+                try { System.IO.File.Delete(filePath); } catch { }
+            }
         }
     }
 }
