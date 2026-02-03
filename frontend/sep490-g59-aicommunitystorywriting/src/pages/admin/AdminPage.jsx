@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { AdminDashboard } from '../../components/admin/AdminDashboard';
-import { CategoryManagement } from '../../components/admin/CategoryManagement';
+import { CategoryManagement } from './category/CategoryManagement';
 
 export function AdminPage() {
     // eslint-disable-next-line no-unused-vars

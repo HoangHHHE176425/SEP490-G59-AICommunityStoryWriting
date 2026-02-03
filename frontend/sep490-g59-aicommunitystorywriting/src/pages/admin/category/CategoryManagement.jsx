@@ -11,7 +11,7 @@ import {
     Download,
     Upload
 } from 'lucide-react';
-import { CategoryModal } from './CategoryModal';
+import { CategoryModal } from '../../../components/admin/category/CategoryModal';
 
 export function CategoryManagement() {
     const [searchTerm, setSearchTerm] = useState('');
