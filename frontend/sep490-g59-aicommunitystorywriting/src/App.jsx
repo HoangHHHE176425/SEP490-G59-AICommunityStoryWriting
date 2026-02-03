@@ -9,6 +9,7 @@ import ForgotPassword from './pages/auth/ForgotPassword';
 import Profile from './pages/profile/Profile';
 import { ChapterReader } from './pages/chapter-detail/ChapterReader';
 import { AuthorStoryManagement } from './pages/author/AuthorStoryManagement';
+import { StoryBrowse } from './pages/story-list/StoryBrowse';
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="/profile" element={<Profile />} />
           <Route path="/chapter" element={<ChapterReader />} />
           <Route path="/author" element={<AuthorStoryManagement />} />
+          <Route path="/story-list" element={<StoryBrowse />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>
