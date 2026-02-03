@@ -1,39 +1,21 @@
-# Build results
-bin/
-obj/
-
 # Visual Studio
 .vs/
 *.user
 *.suo
-*.userosscache
-*.sln.docstates
 
-# Rider
+# Build outputs
+bin/
+obj/
+
+# IDE
+.vscode/
 .idea/
 
-# OS files
+# OS
 Thumbs.db
 .DS_Store
 
-# Environment & secrets
-appsettings.Development.json
-appsettings.Production.json
-
-# Logs
-*.log
-
-# Publish output
-publish/
-
-# Cache / temp
+# Temporary / Backup files
 *.tmp
-
-# EF Core migrations backup
-Migrations/*.Designer.cs
-
-# Node (nếu có frontend)
-node_modules/
-
-# Swagger temp
-wwwroot/swagger/
+*.bak
+*.backup
