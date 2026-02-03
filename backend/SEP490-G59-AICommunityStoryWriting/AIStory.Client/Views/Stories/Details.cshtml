@@ -142,7 +142,7 @@
 
 @section Scripts {
     <script>
-        const storyId = @(storyId);
+        const storyId = '@(storyId)';
         let story = null;
         let chapters = [];
         let editingChapterId = null;
@@ -203,8 +203,6 @@
                         <div class="row">
                             <div class="col-md-6">
                                 <p><strong>Độ tuổi:</strong> ${story.ageRating || 'ALL'}</p>
-                                <p><strong>Số chương dự kiến:</strong> ${story.expectedChapters || 0}</p>
-                                <p><strong>Tần suất ra mắt:</strong> ${story.releaseFrequencyDays || 7} ngày</p>
                             </div>
                             <div class="col-md-6">
                                 <p><strong>Tổng số từ:</strong> ${Utils.formatNumber(story.wordCount || 0)}</p>
@@ -288,16 +286,16 @@
                                 </div>
                             </div>
                             <div class="ms-3">
-                                <button class="btn btn-sm btn-info" onclick="viewChapter(${chapter.id})" title="Xem">
+                                <button class="btn btn-sm btn-info" onclick="viewChapter('${chapter.id}')" title="Xem">
                                     <i class="bi bi-eye"></i>
                                 </button>
-                                <button class="btn btn-sm btn-primary" onclick="editChapter(${chapter.id})" title="Sửa">
+                                <button class="btn btn-sm btn-primary" onclick="editChapter('${chapter.id}')" title="Sửa">
                                     <i class="bi bi-pencil"></i>
                                 </button>
-                                <button class="btn btn-sm btn-success" onclick="publishChapter(${chapter.id})" title="Publish" ${chapter.status === 'PUBLISHED' ? 'disabled' : ''}>
+                                <button class="btn btn-sm btn-success" onclick="publishChapter('${chapter.id}')" title="Publish" ${chapter.status === 'PUBLISHED' ? 'disabled' : ''}>
                                     <i class="bi bi-check-circle"></i>
                                 </button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteChapter(${chapter.id})" title="Xóa">
+                                <button class="btn btn-sm btn-danger" onclick="deleteChapter('${chapter.id}')" title="Xóa">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </div>
@@ -415,8 +413,7 @@
         }
 
         function viewChapter(id) {
-            // Navigate to reading page
-            window.location.href = `/Chapters/Read/${id}`;
+            window.location.href = `/Chapters/Read/${encodeURIComponent(id)}`;
         }
 
         async function publishStoryFromDetails() {

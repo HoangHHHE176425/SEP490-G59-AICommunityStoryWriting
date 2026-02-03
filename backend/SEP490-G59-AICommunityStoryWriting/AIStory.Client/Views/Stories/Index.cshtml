@@ -87,8 +87,15 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
+                @if (string.IsNullOrWhiteSpace(ViewBag.DefaultAuthorId as string))
+                {
+                    <div class="alert alert-warning small py-2 mb-3">
+                        <strong>Lưu ý:</strong> Chưa cấu hình AuthorId. Để tạo truyện, thêm <code>DefaultAuthorIdForStories</code> trong <code>appsettings.json</code> (Guid của user trong bảng users).
+                    </div>
+                }
                 <form id="storyForm">
                     <input type="hidden" id="storyId">
+                    <input type="hidden" id="defaultAuthorId" value="@(ViewBag.DefaultAuthorId ?? "")">
                     <div class="mb-3">
                         <label for="storyTitle" class="form-label">Tiêu đề <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="storyTitle" required>
@@ -99,8 +106,11 @@
                     </div>
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label for="storyCategoryId" class="form-label">Thể loại <span class="text-danger">*</span></label>
-                            <select class="form-select" id="storyCategoryId" required></select>
+                            <label for="storyParentCategoryId" class="form-label">Loại truyện (cha) <span class="text-danger">*</span></label>
+                            <select class="form-select" id="storyParentCategoryId" required>
+                                <option value="">Chọn loại truyện...</option>
+                            </select>
+                            <small class="text-muted">Chọn một loại truyện gốc (ví dụ: Theo độ tuổi, Theo thể loại...)</small>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label for="storyAgeRating" class="form-label">Độ tuổi</label>
@@ -112,15 +122,18 @@
                             </select>
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label for="storyExpectedChapters" class="form-label">Số chương dự kiến</label>
-                            <input type="number" class="form-control" id="storyExpectedChapters" value="0" min="0">
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label for="storyReleaseFrequencyDays" class="form-label">Tần suất ra mắt (ngày)</label>
-                            <input type="number" class="form-control" id="storyReleaseFrequencyDays" value="7" min="1">
-                        </div>
+                    <div class="mb-3">
+                        <label for="storyProgressStatus" class="form-label">Tiến độ truyện</label>
+                        <select class="form-select" id="storyProgressStatus">
+                            <option value="ONGOING">Đang ra</option>
+                            <option value="COMPLETED">Hoàn thành</option>
+                            <option value="HIATUS">Tạm dừng</option>
+                        </select>
+                    </div>
+                    <div class="mb-3" id="storyChildCategoriesWrapper" style="display: none;">
+                        <label class="form-label">Thể loại (con) <span class="text-danger">*</span></label>
+                        <p class="text-muted small mb-2">Chọn một hoặc nhiều thể loại: Thiếu nhi, Kinh dị, Trinh thám, Giả tưởng...</p>
+                        <div id="storyChildCategoriesList" class="border rounded p-3 bg-light"></div>
                     </div>
                     <div class="mb-3">
                         <label for="storyCoverImage" class="form-label">Ảnh bìa</label>
@@ -129,29 +142,13 @@
                         <div id="coverImagePreview" class="mt-2"></div>
                     </div>
                     <div id="editStoryFields" style="display: none;">
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
-                                <label for="storyStatus" class="form-label">Trạng thái</label>
-                                <select class="form-select" id="storyStatus">
-                                    <option value="DRAFT">Draft</option>
-                                    <option value="PUBLISHED">Published</option>
-                                    <option value="COMPLETED">Completed</option>
-                                    <option value="CANCELLED">Cancelled</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6 mb-3">
-                                <label for="storySaleType" class="form-label">Loại bán</label>
-                                <select class="form-select" id="storySaleType">
-                                    <option value="CHAPTER">Theo chương</option>
-                                    <option value="FULL_STORY">Toàn bộ</option>
-                                </select>
-                            </div>
-                        </div>
                         <div class="mb-3">
-                            <label for="storyAccessType" class="form-label">Loại truy cập</label>
-                            <select class="form-select" id="storyAccessType">
-                                <option value="FREE">Miễn phí</option>
-                                <option value="PAID">Trả phí</option>
+                            <label for="storyStatus" class="form-label">Trạng thái</label>
+                            <select class="form-select" id="storyStatus">
+                                <option value="DRAFT">Draft</option>
+                                <option value="PUBLISHED">Published</option>
+                                <option value="COMPLETED">Completed</option>
+                                <option value="CANCELLED">Cancelled</option>
                             </select>
                         </div>
                     </div>
@@ -168,7 +165,9 @@
 @section Scripts {
     <script>
         let stories = [];
-        let categories = [];
+        let categories = [];        // Tất cả thể loại (cho filter)
+        let parentCategories = [];  // Chỉ loại gốc (parent_id null)
+        let childCategories = [];   // Thể loại con của parent đã chọn
         let currentPage = 1;
         let totalPages = 1;
         let editingStoryId = null;
@@ -176,23 +175,61 @@
         document.addEventListener('DOMContentLoaded', function() {
             loadCategories();
             loadStories();
+            document.getElementById('storyParentCategoryId').addEventListener('change', onParentCategoryChange);
         });
 
         async function loadCategories() {
             try {
-                categories = await ApiService.getCategories(false);
-                const categorySelect = document.getElementById('storyCategoryId');
-                const categoryFilter = document.getElementById('categoryFilter');
+                const [allCats, roots] = await Promise.all([
+                    ApiService.getCategories(false),
+                    ApiService.getCategories(false, null, true)
+                ]);
+                categories = allCats;
+                parentCategories = roots;
 
-                const options = categories.map(cat =>
+                const categoryFilter = document.getElementById('categoryFilter');
+                const filterOptions = categories.map(cat =>
                     `<option value="${cat.id}">${cat.name}</option>`
                 ).join('');
+                categoryFilter.innerHTML = '<option value="">Tất cả</option>' + filterOptions;
 
-                categorySelect.innerHTML = '<option value="">Chọn thể loại...</option>' + options;
-                categoryFilter.innerHTML = '<option value="">Tất cả</option>' + options;
+                const parentSelect = document.getElementById('storyParentCategoryId');
+                const parentOptions = parentCategories.map(cat =>
+                    `<option value="${cat.id}">${cat.name}</option>`
+                ).join('');
+                parentSelect.innerHTML = '<option value="">Chọn loại truyện...</option>' + parentOptions;
             } catch (error) {
                 Utils.showAlert('Lỗi khi tải danh sách thể loại: ' + error.message, 'danger');
             }
+        }
+
+        async function onParentCategoryChange() {
+            const parentId = document.getElementById('storyParentCategoryId').value;
+            const wrapper = document.getElementById('storyChildCategoriesWrapper');
+            const listEl = document.getElementById('storyChildCategoriesList');
+
+            if (!parentId) {
+                wrapper.style.display = 'none';
+                listEl.innerHTML = '';
+                return;
+            }
+
+            try {
+                childCategories = await ApiService.getCategories(false, parentId);
+                listEl.innerHTML = childCategories.map(cat =>
+                    `<div class="form-check form-check-inline">
+                        <input class="form-check-input story-child-category" type="checkbox" value="${cat.id}" id="childCat_${cat.id}">
+                        <label class="form-check-label" for="childCat_${cat.id}">${cat.name}</label>
+                    </div>`
+                ).join('');
+                wrapper.style.display = 'block';
+            } catch (error) {
+                Utils.showAlert('Lỗi khi tải thể loại con: ' + error.message, 'danger');
+            }
+        }
+
+        function getSelectedChildCategoryIds() {
+            return Array.from(document.querySelectorAll('.story-child-category:checked')).map(el => el.value);
         }
 
         async function loadStories(page = 1) {
@@ -243,23 +280,24 @@
                                         <h5 class="card-title">${story.title}</h5>
                                         <p class="card-text"><small class="text-muted">${story.summary || 'Chưa có mô tả'}</small></p>
                                         <div class="mt-2">
-                                            <span class="badge bg-primary">${story.categoryName || 'N/A'}</span>
+                                            <span class="badge bg-primary">${story.categoryNames || 'N/A'}</span>
                                             <span class="badge ${story.status === 'PUBLISHED' ? 'bg-success' : 'bg-secondary'}">${story.status || 'DRAFT'}</span>
+                                            <span class="badge ${({ ONGOING: 'bg-info', COMPLETED: 'bg-success', HIATUS: 'bg-warning' })[story.storyProgressStatus] || 'bg-secondary'}">${({ ONGOING: 'Đang ra', COMPLETED: 'Hoàn thành', HIATUS: 'Tạm dừng' })[story.storyProgressStatus] || story.storyProgressStatus || 'Đang ra'}</span>
                                             <span class="badge bg-info">${story.totalChapters || 0} chương</span>
                                             <span class="badge bg-warning">${Utils.formatNumber(story.totalViews || 0)} lượt xem</span>
                                         </div>
                                     </div>
                                     <div class="ms-3">
-                                        <button class="btn btn-sm btn-info" onclick="viewStoryDetails(${story.id})" title="Xem chi tiết">
+                                        <button class="btn btn-sm btn-info" onclick="viewStoryDetails('${story.id}')" title="Xem chi tiết">
                                             <i class="bi bi-eye"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-primary" onclick="editStory(${story.id})" title="Sửa">
+                                        <button class="btn btn-sm btn-primary" onclick="editStory('${story.id}')" title="Sửa">
                                             <i class="bi bi-pencil"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-success" onclick="publishStory(${story.id})" title="Publish" ${story.status === 'PUBLISHED' ? 'disabled' : ''}>
+                                        <button class="btn btn-sm btn-success" onclick="publishStory('${story.id}')" title="Publish" ${story.status === 'PUBLISHED' ? 'disabled' : ''}>
                                             <i class="bi bi-check-circle"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-danger" onclick="deleteStory(${story.id})" title="Xóa">
+                                        <button class="btn btn-sm btn-danger" onclick="deleteStory('${story.id}')" title="Xóa">
                                             <i class="bi bi-trash"></i>
                                         </button>
                                     </div>
@@ -311,6 +349,8 @@
             document.getElementById('storyForm').reset();
             document.getElementById('storyId').value = '';
             document.getElementById('editStoryFields').style.display = 'none';
+            document.getElementById('storyChildCategoriesWrapper').style.display = 'none';
+            document.getElementById('storyChildCategoriesList').innerHTML = '';
             document.getElementById('coverImagePreview').innerHTML = '';
             new bootstrap.Modal(document.getElementById('storyModal')).show();
         }
@@ -323,25 +363,33 @@
                 document.getElementById('storyId').value = story.id;
                 document.getElementById('storyTitle').value = story.title;
                 document.getElementById('storySummary').value = story.summary || '';
-                document.getElementById('storyCategoryId').value = story.categoryId || '';
                 document.getElementById('storyAgeRating').value = story.ageRating || 'ALL';
-                document.getElementById('storyExpectedChapters').value = story.expectedChapters || 0;
-                document.getElementById('storyReleaseFrequencyDays').value = story.releaseFrequencyDays || 7;
+                document.getElementById('storyProgressStatus').value = story.storyProgressStatus || 'ONGOING';
                 document.getElementById('storyStatus').value = story.status || 'DRAFT';
-                document.getElementById('storySaleType').value = story.saleType || 'CHAPTER';
-                document.getElementById('storyAccessType').value = story.accessType || 'FREE';
                 document.getElementById('editStoryFields').style.display = 'block';
 
-                // Reset file input
                 document.getElementById('storyCoverImage').value = '';
 
-                // Show current cover image if exists
                 if (story.coverImage) {
                     document.getElementById('coverImagePreview').innerHTML =
                         `<img src="http://localhost:5000${story.coverImage}" class="img-thumbnail" style="max-height: 200px;">
                          <p class="text-muted mt-2"><small>Ảnh hiện tại. Chọn ảnh mới để thay thế.</small></p>`;
                 } else {
                     document.getElementById('coverImagePreview').innerHTML = '';
+                }
+
+                const categoryIds = story.categoryIds || [];
+                if (categoryIds.length > 0) {
+                    const cat = await ApiService.getCategoryById(categoryIds[0]);
+                    const parentId = cat?.parentId ?? categoryIds[0];
+                    document.getElementById('storyParentCategoryId').value = parentId;
+                    await onParentCategoryChange();
+                    document.querySelectorAll('.story-child-category').forEach(cb => {
+                        cb.checked = categoryIds.includes(cb.value);
+                    });
+                } else {
+                    document.getElementById('storyParentCategoryId').value = '';
+                    document.getElementById('storyChildCategoriesWrapper').style.display = 'none';
                 }
 
                 new bootstrap.Modal(document.getElementById('storyModal')).show();
@@ -357,21 +405,27 @@
                 return;
             }
 
+            const parentIdVal = document.getElementById('storyParentCategoryId').value;
+            const selectedIds = getSelectedChildCategoryIds();
+            if (!parentIdVal) {
+                Utils.showAlert('Vui lòng chọn loại truyện (cha).', 'danger');
+                return;
+            }
+            if (selectedIds.length === 0) {
+                Utils.showAlert('Vui lòng chọn ít nhất một thể loại (con).', 'danger');
+                return;
+            }
+
             try {
                 if (editingStoryId) {
-                    // Update story with FormData to support image upload
                     const formData = new FormData();
                     formData.append('Title', document.getElementById('storyTitle').value);
                     formData.append('Summary', document.getElementById('storySummary').value);
-                    formData.append('CategoryId', document.getElementById('storyCategoryId').value);
+                    selectedIds.forEach(id => formData.append('CategoryIds', id));
                     formData.append('Status', document.getElementById('storyStatus').value);
-                    formData.append('SaleType', document.getElementById('storySaleType').value);
-                    formData.append('AccessType', document.getElementById('storyAccessType').value);
                     formData.append('AgeRating', document.getElementById('storyAgeRating').value);
-                    formData.append('ExpectedChapters', document.getElementById('storyExpectedChapters').value);
-                    formData.append('ReleaseFrequencyDays', document.getElementById('storyReleaseFrequencyDays').value);
+                    formData.append('StoryProgressStatus', document.getElementById('storyProgressStatus').value);
 
-                    // Add cover image if a new one is selected
                     const coverImage = document.getElementById('storyCoverImage').files[0];
                     if (coverImage) {
                         formData.append('CoverImage', coverImage);
@@ -380,14 +434,17 @@
                     await ApiService.updateStory(editingStoryId, formData);
                     Utils.showAlert('Cập nhật truyện thành công!', 'success');
                 } else {
-                    // Create story
                     const formData = new FormData();
                     formData.append('Title', document.getElementById('storyTitle').value);
                     formData.append('Summary', document.getElementById('storySummary').value);
-                    formData.append('CategoryId', document.getElementById('storyCategoryId').value);
-                    formData.append('ExpectedChapters', document.getElementById('storyExpectedChapters').value);
-                    formData.append('ReleaseFrequencyDays', document.getElementById('storyReleaseFrequencyDays').value);
+                    selectedIds.forEach(id => formData.append('CategoryIds', id));
                     formData.append('AgeRating', document.getElementById('storyAgeRating').value);
+                    formData.append('StoryProgressStatus', document.getElementById('storyProgressStatus').value);
+
+                    const defaultAuthorId = document.getElementById('defaultAuthorId').value?.trim();
+                    if (defaultAuthorId) {
+                        formData.append('AuthorId', defaultAuthorId);
+                    }
 
                     const coverImage = document.getElementById('storyCoverImage').files[0];
                     if (coverImage) {
@@ -397,7 +454,6 @@
                     const newStory = await ApiService.createStory(formData);
                     Utils.showAlert('Tạo truyện thành công!', 'success');
 
-                    // Redirect to story details page to create chapters
                     bootstrap.Modal.getInstance(document.getElementById('storyModal')).hide();
                     window.location.href = `/Stories/Details/${newStory.id}?createChapter=true`;
                     return;
@@ -433,7 +489,7 @@
         }
 
         function viewStoryDetails(id) {
-            window.location.href = `/Stories/Details/${id}`;
+            window.location.href = `/Stories/Details/${encodeURIComponent(id)}`;
         }
 
         function previewCoverImage(input) {

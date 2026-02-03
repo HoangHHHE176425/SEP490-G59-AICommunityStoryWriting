@@ -2,24 +2,22 @@
 {
     public class StoryResponseDto
     {
-        public int Id { get; set; }
+        public Guid Id { get; set; }
         public string Title { get; set; } = null!;
         public string Slug { get; set; } = null!;
         public string? Summary { get; set; }
 
-        public int? CategoryId { get; set; }
-        public string? CategoryName { get; set; }
-        public int? AuthorId { get; set; }
+        public List<Guid> CategoryIds { get; set; } = new();
+        public string? CategoryNames { get; set; }
+        public Guid? AuthorId { get; set; }
         public string? AuthorName { get; set; }
 
         public string? CoverImage { get; set; }
         public string? Status { get; set; }
-        public string? SaleType { get; set; }
-        public string? AccessType { get; set; }
+        /// <summary>ONGOING = Đang ra, COMPLETED = Hoàn thành, HIATUS = Tạm dừng</summary>
+        public string? StoryProgressStatus { get; set; }
         public string? AgeRating { get; set; }
 
-        public int? ExpectedChapters { get; set; }
-        public int? ReleaseFrequencyDays { get; set; }
         public int? TotalChapters { get; set; }
         public long? TotalViews { get; set; }
         public int? TotalFavorites { get; set; }

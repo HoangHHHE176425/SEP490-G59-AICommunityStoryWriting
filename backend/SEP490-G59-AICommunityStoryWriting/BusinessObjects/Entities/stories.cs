@@ -9,8 +9,6 @@ public partial class stories
 
     public Guid? author_id { get; set; }
 
-    public int? category_id { get; set; }
-
     public string title { get; set; } = null!;
 
     public string slug { get; set; } = null!;
@@ -20,6 +18,8 @@ public partial class stories
     public string? summary { get; set; }
 
     public string? status { get; set; }
+
+    public string story_progress_status { get; set; } = null!;
 
     public DateTime? last_published_at { get; set; }
 
@@ -43,8 +43,6 @@ public partial class stories
 
     public virtual users? author { get; set; }
 
-    public virtual categories? category { get; set; }
-
     public virtual ICollection<chapters> chapters { get; set; } = new List<chapters>();
 
     public virtual ICollection<comments> comments { get; set; } = new List<comments>();
@@ -58,4 +56,6 @@ public partial class stories
     public virtual ICollection<story_commitments> story_commitments { get; set; } = new List<story_commitments>();
 
     public virtual ICollection<user_library> user_library { get; set; } = new List<user_library>();
+
+    public virtual ICollection<categories> category { get; set; } = new List<categories>();
 }
