@@ -1,3 +1,4 @@
+/* eslint-disable no-dupe-keys */
 import { Eye, Heart, BookOpen, Star } from 'lucide-react';
 
 export function StoryListItem({ story }) {

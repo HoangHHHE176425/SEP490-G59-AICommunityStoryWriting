@@ -1,3 +1,4 @@
+/* eslint-disable no-dupe-keys */
 import { useState } from 'react';
 import { PublicationList } from '../../../components/admin/publication/PublicationList';
 import { PublicationDetailModal } from '../../../components/admin/publication/PublicationDetailModal';
