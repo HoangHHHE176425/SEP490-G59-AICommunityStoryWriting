@@ -14,7 +14,7 @@ namespace AIStory.API.Controllers
             _chapterService = chapterService;
         }
 
-        /// Tạo chapter mới
+        /// <summary>Tạo chapter mới</summary>
         [HttpPost]
         public IActionResult Create([FromBody] CreateChapterRequestDto request)
         {
@@ -37,7 +37,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Lấy danh sách chapters với pagination và filtering
+        /// <summary>Lấy danh sách chapters với pagination và filtering</summary>
         [HttpGet]
         public IActionResult GetAll([FromQuery] ChapterQueryDto query)
         {
@@ -52,9 +52,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Lấy chapter theo ID
-        [HttpGet("{id:int}")]
-        public IActionResult GetById(int id)
+        /// <summary>Lấy chapter theo ID (Guid)</summary>
+        [HttpGet("{id:guid}")]
+        public IActionResult GetById(Guid id)
         {
             try
             {
@@ -67,9 +67,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Lấy tất cả chapters của một story (không phân trang, sắp xếp theo order_index)
-        [HttpGet("story/{storyId:int}")]
-        public IActionResult GetByStoryId(int storyId)
+        /// <summary>Lấy tất cả chapters của một story (Guid)</summary>
+        [HttpGet("story/{storyId:guid}")]
+        public IActionResult GetByStoryId(Guid storyId)
         {
             try
             {
@@ -82,9 +82,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Lấy chapter theo story ID và order index
-        [HttpGet("story/{storyId:int}/order/{orderIndex:int}")]
-        public IActionResult GetByStoryIdAndOrderIndex(int storyId, int orderIndex)
+        /// <summary>Lấy chapter theo story ID (Guid) và order index</summary>
+        [HttpGet("story/{storyId:guid}/order/{orderIndex:int}")]
+        public IActionResult GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex)
         {
             try
             {
@@ -97,9 +97,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Cập nhật chapter
-        [HttpPut("{id:int}")]
-        public IActionResult Update(int id, [FromBody] UpdateChapterRequestDto request)
+        /// <summary>Cập nhật chapter</summary>
+        [HttpPut("{id:guid}")]
+        public IActionResult Update(Guid id, [FromBody] UpdateChapterRequestDto request)
         {
             try
             {
@@ -120,9 +120,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Xóa chapter
-        [HttpDelete("{id:int}")]
-        public IActionResult Delete(int id)
+        /// <summary>Xóa chapter</summary>
+        [HttpDelete("{id:guid}")]
+        public IActionResult Delete(Guid id)
         {
             try
             {
@@ -135,9 +135,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Publish chapter
-        [HttpPost("{id:int}/publish")]
-        public IActionResult Publish(int id)
+        /// <summary>Publish chapter</summary>
+        [HttpPost("{id:guid}/publish")]
+        public IActionResult Publish(Guid id)
         {
             try
             {
@@ -150,9 +150,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Unpublish chapter
-        [HttpPost("{id:int}/unpublish")]
-        public IActionResult Unpublish(int id)
+        /// <summary>Unpublish chapter</summary>
+        [HttpPost("{id:guid}/unpublish")]
+        public IActionResult Unpublish(Guid id)
         {
             try
             {
@@ -165,9 +165,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Sắp xếp lại thứ tự chapter
-        [HttpPost("{id:int}/reorder")]
-        public IActionResult Reorder(int id, [FromBody] int newOrderIndex)
+        /// <summary>Sắp xếp lại thứ tự chapter</summary>
+        [HttpPost("{id:guid}/reorder")]
+        public IActionResult Reorder(Guid id, [FromBody] int newOrderIndex)
         {
             try
             {

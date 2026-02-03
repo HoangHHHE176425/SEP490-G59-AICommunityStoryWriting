@@ -9,7 +9,7 @@ namespace AIStory.Client.Controllers
             return View();
         }
 
-        public IActionResult ByStory(int? storyId)
+        public IActionResult ByStory(Guid? storyId)
         {
             if (!storyId.HasValue)
             {
@@ -19,7 +19,7 @@ namespace AIStory.Client.Controllers
             return View();
         }
 
-        public IActionResult Read(int? id)
+        public IActionResult Read(Guid? id)
         {
             if (!id.HasValue)
             {

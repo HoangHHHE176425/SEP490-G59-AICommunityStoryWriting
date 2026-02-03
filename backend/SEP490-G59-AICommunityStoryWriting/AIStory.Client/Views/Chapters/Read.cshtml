@@ -1,6 +1,6 @@
 ﻿@{
     ViewData["Title"] = "Đọc Truyện";
-    var chapterId = ViewBag.ChapterId ?? 0;
+    var chapterId = ViewBag.ChapterId ?? Guid.Empty;
 }
 
 <div class="container-fluid px-0">
@@ -126,7 +126,7 @@
 
 @section Scripts {
     <script>
-        const chapterId = @(chapterId);
+        const chapterId = '@(chapterId)';
         let currentChapter = null;
         let storyId = null;
         let allChapters = [];
@@ -150,7 +150,7 @@
                 // Load story info
                 const story = await ApiService.getStoryById(storyId);
                 document.getElementById('storyTitleHeader').textContent = story.title;
-                document.getElementById('backToStoryLink').href = `/Stories/Details/${storyId}`;
+                document.getElementById('backToStoryLink').href = `/Stories/Details/${encodeURIComponent(storyId)}`;
 
                 // Load all chapters to enable navigation
                 allChapters = await ApiService.getChaptersByStoryId(storyId);
@@ -227,7 +227,7 @@
         }
 
         function navigateToChapter(newChapterId) {
-            window.location.href = `/Chapters/Read/${newChapterId}`;
+            window.location.href = `/Chapters/Read/${encodeURIComponent(newChapterId)}`;
         }
 
         function navigateChapter(direction) {
