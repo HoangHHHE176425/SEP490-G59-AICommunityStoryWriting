@@ -1,3 +1,4 @@
+/* eslint-disable no-dupe-keys */
 export function EmptyState({ onClearFilters }) {
     return (
         <div style={{

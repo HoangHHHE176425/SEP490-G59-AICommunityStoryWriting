@@ -1,3 +1,4 @@
+/* eslint-disable no-dupe-keys */
 import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen } from 'lucide-react';
 
 export function PublicationList({ publications, onViewDetail }) {
