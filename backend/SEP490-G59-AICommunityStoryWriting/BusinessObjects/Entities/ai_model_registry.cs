@@ -5,7 +5,7 @@ namespace BusinessObjects.Entities;
 
 public partial class ai_model_registry
 {
-    public int id { get; set; }
+    public Guid id { get; set; }
 
     public string? provider { get; set; }
 

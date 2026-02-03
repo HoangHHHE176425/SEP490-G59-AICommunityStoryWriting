@@ -7,9 +7,9 @@ public partial class coin_orders
 {
     public Guid id { get; set; }
 
-    public Guid? user_id { get; set; }
+    public Guid user_id { get; set; }
 
-    public int? package_id { get; set; }
+    public Guid package_id { get; set; }
 
     public decimal amount_paid { get; set; }
 
@@ -27,7 +27,7 @@ public partial class coin_orders
 
     public DateTime? completed_at { get; set; }
 
-    public virtual coin_packages? package { get; set; }
+    public virtual coin_packages package { get; set; } = null!;
 
-    public virtual users? user { get; set; }
+    public virtual users user { get; set; } = null!;
 }
