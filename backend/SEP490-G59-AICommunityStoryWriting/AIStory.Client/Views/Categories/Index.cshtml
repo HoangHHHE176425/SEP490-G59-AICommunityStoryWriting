@@ -1,0 +1,238 @@
+﻿@{
+    ViewData["Title"] = "Quản lý Thể loại";
+}
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2><i class="bi bi-tags"></i> Quản lý Thể loại</h2>
+                <button class="btn btn-primary" onclick="showCreateCategoryModal()">
+                    <i class="bi bi-plus-circle"></i> Tạo thể loại mới
+                </button>
+            </div>
+
+            <!-- Filter -->
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="includeInactive" onchange="loadCategories()">
+                                <label class="form-check-label" for="includeInactive">
+                                    Hiển thị thể loại không hoạt động
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Categories Table -->
+            <div class="card">
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Tên</th>
+                                    <th>Slug</th>
+                                    <th>Mô tả</th>
+                                    <th>Số truyện</th>
+                                    <th>Trạng thái</th>
+                                    <th>Ngày tạo</th>
+                                    <th>Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="categoriesTableBody">
+                                <tr>
+                                    <td colspan="8" class="text-center">
+                                        <div class="spinner-border text-primary" role="status">
+                                            <span class="visually-hidden">Loading...</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create/Edit Category Modal -->
+<div class="modal fade" id="categoryModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="categoryModalTitle">Tạo thể loại mới</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="categoryForm">
+                    <input type="hidden" id="categoryId">
+                    <div class="mb-3">
+                        <label for="categoryName" class="form-label">Tên thể loại <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="categoryName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="categoryDescription" class="form-label">Mô tả</label>
+                        <textarea class="form-control" id="categoryDescription" rows="3"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label for="categoryIconUrl" class="form-label">Icon URL</label>
+                        <input type="url" class="form-control" id="categoryIconUrl">
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="categoryIsActive" checked>
+                            <label class="form-check-label" for="categoryIsActive">
+                                Đang hoạt động
+                            </label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                <button type="button" class="btn btn-primary" onclick="saveCategory()">Lưu</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        let categories = [];
+        let editingCategoryId = null;
+
+        // Load categories on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCategories();
+        });
+
+        async function loadCategories() {
+            try {
+                const includeInactive = document.getElementById('includeInactive').checked;
+                categories = await ApiService.getCategories(includeInactive);
+                renderCategories();
+            } catch (error) {
+                Utils.showAlert('Lỗi khi tải danh sách thể loại: ' + error.message, 'danger');
+            }
+        }
+
+        function renderCategories() {
+            const tbody = document.getElementById('categoriesTableBody');
+            if (categories.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center">Không có dữ liệu</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = categories.map(cat => `
+                <tr>
+                    <td>${cat.id}</td>
+                    <td><strong>${cat.name}</strong></td>
+                    <td><code>${cat.slug}</code></td>
+                    <td>${cat.description || '-'}</td>
+                    <td><span class="badge bg-info">${cat.storyCount || 0}</span></td>
+                    <td>
+                        <span class="badge ${cat.isActive ? 'bg-success' : 'bg-secondary'}">
+                            ${cat.isActive ? 'Hoạt động' : 'Không hoạt động'}
+                        </span>
+                    </td>
+                    <td>${Utils.formatDate(cat.createdAt)}</td>
+                    <td>
+                        <button class="btn btn-sm btn-primary" onclick="editCategory(${cat.id})" title="Sửa">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-sm btn-warning" onclick="toggleCategoryActive(${cat.id})" title="Bật/Tắt">
+                            <i class="bi bi-toggle-${cat.isActive ? 'on' : 'off'}"></i>
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteCategory(${cat.id})" title="Xóa">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        function showCreateCategoryModal() {
+            editingCategoryId = null;
+            document.getElementById('categoryModalTitle').textContent = 'Tạo thể loại mới';
+            document.getElementById('categoryForm').reset();
+            document.getElementById('categoryId').value = '';
+            document.getElementById('categoryIsActive').checked = true;
+            new bootstrap.Modal(document.getElementById('categoryModal')).show();
+        }
+
+        async function editCategory(id) {
+            try {
+                const category = await ApiService.getCategoryById(id);
+                editingCategoryId = id;
+                document.getElementById('categoryModalTitle').textContent = 'Sửa thể loại';
+                document.getElementById('categoryId').value = category.id;
+                document.getElementById('categoryName').value = category.name;
+                document.getElementById('categoryDescription').value = category.description || '';
+                document.getElementById('categoryIconUrl').value = category.iconUrl || '';
+                document.getElementById('categoryIsActive').checked = category.isActive;
+                new bootstrap.Modal(document.getElementById('categoryModal')).show();
+            } catch (error) {
+                Utils.showAlert('Lỗi khi tải thông tin thể loại: ' + error.message, 'danger');
+            }
+        }
+
+        async function saveCategory() {
+            const form = document.getElementById('categoryForm');
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+
+            try {
+                const data = {
+                    name: document.getElementById('categoryName').value,
+                    description: document.getElementById('categoryDescription').value,
+                    iconUrl: document.getElementById('categoryIconUrl').value,
+                    isActive: document.getElementById('categoryIsActive').checked
+                };
+
+                if (editingCategoryId) {
+                    await ApiService.updateCategory(editingCategoryId, data);
+                    Utils.showAlert('Cập nhật thể loại thành công!', 'success');
+                } else {
+                    await ApiService.createCategory(data);
+                    Utils.showAlert('Tạo thể loại thành công!', 'success');
+                }
+
+                bootstrap.Modal.getInstance(document.getElementById('categoryModal')).hide();
+                loadCategories();
+            } catch (error) {
+                Utils.showAlert('Lỗi: ' + error.message, 'danger');
+            }
+        }
+
+        async function deleteCategory(id) {
+            if (!confirm('Bạn có chắc chắn muốn xóa thể loại này?')) return;
+
+            try {
+                await ApiService.deleteCategory(id);
+                Utils.showAlert('Xóa thể loại thành công!', 'success');
+                loadCategories();
+            } catch (error) {
+                Utils.showAlert('Lỗi: ' + error.message, 'danger');
+            }
+        }
+
+        async function toggleCategoryActive(id) {
+            try {
+                await ApiService.toggleCategoryActive(id);
+                Utils.showAlert('Cập nhật trạng thái thành công!', 'success');
+                loadCategories();
+            } catch (error) {
+                Utils.showAlert('Lỗi: ' + error.message, 'danger');
+            }
+        }
+    </script>
+}
