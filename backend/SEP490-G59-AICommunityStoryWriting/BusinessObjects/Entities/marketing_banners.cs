@@ -5,7 +5,7 @@ namespace BusinessObjects.Entities;
 
 public partial class marketing_banners
 {
-    public int id { get; set; }
+    public Guid id { get; set; }
 
     public string? title { get; set; }
 

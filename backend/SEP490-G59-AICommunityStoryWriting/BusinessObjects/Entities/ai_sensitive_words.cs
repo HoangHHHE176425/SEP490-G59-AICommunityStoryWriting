@@ -5,7 +5,7 @@ namespace BusinessObjects.Entities;
 
 public partial class ai_sensitive_words
 {
-    public int id { get; set; }
+    public Guid id { get; set; }
 
     public string word { get; set; } = null!;
 

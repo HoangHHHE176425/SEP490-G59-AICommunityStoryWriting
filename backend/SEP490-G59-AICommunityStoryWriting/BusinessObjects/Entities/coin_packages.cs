@@ -5,7 +5,7 @@ namespace BusinessObjects.Entities;
 
 public partial class coin_packages
 {
-    public int id { get; set; }
+    public Guid id { get; set; }
 
     public string name { get; set; } = null!;
 
