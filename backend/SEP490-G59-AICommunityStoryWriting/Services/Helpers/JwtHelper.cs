@@ -1,0 +1,48 @@
+﻿using BusinessObjects.Entities; // Đảm bảo namespace này chứa class 'user'
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+
+namespace AIStory.Services.Helpers
+{
+    public class JwtHelper
+    {
+        private readonly IConfiguration _config;
+
+        public JwtHelper(IConfiguration config)
+        {
+            _config = config;
+        }
+
+        public string GenerateToken(User user)
+        {
+            var key = _config["Jwt:Key"];
+            var issuer = _config["Jwt:Issuer"];
+            var audience = _config["Jwt:Audience"];
+
+            if (string.IsNullOrEmpty(key)) throw new Exception("Jwt Key is missing configuration");
+
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+
+            // SỬA LỖI Ở ĐÂY: Dùng đúng tên Property PascalCase
+            var claims = new List<Claim>
+            {
+                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()), // user.Id
+                new Claim(JwtRegisteredClaimNames.Email, user.Email),       // user.Email
+                new Claim("role", user.Role ?? "USER")                      // user.Role
+            };
+
+            var token = new JwtSecurityToken(
+                issuer: issuer,
+                audience: audience,
+                claims: claims,
+                expires: DateTime.UtcNow.AddMinutes(120),
+                signingCredentials: credentials);
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+    }
+}
