@@ -2,20 +2,16 @@
 {
     public class StoryViewModel
     {
-        public int Id { get; set; }
+        public Guid Id { get; set; }
         public string Title { get; set; } = null!;
         public string Slug { get; set; } = null!;
         public string? Summary { get; set; }
-        public int? CategoryId { get; set; }
-        public string? CategoryName { get; set; }
-        public int? AuthorId { get; set; }
+        public List<Guid> CategoryIds { get; set; } = new();
+        public string? CategoryNames { get; set; }
+        public Guid? AuthorId { get; set; }
         public string? CoverImage { get; set; }
         public string? Status { get; set; }
-        public string? SaleType { get; set; }
-        public string? AccessType { get; set; }
         public string? AgeRating { get; set; }
-        public int? ExpectedChapters { get; set; }
-        public int? ReleaseFrequencyDays { get; set; }
         public int? TotalChapters { get; set; }
         public long? TotalViews { get; set; }
         public int? TotalFavorites { get; set; }
@@ -28,15 +24,15 @@
 
     public class StoryListItemViewModel
     {
-        public int Id { get; set; }
+        public Guid Id { get; set; }
         public string Title { get; set; } = null!;
         public string Slug { get; set; } = null!;
         public string? Summary { get; set; }
         public string? Status { get; set; }
         public string? CoverImage { get; set; }
-        public int? CategoryId { get; set; }
-        public string? CategoryName { get; set; }
-        public int? AuthorId { get; set; }
+        public List<Guid> CategoryIds { get; set; } = new();
+        public string? CategoryNames { get; set; }
+        public Guid? AuthorId { get; set; }
         public int? TotalChapters { get; set; }
         public long? TotalViews { get; set; }
         public int? TotalFavorites { get; set; }
@@ -60,9 +56,7 @@
     {
         public string Title { get; set; } = null!;
         public string? Summary { get; set; }
-        public int CategoryId { get; set; }
-        public int ExpectedChapters { get; set; } = 0;
-        public int ReleaseFrequencyDays { get; set; } = 7;
+        public List<Guid> CategoryIds { get; set; } = new();
         public string AgeRating { get; set; } = "ALL";
         public IFormFile? CoverImage { get; set; }
     }
@@ -71,13 +65,9 @@
     {
         public string Title { get; set; } = null!;
         public string? Summary { get; set; }
-        public int CategoryId { get; set; }
+        public List<Guid> CategoryIds { get; set; } = new();
         public string? Status { get; set; }
-        public string? SaleType { get; set; }
-        public string? AccessType { get; set; }
         public string? AgeRating { get; set; }
-        public int? ExpectedChapters { get; set; }
-        public int? ReleaseFrequencyDays { get; set; }
         public IFormFile? CoverImage { get; set; }
     }
 }

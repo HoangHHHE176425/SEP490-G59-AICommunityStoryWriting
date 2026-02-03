@@ -107,7 +107,7 @@ public partial class StoryPlatformDbContext : DbContext
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer(
-                "Server=.;Database=story_platform_v8;Trusted_Connection=True;TrustServerCertificate=True");
+                "Server=.;Database=story_platform_v6;Trusted_Connection=True;TrustServerCertificate=True");
         }
     }
 
@@ -115,7 +115,7 @@ public partial class StoryPlatformDbContext : DbContext
     {
         modelBuilder.Entity<admin_audit_logs>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__admin_au__3213E83F8904D493");
+            entity.HasKey(e => e.id).HasName("PK__admin_au__3213E83F1AC5D3D4");
 
             entity.Property(e => e.action_type).HasMaxLength(50);
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -129,7 +129,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<ai_configs>(entity =>
         {
-            entity.HasKey(e => e.key).HasName("PK__ai_confi__DFD83CAE1B71C358");
+            entity.HasKey(e => e.key).HasName("PK__ai_confi__DFD83CAECA916319");
 
             entity.Property(e => e.key).HasMaxLength(50);
             entity.Property(e => e.updated_at).HasDefaultValueSql("(getdate())");
@@ -137,7 +137,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<ai_generated_content>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__ai_gener__3213E83F208F90C0");
+            entity.HasKey(e => e.id).HasName("PK__ai_gener__3213E83F961871BE");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -150,8 +150,9 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<ai_model_registry>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__ai_model__3213E83FCBC964F1");
+            entity.HasKey(e => e.id).HasName("PK__ai_model__3213E83F6AC58A3C");
 
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.is_active).HasDefaultValue(true);
             entity.Property(e => e.is_default_for_gen).HasDefaultValue(false);
             entity.Property(e => e.is_default_for_mod).HasDefaultValue(false);
@@ -163,7 +164,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<ai_plagiarism_reports>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__ai_plagi__3213E83FC3666615");
+            entity.HasKey(e => e.id).HasName("PK__ai_plagi__3213E83F72577CCD");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.checked_at).HasDefaultValueSql("(getdate())");
@@ -177,8 +178,9 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<ai_sensitive_words>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__ai_sensi__3213E83F351AC893");
+            entity.HasKey(e => e.id).HasName("PK__ai_sensi__3213E83F5C3C2178");
 
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.category).HasMaxLength(50);
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.word).HasMaxLength(100);
@@ -186,7 +188,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<ai_usage_logs>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__ai_usage__3213E83F868F24E4");
+            entity.HasKey(e => e.id).HasName("PK__ai_usage__3213E83F6D964185");
 
             entity.Property(e => e.action_type).HasMaxLength(50);
             entity.Property(e => e.completion_tokens).HasDefaultValue(0);
@@ -203,7 +205,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<appeals>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__appeals__3213E83F97BEBF79");
+            entity.HasKey(e => e.id).HasName("PK__appeals__3213E83FA1C34B96");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -222,9 +224,9 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<auth_tokens>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__auth_tok__3213E83F0965F89B");
+            entity.HasKey(e => e.id).HasName("PK__auth_tok__3213E83FFC053B92");
 
-            entity.HasIndex(e => e.refresh_token, "UQ__auth_tok__7FB69BAD173F7957").IsUnique();
+            entity.HasIndex(e => e.refresh_token, "UQ__auth_tok__7FB69BADCA111301").IsUnique();
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -237,7 +239,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<author_bank_accounts>(entity =>
         {
-            entity.HasKey(e => e.user_id).HasName("PK__author_b__B9BE370FDDE8DA6F");
+            entity.HasKey(e => e.user_id).HasName("PK__author_b__B9BE370F689F6393");
 
             entity.Property(e => e.user_id).ValueGeneratedNever();
             entity.Property(e => e.account_holder_name).HasMaxLength(100);
@@ -255,7 +257,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<author_income_logs>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__author_i__3213E83FDB92AC0E");
+            entity.HasKey(e => e.id).HasName("PK__author_i__3213E83FFED67314");
 
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.gross_amount).HasColumnType("decimal(15, 2)");
@@ -273,19 +275,24 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<categories>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__categori__3213E83FAC083428");
+            entity.HasKey(e => e.id).HasName("PK__categori__3213E83F9591669A");
 
-            entity.HasIndex(e => e.slug, "UQ__categori__32DD1E4CB0FB761D").IsUnique();
+            entity.HasIndex(e => e.slug, "UQ__categori__32DD1E4C6CFF2CEF").IsUnique();
 
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.is_active).HasDefaultValue(true);
             entity.Property(e => e.name).HasMaxLength(100);
             entity.Property(e => e.slug).HasMaxLength(100);
+
+            entity.HasOne(d => d.parent_category).WithMany(p => p.Inverseparent_category)
+                .HasForeignKey(d => d.parent_category_id)
+                .HasConstraintName("fk_category_parent");
         });
 
         modelBuilder.Entity<chapter_versions>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__chapter___3213E83F6BCD5C8D");
+            entity.HasKey(e => e.id).HasName("PK__chapter___3213E83F351819DD");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -301,7 +308,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<chapters>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__chapters__3213E83FB7AE3290");
+            entity.HasKey(e => e.id).HasName("PK__chapters__3213E83FC9E5BEA2");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.access_type)
@@ -327,7 +334,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<coin_orders>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__coin_ord__3213E83FEBCDBC3C");
+            entity.HasKey(e => e.id).HasName("PK__coin_ord__3213E83FF25CC481");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.amount_paid).HasColumnType("decimal(15, 2)");
@@ -340,17 +347,20 @@ public partial class StoryPlatformDbContext : DbContext
 
             entity.HasOne(d => d.package).WithMany(p => p.coin_orders)
                 .HasForeignKey(d => d.package_id)
+                .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("fk_order_pkg");
 
             entity.HasOne(d => d.user).WithMany(p => p.coin_orders)
                 .HasForeignKey(d => d.user_id)
+                .OnDelete(DeleteBehavior.ClientSetNull)
                 .HasConstraintName("fk_order_user");
         });
 
         modelBuilder.Entity<coin_packages>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__coin_pac__3213E83F95B31D16");
+            entity.HasKey(e => e.id).HasName("PK__coin_pac__3213E83FD27D473B");
 
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.bonus_coin).HasDefaultValue(0);
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.currency)
@@ -363,7 +373,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<comments>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__comments__3213E83F626E18D1");
+            entity.HasKey(e => e.id).HasName("PK__comments__3213E83F52DCAB20");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -388,7 +398,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<daily_statistics>(entity =>
         {
-            entity.HasKey(e => e.stat_date).HasName("PK__daily_st__38B70DF9DAA218DB");
+            entity.HasKey(e => e.stat_date).HasName("PK__daily_st__38B70DF950648CFA");
 
             entity.Property(e => e.active_users_count).HasDefaultValue(0);
             entity.Property(e => e.new_chapters_count).HasDefaultValue(0);
@@ -409,7 +419,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<donations>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__donation__3213E83F7B90949B");
+            entity.HasKey(e => e.id).HasName("PK__donation__3213E83FF7E6C71F");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -425,7 +435,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<follows>(entity =>
         {
-            entity.HasKey(e => new { e.user_id, e.author_id }).HasName("PK__follows__51DB21B334D87D77");
+            entity.HasKey(e => new { e.user_id, e.author_id }).HasName("PK__follows__51DB21B33DE17101");
 
             entity.Property(e => e.followed_at).HasDefaultValueSql("(getdate())");
 
@@ -442,7 +452,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<idea_posts>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__idea_pos__3213E83FCF95DE33");
+            entity.HasKey(e => e.id).HasName("PK__idea_pos__3213E83F1F1491AE");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -458,7 +468,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<idea_proposals>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__idea_pro__3213E83F51E94741");
+            entity.HasKey(e => e.id).HasName("PK__idea_pro__3213E83FC8DEAD81");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -475,8 +485,9 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<marketing_banners>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__marketin__3213E83FC0CA0EDD");
+            entity.HasKey(e => e.id).HasName("PK__marketin__3213E83F45587987");
 
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.is_active).HasDefaultValue(true);
             entity.Property(e => e.position).HasMaxLength(50);
@@ -486,7 +497,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<moderation_logs>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__moderati__3213E83FFAD27E1C");
+            entity.HasKey(e => e.id).HasName("PK__moderati__3213E83FF3FE8436");
 
             entity.Property(e => e.action).HasMaxLength(20);
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -499,7 +510,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<notifications>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__notifica__3213E83FE823970E");
+            entity.HasKey(e => e.id).HasName("PK__notifica__3213E83FE90EC405");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -513,7 +524,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<otp_verifications>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__otp_veri__3213E83F984A72F6");
+            entity.HasKey(e => e.id).HasName("PK__otp_veri__3213E83FD07CAB7E");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -528,7 +539,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<purchases>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__purchase__3213E83F53B77230");
+            entity.HasKey(e => e.id).HasName("PK__purchase__3213E83FC86F570D");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -551,7 +562,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<ratings>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__ratings__3213E83FB35D46EF");
+            entity.HasKey(e => e.id).HasName("PK__ratings__3213E83FD1FE086F");
 
             entity.HasIndex(e => new { e.user_id, e.story_id }, "uk_ratings").IsUnique();
 
@@ -572,7 +583,9 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<report_evidences>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__report_e__3213E83F542588E0");
+            entity.HasKey(e => e.id).HasName("PK__report_e__3213E83FD6F34C0C");
+
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
 
             entity.HasOne(d => d.report).WithMany(p => p.report_evidences)
                 .HasForeignKey(d => d.report_id)
@@ -581,7 +594,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<reports>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__reports__3213E83FCE38BD4B");
+            entity.HasKey(e => e.id).HasName("PK__reports__3213E83FDA1BA60C");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -602,9 +615,9 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<stories>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__stories__3213E83FE42298AF");
+            entity.HasKey(e => e.id).HasName("PK__stories__3213E83FC03FD3BD");
 
-            entity.HasIndex(e => e.slug, "UQ__stories__32DD1E4CA207ABA8").IsUnique();
+            entity.HasIndex(e => e.slug, "UQ__stories__32DD1E4CB6F2F9BA").IsUnique();
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.age_rating)
@@ -618,6 +631,9 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.status)
                 .HasMaxLength(20)
                 .HasDefaultValue("DRAFT");
+            entity.Property(e => e.story_progress_status)
+                .HasMaxLength(20)
+                .HasDefaultValue("ONGOING");
             entity.Property(e => e.title).HasMaxLength(255);
             entity.Property(e => e.total_chapters).HasDefaultValue(0);
             entity.Property(e => e.total_favorites).HasDefaultValue(0);
@@ -629,14 +645,24 @@ public partial class StoryPlatformDbContext : DbContext
                 .HasForeignKey(d => d.author_id)
                 .HasConstraintName("fk_stories_author");
 
-            entity.HasOne(d => d.category).WithMany(p => p.stories)
-                .HasForeignKey(d => d.category_id)
-                .HasConstraintName("fk_stories_category");
+            entity.HasMany(d => d.category).WithMany(p => p.story)
+                .UsingEntity<Dictionary<string, object>>(
+                    "story_categories",
+                    r => r.HasOne<categories>().WithMany()
+                        .HasForeignKey("category_id")
+                        .HasConstraintName("fk_sc_category"),
+                    l => l.HasOne<stories>().WithMany()
+                        .HasForeignKey("story_id")
+                        .HasConstraintName("fk_sc_story"),
+                    j =>
+                    {
+                        j.HasKey("story_id", "category_id").HasName("PK__story_ca__3B6772CD61F08E66");
+                    });
         });
 
         modelBuilder.Entity<story_commitments>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__story_co__3213E83FCE137BBB");
+            entity.HasKey(e => e.id).HasName("PK__story_co__3213E83F8823F4B1");
 
             entity.HasIndex(e => new { e.story_id, e.user_id }, "uk_story_commitments").IsUnique();
 
@@ -656,7 +682,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<system_policies>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__system_p__3213E83FAF1A7A7C");
+            entity.HasKey(e => e.id).HasName("PK__system_p__3213E83F9DB9CDC5");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -668,7 +694,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<system_settings>(entity =>
         {
-            entity.HasKey(e => e.key).HasName("PK__system_s__DFD83CAEBF24BA13");
+            entity.HasKey(e => e.key).HasName("PK__system_s__DFD83CAEA819FDF2");
 
             entity.Property(e => e.key).HasMaxLength(100);
             entity.Property(e => e.updated_at).HasDefaultValueSql("(getdate())");
@@ -681,7 +707,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<user_activity_logs>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__user_act__3213E83F872D0455");
+            entity.HasKey(e => e.id).HasName("PK__user_act__3213E83F616A7B22");
 
             entity.Property(e => e.action_type).HasMaxLength(50);
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -694,7 +720,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<user_library>(entity =>
         {
-            entity.HasKey(e => new { e.user_id, e.story_id, e.relation_type }).HasName("PK__user_lib__33B829F613F76C72");
+            entity.HasKey(e => new { e.user_id, e.story_id, e.relation_type }).HasName("PK__user_lib__33B829F6CB79BBE5");
 
             entity.Property(e => e.relation_type).HasMaxLength(20);
             entity.Property(e => e.last_read_at).HasDefaultValueSql("(getdate())");
@@ -712,9 +738,9 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<user_profiles>(entity =>
         {
-            entity.HasKey(e => e.user_id).HasName("PK__user_pro__B9BE370F185899D4");
+            entity.HasKey(e => e.user_id).HasName("PK__user_pro__B9BE370F23866C3D");
 
-            entity.HasIndex(e => e.nickname, "UQ__user_pro__5CF1C59BE154BB6E").IsUnique();
+            entity.HasIndex(e => e.nickname, "UQ__user_pro__5CF1C59B1FECD00B").IsUnique();
 
             entity.Property(e => e.user_id).ValueGeneratedNever();
             entity.Property(e => e.nickname)
@@ -732,7 +758,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<user_vouchers>(entity =>
         {
-            entity.HasKey(e => new { e.user_id, e.voucher_id }).HasName("PK__user_vou__21B558F59BEDAA4A");
+            entity.HasKey(e => new { e.user_id, e.voucher_id }).HasName("PK__user_vou__21B558F5258B4F04");
 
             entity.Property(e => e.applied_at).HasDefaultValueSql("(getdate())");
 
@@ -749,9 +775,9 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<users>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__users__3213E83F6A2A2C8F");
+            entity.HasKey(e => e.id).HasName("PK__users__3213E83F8B24A17B");
 
-            entity.HasIndex(e => e.email, "UQ__users__AB6E61644293E61E").IsUnique();
+            entity.HasIndex(e => e.email, "UQ__users__AB6E6164B8ADEF76").IsUnique();
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -778,13 +804,13 @@ public partial class StoryPlatformDbContext : DbContext
                         .HasConstraintName("fk_clikes_user"),
                     j =>
                     {
-                        j.HasKey("user_id", "comment_id").HasName("PK__comment___D7C7606719102F89");
+                        j.HasKey("user_id", "comment_id").HasName("PK__comment___D7C76067174594E4");
                     });
         });
 
         modelBuilder.Entity<violation_logs>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__violatio__3213E83FCBA12D22");
+            entity.HasKey(e => e.id).HasName("PK__violatio__3213E83F983E11C7");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
@@ -806,9 +832,9 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<vouchers>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__vouchers__3213E83FF6E411C8");
+            entity.HasKey(e => e.id).HasName("PK__vouchers__3213E83F12031197");
 
-            entity.HasIndex(e => e.code, "UQ__vouchers__357D4CF9E75EFDAA").IsUnique();
+            entity.HasIndex(e => e.code, "UQ__vouchers__357D4CF99A1B38A1").IsUnique();
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.code).HasMaxLength(50);
@@ -824,7 +850,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<wallets>(entity =>
         {
-            entity.HasKey(e => e.user_id).HasName("PK__wallets__B9BE370FEF769E54");
+            entity.HasKey(e => e.user_id).HasName("PK__wallets__B9BE370FE677FE3D");
 
             entity.Property(e => e.user_id).ValueGeneratedNever();
             entity.Property(e => e.balance_coin).HasDefaultValue(0);
@@ -850,7 +876,7 @@ public partial class StoryPlatformDbContext : DbContext
 
         modelBuilder.Entity<withdraw_requests>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK__withdraw__3213E83F94BEBB66");
+            entity.HasKey(e => e.id).HasName("PK__withdraw__3213E83F396A016F");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.amount_requested).HasColumnType("decimal(15, 2)");

@@ -2,13 +2,13 @@
 
 public interface IStoryService
 {
-    StoryResponseDto Create(CreateStoryRequestDto request, int authorId, string? coverImageUrl);
+    StoryResponseDto Create(CreateStoryRequestDto request, Guid authorId, string? coverImageUrl);
     PagedResultDto<StoryListItemDto> GetAll(StoryQueryDto query);
-    StoryResponseDto? GetById(int id);
+    StoryResponseDto? GetById(Guid id);
     StoryResponseDto? GetBySlug(string slug);
-    PagedResultDto<StoryListItemDto> GetByAuthor(int authorId, StoryQueryDto query);
-    bool Update(int id, UpdateStoryRequestDto request);
-    bool Delete(int id);
-    bool Publish(int id);
-    bool Unpublish(int id);
+    PagedResultDto<StoryListItemDto> GetByAuthor(Guid authorId, StoryQueryDto query);
+    bool Update(Guid id, UpdateStoryRequestDto request);
+    bool Delete(Guid id);
+    bool Publish(Guid id);
+    bool Unpublish(Guid id);
 }

@@ -14,65 +14,70 @@ namespace Services.Implementations
             _storyRepository = storyRepository;
         }
 
-        public StoryResponseDto Create(CreateStoryRequestDto request, int authorId, string? coverImageUrl)
+        public StoryResponseDto Create(CreateStoryRequestDto request, Guid authorId, string? coverImageUrl)
         {
-            // Validate category exists
-            var category = CategoryDAO.GetById(request.CategoryId);
-            if (category == null)
+            if (!UserDAO.Exists(authorId))
             {
-                throw new InvalidOperationException($"Category with ID {request.CategoryId} not found.");
+                throw new InvalidOperationException(
+                    "AuthorId không tồn tại trong bảng users. Vui lòng kiểm tra DefaultAuthorIdForStories trong appsettings.json (dùng Guid của user có trong bảng users).");
             }
 
-            if (!category.is_active ?? false)
+            if (request.CategoryIds == null || !request.CategoryIds.Any())
             {
-                throw new InvalidOperationException($"Category '{category.name}' is not active.");
+                throw new InvalidOperationException("Chọn ít nhất một thể loại.");
             }
 
-            // Generate slug and check for duplicates
+            foreach (var categoryId in request.CategoryIds)
+            {
+                var category = CategoryDAO.GetById(categoryId);
+                if (category == null)
+                    throw new InvalidOperationException($"Category with ID {categoryId} not found.");
+                if (!category.is_active ?? false)
+                    throw new InvalidOperationException($"Category '{category.name}' is not active.");
+            }
+
             var slug = GenerateSlug(request.Title);
-            var existingStory = _storyRepository.GetBySlug(slug);
-            if (existingStory != null)
+            var existingBySlug = _storyRepository.GetBySlug(slug);
+            if (existingBySlug != null)
             {
                 throw new InvalidOperationException($"Story with slug '{slug}' already exists.");
             }
 
-            // Validate age rating
             var validAgeRatings = new[] { "ALL", "13+", "16+", "18+" };
             if (!validAgeRatings.Contains(request.AgeRating?.ToUpper()))
             {
                 throw new ArgumentException($"Invalid age rating. Must be one of: {string.Join(", ", validAgeRatings)}");
             }
 
-            var story = new story
+            var validProgressStatuses = new[] { "ONGOING", "COMPLETED", "HIATUS" };
+            var progressStatus = (request.StoryProgressStatus ?? "ONGOING").ToUpper();
+            if (!validProgressStatuses.Contains(progressStatus))
             {
+                throw new ArgumentException($"Invalid story progress status. Must be one of: {string.Join(", ", validProgressStatuses)}");
+            }
+
+            var story = new stories
+            {
+                id = Guid.NewGuid(),
                 title = request.Title,
                 slug = slug,
                 summary = request.Summary,
-                category_id = request.CategoryId,
                 author_id = authorId,
                 cover_image = coverImageUrl,
-
                 status = "DRAFT",
-                sale_type = "CHAPTER",
-                access_type = "FREE",
-
-                expected_chapters = request.ExpectedChapters,
-                release_frequency_days = request.ReleaseFrequencyDays,
-                age_rating = request.AgeRating.ToUpper(),
-
+                story_progress_status = progressStatus,
+                age_rating = (request.AgeRating ?? "ALL").ToUpper(),
                 total_chapters = 0,
                 total_views = 0,
                 total_favorites = 0,
                 avg_rating = 0,
                 word_count = 0,
-
                 created_at = DateTime.Now,
                 updated_at = DateTime.Now
             };
 
-            _storyRepository.Add(story);
+            _storyRepository.Add(story, request.CategoryIds);
 
-            // Reload to get navigation properties
             var createdStory = _storyRepository.GetById(story.id);
             return MapToResponseDto(createdStory!);
         }
@@ -81,7 +86,6 @@ namespace Services.Implementations
         {
             var storiesQuery = _storyRepository.GetAll();
 
-            // Apply filters
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
                 var searchLower = query.Search.ToLower();
@@ -92,7 +96,7 @@ namespace Services.Implementations
 
             if (query.CategoryId.HasValue)
             {
-                storiesQuery = storiesQuery.Where(s => s.category_id == query.CategoryId.Value);
+                storiesQuery = storiesQuery.Where(s => s.category.Any(c => c.id == query.CategoryId.Value));
             }
 
             if (query.AuthorId.HasValue)
@@ -105,7 +109,6 @@ namespace Services.Implementations
                 storiesQuery = storiesQuery.Where(s => s.status == query.Status);
             }
 
-            // Apply sorting
             storiesQuery = query.SortBy?.ToLower() switch
             {
                 "updated_at" => query.SortOrder == "asc"
@@ -124,7 +127,6 @@ namespace Services.Implementations
 
             var totalCount = storiesQuery.Count();
 
-            // Apply pagination
             var stories = storiesQuery
                 .Skip((query.Page - 1) * query.PageSize)
                 .Take(query.PageSize)
@@ -139,7 +141,7 @@ namespace Services.Implementations
             };
         }
 
-        public StoryResponseDto? GetById(int id)
+        public StoryResponseDto? GetById(Guid id)
         {
             var story = _storyRepository.GetById(id);
             return story == null ? null : MapToResponseDto(story);
@@ -151,7 +153,7 @@ namespace Services.Implementations
             return story == null ? null : MapToResponseDto(story);
         }
 
-        public PagedResultDto<StoryListItemDto> GetByAuthor(int authorId, StoryQueryDto query)
+        public PagedResultDto<StoryListItemDto> GetByAuthor(Guid authorId, StoryQueryDto query)
         {
             var authorQuery = new StoryQueryDto
             {
@@ -168,28 +170,24 @@ namespace Services.Implementations
             return GetAll(authorQuery);
         }
 
-        public bool Update(int id, UpdateStoryRequestDto request)
+        public bool Update(Guid id, UpdateStoryRequestDto request)
         {
             var story = _storyRepository.GetById(id);
             if (story == null)
                 return false;
 
-            // Validate category if changed
-            if (request.CategoryId != story.category_id)
+            if (request.CategoryIds != null && request.CategoryIds.Any())
             {
-                var category = CategoryDAO.GetById(request.CategoryId);
-                if (category == null)
+                foreach (var categoryId in request.CategoryIds)
                 {
-                    throw new InvalidOperationException($"Category with ID {request.CategoryId} not found.");
-                }
-
-                if (!category.is_active ?? false)
-                {
-                    throw new InvalidOperationException($"Category '{category.name}' is not active.");
+                    var category = CategoryDAO.GetById(categoryId);
+                    if (category == null)
+                        throw new InvalidOperationException($"Category with ID {categoryId} not found.");
+                    if (!category.is_active ?? false)
+                        throw new InvalidOperationException($"Category '{category.name}' is not active.");
                 }
             }
 
-            // Check slug conflict if title changed
             if (request.Title != story.title)
             {
                 var newSlug = GenerateSlug(request.Title);
@@ -204,7 +202,6 @@ namespace Services.Implementations
                 }
             }
 
-            // Validate status if provided
             if (!string.IsNullOrWhiteSpace(request.Status))
             {
                 var validStatuses = new[] { "DRAFT", "PUBLISHED", "COMPLETED", "CANCELLED" };
@@ -214,7 +211,6 @@ namespace Services.Implementations
                 }
             }
 
-            // Validate age rating if provided
             if (!string.IsNullOrWhiteSpace(request.AgeRating))
             {
                 var validAgeRatings = new[] { "ALL", "13+", "16+", "18+" };
@@ -224,12 +220,19 @@ namespace Services.Implementations
                 }
             }
 
+            if (!string.IsNullOrWhiteSpace(request.StoryProgressStatus))
+            {
+                var validProgressStatuses = new[] { "ONGOING", "COMPLETED", "HIATUS" };
+                if (!validProgressStatuses.Contains(request.StoryProgressStatus.ToUpper()))
+                {
+                    throw new ArgumentException($"Invalid story progress status. Must be one of: {string.Join(", ", validProgressStatuses)}");
+                }
+            }
+
             story.title = request.Title;
             story.summary = request.Summary;
-            story.category_id = request.CategoryId;
             story.updated_at = DateTime.Now;
 
-            // Update cover image if provided
             if (!string.IsNullOrWhiteSpace(request.CoverImageUrl))
             {
                 story.cover_image = request.CoverImageUrl;
@@ -238,36 +241,26 @@ namespace Services.Implementations
             if (!string.IsNullOrWhiteSpace(request.Status))
                 story.status = request.Status.ToUpper();
 
-            if (!string.IsNullOrWhiteSpace(request.SaleType))
-                story.sale_type = request.SaleType.ToUpper();
-
-            if (!string.IsNullOrWhiteSpace(request.AccessType))
-                story.access_type = request.AccessType.ToUpper();
+            if (!string.IsNullOrWhiteSpace(request.StoryProgressStatus))
+                story.story_progress_status = request.StoryProgressStatus.ToUpper();
 
             if (!string.IsNullOrWhiteSpace(request.AgeRating))
                 story.age_rating = request.AgeRating.ToUpper();
 
-            if (request.ExpectedChapters.HasValue)
-                story.expected_chapters = request.ExpectedChapters.Value;
-
-            if (request.ReleaseFrequencyDays.HasValue)
-                story.release_frequency_days = request.ReleaseFrequencyDays.Value;
-
+            story.category.Clear();
             _storyRepository.Update(story);
+            if (request.CategoryIds != null)
+                StoryDAO.UpdateStoryCategories(id, request.CategoryIds);
             return true;
         }
 
-        public bool Delete(int id)
+        public bool Delete(Guid id)
         {
             var story = _storyRepository.GetById(id);
             if (story == null)
                 return false;
 
-            // Check if story has chapters
-            var chapterCount = ChapterDAO.GetAll()
-                .Where(c => c.story_id == id)
-                .Count();
-
+            var chapterCount = ChapterDAO.GetCountByStoryId(id);
             if (chapterCount > 0)
             {
                 throw new InvalidOperationException("Cannot delete story that has associated chapters.");
@@ -277,7 +270,7 @@ namespace Services.Implementations
             return true;
         }
 
-        public bool Publish(int id)
+        public bool Publish(Guid id)
         {
             var story = _storyRepository.GetById(id);
             if (story == null)
@@ -285,13 +278,14 @@ namespace Services.Implementations
 
             story.status = "PUBLISHED";
             story.published_at = DateTime.Now;
+            story.last_published_at = DateTime.Now;
             story.updated_at = DateTime.Now;
 
             _storyRepository.Update(story);
             return true;
         }
 
-        public bool Unpublish(int id)
+        public bool Unpublish(Guid id)
         {
             var story = _storyRepository.GetById(id);
             if (story == null)
@@ -380,11 +374,11 @@ namespace Services.Implementations
                 .Replace("ỵ", "y");
         }
 
-        private StoryResponseDto MapToResponseDto(story story)
+        private StoryResponseDto MapToResponseDto(stories story)
         {
-            var category = story.category_id.HasValue
-                ? CategoryDAO.GetById(story.category_id.Value)
-                : null;
+            var categories = story.category?.ToList() ?? new List<categories>();
+            var categoryIds = categories.Select(c => c.id).ToList();
+            var categoryNames = categories.Any() ? string.Join(", ", categories.Select(c => c.name)) : null;
 
             return new StoryResponseDto
             {
@@ -392,16 +386,13 @@ namespace Services.Implementations
                 Title = story.title,
                 Slug = story.slug,
                 Summary = story.summary,
-                CategoryId = story.category_id,
-                CategoryName = category?.name,
+                CategoryIds = categoryIds,
+                CategoryNames = categoryNames,
                 AuthorId = story.author_id,
                 CoverImage = story.cover_image,
                 Status = story.status,
-                SaleType = story.sale_type,
-                AccessType = story.access_type,
+                StoryProgressStatus = story.story_progress_status,
                 AgeRating = story.age_rating,
-                ExpectedChapters = story.expected_chapters,
-                ReleaseFrequencyDays = story.release_frequency_days,
                 TotalChapters = story.total_chapters,
                 TotalViews = story.total_views,
                 TotalFavorites = story.total_favorites,
@@ -414,11 +405,11 @@ namespace Services.Implementations
             };
         }
 
-        private StoryListItemDto MapToListItemDto(story story)
+        private StoryListItemDto MapToListItemDto(stories story)
         {
-            var category = story.category_id.HasValue
-                ? CategoryDAO.GetById(story.category_id.Value)
-                : null;
+            var categories = story.category?.ToList() ?? new List<categories>();
+            var categoryIds = categories.Select(c => c.id).ToList();
+            var categoryNames = categories.Any() ? string.Join(", ", categories.Select(c => c.name)) : null;
 
             return new StoryListItemDto
             {
@@ -427,9 +418,10 @@ namespace Services.Implementations
                 Slug = story.slug,
                 Summary = story.summary,
                 Status = story.status,
+                StoryProgressStatus = story.story_progress_status,
                 CoverImage = story.cover_image,
-                CategoryId = story.category_id,
-                CategoryName = category?.name,
+                CategoryIds = categoryIds,
+                CategoryNames = categoryNames,
                 AuthorId = story.author_id,
                 TotalChapters = story.total_chapters,
                 TotalViews = story.total_views,

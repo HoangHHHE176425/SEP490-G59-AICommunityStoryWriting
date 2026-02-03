@@ -4,11 +4,12 @@ namespace Repositories
 {
     public interface IStoryRepository
     {
-        IQueryable<story> GetAll();
-        story? GetById(int id);
-        story? GetBySlug(string slug);
-        void Add(story story);
-        void Update(story story);
-        void Delete(int id);
+        IQueryable<stories> GetAll();
+        stories? GetById(Guid id);
+        stories? GetBySlug(string slug);
+        void Add(stories story);
+        void Add(stories story, IEnumerable<Guid> categoryIds);
+        void Update(stories story);
+        void Delete(Guid id);
     }
 }
