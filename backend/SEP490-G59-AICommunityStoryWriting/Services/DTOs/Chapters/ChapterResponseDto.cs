@@ -2,8 +2,8 @@
 {
     public class ChapterResponseDto
     {
-        public int Id { get; set; }
-        public int StoryId { get; set; }
+        public Guid Id { get; set; }
+        public Guid? StoryId { get; set; }
         public string? StoryTitle { get; set; }
         public string Title { get; set; } = null!;
         public int OrderIndex { get; set; }

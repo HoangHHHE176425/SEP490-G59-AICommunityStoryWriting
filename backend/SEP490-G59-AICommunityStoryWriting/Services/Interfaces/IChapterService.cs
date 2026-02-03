@@ -5,12 +5,12 @@ public interface IChapterService
 {
     ChapterResponseDto Create(CreateChapterRequestDto request);
     PagedResultDto<ChapterListItemDto> GetAll(ChapterQueryDto query);
-    ChapterResponseDto? GetById(int id);
-    IEnumerable<ChapterListItemDto> GetByStoryId(int storyId);
-    ChapterResponseDto? GetByStoryIdAndOrderIndex(int storyId, int orderIndex);
-    bool Update(int id, UpdateChapterRequestDto request);
-    bool Delete(int id);
-    bool Publish(int id);
-    bool Unpublish(int id);
-    bool Reorder(int id, int newOrderIndex);
+    ChapterResponseDto? GetById(Guid id);
+    IEnumerable<ChapterListItemDto> GetByStoryId(Guid storyId);
+    ChapterResponseDto? GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex);
+    bool Update(Guid id, UpdateChapterRequestDto request);
+    bool Delete(Guid id);
+    bool Publish(Guid id);
+    bool Unpublish(Guid id);
+    bool Reorder(Guid id, int newOrderIndex);
 }
