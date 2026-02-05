@@ -12,14 +12,17 @@ import {
 import { CategoryModal } from '../../../components/admin/category/CategoryModal';
 import { Pagination } from '../../../components/pagination/Pagination';
 import { createCategory, getCategoriesWithPagination, updateCategory } from '../../../api/category/categoryApi';
+import { useToast } from '../../../components/author/story-editor/Toast';
 
 export function CategoryManagement() {
+    const { showToast, ToastContainer } = useToast();
     const [searchTerm, setSearchTerm] = useState('');
     const [filterStatus, setFilterStatus] = useState('all');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCategory, setEditingCategory] = useState(null);
     const [viewingCategory, setViewingCategory] = useState(null);
     const [categories, setCategories] = useState([]);
+    const [allCategoriesForStats, setAllCategoriesForStats] = useState([]); // All categories for stats (not filtered by status)
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -29,9 +32,29 @@ export function CategoryManagement() {
     const [totalCount, setTotalCount] = useState(0);
     const [totalPages, setTotalPages] = useState(1);
 
+    // Load categories for stats (all categories, not filtered by status)
+    const loadCategoriesForStats = async () => {
+        try {
+            const queryParams = {
+                page: 1,
+                pageSize: 1000, // Get all categories for stats
+                excludeRoots: true, // Exclude root categories (parent_id = null)
+                includeInactive: true, // Include all statuses for stats
+            };
+
+            const result = await getCategoriesWithPagination(queryParams);
+            const allCategories = result.items || [];
+            setAllCategoriesForStats(allCategories);
+        } catch (err) {
+            console.error('Error loading categories for stats:', err);
+            // Don't show error to user, just log it
+        }
+    };
+
     // Load categories from API with pagination
     useEffect(() => {
         loadCategories();
+        loadCategoriesForStats(); // Also load all categories for stats
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentPage]);
 
@@ -43,6 +66,7 @@ export function CategoryManagement() {
             } else {
                 loadCategories(1);
             }
+            // Stats don't need to reload on search, they show all categories
         }, 500);
 
         return () => clearTimeout(timer);
@@ -212,6 +236,10 @@ export function CategoryManagement() {
 
                 // Reload categories from API to get updated list
                 await loadCategories(currentPage);
+                await loadCategoriesForStats(); // Reload stats
+
+                // Show success message
+                showToast('Cập nhật thể loại thành công!', 'success');
             } else {
                 // Map story_type to parentId
                 const parentId = getParentIdByStoryType(categoryData.story_type || 'long');
@@ -229,6 +257,10 @@ export function CategoryManagement() {
                 // Reload categories from API to get updated list
                 // Reload current page or go to first page if new category might be on different page
                 await loadCategories(1);
+                await loadCategoriesForStats(); // Reload stats
+
+                // Show success message
+                showToast('Tạo thể loại thành công!', 'success');
             }
             setIsModalOpen(false);
         } catch (error) {
@@ -308,7 +340,7 @@ export function CategoryManagement() {
                         <div>
                             <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Tổng thể loại</p>
                             <p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#1e293b', margin: '0.25rem 0 0 0' }}>
-                                {totalCount}
+                                {allCategoriesForStats.length}
                             </p>
                         </div>
                         <div style={{ width: '48px', height: '48px', backgroundColor: 'rgba(19, 236, 91, 0.1)', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -322,7 +354,7 @@ export function CategoryManagement() {
                         <div>
                             <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Đang hoạt động</p>
                             <p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#16a34a', margin: '0.25rem 0 0 0' }}>
-                                {categories.filter(c => c.isActive !== false).length}
+                                {allCategoriesForStats.filter(c => c.isActive !== false).length}
                             </p>
                         </div>
                         <div style={{ width: '48px', height: '48px', backgroundColor: 'rgba(22, 163, 74, 0.1)', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -336,7 +368,7 @@ export function CategoryManagement() {
                         <div>
                             <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Đã tắt</p>
                             <p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#dc2626', margin: '0.25rem 0 0 0' }}>
-                                {categories.filter(c => c.isActive === false).length}
+                                {allCategoriesForStats.filter(c => c.isActive === false).length}
                             </p>
                         </div>
                         <div style={{ width: '48px', height: '48px', backgroundColor: 'rgba(220, 38, 38, 0.1)', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -717,6 +749,9 @@ export function CategoryManagement() {
                 category={viewingCategory || editingCategory}
                 isViewOnly={!!viewingCategory}
             />
+
+            {/* Toast Container */}
+            <ToastContainer />
         </div>
     );
 }
