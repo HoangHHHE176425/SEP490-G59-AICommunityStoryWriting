@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Categories;
 using Services.Interfaces;
 
@@ -44,6 +44,15 @@ namespace AIStory.API.Controllers
             catch (InvalidOperationException ex)
             {
                 return BadRequest(new { message = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                // Log the full exception for debugging
+                return StatusCode(500, new { message = "Đã xảy ra lỗi khi tạo thể loại", error = ex.Message });
             }
         }
 
