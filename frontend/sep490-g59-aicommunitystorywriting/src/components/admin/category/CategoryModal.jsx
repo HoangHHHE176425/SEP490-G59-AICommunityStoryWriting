@@ -15,18 +15,67 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
     const [errors, setErrors] = useState({});
     const [imagePreview, setImagePreview] = useState(null);
 
+    // Map parentId to story_type
+    const getStoryTypeByParentId = (parentId) => {
+        if (!parentId) return 'long'; // default
+        const parentIdStr = parentId.toString().toUpperCase();
+        if (parentIdStr === 'AF3C494B-2A64-45AE-89E9-73998391AB78') return 'long';
+        if (parentIdStr === 'D488A3A0-5971-42C5-A7E4-CB35BEBBE6B6') return 'short';
+        return 'long'; // default
+    };
+
+    // Get full icon URL for preview
+    const getIconUrl = (iconUrl) => {
+        if (!iconUrl) return '';
+        if (iconUrl.startsWith('http://') || iconUrl.startsWith('https://')) {
+            // Check if it's a valid absolute URL
+            try {
+                const urlObj = new URL(iconUrl);
+                if (urlObj.hostname && urlObj.hostname !== 'uploads' && urlObj.hostname.includes('.')) {
+                    return iconUrl;
+                }
+            } catch {
+                // Invalid URL, treat as relative path
+            }
+        }
+
+        // Handle relative paths
+        let path = iconUrl;
+        if (iconUrl.startsWith('http://uploads/') || iconUrl.startsWith('https://uploads/')) {
+            path = iconUrl.replace(/^https?:\/\/uploads\//, '/uploads/');
+        } else if (iconUrl.startsWith('http://') || iconUrl.startsWith('https://')) {
+            path = iconUrl.replace(/^https?:\/\//, '/');
+        }
+
+        if (!path.startsWith('/')) {
+            path = '/' + path;
+        }
+
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+        const baseUrl = apiUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
+        return `${baseUrl}${path}`;
+    };
+
     useEffect(() => {
         if (category) {
+            // Map API response fields to formData
+            // API returns: iconUrl (camelCase), isActive (camelCase), parentId
+            // Form expects: icon_url (snake_case), is_active (snake_case), story_type
+            const storyType = getStoryTypeByParentId(category.parentId);
+            const iconUrl = category.iconUrl || '';
+            const fullIconUrl = getIconUrl(iconUrl);
+
             // eslint-disable-next-line react-hooks/set-state-in-effect
             setFormData({
-                name: category.name,
-                slug: category.slug,
+                name: category.name || '',
+                slug: category.slug || '',
                 description: category.description || '',
-                icon_url: category.icon_url || '',
-                story_type: category.story_type || 'long',
-                is_active: category.is_active
+                icon_url: iconUrl, // Keep original for API, use fullIconUrl for preview
+                iconFile: null, // Reset file when editing (user can upload new one)
+                story_type: storyType,
+                is_active: category.isActive !== false // Handle both camelCase and snake_case
             });
-            setImagePreview(category.icon_url || null);
+            setImagePreview(fullIconUrl || null);
         } else {
             setFormData({
                 name: '',
@@ -77,9 +126,9 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
             const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
             const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
             if (!allowedExtensions.includes(fileExtension)) {
-                setErrors(prev => ({ 
-                    ...prev, 
-                    icon_url: 'Định dạng file không hợp lệ. Chỉ chấp nhận: JPG, JPEG, PNG, GIF, WEBP, SVG' 
+                setErrors(prev => ({
+                    ...prev,
+                    icon_url: 'Định dạng file không hợp lệ. Chỉ chấp nhận: JPG, JPEG, PNG, GIF, WEBP, SVG'
                 }));
                 return;
             }
@@ -94,8 +143,8 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
             const reader = new FileReader();
             reader.onloadend = () => {
                 setImagePreview(reader.result);
-                setFormData(prev => ({ 
-                    ...prev, 
+                setFormData(prev => ({
+                    ...prev,
                     icon_url: reader.result,
                     iconFile: file // Save File object for API
                 }));
@@ -116,7 +165,8 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
             newErrors.slug = 'Slug không được để trống';
         }
 
-        if (!formData.icon_url.trim()) {
+        // Icon is required: either existing icon_url or new iconFile
+        if (!formData.icon_url.trim() && !formData.iconFile) {
             newErrors.icon_url = 'Vui lòng tải lên ảnh icon';
         }
 
