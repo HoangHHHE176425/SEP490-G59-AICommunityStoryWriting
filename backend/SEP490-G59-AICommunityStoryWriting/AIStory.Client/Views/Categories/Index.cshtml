@@ -205,12 +205,12 @@
                 categories = result.items || [];
                 totalCount = result.totalCount || 0;
                 totalPages = result.totalPages || 1;
-                
+
                 // Update pagination info
                 document.getElementById('totalCount').textContent = totalCount;
                 document.getElementById('currentPage').textContent = currentPage;
                 document.getElementById('totalPages').textContent = totalPages;
-                
+
                 renderCategories();
                 renderPagination();
             } catch (error) {
