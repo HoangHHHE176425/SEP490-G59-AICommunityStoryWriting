@@ -17,32 +17,29 @@ namespace Services.Implementations
 
         public ChapterResponseDto Create(CreateChapterRequestDto request)
         {
-            // Validate story exists
             var story = StoryDAO.GetById(request.StoryId);
             if (story == null)
             {
                 throw new InvalidOperationException($"Story with ID {request.StoryId} not found.");
             }
 
-            // Check if order_index already exists for this story
             var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(request.StoryId, request.OrderIndex);
             if (existingChapter != null)
             {
                 throw new InvalidOperationException($"Chapter with order index {request.OrderIndex} already exists for this story.");
             }
 
-            // Validate access type
             var validAccessTypes = new[] { "FREE", "PAID" };
             if (!string.IsNullOrWhiteSpace(request.AccessType) && !validAccessTypes.Contains(request.AccessType.ToUpper()))
             {
                 throw new ArgumentException($"Invalid access type. Must be one of: {string.Join(", ", validAccessTypes)}");
             }
 
-            // Calculate word count from content
             var wordCount = CalculateWordCount(request.Content);
 
-            var chapter = new chapter
+            var chapter = new chapters
             {
+                id = Guid.NewGuid(),
                 story_id = request.StoryId,
                 title = request.Title,
                 content = request.Content,
@@ -59,10 +56,8 @@ namespace Services.Implementations
 
             _chapterRepository.Add(chapter);
 
-            // Update story's total chapters and word count
             UpdateStoryChapterStats(request.StoryId);
 
-            // Reload to get navigation properties
             var createdChapter = _chapterRepository.GetById(chapter.id);
             return MapToResponseDto(createdChapter!);
         }
@@ -71,7 +66,6 @@ namespace Services.Implementations
         {
             var chaptersQuery = _chapterRepository.GetAll();
 
-            // Apply filters
             if (query.StoryId.HasValue)
             {
                 chaptersQuery = chaptersQuery.Where(c => c.story_id == query.StoryId.Value);
@@ -87,7 +81,6 @@ namespace Services.Implementations
                 chaptersQuery = chaptersQuery.Where(c => c.access_type == query.AccessType);
             }
 
-            // Apply sorting
             chaptersQuery = query.SortBy?.ToLower() switch
             {
                 "created_at" => query.SortOrder == "asc"
@@ -103,59 +96,57 @@ namespace Services.Implementations
 
             var totalCount = chaptersQuery.Count();
 
-            // Apply pagination
-            var chapters = chaptersQuery
+            var chapterList = chaptersQuery
                 .Skip((query.Page - 1) * query.PageSize)
                 .Take(query.PageSize)
                 .ToList();
 
             return new PagedResultDto<ChapterListItemDto>
             {
-                Items = chapters.Select(MapToListItemDto),
+                Items = chapterList.Select(MapToListItemDto),
                 TotalCount = totalCount,
                 Page = query.Page,
                 PageSize = query.PageSize
             };
         }
 
-        public ChapterResponseDto? GetById(int id)
+        public ChapterResponseDto? GetById(Guid id)
         {
             var chapter = _chapterRepository.GetById(id);
             return chapter == null ? null : MapToResponseDto(chapter);
         }
 
-        public IEnumerable<ChapterListItemDto> GetByStoryId(int storyId)
+        public IEnumerable<ChapterListItemDto> GetByStoryId(Guid storyId)
         {
-            var chapters = _chapterRepository.GetByStoryId(storyId)
+            var chapterList = _chapterRepository.GetByStoryId(storyId)
                 .OrderBy(c => c.order_index)
                 .ToList();
 
-            return chapters.Select(MapToListItemDto);
+            return chapterList.Select(MapToListItemDto);
         }
 
-        public ChapterResponseDto? GetByStoryIdAndOrderIndex(int storyId, int orderIndex)
+        public ChapterResponseDto? GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex)
         {
             var chapter = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, orderIndex);
             return chapter == null ? null : MapToResponseDto(chapter);
         }
 
-        public bool Update(int id, UpdateChapterRequestDto request)
+        public bool Update(Guid id, UpdateChapterRequestDto request)
         {
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
 
-            // Check order_index conflict if changed
             if (request.OrderIndex.HasValue && request.OrderIndex.Value != chapter.order_index)
             {
-                var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(chapter.story_id, request.OrderIndex.Value);
+                var storyId = chapter.story_id ?? Guid.Empty;
+                var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, request.OrderIndex.Value);
                 if (existingChapter != null && existingChapter.id != id)
                 {
                     throw new InvalidOperationException($"Chapter with order index {request.OrderIndex.Value} already exists for this story.");
                 }
             }
 
-            // Validate status if provided
             if (!string.IsNullOrWhiteSpace(request.Status))
             {
                 var validStatuses = new[] { "DRAFT", "PUBLISHED", "ARCHIVED" };
@@ -165,7 +156,6 @@ namespace Services.Implementations
                 }
             }
 
-            // Validate access type if provided
             if (!string.IsNullOrWhiteSpace(request.AccessType))
             {
                 var validAccessTypes = new[] { "FREE", "PAID" };
@@ -175,7 +165,6 @@ namespace Services.Implementations
                 }
             }
 
-            // Update fields
             chapter.title = request.Title;
             chapter.content = request.Content;
             chapter.updated_at = DateTime.Now;
@@ -198,7 +187,6 @@ namespace Services.Implementations
             if (request.IsAiClean.HasValue)
                 chapter.is_ai_clean = request.IsAiClean.Value;
 
-            // Recalculate word count if content changed
             if (request.Content != null)
             {
                 chapter.word_count = CalculateWordCount(request.Content);
@@ -206,13 +194,13 @@ namespace Services.Implementations
 
             _chapterRepository.Update(chapter);
 
-            // Update story's total chapters and word count
-            UpdateStoryChapterStats(chapter.story_id);
+            if (chapter.story_id.HasValue)
+                UpdateStoryChapterStats(chapter.story_id.Value);
 
             return true;
         }
 
-        public bool Delete(int id)
+        public bool Delete(Guid id)
         {
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
@@ -222,13 +210,13 @@ namespace Services.Implementations
 
             _chapterRepository.Delete(id);
 
-            // Update story's total chapters and word count
-            UpdateStoryChapterStats(storyId);
+            if (storyId.HasValue)
+                UpdateStoryChapterStats(storyId.Value);
 
             return true;
         }
 
-        public bool Publish(int id)
+        public bool Publish(Guid id)
         {
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
@@ -240,18 +228,20 @@ namespace Services.Implementations
 
             _chapterRepository.Update(chapter);
 
-            // Update story's last_published_at
-            var story = StoryDAO.GetById(chapter.story_id);
-            if (story != null)
+            if (chapter.story_id.HasValue)
             {
-                story.last_published_at = DateTime.Now;
-                StoryDAO.Update(story);
+                var story = StoryDAO.GetById(chapter.story_id.Value);
+                if (story != null)
+                {
+                    story.last_published_at = DateTime.Now;
+                    StoryDAO.Update(story);
+                }
             }
 
             return true;
         }
 
-        public bool Unpublish(int id)
+        public bool Unpublish(Guid id)
         {
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
@@ -264,17 +254,16 @@ namespace Services.Implementations
             return true;
         }
 
-        public bool Reorder(int id, int newOrderIndex)
+        public bool Reorder(Guid id, int newOrderIndex)
         {
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
 
-            // Check if new order_index already exists
-            var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(chapter.story_id, newOrderIndex);
+            var storyId = chapter.story_id ?? Guid.Empty;
+            var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, newOrderIndex);
             if (existingChapter != null && existingChapter.id != id)
             {
-                // Swap order indices
                 var tempOrder = chapter.order_index;
                 chapter.order_index = newOrderIndex;
                 existingChapter.order_index = tempOrder;
@@ -296,30 +285,31 @@ namespace Services.Implementations
             if (string.IsNullOrWhiteSpace(content))
                 return 0;
 
-            // Simple word count: split by whitespace and count non-empty strings
             return content
                 .Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
                 .Length;
         }
 
-        private void UpdateStoryChapterStats(int storyId)
+        private void UpdateStoryChapterStats(Guid storyId)
         {
             var story = StoryDAO.GetById(storyId);
             if (story == null)
                 return;
 
-            var chapters = _chapterRepository.GetByStoryId(storyId).ToList();
+            var chapterList = _chapterRepository.GetByStoryId(storyId).ToList();
 
-            story.total_chapters = chapters.Count;
-            story.word_count = chapters.Sum(c => c.word_count ?? 0);
+            story.total_chapters = chapterList.Count;
+            story.word_count = chapterList.Sum(c => c.word_count ?? 0);
             story.updated_at = DateTime.Now;
 
             StoryDAO.Update(story);
         }
 
-        private ChapterResponseDto MapToResponseDto(chapter chapter)
+        private ChapterResponseDto MapToResponseDto(chapters chapter)
         {
-            var story = StoryDAO.GetById(chapter.story_id);
+            stories? story = null;
+            if (chapter.story_id.HasValue)
+                story = StoryDAO.GetById(chapter.story_id.Value);
 
             return new ChapterResponseDto
             {
@@ -341,7 +331,7 @@ namespace Services.Implementations
             };
         }
 
-        private ChapterListItemDto MapToListItemDto(chapter chapter)
+        private ChapterListItemDto MapToListItemDto(chapters chapter)
         {
             return new ChapterListItemDto
             {

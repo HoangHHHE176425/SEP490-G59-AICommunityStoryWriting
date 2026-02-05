@@ -17,21 +17,25 @@ namespace Services.Implementations
 
         public CategoryResponseDto Create(CreateCategoryRequestDto request)
         {
-            // Check if slug already exists
-            var slug = GenerateSlug(request.Name);
-            var existingCategory = _categoryRepository.GetBySlug(slug);
-            if (existingCategory != null)
+            categories? parent = null;
+            if (request.ParentId.HasValue)
             {
-                throw new InvalidOperationException($"Category with slug '{slug}' already exists.");
+                parent = _categoryRepository.GetById(request.ParentId.Value);
+                if (parent == null)
+                    throw new InvalidOperationException($"Parent category with ID {request.ParentId} not found.");
             }
 
-            var category = new category
+            var slug = BuildUniqueSlug(request.Name, request.ParentId, parent?.slug, idToExclude: null);
+
+            var category = new categories
             {
+                id = Guid.NewGuid(),
                 name = request.Name,
                 slug = slug,
                 description = request.Description,
                 icon_url = request.IconUrl,
                 is_active = request.IsActive,
+                parent_category_id = request.ParentId,
                 created_at = DateTime.Now
             };
 
@@ -40,7 +44,7 @@ namespace Services.Implementations
             return MapToDto(category);
         }
 
-        public IEnumerable<CategoryResponseDto> GetAll(bool includeInactive = false)
+        public IEnumerable<CategoryResponseDto> GetAll(bool includeInactive = false, Guid? parentId = null, bool rootsOnly = false)
         {
             var query = _categoryRepository.GetAll();
 
@@ -49,11 +53,16 @@ namespace Services.Implementations
                 query = query.Where(c => c.is_active == true);
             }
 
-            var categories = query.OrderBy(c => c.name).ToList();
+            if (rootsOnly)
+                query = query.Where(c => c.parent_category_id == null);
+            else if (parentId.HasValue)
+                query = query.Where(c => c.parent_category_id == parentId.Value);
+
+            var categories = query.OrderBy(c => c.parent_category_id == null ? 0 : 1).ThenBy(c => c.name).ToList();
             return categories.Select(c => MapToDto(c));
         }
 
-        public CategoryResponseDto? GetById(int id)
+        public CategoryResponseDto? GetById(Guid id)
         {
             var category = _categoryRepository.GetById(id);
             return category == null ? null : MapToDto(category);
@@ -65,44 +74,46 @@ namespace Services.Implementations
             return category == null ? null : MapToDto(category);
         }
 
-        public bool Update(int id, UpdateCategoryRequestDto request)
+        public bool Update(Guid id, UpdateCategoryRequestDto request)
         {
             var category = _categoryRepository.GetById(id);
             if (category == null)
                 return false;
 
-            // Check if new slug conflicts with existing category
-            var newSlug = GenerateSlug(request.Name);
-            if (newSlug != category.slug)
+            if (request.ParentId.HasValue)
             {
-                var existingCategory = _categoryRepository.GetBySlug(newSlug);
-                if (existingCategory != null && existingCategory.id != id)
-                {
-                    throw new InvalidOperationException($"Category with slug '{newSlug}' already exists.");
-                }
+                if (request.ParentId.Value == id)
+                    throw new InvalidOperationException("Category cannot be its own parent.");
+                var parent = _categoryRepository.GetById(request.ParentId.Value);
+                if (parent == null)
+                    throw new InvalidOperationException($"Parent category with ID {request.ParentId} not found.");
             }
+
+            categories? parentCat = request.ParentId.HasValue ? _categoryRepository.GetById(request.ParentId.Value) : null;
+            var newSlug = BuildUniqueSlug(request.Name, request.ParentId, parentCat?.slug, idToExclude: id);
 
             category.name = request.Name;
             category.slug = newSlug;
             category.description = request.Description;
             category.icon_url = request.IconUrl;
             category.is_active = request.IsActive;
+            category.parent_category_id = request.ParentId;
 
             _categoryRepository.Update(category);
             return true;
         }
 
-        public bool Delete(int id)
+        public bool Delete(Guid id)
         {
             var category = _categoryRepository.GetById(id);
             if (category == null)
                 return false;
 
-            // Check if category has stories
-            var storyCount = StoryDAO.GetAll()
-                .Where(s => s.category_id == id)
-                .Count();
+            var hasChildren = _categoryRepository.GetAll().Any(c => c.parent_category_id == id);
+            if (hasChildren)
+                throw new InvalidOperationException("Cannot delete category that has child categories. Delete or move children first.");
 
+            var storyCount = CategoryDAO.GetStoryCountByCategoryId(id);
             if (storyCount > 0)
             {
                 throw new InvalidOperationException("Cannot delete category that has associated stories.");
@@ -112,7 +123,7 @@ namespace Services.Implementations
             return true;
         }
 
-        public bool ToggleActive(int id)
+        public bool ToggleActive(Guid id)
         {
             var category = _categoryRepository.GetById(id);
             if (category == null)
@@ -199,13 +210,30 @@ namespace Services.Implementations
                 .Replace("ỵ", "y");
         }
 
-        private CategoryResponseDto MapToDto(category category)
+        private string BuildUniqueSlug(string name, Guid? parentId, string? parentSlug, Guid? idToExclude)
         {
-            // Count stories for this category using the repository
-            // Note: This queries the database, so it's accurate even if navigation property isn't loaded
-            var storyCount = StoryDAO.GetAll()
-                .Where(s => s.category_id == category.id)
-                .Count();
+            var baseSlug = string.IsNullOrEmpty(parentSlug)
+                ? GenerateSlug(name)
+                : parentSlug + "-" + GenerateSlug(name);
+            var slug = baseSlug;
+            var suffix = 0;
+            while (true)
+            {
+                var existing = _categoryRepository.GetBySlug(slug);
+                if (existing == null || (idToExclude.HasValue && existing.id == idToExclude.Value))
+                    return slug;
+                suffix++;
+                slug = baseSlug + "-" + suffix;
+            }
+        }
+
+        private CategoryResponseDto MapToDto(categories category)
+        {
+            var storyCount = CategoryDAO.GetStoryCountByCategoryId(category.id);
+
+            categories? parent = category.parent_category_id.HasValue
+                ? _categoryRepository.GetById(category.parent_category_id.Value)
+                : null;
 
             return new CategoryResponseDto
             {
@@ -216,7 +244,9 @@ namespace Services.Implementations
                 IconUrl = category.icon_url,
                 IsActive = category.is_active ?? true,
                 CreatedAt = category.created_at,
-                StoryCount = storyCount
+                StoryCount = storyCount,
+                ParentId = category.parent_category_id,
+                ParentName = parent?.name
             };
         }
     }

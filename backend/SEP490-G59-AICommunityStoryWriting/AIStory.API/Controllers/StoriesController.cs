@@ -9,13 +9,15 @@ namespace AIStory.API.Controllers
     public class StoriesController : ControllerBase
     {
         private readonly IStoryService _storyService;
+        private readonly ILogger<StoriesController> _logger;
 
-        public StoriesController(IStoryService storyService)
+        public StoriesController(IStoryService storyService, ILogger<StoriesController> logger)
         {
             _storyService = storyService;
+            _logger = logger;
         }
 
-        /// Tạo story mới
+        /// <summary>Tạo story mới</summary>
         [HttpPost]
         [Consumes("multipart/form-data")]
         public async Task<IActionResult> Create([FromForm] CreateStoryRequestDto request)
@@ -26,7 +28,6 @@ namespace AIStory.API.Controllers
 
                 if (request.CoverImage != null && request.CoverImage.Length > 0)
                 {
-                    // Validate file type
                     var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
                     var fileExtension = Path.GetExtension(request.CoverImage.FileName).ToLower();
                     if (!allowedExtensions.Contains(fileExtension))
@@ -34,7 +35,6 @@ namespace AIStory.API.Controllers
                         return BadRequest(new { message = "Invalid file type. Allowed types: jpg, jpeg, png, gif, webp" });
                     }
 
-                    // Validate file size (max 5MB)
                     if (request.CoverImage.Length > 5 * 1024 * 1024)
                     {
                         return BadRequest(new { message = "File size exceeds 5MB limit" });
@@ -59,28 +59,51 @@ namespace AIStory.API.Controllers
                     coverUrl = $"/uploads/covers/{fileName}";
                 }
 
-                // Get author ID from claims or use default for testing
+                Guid authorId;
                 var authorIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-                var authorId = authorIdClaim != null ? int.Parse(authorIdClaim) : 1;
+                if (!string.IsNullOrEmpty(authorIdClaim) && Guid.TryParse(authorIdClaim, out authorId))
+                {
+                    // Đã đăng nhập (JWT/cookie) → dùng ID từ claim
+                }
+                else if (request.AuthorId.HasValue)
+                {
+                    authorId = request.AuthorId.Value;
+                }
+                else
+                {
+                    return Unauthorized(new { message = "Author ID (Guid) not found or invalid. Hãy đăng nhập hoặc gửi AuthorId trong request (dev)." });
+                }
 
                 var story = _storyService.Create(request, authorId, coverUrl);
                 return Created($"api/stories/{story.Id}", story);
             }
             catch (InvalidOperationException ex)
             {
+                _logger.LogWarning(ex, "Create story validation failed");
                 return BadRequest(new { message = ex.Message });
             }
             catch (ArgumentException ex)
             {
+                _logger.LogWarning(ex, "Create story argument error");
                 return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = "An error occurred while creating the story", error = ex.Message });
+                var inner = GetInnermostException(ex);
+                _logger.LogError(ex, "Create story failed: {Message}. Inner: {InnerMessage}", ex.Message, inner?.Message);
+                var detail = inner?.Message ?? ex.Message;
+                return StatusCode(500, new { message = "Lỗi tạo truyện: " + detail, error = detail });
             }
         }
 
-        /// Lấy danh sách stories với pagination và filtering
+        private static Exception? GetInnermostException(Exception ex)
+        {
+            while (ex.InnerException != null)
+                ex = ex.InnerException;
+            return ex;
+        }
+
+        /// <summary>Lấy danh sách stories với pagination và filtering</summary>
         [HttpGet]
         public IActionResult GetAll([FromQuery] StoryQueryDto query)
         {
@@ -95,9 +118,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Lấy story theo ID
-        [HttpGet("{id:int}")]
-        public IActionResult GetById(int id)
+        /// <summary>Lấy story theo ID (Guid)</summary>
+        [HttpGet("{id:guid}")]
+        public IActionResult GetById(Guid id)
         {
             try
             {
@@ -110,7 +133,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Lấy story theo slug
+        /// <summary>Lấy story theo slug</summary>
         [HttpGet("slug/{slug}")]
         public IActionResult GetBySlug(string slug)
         {
@@ -125,9 +148,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Lấy stories theo author với pagination
-        [HttpGet("author/{authorId:int}")]
-        public IActionResult GetByAuthor(int authorId, [FromQuery] StoryQueryDto query)
+        /// <summary>Lấy stories theo author (Guid) với pagination</summary>
+        [HttpGet("author/{authorId:guid}")]
+        public IActionResult GetByAuthor(Guid authorId, [FromQuery] StoryQueryDto query)
         {
             try
             {
@@ -140,19 +163,17 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Cập nhật story (với hỗ trợ upload ảnh)
-        [HttpPut("{id:int}")]
+        /// <summary>Cập nhật story (với hỗ trợ upload ảnh)</summary>
+        [HttpPut("{id:guid}")]
         [Consumes("multipart/form-data")]
-        public async Task<IActionResult> Update(int id, [FromForm] UpdateStoryWithImageRequestDto request)
+        public async Task<IActionResult> Update(Guid id, [FromForm] UpdateStoryWithImageRequestDto request)
         {
             try
             {
                 string? coverUrl = null;
 
-                // Handle cover image upload if provided
                 if (request.CoverImage != null && request.CoverImage.Length > 0)
                 {
-                    // Validate file type
                     var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
                     var fileExtension = Path.GetExtension(request.CoverImage.FileName).ToLower();
                     if (!allowedExtensions.Contains(fileExtension))
@@ -160,7 +181,6 @@ namespace AIStory.API.Controllers
                         return BadRequest(new { message = "Invalid file type. Allowed types: jpg, jpeg, png, gif, webp" });
                     }
 
-                    // Validate file size (max 5MB)
                     if (request.CoverImage.Length > 5 * 1024 * 1024)
                     {
                         return BadRequest(new { message = "File size exceeds 5MB limit" });
@@ -176,7 +196,6 @@ namespace AIStory.API.Controllers
                     if (!Directory.Exists(uploadsFolder))
                         Directory.CreateDirectory(uploadsFolder);
 
-                    // Delete old cover image if exists
                     var existingStory = _storyService.GetById(id);
                     if (existingStory != null && !string.IsNullOrEmpty(existingStory.CoverImage))
                     {
@@ -191,10 +210,7 @@ namespace AIStory.API.Controllers
                             {
                                 System.IO.File.Delete(oldFilePath);
                             }
-                            catch
-                            {
-                                // Ignore deletion errors
-                            }
+                            catch { }
                         }
                     }
 
@@ -207,18 +223,14 @@ namespace AIStory.API.Controllers
                     coverUrl = $"/uploads/covers/{fileName}";
                 }
 
-                // Convert to UpdateStoryRequestDto
                 var updateRequest = new UpdateStoryRequestDto
                 {
                     Title = request.Title,
                     Summary = request.Summary,
-                    CategoryId = request.CategoryId,
+                    CategoryIds = request.CategoryIds ?? new List<Guid>(),
                     Status = request.Status,
-                    SaleType = request.SaleType,
-                    AccessType = request.AccessType,
                     AgeRating = request.AgeRating,
-                    ExpectedChapters = request.ExpectedChapters,
-                    ReleaseFrequencyDays = request.ReleaseFrequencyDays,
+                    StoryProgressStatus = request.StoryProgressStatus,
                     CoverImageUrl = coverUrl
                 };
 
@@ -227,21 +239,26 @@ namespace AIStory.API.Controllers
             }
             catch (InvalidOperationException ex)
             {
+                _logger.LogWarning(ex, "Update story validation failed");
                 return BadRequest(new { message = ex.Message });
             }
             catch (ArgumentException ex)
             {
+                _logger.LogWarning(ex, "Update story argument error");
                 return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = "An error occurred while updating the story", error = ex.Message });
+                var inner = GetInnermostException(ex);
+                _logger.LogError(ex, "Update story failed: {Message}. Inner: {InnerMessage}", ex.Message, inner?.Message);
+                var detail = inner?.Message ?? ex.Message;
+                return StatusCode(500, new { message = "Lỗi cập nhật truyện: " + detail, error = detail });
             }
         }
 
-        /// Xóa story
-        [HttpDelete("{id:int}")]
-        public IActionResult Delete(int id)
+        /// <summary>Xóa story</summary>
+        [HttpDelete("{id:guid}")]
+        public IActionResult Delete(Guid id)
         {
             try
             {
@@ -258,9 +275,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Publish story
-        [HttpPost("{id:int}/publish")]
-        public IActionResult Publish(int id)
+        /// <summary>Publish story</summary>
+        [HttpPost("{id:guid}/publish")]
+        public IActionResult Publish(Guid id)
         {
             try
             {
@@ -273,9 +290,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// Unpublish story
-        [HttpPost("{id:int}/unpublish")]
-        public IActionResult Unpublish(int id)
+        /// <summary>Unpublish story</summary>
+        [HttpPost("{id:guid}/unpublish")]
+        public IActionResult Unpublish(Guid id)
         {
             try
             {

@@ -5,22 +5,22 @@ namespace Repositories
 {
     public class CategoryRepository : ICategoryRepository
     {
-        public IQueryable<category> GetAll()
+        public IQueryable<categories> GetAll()
             => CategoryDAO.GetAll();
 
-        public category? GetById(int id)
+        public categories? GetById(Guid id)
             => CategoryDAO.GetById(id);
 
-        public category? GetBySlug(string slug)
+        public categories? GetBySlug(string slug)
             => CategoryDAO.GetBySlug(slug);
 
-        public void Add(category category)
+        public void Add(categories category)
             => CategoryDAO.Add(category);
 
-        public void Update(category category)
+        public void Update(categories category)
             => CategoryDAO.Update(category);
 
-        public void Delete(int id)
+        public void Delete(Guid id)
             => CategoryDAO.Delete(id);
     }
 }

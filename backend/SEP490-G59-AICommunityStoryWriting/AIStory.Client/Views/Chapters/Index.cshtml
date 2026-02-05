@@ -14,8 +14,8 @@
                 <div class="card-body">
                     <div class="row g-3">
                         <div class="col-md-3">
-                            <label class="form-label">Story ID</label>
-                            <input type="number" class="form-control" id="storyIdFilter" placeholder="Nhập Story ID..." onchange="loadChapters()">
+                            <label class="form-label">Story ID (Guid)</label>
+                            <input type="text" class="form-control" id="storyIdFilter" placeholder="Nhập Story ID (Guid)..." onchange="loadChapters()">
                         </div>
                         <div class="col-md-2">
                             <label class="form-label">Trạng thái</label>
@@ -164,10 +164,10 @@
                     <td>${chapter.coinPrice > 0 ? `${chapter.coinPrice} coin` : '-'}</td>
                     <td>${Utils.formatDate(chapter.createdAt)}</td>
                     <td>
-                        <button class="btn btn-sm btn-info" onclick="viewChapter(${chapter.id})" title="Xem">
+                        <button class="btn btn-sm btn-info" onclick="viewChapter('${chapter.id}')" title="Xem">
                             <i class="bi bi-eye"></i>
                         </button>
-                        <a href="/Stories/Details/${chapter.storyId}" class="btn btn-sm btn-primary" title="Xem Story">
+                        <a href="/Stories/Details/${encodeURIComponent(chapter.storyId || '')}" class="btn btn-sm btn-primary" title="Xem Story">
                             <i class="bi bi-book"></i>
                         </a>
                     </td>
@@ -207,8 +207,7 @@
         }
 
         function viewChapter(id) {
-            // Navigate to reading page
-            window.location.href = `/Chapters/Read/${id}`;
+            window.location.href = `/Chapters/Read/${encodeURIComponent(id)}`;
         }
     </script>
 }
