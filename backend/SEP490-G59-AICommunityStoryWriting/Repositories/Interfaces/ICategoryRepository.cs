@@ -4,11 +4,11 @@ namespace Repositories
 {
     public interface ICategoryRepository
     {
-        IQueryable<category> GetAll();
-        category? GetById(int id);
-        category? GetBySlug(string slug);
-        void Add(category category);
-        void Update(category category);
-        void Delete(int id);
+        IQueryable<categories> GetAll();
+        categories? GetById(Guid id);
+        categories? GetBySlug(string slug);
+        void Add(categories category);
+        void Update(categories category);
+        void Delete(Guid id);
     }
 }

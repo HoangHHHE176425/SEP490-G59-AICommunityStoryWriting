@@ -2,7 +2,7 @@
 {
     public class CreateChapterRequestDto
     {
-        public int StoryId { get; set; }
+        public Guid StoryId { get; set; }
         public string Title { get; set; } = null!;
         public string? Content { get; set; }
         public int OrderIndex { get; set; }

@@ -1,4 +1,4 @@
-﻿using BusinessObjects.DataAccessObjects.Context;
+﻿using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -6,39 +6,39 @@ namespace DataAccessObjects.DAOs
 {
     public class ChapterDAO
     {
-        public static IQueryable<chapter> GetAll()
+        public static IQueryable<chapters> GetAll()
         {
             var context = new StoryPlatformDbContext();
             return context.chapters.AsNoTracking();
         }
 
-        public static chapter? GetById(int id)
+        public static chapters? GetById(Guid id)
         {
             using var context = new StoryPlatformDbContext();
             return context.chapters.FirstOrDefault(c => c.id == id);
         }
 
-        public static chapter? GetByStoryIdAndOrderIndex(int storyId, int orderIndex)
+        public static chapters? GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex)
         {
             using var context = new StoryPlatformDbContext();
             return context.chapters.FirstOrDefault(c => c.story_id == storyId && c.order_index == orderIndex);
         }
 
-        public static void Add(chapter chapter)
+        public static void Add(chapters chapter)
         {
             using var context = new StoryPlatformDbContext();
             context.chapters.Add(chapter);
             context.SaveChanges();
         }
 
-        public static void Update(chapter chapter)
+        public static void Update(chapters chapter)
         {
             using var context = new StoryPlatformDbContext();
             context.chapters.Update(chapter);
             context.SaveChanges();
         }
 
-        public static void Delete(int id)
+        public static void Delete(Guid id)
         {
             using var context = new StoryPlatformDbContext();
             var chapter = context.chapters.FirstOrDefault(c => c.id == id);
@@ -47,6 +47,13 @@ namespace DataAccessObjects.DAOs
                 context.chapters.Remove(chapter);
                 context.SaveChanges();
             }
+        }
+
+        /// <summary>Đếm số chương theo story_id (Guid) - dùng cho entity stories.</summary>
+        public static int GetCountByStoryId(Guid storyId)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.chapters.Count(c => c.story_id == storyId);
         }
     }
 }

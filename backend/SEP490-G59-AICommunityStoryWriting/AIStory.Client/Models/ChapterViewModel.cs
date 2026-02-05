@@ -2,8 +2,8 @@
 {
     public class ChapterViewModel
     {
-        public int Id { get; set; }
-        public int StoryId { get; set; }
+        public Guid Id { get; set; }
+        public Guid? StoryId { get; set; }
         public string? StoryTitle { get; set; }
         public string Title { get; set; } = null!;
         public int OrderIndex { get; set; }
@@ -21,8 +21,8 @@
 
     public class ChapterListItemViewModel
     {
-        public int Id { get; set; }
-        public int StoryId { get; set; }
+        public Guid Id { get; set; }
+        public Guid? StoryId { get; set; }
         public string Title { get; set; } = null!;
         public int OrderIndex { get; set; }
         public string? Status { get; set; }
@@ -35,7 +35,7 @@
 
     public class CreateChapterViewModel
     {
-        public int StoryId { get; set; }
+        public Guid StoryId { get; set; }
         public string Title { get; set; } = null!;
         public string? Content { get; set; }
         public int OrderIndex { get; set; }

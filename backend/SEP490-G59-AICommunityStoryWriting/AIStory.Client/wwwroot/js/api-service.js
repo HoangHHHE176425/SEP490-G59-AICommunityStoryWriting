@@ -31,8 +31,12 @@ class ApiService {
     }
 
     // Categories API
-    static async getCategories(includeInactive = false) {
-        return this.request(`/categories?includeInactive=${includeInactive}`);
+    static async getCategories(includeInactive = false, parentId = null, rootsOnly = false) {
+        const params = new URLSearchParams();
+        params.append('includeInactive', includeInactive);
+        if (rootsOnly) params.append('rootsOnly', 'true');
+        if (parentId != null && parentId !== '') params.append('parentId', parentId);
+        return this.request(`/categories?${params.toString()}`);
     }
 
     static async getCategoryById(id) {
@@ -43,17 +47,29 @@ class ApiService {
         return this.request(`/categories/slug/${slug}`);
     }
 
-    static async createCategory(data) {
-        return this.request('/categories', {
+    static async createCategory(formData) {
+        return fetch(`${API_BASE_URL}/categories`, {
             method: 'POST',
-            body: JSON.stringify(data)
+            body: formData
+        }).then(async (response) => {
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ message: response.statusText }));
+                throw new Error(error.message || `HTTP error! status: ${response.status}`);
+            }
+            return await response.json();
         });
     }
 
-    static async updateCategory(id, data) {
-        return this.request(`/categories/${id}`, {
+    static async updateCategory(id, formData) {
+        return fetch(`${API_BASE_URL}/categories/${id}`, {
             method: 'PUT',
-            body: JSON.stringify(data)
+            body: formData
+        }).then(async (response) => {
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ message: response.statusText }));
+                throw new Error(error.message || `HTTP error! status: ${response.status}`);
+            }
+            return response.status === 204 ? null : await response.json();
         });
     }
 
@@ -106,8 +122,9 @@ class ApiService {
             body: formData
         }).then(async (response) => {
             if (!response.ok) {
-                const error = await response.json().catch(() => ({ message: response.statusText }));
-                throw new Error(error.message || `HTTP error! status: ${response.status}`);
+                const errBody = await response.json().catch(() => ({ message: response.statusText }));
+                const msg = errBody.error || errBody.message || `HTTP error! status: ${response.status}`;
+                throw new Error(msg);
             }
             return await response.json();
         });
@@ -119,8 +136,9 @@ class ApiService {
             body: formData
         }).then(async (response) => {
             if (!response.ok) {
-                const error = await response.json().catch(() => ({ message: response.statusText }));
-                throw new Error(error.message || `HTTP error! status: ${response.status}`);
+                const errBody = await response.json().catch(() => ({ message: response.statusText }));
+                const msg = errBody.error || errBody.message || `HTTP error! status: ${response.status}`;
+                throw new Error(msg);
             }
             return response.status === 204 ? null : await response.json();
         });

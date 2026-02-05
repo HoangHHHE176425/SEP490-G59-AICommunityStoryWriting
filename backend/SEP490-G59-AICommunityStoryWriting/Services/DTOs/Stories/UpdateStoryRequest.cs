@@ -6,13 +6,11 @@ namespace Services.DTOs.Stories
     {
         public string Title { get; set; } = null!;
         public string? Summary { get; set; }
-        public int CategoryId { get; set; }
+        public List<Guid> CategoryIds { get; set; } = new();
         public string? Status { get; set; }
-        public string? SaleType { get; set; }
-        public string? AccessType { get; set; }
         public string? AgeRating { get; set; }
-        public int? ExpectedChapters { get; set; }
-        public int? ReleaseFrequencyDays { get; set; }
+        /// <summary>ONGOING = Đang ra, COMPLETED = Hoàn thành, HIATUS = Tạm dừng</summary>
+        public string? StoryProgressStatus { get; set; }
         public string? CoverImageUrl { get; set; }
     }
 
@@ -20,13 +18,11 @@ namespace Services.DTOs.Stories
     {
         public string Title { get; set; } = null!;
         public string? Summary { get; set; }
-        public int CategoryId { get; set; }
+        public List<Guid> CategoryIds { get; set; } = new();
         public string? Status { get; set; }
-        public string? SaleType { get; set; }
-        public string? AccessType { get; set; }
         public string? AgeRating { get; set; }
-        public int? ExpectedChapters { get; set; }
-        public int? ReleaseFrequencyDays { get; set; }
+        /// <summary>ONGOING = Đang ra, COMPLETED = Hoàn thành, HIATUS = Tạm dừng</summary>
+        public string? StoryProgressStatus { get; set; }
         public IFormFile? CoverImage { get; set; }
     }
 }

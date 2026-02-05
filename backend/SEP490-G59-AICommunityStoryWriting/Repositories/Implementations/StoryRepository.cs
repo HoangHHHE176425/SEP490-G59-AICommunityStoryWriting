@@ -5,22 +5,25 @@ namespace Repositories
 {
     public class StoryRepository : IStoryRepository
     {
-        public IQueryable<story> GetAll()
+        public IQueryable<stories> GetAll()
             => StoryDAO.GetAll();
 
-        public story? GetById(int id)
+        public stories? GetById(Guid id)
             => StoryDAO.GetById(id);
 
-        public story? GetBySlug(string slug)
+        public stories? GetBySlug(string slug)
             => StoryDAO.GetBySlug(slug);
 
-        public void Add(story story)
+        public void Add(stories story)
             => StoryDAO.Add(story);
 
-        public void Update(story story)
+        public void Add(stories story, IEnumerable<Guid> categoryIds)
+            => StoryDAO.AddWithCategories(story, categoryIds);
+
+        public void Update(stories story)
             => StoryDAO.Update(story);
 
-        public void Delete(int id)
+        public void Delete(Guid id)
             => StoryDAO.Delete(id);
     }
 }
