@@ -281,12 +281,36 @@ namespace AIStory.API.Controllers
         {
             try
             {
+                _logger.LogInformation("Attempting to publish story with ID: {StoryId}", id);
                 var published = _storyService.Publish(id);
-                return published ? NoContent() : NotFound(new { message = $"Story with ID {id} not found" });
+
+                if (!published)
+                {
+                    _logger.LogWarning("Story with ID {StoryId} not found for publishing", id);
+                    return NotFound(new { message = $"Story with ID {id} not found" });
+                }
+
+                _logger.LogInformation("Successfully published story with ID: {StoryId}", id);
+                return NoContent();
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = "An error occurred while publishing the story", error = ex.Message });
+                _logger.LogError(ex, "Error publishing story with ID: {StoryId}. Error: {ErrorMessage}", id, ex.Message);
+                var innerException = ex.InnerException;
+                var errorDetails = ex.Message;
+
+                if (innerException != null)
+                {
+                    errorDetails += $" Inner Exception: {innerException.Message}";
+                    _logger.LogError("Inner exception: {InnerException}", innerException.Message);
+                }
+
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while publishing the story",
+                    error = errorDetails,
+                    storyId = id.ToString()
+                });
             }
         }
 
