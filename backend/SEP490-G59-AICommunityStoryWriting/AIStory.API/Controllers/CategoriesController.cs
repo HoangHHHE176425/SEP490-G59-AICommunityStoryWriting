@@ -58,8 +58,36 @@ namespace AIStory.API.Controllers
 
         /// <summary>Lấy thể loại. rootsOnly=true: chỉ loại truyện gốc; parentId: thể loại con của parent.</summary>
         [HttpGet]
-        public IActionResult GetAll([FromQuery] bool includeInactive = false, [FromQuery] Guid? parentId = null, [FromQuery] bool rootsOnly = false)
+        public IActionResult GetAll(
+            [FromQuery] bool includeInactive = false,
+            [FromQuery] Guid? parentId = null,
+            [FromQuery] bool rootsOnly = false,
+            [FromQuery] int? page = null,
+            [FromQuery] int? pageSize = null,
+            [FromQuery] string? search = null,
+            [FromQuery] bool? isActive = null,
+            [FromQuery] string? sortBy = null,
+            [FromQuery] string? sortOrder = null)
         {
+            // If pagination parameters are provided, use new paginated endpoint
+            if (page.HasValue || pageSize.HasValue || !string.IsNullOrWhiteSpace(search) || isActive.HasValue || !string.IsNullOrWhiteSpace(sortBy))
+            {
+                var query = new CategoryQueryDto
+                {
+                    Page = page ?? 1,
+                    PageSize = pageSize ?? 20,
+                    Search = search,
+                    ParentId = parentId,
+                    IsActive = isActive ?? (includeInactive ? null : true),
+                    RootsOnly = rootsOnly,
+                    SortBy = sortBy ?? "name",
+                    SortOrder = sortOrder ?? "asc"
+                };
+                var result = _categoryService.GetAll(query);
+                return Ok(result);
+            }
+
+            // Otherwise use old endpoint for backward compatibility
             var categories = _categoryService.GetAll(includeInactive, parentId, rootsOnly);
             return Ok(categories);
         }
