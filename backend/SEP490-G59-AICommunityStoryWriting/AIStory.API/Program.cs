@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.OpenApi.Models;
 using Repositories;
 using Services.Implementations;
@@ -15,7 +16,12 @@ namespace AIStory.API
             // Add services
             // =======================
 
-            builder.Services.AddControllers();
+            builder.Services.AddControllers()
+                .AddJsonOptions(options =>
+                {
+                    options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+                    options.JsonSerializerOptions.WriteIndented = true;
+                });
 
             // CORS Configuration
             builder.Services.AddCors(options =>
