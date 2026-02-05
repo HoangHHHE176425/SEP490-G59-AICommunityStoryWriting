@@ -67,9 +67,20 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
     const handleImageUpload = (e) => {
         const file = e.target.files[0];
         if (file) {
-            // Validate file type
+            // Validate file type - check MIME type
             if (!file.type.startsWith('image/')) {
                 setErrors(prev => ({ ...prev, icon_url: 'Vui lòng chọn file ảnh hợp lệ' }));
+                return;
+            }
+
+            // Validate file extension (backend requires: jpg, jpeg, png, gif, webp, svg)
+            const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
+            const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+            if (!allowedExtensions.includes(fileExtension)) {
+                setErrors(prev => ({ 
+                    ...prev, 
+                    icon_url: 'Định dạng file không hợp lệ. Chỉ chấp nhận: JPG, JPEG, PNG, GIF, WEBP, SVG' 
+                }));
                 return;
             }
 
@@ -349,11 +360,11 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                                     Tải ảnh lên
                                 </p>
                                 <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                                    PNG, JPG, GIF (Max 2MB)
+                                    JPG, JPEG, PNG, GIF, WEBP, SVG (Max 2MB)
                                 </p>
                                 <input
                                     type="file"
-                                    accept="image/*"
+                                    accept=".jpg,.jpeg,.png,.gif,.webp,.svg,image/jpeg,image/png,image/gif,image/webp,image/svg+xml"
                                     onChange={handleImageUpload}
                                     style={{ display: 'none' }}
                                 />

@@ -37,8 +37,22 @@ export async function createCategory(data) {
         formData.append("ParentId", data.parentId);
     }
 
-    // IconImage: File - chỉ gửi nếu là File object hợp lệ
+    // IconImage: File - chỉ gửi nếu là File object hợp lệ và có extension hợp lệ
     if (data.iconImage instanceof File) {
+        // Validate file extension (backend requires: jpg, jpeg, png, gif, webp, svg)
+        const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
+        const fileName = data.iconImage.name.toLowerCase();
+        const fileExtension = fileName.substring(fileName.lastIndexOf('.'));
+        
+        if (!allowedExtensions.includes(fileExtension)) {
+            throw new Error(`Định dạng file không hợp lệ. Chỉ chấp nhận: ${allowedExtensions.join(', ').toUpperCase()}`);
+        }
+        
+        // Validate file size (max 2MB)
+        if (data.iconImage.size > 2 * 1024 * 1024) {
+            throw new Error('Kích thước ảnh không được vượt quá 2MB');
+        }
+        
         formData.append("IconImage", data.iconImage);
     }
 
@@ -132,8 +146,22 @@ export async function updateCategory(id, data) {
         formData.append("ParentId", data.parentId);
     }
 
-    // IconImage: File - chỉ gửi nếu là File object hợp lệ
+    // IconImage: File - chỉ gửi nếu là File object hợp lệ và có extension hợp lệ
     if (data.iconImage instanceof File) {
+        // Validate file extension (backend requires: jpg, jpeg, png, gif, webp, svg)
+        const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
+        const fileName = data.iconImage.name.toLowerCase();
+        const fileExtension = fileName.substring(fileName.lastIndexOf('.'));
+        
+        if (!allowedExtensions.includes(fileExtension)) {
+            throw new Error(`Định dạng file không hợp lệ. Chỉ chấp nhận: ${allowedExtensions.join(', ').toUpperCase()}`);
+        }
+        
+        // Validate file size (max 2MB)
+        if (data.iconImage.size > 2 * 1024 * 1024) {
+            throw new Error('Kích thước ảnh không được vượt quá 2MB');
+        }
+        
         formData.append("IconImage", data.iconImage);
     }
 
