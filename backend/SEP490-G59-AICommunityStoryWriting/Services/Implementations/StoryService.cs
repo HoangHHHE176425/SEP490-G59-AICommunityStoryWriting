@@ -2,16 +2,21 @@
 using DataAccessObjects.DAOs;
 using Repositories;
 using Services.DTOs.Stories;
+using Microsoft.Extensions.Logging;
 
 namespace Services.Implementations
 {
     public class StoryService : IStoryService
     {
         private readonly IStoryRepository _storyRepository;
+        private readonly IChapterRepository _chapterRepository;
+        private readonly ILogger<StoryService> _logger;
 
-        public StoryService(IStoryRepository storyRepository)
+        public StoryService(IStoryRepository storyRepository, IChapterRepository chapterRepository, ILogger<StoryService> logger)
         {
             _storyRepository = storyRepository;
+            _chapterRepository = chapterRepository;
+            _logger = logger;
         }
 
         public StoryResponseDto Create(CreateStoryRequestDto request, Guid authorId, string? coverImageUrl)
@@ -260,10 +265,15 @@ namespace Services.Implementations
             if (story == null)
                 return false;
 
-            var chapterCount = ChapterDAO.GetCountByStoryId(id);
-            if (chapterCount > 0)
+            // Delete all associated chapters first
+            try
             {
-                throw new InvalidOperationException("Cannot delete story that has associated chapters.");
+                _chapterRepository.DeleteByStoryId(id);
+            }
+            catch (Exception)
+            {
+                // Log error but continue with story deletion
+                // If chapters fail to delete, database constraints will prevent story deletion
             }
 
             _storyRepository.Delete(id);
@@ -272,17 +282,44 @@ namespace Services.Implementations
 
         public bool Publish(Guid id)
         {
-            var story = _storyRepository.GetById(id);
-            if (story == null)
-                return false;
+            try
+            {
+                _logger?.LogInformation("StoryService.Publish: Starting publish for story ID: {StoryId}", id);
 
-            story.status = "PUBLISHED";
-            story.published_at = DateTime.Now;
-            story.last_published_at = DateTime.Now;
-            story.updated_at = DateTime.Now;
+                var story = _storyRepository.GetById(id);
+                if (story == null)
+                {
+                    _logger?.LogWarning("StoryService.Publish: Story with ID {StoryId} not found", id);
+                    return false;
+                }
 
-            _storyRepository.Update(story);
-            return true;
+                _logger?.LogInformation("StoryService.Publish: Found story '{Title}' (ID: {StoryId}), current status: {Status}",
+                    story.title, id, story.status);
+
+                // Publish story independently - no check for chapters
+                story.status = "PUBLISHED";
+                story.published_at = DateTime.Now;
+                story.last_published_at = DateTime.Now;
+                story.updated_at = DateTime.Now;
+
+                _logger?.LogInformation("StoryService.Publish: Updating story status to PUBLISHED for ID: {StoryId}", id);
+                _storyRepository.Update(story);
+
+                _logger?.LogInformation("StoryService.Publish: Successfully published story ID: {StoryId}", id);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "StoryService.Publish: Error publishing story ID: {StoryId}. Error: {ErrorMessage}",
+                    id, ex.Message);
+
+                if (ex.InnerException != null)
+                {
+                    _logger?.LogError("StoryService.Publish: Inner exception: {InnerException}", ex.InnerException.Message);
+                }
+
+                throw; // Re-throw to be handled by controller
+            }
         }
 
         public bool Unpublish(Guid id)
