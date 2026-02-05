@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.Categories
+namespace Services.DTOs.Categories
 {
     public class CategoryQueryDto
     {
