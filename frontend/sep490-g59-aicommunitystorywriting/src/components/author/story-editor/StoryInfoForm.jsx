@@ -1,8 +1,8 @@
+// eslint-disable-next-line no-unused-vars
 import { useState } from 'react';
 import { X, Plus, ChevronDown } from 'lucide-react';
 
 export function StoryInfoForm({ formData, onChange, onImageUpload }) {
-    const [tagInput, setTagInput] = useState('');
 
     const statusOptions = ['Đang ra', 'Hoàn thành', 'Tạm dừng'];
     const ageRatings = ['Phù hợp mọi lứa tuổi', 'Từ 13 tuổi', 'Từ 16 tuổi', 'Từ 18 tuổi'];
@@ -32,17 +32,6 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
             ? formData.categories.filter(c => c !== category)
             : [...formData.categories, category];
         onChange('categories', newCategories);
-    };
-
-    const handleAddTag = () => {
-        if (tagInput.trim() && !formData.tags.includes(tagInput.trim())) {
-            onChange('tags', [...formData.tags, tagInput.trim()]);
-            setTagInput('');
-        }
-    };
-
-    const handleRemoveTag = (tag) => {
-        onChange('tags', formData.tags.filter(t => t !== tag));
     };
 
     const handleStoryTypeChange = (newType) => {
@@ -343,89 +332,6 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                                 </button>
                             ))}
                         </div>
-                    </div>
-
-                    {/* Tags */}
-                    <div>
-                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                            Tag
-                        </label>
-                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                            <input
-                                type="text"
-                                value={tagInput}
-                                onChange={(e) => setTagInput(e.target.value)}
-                                onKeyPress={(e) => {
-                                    if (e.key === 'Enter') {
-                                        e.preventDefault();
-                                        handleAddTag();
-                                    }
-                                }}
-                                placeholder="Nhập tag và nhấn Enter"
-                                style={{
-                                    flex: 1,
-                                    padding: '0.5rem 0.75rem',
-                                    backgroundColor: '#f9fafb',
-                                    border: '1px solid #e5e7eb',
-                                    borderRadius: '4px',
-                                    fontSize: '0.875rem',
-                                    outline: 'none'
-                                }}
-                            />
-                            <button
-                                onClick={handleAddTag}
-                                type="button"
-                                style={{
-                                    padding: '0.5rem 1rem',
-                                    backgroundColor: 'transparent',
-                                    border: '1px solid #13ec5b',
-                                    borderRadius: '4px',
-                                    fontSize: '0.875rem',
-                                    color: '#13ec5b',
-                                    cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.25rem'
-                                }}
-                            >
-                                <Plus style={{ width: '14px', height: '14px' }} /> Thêm
-                            </button>
-                        </div>
-                        {formData.tags.length > 0 && (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                {formData.tags.map((tag) => (
-                                    <div
-                                        key={tag}
-                                        style={{
-                                            padding: '0.25rem 0.75rem',
-                                            backgroundColor: '#f3f4f6',
-                                            borderRadius: '4px',
-                                            fontSize: '0.875rem',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '0.5rem'
-                                        }}
-                                    >
-                                        {tag}
-                                        <button
-                                            onClick={() => handleRemoveTag(tag)}
-                                            type="button"
-                                            style={{
-                                                border: 'none',
-                                                background: 'none',
-                                                cursor: 'pointer',
-                                                padding: 0,
-                                                color: '#6b7280',
-                                                display: 'flex',
-                                                alignItems: 'center'
-                                            }}
-                                        >
-                                            <X style={{ width: '14px', height: '14px' }} />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
                     </div>
 
                     {/* Note */}
