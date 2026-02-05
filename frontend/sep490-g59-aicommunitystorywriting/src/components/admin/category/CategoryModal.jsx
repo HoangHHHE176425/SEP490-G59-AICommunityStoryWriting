@@ -7,6 +7,7 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
         slug: '',
         description: '',
         icon_url: '',
+        iconFile: null, // File object for API
         story_type: 'long', // 'long' or 'short'
         is_active: true
     });
@@ -32,6 +33,7 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                 slug: '',
                 description: '',
                 icon_url: '',
+                iconFile: null,
                 story_type: 'long',
                 is_active: true
             });
@@ -77,11 +79,15 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                 return;
             }
 
-            // Create preview
+            // Create preview and save File object
             const reader = new FileReader();
             reader.onloadend = () => {
                 setImagePreview(reader.result);
-                setFormData(prev => ({ ...prev, icon_url: reader.result }));
+                setFormData(prev => ({ 
+                    ...prev, 
+                    icon_url: reader.result,
+                    iconFile: file // Save File object for API
+                }));
                 setErrors(prev => ({ ...prev, icon_url: null }));
             };
             reader.readAsDataURL(file);
@@ -371,7 +377,7 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                                         type="button"
                                         onClick={() => {
                                             setImagePreview(null);
-                                            setFormData(prev => ({ ...prev, icon_url: '' }));
+                                            setFormData(prev => ({ ...prev, icon_url: '', iconFile: null }));
                                         }}
                                         style={{
                                             position: 'absolute',

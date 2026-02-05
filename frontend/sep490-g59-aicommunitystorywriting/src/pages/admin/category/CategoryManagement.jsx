@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { CategoryModal } from '../../../components/admin/category/CategoryModal';
 import { Pagination } from '../../../components/pagination/Pagination';
+import { createCategory } from '../../../api/category/categoryApi';
 
 export function CategoryManagement() {
     const [searchTerm, setSearchTerm] = useState('');
@@ -138,23 +139,48 @@ export function CategoryManagement() {
         ));
     };
 
-    const handleSaveCategory = (categoryData) => {
-        if (editingCategory) {
-            // Update existing category
-            setCategories(categories.map(cat =>
-                cat.id === editingCategory.id ? { ...cat, ...categoryData } : cat
-            ));
-        } else {
-            // Add new category
-            const newCategory = {
-                ...categoryData,
-                id: Math.max(...categories.map(c => c.id)) + 1,
-                created_at: new Date().toISOString()
-            };
-            setCategories([...categories, newCategory]);
+    const handleSaveCategory = async (categoryData) => {
+        try {
+            if (editingCategory) {
+                // TODO: Implement update API call
+                // Update existing category
+                setCategories(categories.map(cat =>
+                    cat.id === editingCategory.id ? { ...cat, ...categoryData } : cat
+                ));
+            } else {
+                // Call API to create category
+                const newCategory = await createCategory({
+                    name: categoryData.name,
+                    description: categoryData.description || '',
+                    isActive: categoryData.is_active !== false,
+                    parentId: categoryData.parentId || null,
+                    iconImage: categoryData.iconFile || null
+                });
+
+                // Add to local state
+                setCategories([...categories, {
+                    ...newCategory,
+                    story_type: categoryData.story_type || 'long',
+                    created_at: new Date().toISOString()
+                }]);
+            }
+            setIsModalOpen(false);
+        } catch (error) {
+            console.error('Error saving category:', error);
+            // Handle validation errors from frontend (thrown by createCategory)
+            // or API errors from backend
+            const errorMessage = error.message 
+                || error.response?.data?.message 
+                || error.response?.data?.title
+                || 'Có lỗi xảy ra khi lưu thể loại';
+            alert(`Lỗi: ${errorMessage}`);
+            // Log full error for debugging
+            if (error.response?.data) {
+                console.error('Full error response:', error.response.data);
+            }
         }
-        setIsModalOpen(false);
     };
+
 
     const handleSelectCategory = (id) => {
         setSelectedCategories(prev =>
