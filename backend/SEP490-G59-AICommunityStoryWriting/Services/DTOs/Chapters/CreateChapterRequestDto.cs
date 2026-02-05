@@ -6,6 +6,7 @@
         public string Title { get; set; } = null!;
         public string? Content { get; set; }
         public int OrderIndex { get; set; }
+        public string? Status { get; set; } = "DRAFT";
         public string? AccessType { get; set; } = "FREE";
         public int? CoinPrice { get; set; } = 0;
         public decimal? AiContributionRatio { get; set; } = 0;
