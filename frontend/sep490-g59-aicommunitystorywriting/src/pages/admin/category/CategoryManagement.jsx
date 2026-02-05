@@ -2,51 +2,98 @@ import { useState, useEffect } from 'react';
 import {
     Plus,
     Search,
-    Filter,
     Edit2,
     Trash2,
     Eye,
     EyeOff,
-    MoreVertical,
-    Download,
-    Upload,
     Info,
     Loader2
 } from 'lucide-react';
 import { CategoryModal } from '../../../components/admin/category/CategoryModal';
 import { Pagination } from '../../../components/pagination/Pagination';
-import { createCategory, getAllCategories } from '../../../api/category/categoryApi';
+import { createCategory, getCategoriesWithPagination, updateCategory } from '../../../api/category/categoryApi';
 
 export function CategoryManagement() {
     const [searchTerm, setSearchTerm] = useState('');
     const [filterStatus, setFilterStatus] = useState('all');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCategory, setEditingCategory] = useState(null);
-    const [selectedCategories, setSelectedCategories] = useState([]);
     const [viewingCategory, setViewingCategory] = useState(null);
     const [categories, setCategories] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    // Load categories from API
+    // Pagination state
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize] = useState(10);
+    const [totalCount, setTotalCount] = useState(0);
+    const [totalPages, setTotalPages] = useState(1);
+
+    // Load categories from API with pagination
     useEffect(() => {
         loadCategories();
-    }, []);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentPage]);
 
-    const loadCategories = async () => {
+    // Handle search with debounce - reset to page 1
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (currentPage !== 1) {
+                setCurrentPage(1);
+            } else {
+                loadCategories(1);
+            }
+        }, 500);
+
+        return () => clearTimeout(timer);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchTerm]);
+
+    // Handle filter change - reset to page 1
+    useEffect(() => {
+        if (currentPage !== 1) {
+            setCurrentPage(1);
+        } else {
+            loadCategories(1);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [filterStatus]);
+
+    const loadCategories = async (page = currentPage) => {
         try {
             setLoading(true);
             setError(null);
-            // Get all categories including inactive ones
-            const data = await getAllCategories({ includeInactive: true });
-            // Filter out root categories (categories with parentId = null or undefined)
-            // These are "Truyện dài" and "Truyện ngắn" parent categories
-            // Only show child categories (categories that have a parentId)
-            const filteredData = (data || []).filter(cat => {
-                // Only include categories that have a valid parentId (not null, not undefined, not empty string)
-                return cat.parentId != null && cat.parentId !== undefined && cat.parentId !== '';
-            });
-            setCategories(filteredData);
+            const queryParams = {
+                page: page,
+                pageSize: pageSize,
+                search: searchTerm || null,
+                excludeRoots: true, // Exclude root categories (parent_id = null)
+            };
+
+            if (filterStatus === 'active') {
+                queryParams.isActive = true;
+                queryParams.includeInactive = false; // Only active
+            } else if (filterStatus === 'inactive') {
+                queryParams.isActive = false;
+                queryParams.includeInactive = true; // Include inactive to show inactive
+            } else {
+                // filterStatus === 'all' - show all statuses
+                queryParams.includeInactive = true; // Include inactive categories
+                // Don't set isActive, let backend handle it
+            }
+
+            const result = await getCategoriesWithPagination(queryParams);
+
+            // Backend already filters out root categories (parent_id = null) when excludeRoots = true
+            // So we can use the data directly without client-side filtering
+            const categoriesData = result.items || [];
+            const backendTotalCount = result.totalCount || 0;
+            const backendTotalPages = result.totalPages || 1;
+
+            setCategories(categoriesData);
+            setTotalCount(backendTotalCount);
+            setTotalPages(backendTotalPages);
+            setCurrentPage(result.page || page);
         } catch (err) {
             console.error('Error loading categories:', err);
             setError('Không thể tải danh sách thể loại. Vui lòng thử lại sau.');
@@ -55,14 +102,12 @@ export function CategoryManagement() {
         }
     };
 
-    const filteredCategories = categories.filter(cat => {
-        const matchesSearch = (cat.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (cat.slug || '').toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesFilter = filterStatus === 'all' ||
-            (filterStatus === 'active' && (cat.isActive !== false)) ||
-            (filterStatus === 'inactive' && cat.isActive === false);
-        return matchesSearch && matchesFilter;
-    });
+    const handlePageChange = (page) => {
+        setCurrentPage(page);
+        loadCategories(page);
+    };
+
+    const filteredCategories = categories; // Already filtered from API
 
     const handleAddCategory = () => {
         setEditingCategory(null);
@@ -153,11 +198,20 @@ export function CategoryManagement() {
     const handleSaveCategory = async (categoryData) => {
         try {
             if (editingCategory) {
-                // TODO: Implement update API call
-                // Update existing category
-                setCategories(categories.map(cat =>
-                    cat.id === editingCategory.id ? { ...cat, ...categoryData } : cat
-                ));
+                // Map story_type to parentId
+                const parentId = getParentIdByStoryType(categoryData.story_type || 'long');
+
+                // Call API to update category
+                await updateCategory(editingCategory.id, {
+                    name: categoryData.name,
+                    description: categoryData.description || '',
+                    isActive: categoryData.is_active !== false,
+                    parentId: parentId,
+                    iconImage: categoryData.iconFile || null
+                });
+
+                // Reload categories from API to get updated list
+                await loadCategories(currentPage);
             } else {
                 // Map story_type to parentId
                 const parentId = getParentIdByStoryType(categoryData.story_type || 'long');
@@ -173,7 +227,8 @@ export function CategoryManagement() {
                 });
 
                 // Reload categories from API to get updated list
-                await loadCategories();
+                // Reload current page or go to first page if new category might be on different page
+                await loadCategories(1);
             }
             setIsModalOpen(false);
         } catch (error) {
@@ -189,21 +244,6 @@ export function CategoryManagement() {
             if (error.response?.data) {
                 console.error('Full error response:', error.response.data);
             }
-        }
-    };
-
-
-    const handleSelectCategory = (id) => {
-        setSelectedCategories(prev =>
-            prev.includes(id) ? prev.filter(cId => cId !== id) : [...prev, id]
-        );
-    };
-
-    const handleSelectAll = () => {
-        if (selectedCategories.length === filteredCategories.length) {
-            setSelectedCategories([]);
-        } else {
-            setSelectedCategories(filteredCategories.map(cat => cat.id));
         }
     };
 
@@ -268,7 +308,7 @@ export function CategoryManagement() {
                         <div>
                             <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Tổng thể loại</p>
                             <p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#1e293b', margin: '0.25rem 0 0 0' }}>
-                                {categories.length}
+                                {totalCount}
                             </p>
                         </div>
                         <div style={{ width: '48px', height: '48px', backgroundColor: 'rgba(19, 236, 91, 0.1)', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -301,20 +341,6 @@ export function CategoryManagement() {
                         </div>
                         <div style={{ width: '48px', height: '48px', backgroundColor: 'rgba(220, 38, 38, 0.1)', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <EyeOff style={{ width: '24px', height: '24px', color: '#dc2626' }} />
-                        </div>
-                    </div>
-                </div>
-
-                <div style={{ backgroundColor: '#ffffff', borderRadius: '0.75rem', padding: '1.25rem', border: '1px solid #e2e8f0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div>
-                            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Mới trong tuần</p>
-                            <p style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#2563eb', margin: '0.25rem 0 0 0' }}>
-                                3
-                            </p>
-                        </div>
-                        <div style={{ width: '48px', height: '48px', backgroundColor: 'rgba(37, 99, 235, 0.1)', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <Plus style={{ width: '24px', height: '24px', color: '#2563eb' }} />
                         </div>
                     </div>
                 </div>
@@ -363,52 +389,6 @@ export function CategoryManagement() {
                             <option value="active">Đang hoạt động</option>
                             <option value="inactive">Đã tắt</option>
                         </select>
-
-                        {/* Action Buttons */}
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                            <button
-                                style={{
-                                    padding: '0.5rem',
-                                    border: 'none',
-                                    background: 'transparent',
-                                    borderRadius: '0.5rem',
-                                    cursor: 'pointer',
-                                    transition: 'background-color 0.2s'
-                                }}
-                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
-                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                            >
-                                <Upload style={{ width: '20px', height: '20px', color: '#64748b' }} />
-                            </button>
-                            <button
-                                style={{
-                                    padding: '0.5rem',
-                                    border: 'none',
-                                    background: 'transparent',
-                                    borderRadius: '0.5rem',
-                                    cursor: 'pointer',
-                                    transition: 'background-color 0.2s'
-                                }}
-                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
-                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                            >
-                                <Download style={{ width: '20px', height: '20px', color: '#64748b' }} />
-                            </button>
-                            <button
-                                style={{
-                                    padding: '0.5rem',
-                                    border: 'none',
-                                    background: 'transparent',
-                                    borderRadius: '0.5rem',
-                                    cursor: 'pointer',
-                                    transition: 'background-color 0.2s'
-                                }}
-                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
-                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                            >
-                                <Filter style={{ width: '20px', height: '20px', color: '#64748b' }} />
-                            </button>
-                        </div>
                     </div>
                 </div>
 
@@ -458,14 +438,6 @@ export function CategoryManagement() {
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                             <thead>
                                 <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                                    <th style={{ textAlign: 'left', padding: '1rem' }}>
-                                        <input
-                                            type="checkbox"
-                                            checked={selectedCategories.length === filteredCategories.length && filteredCategories.length > 0}
-                                            onChange={handleSelectAll}
-                                            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                                        />
-                                    </th>
                                     <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
                                         Icon
                                     </th>
@@ -503,14 +475,6 @@ export function CategoryManagement() {
                                         onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
                                         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                                     >
-                                        <td style={{ padding: '1rem' }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={selectedCategories.includes(category.id)}
-                                                onChange={() => handleSelectCategory(category.id)}
-                                                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                                            />
-                                        </td>
                                         <td style={{ padding: '1rem' }}>
                                             <div style={{ position: 'relative', width: '40px', height: '40px' }}>
                                                 {category.iconUrl ? (
@@ -730,13 +694,13 @@ export function CategoryManagement() {
                 )}
 
                 {/* Pagination */}
-                {!loading && !error && (
+                {!loading && !error && totalPages > 1 && (
                     <Pagination
-                        currentPage={1}
-                        totalPages={Math.ceil(categories.length / 10)}
-                        totalItems={categories.length}
-                        itemsPerPage={10}
-                        onPageChange={(page) => console.log('Page:', page)}
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        totalItems={totalCount}
+                        itemsPerPage={pageSize}
+                        onPageChange={handlePageChange}
                         itemLabel="thể loại"
                     />
                 )}

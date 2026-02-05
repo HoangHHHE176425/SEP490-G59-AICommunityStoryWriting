@@ -65,7 +65,7 @@ export async function createCategory(data) {
 }
 
 /**
- * Lấy tất cả thể loại.
+ * Lấy tất cả thể loại (không phân trang - backward compatibility).
  * @param {Object} params - { includeInactive?: boolean, parentId?: string (Guid), rootsOnly?: boolean }
  * @returns {Promise} - Danh sách categories từ server
  */
@@ -79,6 +79,57 @@ export async function getAllCategories(params = {}) {
     }
     if (params.rootsOnly !== undefined) {
         queryParams.append("rootsOnly", params.rootsOnly);
+    }
+
+    const queryString = queryParams.toString();
+    const url = queryString ? `/categories?${queryString}` : "/categories";
+
+    const response = await axiosInstance.get(url);
+    return response.data;
+}
+
+/**
+ * Lấy danh sách thể loại có phân trang.
+ * @param {Object} params - { 
+ *   page?: number, 
+ *   pageSize?: number, 
+ *   search?: string, 
+ *   isActive?: boolean, 
+ *   parentId?: string (Guid),
+ *   sortBy?: string,
+ *   sortOrder?: 'asc' | 'desc'
+ * }
+ * @returns {Promise} - PagedResultDto với Items, TotalCount, Page, PageSize, TotalPages
+ */
+export async function getCategoriesWithPagination(params = {}) {
+    const queryParams = new URLSearchParams();
+
+    if (params.page != null) {
+        queryParams.append("page", params.page);
+    }
+    if (params.pageSize != null) {
+        queryParams.append("pageSize", params.pageSize);
+    }
+    if (params.search != null && params.search !== '') {
+        queryParams.append("search", params.search);
+    }
+    if (params.isActive !== undefined && params.isActive !== null) {
+        queryParams.append("isActive", params.isActive);
+    }
+    if (params.includeInactive !== undefined && params.includeInactive !== null) {
+        queryParams.append("includeInactive", params.includeInactive);
+    }
+    if (params.parentId != null) {
+        queryParams.append("parentId", params.parentId);
+    }
+    if (params.excludeRoots !== undefined && params.excludeRoots !== null) {
+        queryParams.append("excludeRoots", params.excludeRoots);
+    }
+    if (params.sortBy != null) {
+        queryParams.append("sortBy", params.sortBy);
+    }
+    if (params.sortOrder != null) {
+        queryParams.append("sortOrder", params.sortOrder);
     }
 
     const queryString = queryParams.toString();
