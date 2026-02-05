@@ -30,12 +30,37 @@ namespace Services.Implementations
             }
 
             var validAccessTypes = new[] { "FREE", "PAID" };
-            if (!string.IsNullOrWhiteSpace(request.AccessType) && !validAccessTypes.Contains(request.AccessType.ToUpper()))
+            var accessType = request.AccessType?.ToUpper() ?? "FREE";
+            if (!string.IsNullOrWhiteSpace(request.AccessType) && !validAccessTypes.Contains(accessType))
             {
                 throw new ArgumentException($"Invalid access type. Must be one of: {string.Join(", ", validAccessTypes)}");
             }
 
+            // Validate coin price based on access type
+            var coinPrice = request.CoinPrice ?? 0;
+            if (accessType == "PAID" && coinPrice <= 0)
+            {
+                throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+            }
+            if (accessType == "FREE" && coinPrice > 0)
+            {
+                coinPrice = 0; // Force coin price to 0 for FREE chapters
+            }
+
             var wordCount = CalculateWordCount(request.Content);
+
+            // Determine status - default to DRAFT if not specified or invalid
+            var status = "DRAFT";
+            var publishedAt = (DateTime?)null;
+            var validStatuses = new[] { "DRAFT", "PUBLISHED", "ARCHIVED" };
+            if (!string.IsNullOrWhiteSpace(request.Status) && validStatuses.Contains(request.Status.ToUpper()))
+            {
+                status = request.Status.ToUpper();
+                if (status == "PUBLISHED")
+                {
+                    publishedAt = DateTime.Now;
+                }
+            }
 
             var chapter = new chapters
             {
@@ -44,19 +69,35 @@ namespace Services.Implementations
                 title = request.Title,
                 content = request.Content,
                 order_index = request.OrderIndex,
-                status = "DRAFT",
-                access_type = request.AccessType?.ToUpper() ?? "FREE",
-                coin_price = request.CoinPrice ?? 0,
+                status = status,
+                access_type = accessType,
+                coin_price = coinPrice,
                 word_count = wordCount,
                 ai_contribution_ratio = request.AiContributionRatio ?? 0,
                 is_ai_clean = request.IsAiClean,
+                published_at = publishedAt,
                 created_at = DateTime.Now,
                 updated_at = DateTime.Now
             };
 
             _chapterRepository.Add(chapter);
 
-            UpdateStoryChapterStats(request.StoryId);
+            try
+            {
+                UpdateStoryChapterStats(request.StoryId);
+
+                // If chapter is published, update story's last_published_at
+                if (status == "PUBLISHED" && story != null)
+                {
+                    story.last_published_at = DateTime.Now;
+                    StoryDAO.Update(story);
+                }
+            }
+            catch (Exception)
+            {
+                // Log error but don't fail the create operation
+                // The chapter was already created successfully
+            }
 
             var createdChapter = _chapterRepository.GetById(chapter.id);
             return MapToResponseDto(createdChapter!);
@@ -159,10 +200,40 @@ namespace Services.Implementations
             if (!string.IsNullOrWhiteSpace(request.AccessType))
             {
                 var validAccessTypes = new[] { "FREE", "PAID" };
-                if (!validAccessTypes.Contains(request.AccessType.ToUpper()))
+                var accessType = request.AccessType.ToUpper();
+                if (!validAccessTypes.Contains(accessType))
                 {
                     throw new ArgumentException($"Invalid access type. Must be one of: {string.Join(", ", validAccessTypes)}");
                 }
+
+                // Validate coin price based on access type
+                var coinPrice = request.CoinPrice ?? chapter.coin_price ?? 0;
+                if (accessType == "PAID" && coinPrice <= 0)
+                {
+                    throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+                }
+                if (accessType == "FREE")
+                {
+                    coinPrice = 0; // Force coin price to 0 for FREE chapters
+                }
+
+                chapter.access_type = accessType;
+                chapter.coin_price = coinPrice;
+            }
+            else if (request.CoinPrice.HasValue)
+            {
+                // If only coin price is updated, validate based on current access type
+                var currentAccessType = chapter.access_type?.ToUpper() ?? "FREE";
+                var coinPrice = request.CoinPrice.Value;
+                if (currentAccessType == "PAID" && coinPrice <= 0)
+                {
+                    throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+                }
+                if (currentAccessType == "FREE" && coinPrice > 0)
+                {
+                    throw new ArgumentException("Cannot set coin price for FREE chapters. Please change access type to PAID first.");
+                }
+                chapter.coin_price = currentAccessType == "FREE" ? 0 : coinPrice;
             }
 
             chapter.title = request.Title;
@@ -173,13 +244,23 @@ namespace Services.Implementations
                 chapter.order_index = request.OrderIndex.Value;
 
             if (!string.IsNullOrWhiteSpace(request.Status))
-                chapter.status = request.Status.ToUpper();
+            {
+                var newStatus = request.Status.ToUpper();
+                var oldStatus = chapter.status?.ToUpper() ?? "DRAFT";
 
-            if (!string.IsNullOrWhiteSpace(request.AccessType))
-                chapter.access_type = request.AccessType.ToUpper();
+                chapter.status = newStatus;
 
-            if (request.CoinPrice.HasValue)
-                chapter.coin_price = request.CoinPrice.Value;
+                // If changing to PUBLISHED, set published_at
+                if (newStatus == "PUBLISHED" && oldStatus != "PUBLISHED")
+                {
+                    chapter.published_at = DateTime.Now;
+                }
+                // If changing from PUBLISHED to something else, clear published_at
+                else if (oldStatus == "PUBLISHED" && newStatus != "PUBLISHED")
+                {
+                    chapter.published_at = null;
+                }
+            }
 
             if (request.AiContributionRatio.HasValue)
                 chapter.ai_contribution_ratio = request.AiContributionRatio.Value;
@@ -195,7 +276,28 @@ namespace Services.Implementations
             _chapterRepository.Update(chapter);
 
             if (chapter.story_id.HasValue)
-                UpdateStoryChapterStats(chapter.story_id.Value);
+            {
+                try
+                {
+                    UpdateStoryChapterStats(chapter.story_id.Value);
+
+                    // If chapter status was changed to PUBLISHED, update story's last_published_at
+                    if (!string.IsNullOrWhiteSpace(request.Status) && request.Status.ToUpper() == "PUBLISHED")
+                    {
+                        var story = StoryDAO.GetById(chapter.story_id.Value);
+                        if (story != null)
+                        {
+                            story.last_published_at = DateTime.Now;
+                            StoryDAO.Update(story);
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // Log error but don't fail the update operation
+                    // The chapter was already updated successfully
+                }
+            }
 
             return true;
         }
@@ -211,7 +313,17 @@ namespace Services.Implementations
             _chapterRepository.Delete(id);
 
             if (storyId.HasValue)
-                UpdateStoryChapterStats(storyId.Value);
+            {
+                try
+                {
+                    UpdateStoryChapterStats(storyId.Value);
+                }
+                catch (Exception)
+                {
+                    // Log error but don't fail the delete operation
+                    // The chapter was already deleted successfully
+                }
+            }
 
             return true;
         }
@@ -230,11 +342,19 @@ namespace Services.Implementations
 
             if (chapter.story_id.HasValue)
             {
-                var story = StoryDAO.GetById(chapter.story_id.Value);
-                if (story != null)
+                try
                 {
-                    story.last_published_at = DateTime.Now;
-                    StoryDAO.Update(story);
+                    var story = StoryDAO.GetById(chapter.story_id.Value);
+                    if (story != null)
+                    {
+                        story.last_published_at = DateTime.Now;
+                        StoryDAO.Update(story);
+                    }
+                }
+                catch (Exception)
+                {
+                    // Log error but don't fail the publish operation
+                    // The chapter was already published successfully
                 }
             }
 
