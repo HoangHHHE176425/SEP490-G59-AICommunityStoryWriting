@@ -7,7 +7,7 @@ public partial class categories
 {
     public Guid id { get; set; }
 
-    public Guid? parent_category_id { get; set; }
+    public Guid? parent_id { get; set; }
 
     public string name { get; set; } = null!;
 
