@@ -33,7 +33,7 @@ public partial class StoryPlatformDbContext : DbContext
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer(
-                "Server=.;Database=story_platform;Trusted_Connection=True;TrustServerCertificate=True");
+                "Server=.;Database=story_platform_v6;Trusted_Connection=True;TrustServerCertificate=True");
         }
     }
 
