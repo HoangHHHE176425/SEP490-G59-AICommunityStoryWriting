@@ -13,19 +13,36 @@ class ApiService {
                 ...options
             });
 
-            if (!response.ok) {
-                const error = await response.json().catch(() => ({ message: response.statusText }));
-                throw new Error(error.message || `HTTP error! status: ${response.status}`);
-            }
-
-            // Handle NoContent responses
+            // Handle NoContent responses (204) first - these are successful
             if (response.status === 204) {
                 return null;
             }
 
-            return await response.json();
+            if (!response.ok) {
+                let errorMessage = response.statusText;
+                try {
+                    const errorBody = await response.json();
+                    errorMessage = errorBody.message || errorBody.error || errorMessage;
+                } catch {
+                    // If response body is not JSON, use statusText
+                }
+                throw new Error(errorMessage || `HTTP error! status: ${response.status}`);
+            }
+
+            // Try to parse JSON, but handle empty responses gracefully
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const text = await response.text();
+                return text ? JSON.parse(text) : null;
+            }
+
+            return null;
         } catch (error) {
             console.error('API Request Error:', error);
+            // Re-throw with a more user-friendly message if it's a network error
+            if (error instanceof TypeError && error.message.includes('fetch')) {
+                throw new Error('Không thể kết nối đến server. Vui lòng kiểm tra kết nối mạng.');
+            }
             throw error;
         }
     }
@@ -37,6 +54,17 @@ class ApiService {
         if (rootsOnly) params.append('rootsOnly', 'true');
         if (parentId != null && parentId !== '') params.append('parentId', parentId);
         return this.request(`/categories?${params.toString()}`);
+    }
+
+    static async getCategoriesWithPagination(query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach(key => {
+            if (query[key] !== null && query[key] !== undefined && query[key] !== '') {
+                params.append(key, query[key]);
+            }
+        });
+        const queryString = params.toString();
+        return this.request(`/categories${queryString ? '?' + queryString : ''}`);
     }
 
     static async getCategoryById(id) {

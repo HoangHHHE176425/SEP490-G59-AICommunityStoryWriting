@@ -55,5 +55,17 @@ namespace DataAccessObjects.DAOs
             using var context = new StoryPlatformDbContext();
             return context.chapters.Count(c => c.story_id == storyId);
         }
+
+        /// <summary>Xóa tất cả chapters của một story</summary>
+        public static void DeleteByStoryId(Guid storyId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var chapters = context.chapters.Where(c => c.story_id == storyId).ToList();
+            if (chapters.Any())
+            {
+                context.chapters.RemoveRange(chapters);
+                context.SaveChanges();
+            }
+        }
     }
 }
