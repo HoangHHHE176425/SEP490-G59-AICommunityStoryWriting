@@ -248,6 +248,14 @@
                 const result = await ApiService.getStories(query);
                 stories = result.items;
                 totalPages = result.totalPages;
+
+                // Debug: Log first story to check data structure
+                if (stories.length > 0) {
+                    console.log('First story data:', stories[0]);
+                    console.log('totalChapters:', stories[0].totalChapters);
+                    console.log('TotalChapters:', stories[0].TotalChapters);
+                }
+
                 renderStories();
                 renderPagination();
             } catch (error) {
@@ -283,8 +291,20 @@
                                             <span class="badge bg-primary">${story.categoryNames || 'N/A'}</span>
                                             <span class="badge ${story.status === 'PUBLISHED' ? 'bg-success' : 'bg-secondary'}">${story.status || 'DRAFT'}</span>
                                             <span class="badge ${({ ONGOING: 'bg-info', COMPLETED: 'bg-success', HIATUS: 'bg-warning' })[story.storyProgressStatus] || 'bg-secondary'}">${({ ONGOING: 'Đang ra', COMPLETED: 'Hoàn thành', HIATUS: 'Tạm dừng' })[story.storyProgressStatus] || story.storyProgressStatus || 'Đang ra'}</span>
-                                            <span class="badge bg-info">${story.totalChapters || 0} chương</span>
-                                            <span class="badge bg-warning">${Utils.formatNumber(story.totalViews || 0)} lượt xem</span>
+                                        </div>
+                                        <div class="mt-2">
+                                            <span class="badge bg-info" title="Tổng số chương">
+                                                <i class="bi bi-book"></i> ${(story.totalChapters ?? story.TotalChapters) || 0} chương
+                                            </span>
+                                            <span class="badge bg-warning" title="Tổng lượt đọc">
+                                                <i class="bi bi-eye"></i> ${Utils.formatNumber((story.totalViews ?? story.TotalViews) || 0)} lượt đọc
+                                            </span>
+                                            <span class="badge bg-danger" title="Tổng lượt theo dõi">
+                                                <i class="bi bi-heart"></i> ${Utils.formatNumber((story.totalFavorites ?? story.TotalFavorites) || 0)} theo dõi
+                                            </span>
+                                            <span class="badge bg-success" title="Đánh giá trung bình">
+                                                <i class="bi bi-star-fill"></i> ${((story.avgRating ?? story.AvgRating) ? (story.avgRating ?? story.AvgRating).toFixed(1) : '0.0')}/5.0
+                                            </span>
                                         </div>
                                     </div>
                                     <div class="ms-3">
