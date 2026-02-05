@@ -35,7 +35,7 @@ namespace Services.Implementations
                 description = request.Description,
                 icon_url = request.IconUrl,
                 is_active = request.IsActive,
-                parent_category_id = request.ParentId,
+                parent_id = request.ParentId,
                 created_at = DateTime.Now
             };
 
@@ -54,12 +54,101 @@ namespace Services.Implementations
             }
 
             if (rootsOnly)
-                query = query.Where(c => c.parent_category_id == null);
+                query = query.Where(c => c.parent_id == null);
             else if (parentId.HasValue)
-                query = query.Where(c => c.parent_category_id == parentId.Value);
+                query = query.Where(c => c.parent_id == parentId.Value);
 
-            var categories = query.OrderBy(c => c.parent_category_id == null ? 0 : 1).ThenBy(c => c.name).ToList();
+            var categories = query.OrderBy(c => c.parent_id == null ? 0 : 1).ThenBy(c => c.name).ToList();
             return categories.Select(c => MapToDto(c));
+        }
+
+        public PagedResultDto<CategoryResponseDto> GetAll(CategoryQueryDto queryDto)
+        {
+            var query = _categoryRepository.GetAll();
+
+            // Search filter
+            if (!string.IsNullOrWhiteSpace(queryDto.Search))
+            {
+                var searchLower = queryDto.Search.ToLower();
+                query = query.Where(c =>
+                    c.name.ToLower().Contains(searchLower) ||
+                    (c.description != null && c.description.ToLower().Contains(searchLower)) ||
+                    (c.slug != null && c.slug.ToLower().Contains(searchLower)));
+            }
+
+            // Parent filter
+            if (queryDto.RootsOnly == true)
+            {
+                query = query.Where(c => c.parent_id == null);
+            }
+            else if (queryDto.ParentId.HasValue)
+            {
+                query = query.Where(c => c.parent_id == queryDto.ParentId.Value);
+            }
+
+            // Active filter
+            if (queryDto.IsActive.HasValue)
+            {
+                query = query.Where(c => c.is_active == queryDto.IsActive.Value);
+            }
+
+            var totalCount = query.Count();
+
+            // Handle story_count sorting separately as it requires additional computation
+            IQueryable<categories> sortedQuery;
+            if (queryDto.SortBy?.ToLower() == "story_count")
+            {
+                // For story_count, we need to load all, calculate counts, sort, then paginate
+                var allCategories = query.ToList();
+                var categoriesWithCounts = allCategories.Select(c => new
+                {
+                    Category = c,
+                    StoryCount = CategoryDAO.GetStoryCountByCategoryId(c.id)
+                });
+
+                if (queryDto.SortOrder == "asc")
+                    categoriesWithCounts = categoriesWithCounts.OrderBy(x => x.StoryCount);
+                else
+                    categoriesWithCounts = categoriesWithCounts.OrderByDescending(x => x.StoryCount);
+
+                var categories = categoriesWithCounts
+                    .Skip((queryDto.Page - 1) * queryDto.PageSize)
+                    .Take(queryDto.PageSize)
+                    .Select(x => x.Category)
+                    .ToList();
+
+                return new PagedResultDto<CategoryResponseDto>
+                {
+                    Items = categories.Select(c => MapToDto(c)),
+                    TotalCount = totalCount,
+                    Page = queryDto.Page,
+                    PageSize = queryDto.PageSize
+                };
+            }
+
+            // For other sorts, use standard LINQ
+            sortedQuery = queryDto.SortBy?.ToLower() switch
+            {
+                "created_at" => queryDto.SortOrder == "asc"
+                    ? query.OrderBy(c => c.created_at)
+                    : query.OrderByDescending(c => c.created_at),
+                _ => queryDto.SortOrder == "asc"
+                    ? query.OrderBy(c => c.name)
+                    : query.OrderByDescending(c => c.name)
+            };
+
+            var categoriesList = sortedQuery
+                .Skip((queryDto.Page - 1) * queryDto.PageSize)
+                .Take(queryDto.PageSize)
+                .ToList();
+
+            return new PagedResultDto<CategoryResponseDto>
+            {
+                Items = categoriesList.Select(c => MapToDto(c)),
+                TotalCount = totalCount,
+                Page = queryDto.Page,
+                PageSize = queryDto.PageSize
+            };
         }
 
         public CategoryResponseDto? GetById(Guid id)
@@ -97,7 +186,7 @@ namespace Services.Implementations
             category.description = request.Description;
             category.icon_url = request.IconUrl;
             category.is_active = request.IsActive;
-            category.parent_category_id = request.ParentId;
+            category.parent_id = request.ParentId;
 
             _categoryRepository.Update(category);
             return true;
@@ -109,7 +198,7 @@ namespace Services.Implementations
             if (category == null)
                 return false;
 
-            var hasChildren = _categoryRepository.GetAll().Any(c => c.parent_category_id == id);
+            var hasChildren = _categoryRepository.GetAll().Any(c => c.parent_id == id);
             if (hasChildren)
                 throw new InvalidOperationException("Cannot delete category that has child categories. Delete or move children first.");
 
@@ -212,9 +301,8 @@ namespace Services.Implementations
 
         private string BuildUniqueSlug(string name, Guid? parentId, string? parentSlug, Guid? idToExclude)
         {
-            var baseSlug = string.IsNullOrEmpty(parentSlug)
-                ? GenerateSlug(name)
-                : parentSlug + "-" + GenerateSlug(name);
+            // Only use the category's own slug, not parent slug
+            var baseSlug = GenerateSlug(name);
             var slug = baseSlug;
             var suffix = 0;
             while (true)
@@ -231,8 +319,8 @@ namespace Services.Implementations
         {
             var storyCount = CategoryDAO.GetStoryCountByCategoryId(category.id);
 
-            categories? parent = category.parent_category_id.HasValue
-                ? _categoryRepository.GetById(category.parent_category_id.Value)
+            categories? parent = category.parent_id.HasValue
+                ? _categoryRepository.GetById(category.parent_id.Value)
                 : null;
 
             return new CategoryResponseDto
@@ -245,7 +333,7 @@ namespace Services.Implementations
                 IsActive = category.is_active ?? true,
                 CreatedAt = category.created_at,
                 StoryCount = storyCount,
-                ParentId = category.parent_category_id,
+                ParentId = category.parent_id,
                 ParentName = parent?.name
             };
         }
