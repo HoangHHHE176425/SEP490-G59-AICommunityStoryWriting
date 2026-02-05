@@ -1,0 +1,290 @@
+﻿@{
+    ViewData["Title"] = "Đọc Truyện";
+    var chapterId = ViewBag.ChapterId ?? Guid.Empty;
+}
+
+<div class="container-fluid px-0">
+    <!-- Reading Header -->
+    <div class="bg-light border-bottom sticky-top" style="z-index: 1000;">
+        <div class="container py-2">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <a href="/Stories" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-arrow-left"></i> Quay lại
+                    </a>
+                    <span class="ms-2" id="storyTitleHeader">Đang tải...</span>
+                </div>
+                <div>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="toggleFullscreen()" title="Toàn màn hình">
+                        <i class="bi bi-arrows-fullscreen"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="adjustFontSize(-1)" title="Giảm cỡ chữ">
+                        <i class="bi bi-dash-lg"></i>
+                    </button>
+                    <span class="mx-2" id="fontSizeDisplay">16px</span>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="adjustFontSize(1)" title="Tăng cỡ chữ">
+                        <i class="bi bi-plus-lg"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Reading Content -->
+    <div class="container my-4">
+        <div class="row justify-content-center">
+            <div class="col-lg-8 col-xl-7">
+                <!-- Chapter Info -->
+                <div class="text-center mb-4" id="chapterInfo">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+
+                <!-- Chapter Content -->
+                <div class="reading-content" id="chapterContent" style="font-size: 16px; line-height: 1.8; color: #333;">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Navigation -->
+                <div class="d-flex justify-content-between align-items-center mt-5 pt-4 border-top">
+                    <button class="btn btn-outline-primary" id="prevChapterBtn" onclick="navigateChapter('prev')" disabled>
+                        <i class="bi bi-chevron-left"></i> Chương trước
+                    </button>
+                    <a href="#" id="backToStoryLink" class="btn btn-outline-secondary">
+                        <i class="bi bi-list"></i> Danh sách chương
+                    </a>
+                    <button class="btn btn-outline-primary" id="nextChapterBtn" onclick="navigateChapter('next')" disabled>
+                        Chương sau <i class="bi bi-chevron-right"></i>
+                    </button>
+                </div>
+
+                <!-- Chapter Stats -->
+                <div class="mt-4 text-center text-muted small">
+                    <div id="chapterStats"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .reading-content {
+        font-family: 'Georgia', 'Times New Roman', serif;
+        text-align: justify;
+        padding: 2rem 0;
+        min-height: 400px;
+    }
+
+        .reading-content p {
+            margin-bottom: 1.5rem;
+            text-indent: 2em;
+        }
+
+            .reading-content p:first-child {
+                text-indent: 0;
+            }
+
+    .chapter-title {
+        font-size: 2rem;
+        font-weight: bold;
+        margin-bottom: 1rem;
+        color: #2c3e50;
+    }
+
+    .chapter-meta {
+        color: #7f8c8d;
+        font-size: 0.9rem;
+        margin-bottom: 2rem;
+    }
+
+    .fullscreen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 9999;
+        background: white;
+        overflow-y: auto;
+    }
+
+        .fullscreen .container {
+            max-width: 100%;
+            padding: 2rem;
+        }
+
+        .fullscreen .reading-content {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+</style>
+
+@section Scripts {
+    <script>
+        const chapterId = '@(chapterId)';
+        let currentChapter = null;
+        let storyId = null;
+        let allChapters = [];
+        let currentChapterIndex = -1;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadChapter();
+        });
+
+        async function loadChapter() {
+            try {
+                currentChapter = await ApiService.getChapterById(chapterId);
+                if (!currentChapter) {
+                    Utils.showAlert('Không tìm thấy chapter', 'danger');
+                    window.location.href = '/Stories';
+                    return;
+                }
+
+                storyId = currentChapter.storyId;
+
+                // Load story info
+                const story = await ApiService.getStoryById(storyId);
+                document.getElementById('storyTitleHeader').textContent = story.title;
+                document.getElementById('backToStoryLink').href = `/Stories/Details/${encodeURIComponent(storyId)}`;
+
+                // Load all chapters to enable navigation
+                allChapters = await ApiService.getChaptersByStoryId(storyId);
+                allChapters = Array.from(allChapters).sort((a, b) => a.orderIndex - b.orderIndex);
+                currentChapterIndex = allChapters.findIndex(c => c.id === chapterId);
+
+                renderChapter();
+                updateNavigation();
+            } catch (error) {
+                Utils.showAlert('Lỗi khi tải chapter: ' + error.message, 'danger');
+            }
+        }
+
+        function renderChapter() {
+            // Render chapter info
+            const chapterInfo = document.getElementById('chapterInfo');
+            chapterInfo.innerHTML = `
+                <h1 class="chapter-title">${currentChapter.title}</h1>
+                <div class="chapter-meta">
+                    <span class="badge bg-secondary me-2">Chương ${currentChapter.orderIndex}</span>
+                    ${currentChapter.publishedAt ?
+                        `<span><i class="bi bi-calendar"></i> ${Utils.formatDate(currentChapter.publishedAt)}</span>` :
+                        ''
+                    }
+                    ${currentChapter.wordCount ?
+                        `<span class="ms-3"><i class="bi bi-file-text"></i> ${Utils.formatNumber(currentChapter.wordCount)} từ</span>` :
+                        ''
+                    }
+                </div>
+            `;
+
+            // Render content
+            const contentDiv = document.getElementById('chapterContent');
+            if (currentChapter.content) {
+                // Split content into paragraphs
+                const paragraphs = currentChapter.content
+                    .split(/\n\s*\n/)
+                    .filter(p => p.trim().length > 0)
+                    .map(p => p.trim());
+
+                contentDiv.innerHTML = paragraphs.map(p => `<p>${p}</p>`).join('');
+            } else {
+                contentDiv.innerHTML = '<p class="text-muted text-center">Chương này chưa có nội dung.</p>';
+            }
+
+            // Render stats
+            const statsDiv = document.getElementById('chapterStats');
+            statsDiv.innerHTML = `
+                ${currentChapter.wordCount ? `Số từ: ${Utils.formatNumber(currentChapter.wordCount)}` : ''}
+                ${currentChapter.accessType === 'PAID' && currentChapter.coinPrice ?
+                    ` | Giá: ${currentChapter.coinPrice} coin` :
+                    ''
+                }
+            `;
+        }
+
+        function updateNavigation() {
+            const prevBtn = document.getElementById('prevChapterBtn');
+            const nextBtn = document.getElementById('nextChapterBtn');
+
+            if (currentChapterIndex > 0) {
+                prevBtn.disabled = false;
+                prevBtn.onclick = () => navigateToChapter(allChapters[currentChapterIndex - 1].id);
+            } else {
+                prevBtn.disabled = true;
+            }
+
+            if (currentChapterIndex < allChapters.length - 1) {
+                nextBtn.disabled = false;
+                nextBtn.onclick = () => navigateToChapter(allChapters[currentChapterIndex + 1].id);
+            } else {
+                nextBtn.disabled = true;
+            }
+        }
+
+        function navigateToChapter(newChapterId) {
+            window.location.href = `/Chapters/Read/${encodeURIComponent(newChapterId)}`;
+        }
+
+        function navigateChapter(direction) {
+            if (direction === 'prev' && currentChapterIndex > 0) {
+                navigateToChapter(allChapters[currentChapterIndex - 1].id);
+            } else if (direction === 'next' && currentChapterIndex < allChapters.length - 1) {
+                navigateToChapter(allChapters[currentChapterIndex + 1].id);
+            }
+        }
+
+        function adjustFontSize(delta) {
+            const content = document.getElementById('chapterContent');
+            const currentSize = parseInt(window.getComputedStyle(content).fontSize);
+            const newSize = Math.max(12, Math.min(24, currentSize + delta));
+            content.style.fontSize = newSize + 'px';
+            document.getElementById('fontSizeDisplay').textContent = newSize + 'px';
+
+            // Save to localStorage
+            localStorage.setItem('readingFontSize', newSize);
+        }
+
+        function toggleFullscreen() {
+            const container = document.querySelector('.container-fluid');
+            if (container.classList.contains('fullscreen')) {
+                container.classList.remove('fullscreen');
+            } else {
+                container.classList.add('fullscreen');
+            }
+        }
+
+        // Load saved font size
+        document.addEventListener('DOMContentLoaded', function() {
+            const savedSize = localStorage.getItem('readingFontSize');
+            if (savedSize) {
+                const content = document.getElementById('chapterContent');
+                if (content) {
+                    content.style.fontSize = savedSize + 'px';
+                    document.getElementById('fontSizeDisplay').textContent = savedSize + 'px';
+                }
+            }
+        });
+
+        // Keyboard navigation
+        document.addEventListener('keydown', function(e) {
+            // Left arrow - previous chapter
+            if (e.key === 'ArrowLeft' && currentChapterIndex > 0) {
+                navigateToChapter(allChapters[currentChapterIndex - 1].id);
+            }
+            // Right arrow - next chapter
+            else if (e.key === 'ArrowRight' && currentChapterIndex < allChapters.length - 1) {
+                navigateToChapter(allChapters[currentChapterIndex + 1].id);
+            }
+            // Escape - exit fullscreen
+            else if (e.key === 'Escape') {
+                const container = document.querySelector('.container-fluid');
+                container.classList.remove('fullscreen');
+            }
+        });
+    </script>
+}
