@@ -163,6 +163,7 @@ export function CategoryManagement() {
                 const parentId = getParentIdByStoryType(categoryData.story_type || 'long');
 
                 // Call API to create category
+                // eslint-disable-next-line no-unused-vars
                 const newCategory = await createCategory({
                     name: categoryData.name,
                     description: categoryData.description || '',
@@ -564,22 +565,37 @@ export function CategoryManagement() {
                                                 {category.slug}
                                             </code>
                                         </td>
-                                        <td style={{ padding: '1rem' }}>
+                                        <td style={{ padding: '1rem', verticalAlign: 'middle' }}>
                                             {(() => {
                                                 const storyType = getStoryTypeByParentId(category.parentId);
-                                                if (!storyType) return <span style={{ color: '#64748b', fontSize: '0.875rem' }}>-</span>;
+                                                if (!storyType) {
+                                                    return (
+                                                        <span style={{
+                                                            color: '#64748b',
+                                                            fontSize: '0.875rem',
+                                                            display: 'inline-block',
+                                                            verticalAlign: 'middle'
+                                                        }}>
+                                                            -
+                                                        </span>
+                                                    );
+                                                }
                                                 return (
                                                     <span
                                                         style={{
                                                             display: 'inline-flex',
                                                             alignItems: 'center',
+                                                            justifyContent: 'center',
                                                             gap: '0.25rem',
-                                                            padding: '0.25rem 0.75rem',
+                                                            padding: '0.375rem 0.75rem',
                                                             borderRadius: '9999px',
                                                             fontSize: '0.75rem',
                                                             fontWeight: 600,
                                                             backgroundColor: storyType === 'long' ? 'rgba(37, 99, 235, 0.1)' : 'rgba(168, 85, 247, 0.1)',
-                                                            color: storyType === 'long' ? '#1d4ed8' : '#7c3aed'
+                                                            color: storyType === 'long' ? '#1d4ed8' : '#7c3aed',
+                                                            whiteSpace: 'nowrap',
+                                                            verticalAlign: 'middle',
+                                                            lineHeight: '1'
                                                         }}
                                                     >
                                                         {storyType === 'long' ? '📖 Truyện dài' : '📄 Truyện ngắn'}
