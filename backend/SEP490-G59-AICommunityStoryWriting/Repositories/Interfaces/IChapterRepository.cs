@@ -11,5 +11,6 @@ namespace Repositories
         void Add(chapters chapter);
         void Update(chapters chapter);
         void Delete(Guid id);
+        void DeleteByStoryId(Guid storyId);
     }
 }
