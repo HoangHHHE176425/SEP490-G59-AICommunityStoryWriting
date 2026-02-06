@@ -3,19 +3,23 @@ using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
 
-public partial class AuthToken
+public partial class Rating
 {
     public Guid Id { get; set; }
 
     public Guid? UserId { get; set; }
 
-    public string RefreshToken { get; set; } = null!;
+    public Guid? StoryId { get; set; }
 
-    public string? DeviceInfo { get; set; }
+    public int? StarValue { get; set; }
 
-    public DateTime ExpiresAt { get; set; }
+    public string? ReviewText { get; set; }
+
+    public string? Status { get; set; }
 
     public DateTime? CreatedAt { get; set; }
+
+    public virtual Story? Story { get; set; }
 
     public virtual User? User { get; set; }
 }

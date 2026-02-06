@@ -5,9 +5,9 @@ namespace BusinessObjects.Entities;
 
 public partial class Chapter
 {
-    public int Id { get; set; }
+    public Guid Id { get; set; }
 
-    public int StoryId { get; set; }
+    public Guid? StoryId { get; set; }
 
     public string Title { get; set; } = null!;
 
@@ -33,5 +33,11 @@ public partial class Chapter
 
     public DateTime? UpdatedAt { get; set; }
 
-    public virtual Story Story { get; set; } = null!;
+    public virtual ICollection<AiGeneratedContent> AiGeneratedContents { get; set; } = new List<AiGeneratedContent>();
+
+    public virtual ICollection<AiPlagiarismReport> AiPlagiarismReports { get; set; } = new List<AiPlagiarismReport>();
+
+    public virtual ICollection<ChapterVersion> ChapterVersions { get; set; } = new List<ChapterVersion>();
+
+    public virtual Story? Story { get; set; }
 }

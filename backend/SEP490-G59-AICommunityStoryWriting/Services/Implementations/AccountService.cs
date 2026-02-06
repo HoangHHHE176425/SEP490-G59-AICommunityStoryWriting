@@ -18,25 +18,44 @@ namespace Services.Implementations
         {
             _userRepo = userRepo;
         }
-
-        public async Task ChangePasswordAsync(int userId, ChangePasswordRequest request)
+        public async Task DeleteAccountAsync(Guid userId)
         {
-            // Tìm user theo ID được truyền vào từ Token
             var user = await _userRepo.GetUserById(userId);
-            if (user == null) throw new Exception("User not found");
+            if (user == null) throw new Exception("Người dùng không tồn tại.");
 
-            if (!BCrypt.Net.BCrypt.Verify(request.OldPassword, user.PasswordHash))
+            await _userRepo.DeleteUser(userId);
+        }
+        public async Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request)
+        {
+            // 1. Lấy thông tin User từ DB
+            var user = await _userRepo.GetUserById(userId);
+            if (user == null) throw new Exception("Không tìm thấy người dùng.");
+
+
+            bool isPasswordCorrect = BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.PasswordHash);
+
+            if (!isPasswordCorrect)
             {
-                throw new Exception("Old password is not incorrect");
+                throw new Exception("Mật khẩu hiện tại không chính xác.");
             }
 
-            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+            // 3. Kiểm tra trùng lặp (Optional: Không cho trùng mật khẩu cũ)
+            if (request.CurrentPassword == request.NewPassword)
+            {
+                throw new Exception("Mật khẩu mới không được trùng với mật khẩu cũ.");
+            }
+
+            // 4. Mã hóa mật khẩu mới và lưu vào DB
+            string newPasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+
+            user.PasswordHash = newPasswordHash;
             user.UpdatedAt = DateTime.UtcNow;
 
+            // 5. Gọi Repository để update
             await _userRepo.UpdateUser(user);
         }
 
-        public async Task UpdateProfileAsync(int userId, UpdateProfileRequest request)
+        public async Task UpdateProfileAsync(Guid userId, UpdateProfileRequest request)
         {
             var user = await _userRepo.GetUserById(userId);
             if (user == null) throw new Exception("User not found");
@@ -46,40 +65,82 @@ namespace Services.Implementations
                 user.UserProfile = new UserProfile
                 {
                     UserId = userId,
-                    UpdatedAt = DateTime.UtcNow
+                    SocialLinks = "{}",
+                    Settings = "{\"allow_notif\": true}"
                 };
             }
 
-            if (!string.IsNullOrEmpty(request.Nickname))
-                user.UserProfile.Nickname = request.Nickname;
+            //  KIỂM TRA TRÙNG NICKNAME
+            if (!string.IsNullOrEmpty(request.DisplayName))
+            {
+                // Chỉ check nếu nickname thay đổi so với cái cũ
+                if (request.DisplayName != user.UserProfile.Nickname)
+                {
+                    bool isExist = await _userRepo.IsNicknameExist(request.DisplayName, userId);
+                    if (isExist)
+                    {
+                        throw new Exception($"Tên hiển thị '{request.DisplayName}' đã được sử dụng. Vui lòng chọn tên khác.");
+                    }
+                    user.UserProfile.Nickname = request.DisplayName;
+                }
+            }
 
-            if (!string.IsNullOrEmpty(request.Bio))
-                user.UserProfile.Bio = request.Bio;
-
-            if (!string.IsNullOrEmpty(request.AvatarUrl))
-                user.UserProfile.AvatarUrl = request.AvatarUrl;
+            if (!string.IsNullOrEmpty(request.Phone)) user.UserProfile.Phone = request.Phone;
+            if (!string.IsNullOrEmpty(request.IdNumber)) user.UserProfile.IdNumber = request.IdNumber;
+            if (request.Bio != null) user.UserProfile.Bio = request.Bio;
+            if (request.Description != null) user.UserProfile.Description = request.Description;
+            if (!string.IsNullOrEmpty(request.AvatarUrl)) user.UserProfile.AvatarUrl = request.AvatarUrl;
 
             user.UserProfile.UpdatedAt = DateTime.UtcNow;
             user.UpdatedAt = DateTime.UtcNow;
 
             await _userRepo.UpdateUser(user);
         }
-        public async Task<UserProfileResponse> GetProfileAsync(int userId)
+
+        public async Task<UserProfileResponse> GetProfileAsync(Guid userId)
         {
-            // Tìm User trong DB
             var user = await _userRepo.GetUserById(userId);
             if (user == null) throw new Exception("User not found");
 
-            // Map từ Entity sang DTO để trả về
+            int storyCount = user.Stories?.Count ?? 0;
+            long totalReads = user.Stories?.Sum(s => s.TotalViews ?? 0) ?? 0;
+            int totalLikes = user.Stories?.Sum(s => s.TotalFavorites ?? 0) ?? 0;
+
+            // 2. Tạo Tags (Giả lập logic hiển thị)
+            var tags = new List<string>();
+            if (storyCount > 0) tags.Add("Tác giả");
+            if (user.Role == "ADMIN") tags.Add("Quản trị viên");
+            if (totalReads > 1000) tags.Add("Cây bút vàng");
+            if (tags.Count == 0) tags.Add("Thành viên mới");
+
             return new UserProfileResponse
             {
                 Id = user.Id,
                 Email = user.Email,
-                Role = user.Role,
-                // Lấy thông tin từ bảng UserProfile (nếu có)
-                Nickname = user.UserProfile?.Nickname,
-                Bio = user.UserProfile?.Bio,
-                AvatarUrl = user.UserProfile?.AvatarUrl
+
+                DisplayName = !string.IsNullOrEmpty(user.UserProfile?.Nickname)
+                              ? user.UserProfile.Nickname
+                              : user.Email.Split('@')[0],
+
+                Phone = user.UserProfile?.Phone ?? "",
+                IdNumber = user.UserProfile?.IdNumber ?? "",
+                Bio = user.UserProfile?.Bio ?? "",
+                Description = user.UserProfile?.Description ?? "",
+                AvatarUrl = user.UserProfile?.AvatarUrl ?? "",
+
+                JoinDate = user.CreatedAt?.ToString("dd/MM/yyyy") ?? DateTime.UtcNow.ToString("dd/MM/yyyy"),
+
+                IsVerified = user.Status == "ACTIVE",
+
+                Tags = tags,
+
+                Stats = new UserStats
+                {
+                    StoriesWritten = storyCount,
+                    TotalReads = totalReads,
+                    Likes = totalLikes,
+                    CurrentCoins = 0 // Tạm thời trả về 0 như yêu cầu
+                }
             };
         }
     }

@@ -11,68 +11,75 @@ namespace DataAccessObjects.DAOs
 {
     public class UserDAO
     {
-        private static UserDAO instance = null!;
+        private static UserDAO instance = null;
         private static readonly object instanceLock = new object();
-
-        private UserDAO() { }
-
         public static UserDAO Instance
         {
-            get
-            {
-                lock (instanceLock)
-                {
-                    if (instance == null)
-                    {
-                        instance = new UserDAO();
-                    }
-                    return instance;
-                }
-            }
+            get { lock (instanceLock) { return instance ??= new UserDAO(); } }
         }
 
-        // Tìm User theo Email
         public async Task<User?> FindUserByEmail(StoryPlatformDbContext context, string email)
         {
-            return await context.Users // Giả định DbSet tên là Users
-                .Include(u => u.UserProfile)
-                .FirstOrDefaultAsync(u => u.Email == email);
+            return await context.Users.Include(u => u.UserProfile)
+                                      .FirstOrDefaultAsync(u => u.Email == email);
         }
 
-        // Tìm User theo ID
-        public async Task<User?> FindUserById(StoryPlatformDbContext context, int id)
+        public async Task<User?> FindUserById(StoryPlatformDbContext context, Guid id)
         {
             return await context.Users
                 .Include(u => u.UserProfile)
+                .Include(u => u.Stories) // Include truyện để đếm view, like, số lượng
                 .FirstOrDefaultAsync(u => u.Id == id);
         }
 
-        // Check trùng Email
         public async Task<bool> CheckEmailExists(StoryPlatformDbContext context, string email)
         {
             return await context.Users.AnyAsync(u => u.Email == email);
         }
 
-        // Thêm User mới
         public async Task AddUser(StoryPlatformDbContext context, User user)
         {
             context.Users.Add(user);
             await context.SaveChangesAsync();
         }
 
-        // Cập nhật User
         public async Task UpdateUser(StoryPlatformDbContext context, User user)
         {
             context.Users.Update(user);
             await context.SaveChangesAsync();
         }
 
-        // Thêm Refresh Token
         public async Task AddToken(StoryPlatformDbContext context, AuthToken token)
         {
-            // context.AuthTokens (hoặc auth_tokens tùy tên trong DbContext)
-            context.Set<AuthToken>().Add(token);
+            context.AuthTokens.Add(token);
             await context.SaveChangesAsync();
+        }
+        public async Task<bool> IsNicknameExist(StoryPlatformDbContext context, string nickname, Guid currentUserId)
+        {
+            return await context.UserProfiles
+                .AnyAsync(p => p.Nickname == nickname && p.UserId != currentUserId);
+        }
+        public async Task SoftDeleteUser(StoryPlatformDbContext context, Guid userId)
+        {
+            var user = await context.Users.FindAsync(userId);
+            if (user != null)
+            {
+
+                user.Status = "DELETED";
+
+
+                user.Email = $"deleted_{Guid.NewGuid()}@deleted.store";
+
+
+                user.PasswordHash = "DELETED_USER_" + Guid.NewGuid().ToString();
+                // ------------------------
+
+                // 3. Cập nhật ngày
+                user.UpdatedAt = DateTime.UtcNow;
+
+                context.Users.Update(user);
+                await context.SaveChangesAsync();
+            }
         }
     }
 }

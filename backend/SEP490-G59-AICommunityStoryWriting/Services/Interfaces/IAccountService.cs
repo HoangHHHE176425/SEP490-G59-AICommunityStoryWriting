@@ -9,8 +9,9 @@ namespace Services.Interfaces
 {
     public interface IAccountService
     {
-        Task ChangePasswordAsync(int userId, ChangePasswordRequest request);
-        Task UpdateProfileAsync(int userId, UpdateProfileRequest request);
-        Task<UserProfileResponse> GetProfileAsync(int userId);
+        Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request);
+        Task UpdateProfileAsync(Guid userId, UpdateProfileRequest request);
+        Task<UserProfileResponse> GetProfileAsync(Guid userId);
+        Task DeleteAccountAsync(Guid userId);
     }
 }

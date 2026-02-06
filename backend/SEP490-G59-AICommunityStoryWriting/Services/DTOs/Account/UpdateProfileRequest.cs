@@ -8,8 +8,12 @@ namespace Services.DTOs.Account
 {
     public class UpdateProfileRequest
     {
-        public string? Nickname { get; set; }
+        public string? DisplayName { get; set; }
+
+        public string? Phone { get; set; }
+        public string? IdNumber { get; set; }
         public string? Bio { get; set; }
+        public string? Description { get; set; }
         public string? AvatarUrl { get; set; }
     }
 }

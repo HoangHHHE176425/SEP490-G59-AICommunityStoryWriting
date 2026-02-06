@@ -3,17 +3,21 @@ using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
 
-public partial class AuthToken
+public partial class Notification
 {
     public Guid Id { get; set; }
 
     public Guid? UserId { get; set; }
 
-    public string RefreshToken { get; set; } = null!;
+    public string? Type { get; set; }
 
-    public string? DeviceInfo { get; set; }
+    public string? Title { get; set; }
 
-    public DateTime ExpiresAt { get; set; }
+    public string? Content { get; set; }
+
+    public string? LinkUrl { get; set; }
+
+    public bool? IsRead { get; set; }
 
     public DateTime? CreatedAt { get; set; }
 

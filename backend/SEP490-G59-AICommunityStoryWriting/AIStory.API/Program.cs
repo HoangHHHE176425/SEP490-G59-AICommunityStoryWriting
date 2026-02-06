@@ -29,11 +29,11 @@ namespace AIStory.API
             builder.Services.AddScoped<JwtHelper>();
 
             builder.Services.AddScoped<IUserRepository, UserRepository>();
-
+            builder.Services.AddScoped<IOtpRepository, OtpRepository>();
 
             builder.Services.AddScoped<IAuthService, AuthService>();
             builder.Services.AddScoped<IAccountService, AccountService>();
-
+            builder.Services.AddScoped<IEmailService, EmailService>();
 
 
             var jwtKey = builder.Configuration["Jwt:Key"];

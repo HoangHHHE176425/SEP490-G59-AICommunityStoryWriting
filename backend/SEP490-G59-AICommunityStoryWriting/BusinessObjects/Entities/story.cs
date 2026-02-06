@@ -5,11 +5,9 @@ namespace BusinessObjects.Entities;
 
 public partial class Story
 {
-    public int Id { get; set; }
+    public Guid Id { get; set; }
 
-    public int? AuthorId { get; set; }
-
-    public int? CategoryId { get; set; }
+    public Guid? AuthorId { get; set; }
 
     public string Title { get; set; } = null!;
 
@@ -21,17 +19,9 @@ public partial class Story
 
     public string? Status { get; set; }
 
-    public string? SaleType { get; set; }
-
-    public int? FullStoryPrice { get; set; }
-
-    public int? ExpectedChapters { get; set; }
-
-    public int? ReleaseFrequencyDays { get; set; }
+    public string StoryProgressStatus { get; set; } = null!;
 
     public DateTime? LastPublishedAt { get; set; }
-
-    public string? AccessType { get; set; }
 
     public int? TotalChapters { get; set; }
 
@@ -53,7 +43,19 @@ public partial class Story
 
     public virtual User? Author { get; set; }
 
-    public virtual Category? Category { get; set; }
-
     public virtual ICollection<Chapter> Chapters { get; set; } = new List<Chapter>();
+
+    public virtual ICollection<Comment> Comments { get; set; } = new List<Comment>();
+
+    public virtual ICollection<IdeaPost> IdeaPosts { get; set; } = new List<IdeaPost>();
+
+    public virtual ICollection<Purchase> Purchases { get; set; } = new List<Purchase>();
+
+    public virtual ICollection<Rating> Ratings { get; set; } = new List<Rating>();
+
+    public virtual ICollection<StoryCommitment> StoryCommitments { get; set; } = new List<StoryCommitment>();
+
+    public virtual ICollection<UserLibrary> UserLibraries { get; set; } = new List<UserLibrary>();
+
+    public virtual ICollection<Category> Categories { get; set; } = new List<Category>();
 }
