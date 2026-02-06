@@ -17,15 +17,7 @@ namespace Services.Implementations
 
         public CategoryResponseDto Create(CreateCategoryRequestDto request)
         {
-            categories? parent = null;
-            if (request.ParentId.HasValue)
-            {
-                parent = _categoryRepository.GetById(request.ParentId.Value);
-                if (parent == null)
-                    throw new InvalidOperationException($"Parent category with ID {request.ParentId} not found.");
-            }
-
-            var slug = BuildUniqueSlug(request.Name, request.ParentId, parent?.slug, idToExclude: null);
+            var slug = BuildUniqueSlug(request.Name, idToExclude: null);
 
             var category = new categories
             {
@@ -35,7 +27,6 @@ namespace Services.Implementations
                 description = request.Description,
                 icon_url = request.IconUrl,
                 is_active = request.IsActive,
-                parent_id = request.ParentId,
                 created_at = DateTime.Now
             };
 
@@ -53,12 +44,7 @@ namespace Services.Implementations
                 query = query.Where(c => c.is_active == true);
             }
 
-            if (rootsOnly)
-                query = query.Where(c => c.parent_id == null);
-            else if (parentId.HasValue)
-                query = query.Where(c => c.parent_id == parentId.Value);
-
-            var categories = query.OrderBy(c => c.parent_id == null ? 0 : 1).ThenBy(c => c.name).ToList();
+            var categories = query.OrderBy(c => c.name).ToList();
             return categories.Select(c => MapToDto(c));
         }
 
@@ -74,16 +60,6 @@ namespace Services.Implementations
                     c.name.ToLower().Contains(searchLower) ||
                     (c.description != null && c.description.ToLower().Contains(searchLower)) ||
                     (c.slug != null && c.slug.ToLower().Contains(searchLower)));
-            }
-
-            // Parent filter
-            if (queryDto.RootsOnly == true)
-            {
-                query = query.Where(c => c.parent_id == null);
-            }
-            else if (queryDto.ParentId.HasValue)
-            {
-                query = query.Where(c => c.parent_id == queryDto.ParentId.Value);
             }
 
             // Active filter
@@ -169,24 +145,13 @@ namespace Services.Implementations
             if (category == null)
                 return false;
 
-            if (request.ParentId.HasValue)
-            {
-                if (request.ParentId.Value == id)
-                    throw new InvalidOperationException("Category cannot be its own parent.");
-                var parent = _categoryRepository.GetById(request.ParentId.Value);
-                if (parent == null)
-                    throw new InvalidOperationException($"Parent category with ID {request.ParentId} not found.");
-            }
-
-            categories? parentCat = request.ParentId.HasValue ? _categoryRepository.GetById(request.ParentId.Value) : null;
-            var newSlug = BuildUniqueSlug(request.Name, request.ParentId, parentCat?.slug, idToExclude: id);
+            var newSlug = BuildUniqueSlug(request.Name, idToExclude: id);
 
             category.name = request.Name;
             category.slug = newSlug;
             category.description = request.Description;
             category.icon_url = request.IconUrl;
             category.is_active = request.IsActive;
-            category.parent_id = request.ParentId;
 
             _categoryRepository.Update(category);
             return true;
@@ -197,10 +162,6 @@ namespace Services.Implementations
             var category = _categoryRepository.GetById(id);
             if (category == null)
                 return false;
-
-            var hasChildren = _categoryRepository.GetAll().Any(c => c.parent_id == id);
-            if (hasChildren)
-                throw new InvalidOperationException("Cannot delete category that has child categories. Delete or move children first.");
 
             var storyCount = CategoryDAO.GetStoryCountByCategoryId(id);
             if (storyCount > 0)
@@ -299,9 +260,8 @@ namespace Services.Implementations
                 .Replace("ỵ", "y");
         }
 
-        private string BuildUniqueSlug(string name, Guid? parentId, string? parentSlug, Guid? idToExclude)
+        private string BuildUniqueSlug(string name, Guid? idToExclude)
         {
-            // Only use the category's own slug, not parent slug
             var baseSlug = GenerateSlug(name);
             var slug = baseSlug;
             var suffix = 0;
@@ -319,10 +279,6 @@ namespace Services.Implementations
         {
             var storyCount = CategoryDAO.GetStoryCountByCategoryId(category.id);
 
-            categories? parent = category.parent_id.HasValue
-                ? _categoryRepository.GetById(category.parent_id.Value)
-                : null;
-
             return new CategoryResponseDto
             {
                 Id = category.id,
@@ -332,9 +288,7 @@ namespace Services.Implementations
                 IconUrl = category.icon_url,
                 IsActive = category.is_active ?? true,
                 CreatedAt = category.created_at,
-                StoryCount = storyCount,
-                ParentId = category.parent_id,
-                ParentName = parent?.name
+                StoryCount = storyCount
             };
         }
     }

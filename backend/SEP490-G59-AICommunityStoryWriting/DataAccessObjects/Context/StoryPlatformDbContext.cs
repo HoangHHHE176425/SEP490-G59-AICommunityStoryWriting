@@ -284,10 +284,6 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.is_active).HasDefaultValue(true);
             entity.Property(e => e.name).HasMaxLength(100);
             entity.Property(e => e.slug).HasMaxLength(100);
-
-            entity.HasOne(d => d.parent_category).WithMany(p => p.Inverseparent_category)
-                .HasForeignKey(d => d.parent_id)
-                .HasConstraintName("fk_category_parent");
         });
 
         modelBuilder.Entity<chapter_versions>(entity =>

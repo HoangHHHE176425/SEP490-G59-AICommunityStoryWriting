@@ -34,8 +34,7 @@ namespace AIStory.API.Controllers
                     Name = request.Name,
                     Description = request.Description,
                     IsActive = request.IsActive,
-                    IconUrl = iconUrl,
-                    ParentId = request.ParentId
+                    IconUrl = iconUrl
                 };
 
                 var category = _categoryService.Create(dto);
@@ -47,7 +46,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy thể loại. rootsOnly=true: chỉ loại truyện gốc; parentId: thể loại con của parent.</summary>
+        /// <summary>Lấy thể loại</summary>
         [HttpGet]
         public IActionResult GetAll(
             [FromQuery] bool includeInactive = false,
@@ -68,9 +67,7 @@ namespace AIStory.API.Controllers
                     Page = page ?? 1,
                     PageSize = pageSize ?? 20,
                     Search = search,
-                    ParentId = parentId,
                     IsActive = isActive ?? (includeInactive ? null : true),
-                    RootsOnly = rootsOnly,
                     SortBy = sortBy ?? "name",
                     SortOrder = sortOrder ?? "asc"
                 };
@@ -129,8 +126,7 @@ namespace AIStory.API.Controllers
                     Name = request.Name,
                     Description = request.Description,
                     IsActive = request.IsActive,
-                    IconUrl = iconUrl,
-                    ParentId = request.ParentId
+                    IconUrl = iconUrl
                 };
 
                 var updated = _categoryService.Update(id, dto);
