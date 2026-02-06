@@ -1,4 +1,4 @@
-﻿using BusinessObjects.Entities;
+using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Repositories;
 using Services.DTOs.Categories;
