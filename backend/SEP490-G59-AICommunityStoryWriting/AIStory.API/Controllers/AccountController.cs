@@ -19,26 +19,47 @@ namespace AIStory.API.Controllers
             _accountService = accountService;
         }
 
-        private int GetUserIdFromToken()
+        private Guid GetUserIdFromToken()
         {
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+
+            if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out Guid userId))
             {
-                throw new Exception("Invalid Token");
+                throw new Exception("Invalid Token or User ID format");
             }
             return userId;
         }
-
-        [HttpPut("change-password")]
-        public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
+        [Authorize] 
+        [HttpDelete("delete")]
+        public async Task<IActionResult> DeleteAccount()
         {
             try
             {
-                int userId = GetUserIdFromToken();
+                var userId = GetUserIdFromToken();
 
+                await _accountService.DeleteAccountAsync(userId);
+
+                return Ok(new { message = "Tài khoản đã được xóa thành công." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+        [HttpPut("change-password")]
+        public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            try
+            {
+                Guid userId = GetUserIdFromToken(); 
                 await _accountService.ChangePasswordAsync(userId, request);
 
-                return Ok(new { message = "Password changed successfully." });
+                return Ok(new { message = "Đổi mật khẩu thành công!" });
             }
             catch (Exception ex)
             {
@@ -51,11 +72,9 @@ namespace AIStory.API.Controllers
         {
             try
             {
-                int userIdFromToken = GetUserIdFromToken();
-
-                await _accountService.UpdateProfileAsync(userIdFromToken, request);
-
-                return Ok(new { message = "Update thành công!" });
+                Guid userId = GetUserIdFromToken();
+                await _accountService.UpdateProfileAsync(userId, request);
+                return Ok(new { message = "Cập nhật hồ sơ thành công!" });
             }
             catch (Exception ex)
             {
@@ -68,10 +87,8 @@ namespace AIStory.API.Controllers
         {
             try
             {
-                int userId = GetUserIdFromToken();
-
+                Guid userId = GetUserIdFromToken();
                 var profile = await _accountService.GetProfileAsync(userId);
-
                 return Ok(profile);
             }
             catch (Exception ex)

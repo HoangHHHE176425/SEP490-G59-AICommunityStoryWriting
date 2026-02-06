@@ -1,6 +1,7 @@
-﻿using Microsoft.AspNetCore.Identity.Data;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
+using Services.DTOs.Auth; // Đảm bảo namespace chứa VerifyOtpRequest
 using Services.Interfaces;
+
 namespace AIStory.API.Controllers
 {
     [Route("api/[controller]")]
@@ -20,11 +21,26 @@ namespace AIStory.API.Controllers
             try
             {
                 await _authService.RegisterAsync(request);
-                return Ok(new { message = "Registration successful. Please login." });
+                // SỬA MESSAGE: Báo người dùng check mail thay vì bảo login ngay
+                return Ok(new { message = "Registration successful. Please check your email for OTP verification." });
             }
             catch (Exception ex)
             {
-                // Trả về lỗi 400 kèm thông báo từ Service (ví dụ: Email đã tồn tại)
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        // THÊM API MỚI: Xác thực OTP
+        [HttpPost("verify-otp")]
+        public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpRequest request)
+        {
+            try
+            {
+                await _authService.VerifyAccountAsync(request);
+                return Ok(new { message = "Account verified successfully. You can now login." });
+            }
+            catch (Exception ex)
+            {
                 return BadRequest(new { message = ex.Message });
             }
         }
@@ -39,8 +55,47 @@ namespace AIStory.API.Controllers
             }
             catch (Exception ex)
             {
-                // Trả về 401 nếu sai mật khẩu/email
+
                 return Unauthorized(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("forgot-password")]
+        public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            try
+            {
+                await _authService.ForgotPasswordAsync(request);
+
+                return Ok(new { message = "Nếu email tồn tại, mã OTP đã được gửi." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("reset-password")]
+        public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            try
+            {
+                await _authService.ResetPasswordAsync(request);
+                return Ok(new { message = "Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
             }
         }
     }

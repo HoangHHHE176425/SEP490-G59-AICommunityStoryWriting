@@ -1,17 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace BusinessObjects.Entities;
 
 public partial class UserProfile
 {
-    public int Id { get; set; }
-
-    public int UserId { get; set; }
+    public Guid UserId { get; set; }
 
     public string? Nickname { get; set; }
 
     public string? AvatarUrl { get; set; }
+    public string? Phone { get; set; }
+
+    public string? IdNumber { get; set; }
 
     public string? Bio { get; set; }
 

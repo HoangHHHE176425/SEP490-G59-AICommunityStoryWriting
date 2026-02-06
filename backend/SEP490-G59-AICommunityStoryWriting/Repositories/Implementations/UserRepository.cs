@@ -17,7 +17,7 @@ namespace Repositories.Implementations
         public async Task<User?> GetUserByEmail(string email)
             => await UserDAO.Instance.FindUserByEmail(_context, email);
 
-        public async Task<User?> GetUserById(int id)
+        public async Task<User?> GetUserById(Guid id)
             => await UserDAO.Instance.FindUserById(_context, id);
 
         public async Task<bool> IsEmailExist(string email)
@@ -28,7 +28,12 @@ namespace Repositories.Implementations
 
         public async Task UpdateUser(User user)
             => await UserDAO.Instance.UpdateUser(_context, user);
-
+        public async Task<bool> IsNicknameExist(string nickname, Guid currentUserId)
+        {
+            return await UserDAO.Instance.IsNicknameExist(_context, nickname, currentUserId);
+        }
+        public Task DeleteUser(Guid userId)
+         => UserDAO.Instance.SoftDeleteUser(_context, userId);
         public async Task AddRefreshToken(AuthToken token)
             => await UserDAO.Instance.AddToken(_context, token);
     }
