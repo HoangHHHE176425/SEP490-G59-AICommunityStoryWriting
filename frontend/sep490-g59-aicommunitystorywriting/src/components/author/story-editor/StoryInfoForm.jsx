@@ -1,6 +1,14 @@
-// eslint-disable-next-line no-unused-vars
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Plus, ChevronDown } from 'lucide-react';
+import { getCategoriesWithPagination } from '../../../api/category/categoryApi';
+
+// Parent ID của thể loại gốc (BE) - dùng để lọc thể loại truyện dài / truyện ngắn
+const PARENT_ID_LONG = 'AF3C494B-2A64-45AE-89E9-73998391AB78';  // Truyện dài
+const PARENT_ID_SHORT = 'D488A3A0-5971-42C5-A7E4-CB35BEBBE6B6'; // Truyện ngắn
+
+function normalizeParentId(id) {
+    return (id || '').toString().toUpperCase().replace(/-/g, '');
+}
 
 export function StoryInfoForm({ formData, onChange, onImageUpload }) {
 
@@ -12,32 +20,64 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
         { value: 'short', label: 'Truyện ngắn' }
     ];
 
-    // Categories cho từng loại truyện
-    const categoriesByType = {
-        long: [
-            'Tiên Hiệp', 'Kiếm Hiệp', 'Huyền Huyễn', 'Võng Du',
-            'Khoa Huyễn', 'Hệ Thống', 'Dị Giới', 'Dị Năng',
-            'Quân Sự', 'Lịch Sử', 'Cạnh Kỹ', 'Đô Thị'
-        ],
-        short: [
-            'Ngôn Tình', 'Đam Mỹ', 'Đồng Nhân', 'Nguyên Sang',
-            'Kinh Dị', 'Trinh Thám', 'Học Đường', 'Gia Đấu'
-        ]
-    };
+    const [longCategories, setLongCategories] = useState([]);
+    const [shortCategories, setShortCategories] = useState([]);
+    const [categoriesLoading, setCategoriesLoading] = useState(true);
+    const [categoriesError, setCategoriesError] = useState(null);
 
-    const availableCategories = categoriesByType[formData.storyType] || [];
+    useEffect(() => {
+        let cancelled = false;
+        async function load() {
+            setCategoriesLoading(true);
+            setCategoriesError(null);
+            try {
+                const res = await getCategoriesWithPagination({
+                    page: 1,
+                    pageSize: 500,
+                    excludeRoots: true,
+                    includeInactive: false
+                });
+                const long = [];
+                const short = [];
+                const longId = normalizeParentId(PARENT_ID_LONG);
+                const shortId = normalizeParentId(PARENT_ID_SHORT);
+                (res.items || []).forEach((c) => {
+                    const pid = normalizeParentId(c.parentId);
+                    const item = { id: c.id, name: c.name || '' };
+                    if (pid === longId) long.push(item);
+                    else if (pid === shortId) short.push(item);
+                });
+                if (!cancelled) {
+                    setLongCategories(long);
+                    setShortCategories(short);
+                }
+            } catch (e) {
+                if (!cancelled) {
+                    setCategoriesError(e.message || 'Không tải được thể loại');
+                    setLongCategories([]);
+                    setShortCategories([]);
+                }
+            } finally {
+                if (!cancelled) setCategoriesLoading(false);
+            }
+        }
+        load();
+        return () => { cancelled = true; };
+    }, []);
+
+    const availableCategories = formData.storyType === 'short' ? shortCategories : longCategories;
 
     const handleCategoryToggle = (category) => {
-        const newCategories = formData.categories.includes(category)
-            ? formData.categories.filter(c => c !== category)
-            : [...formData.categories, category];
+        const name = typeof category === 'string' ? category : category.name;
+        const newCategories = formData.categories.includes(name)
+            ? formData.categories.filter(c => c !== name)
+            : [...formData.categories, name];
         onChange('categories', newCategories);
     };
 
     const handleStoryTypeChange = (newType) => {
-        // Reset categories khi đổi loại truyện
-        onChange('storyType', newType);
-        onChange('categories', []);
+        // Reset categories khi đổi loại truyện - cập nhật một lần để tránh state bị ghi đè
+        onChange({ storyType: newType, categories: [] });
     };
 
     return (
@@ -297,40 +337,51 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                         }}>
                             💡 Đang hiển thị thể loại cho <strong>{formData.storyType === 'long' ? 'Truyện dài' : 'Truyện ngắn'}</strong>
                         </div>
+                        {categoriesLoading && (
+                            <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.75rem' }}>Đang tải thể loại...</p>
+                        )}
+                        {categoriesError && (
+                            <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '0.75rem' }}>{categoriesError}</p>
+                        )}
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                            {availableCategories.map((cat) => (
-                                <button
-                                    key={cat}
-                                    type="button"
-                                    onClick={() => {
-                                        if (formData.categories.length < 3 || formData.categories.includes(cat)) {
-                                            handleCategoryToggle(cat);
-                                        }
-                                    }}
-                                    disabled={formData.categories.length >= 3 && !formData.categories.includes(cat)}
-                                    style={{
-                                        padding: '0.5rem 1rem',
-                                        backgroundColor: formData.categories.includes(cat) ? '#13ec5b' : '#ffffff',
-                                        border: '1px solid #e5e7eb',
-                                        borderRadius: '4px',
-                                        fontSize: '0.875rem',
-                                        color: formData.categories.includes(cat) ? '#ffffff' : '#333333',
-                                        cursor: formData.categories.length >= 3 && !formData.categories.includes(cat) ? 'not-allowed' : 'pointer',
-                                        opacity: formData.categories.length >= 3 && !formData.categories.includes(cat) ? 0.5 : 1,
-                                        transition: 'all 0.2s'
-                                    }}
-                                    onMouseEnter={(e) => {
-                                        if (!(formData.categories.length >= 3 && !formData.categories.includes(cat))) {
-                                            e.currentTarget.style.transform = 'scale(1.05)';
-                                        }
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        e.currentTarget.style.transform = 'scale(1)';
-                                    }}
-                                >
-                                    {cat}
-                                </button>
-                            ))}
+                            {!categoriesLoading && availableCategories.map((cat) => {
+                                const name = cat.name;
+                                const isSelected = formData.categories.includes(name);
+                                const isDisabled = formData.categories.length >= 3 && !isSelected;
+                                return (
+                                    <button
+                                        key={cat.id}
+                                        type="button"
+                                        onClick={() => {
+                                            if (formData.categories.length < 3 || isSelected) {
+                                                handleCategoryToggle(cat);
+                                            }
+                                        }}
+                                        disabled={isDisabled}
+                                        style={{
+                                            padding: '0.5rem 1rem',
+                                            backgroundColor: isSelected ? '#13ec5b' : '#ffffff',
+                                            border: '1px solid #e5e7eb',
+                                            borderRadius: '4px',
+                                            fontSize: '0.875rem',
+                                            color: isSelected ? '#ffffff' : '#333333',
+                                            cursor: isDisabled ? 'not-allowed' : 'pointer',
+                                            opacity: isDisabled ? 0.5 : 1,
+                                            transition: 'all 0.2s'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            if (!isDisabled) {
+                                                e.currentTarget.style.transform = 'scale(1.05)';
+                                            }
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.transform = 'scale(1)';
+                                        }}
+                                    >
+                                        {name}
+                                    </button>
+                                );
+                            })}
                         </div>
                     </div>
 
