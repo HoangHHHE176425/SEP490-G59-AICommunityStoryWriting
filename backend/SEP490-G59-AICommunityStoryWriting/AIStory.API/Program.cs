@@ -32,6 +32,7 @@ namespace AIStory.API
                             "http://localhost:5210",
                             "http://localhost:5000",
                             "http://localhost:3000",
+                            "http://localhost:5173", // Vite default port
                             "http://localhost:8080",
                             "https://localhost:7258",
                             "http://localhost:16164"
