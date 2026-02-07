@@ -209,7 +209,7 @@ namespace Services.Implementations
 
             if (!string.IsNullOrWhiteSpace(request.Status))
             {
-                var validStatuses = new[] { "DRAFT", "PUBLISHED", "COMPLETED", "CANCELLED" };
+                var validStatuses = new[] { "DRAFT", "PENDING_REVIEW", "REJECTED", "PUBLISHED", "HIDDEN", "COMPLETED", "CANCELLED" };
                 if (!validStatuses.Contains(request.Status.ToUpper()))
                 {
                     throw new ArgumentException($"Invalid status. Must be one of: {string.Join(", ", validStatuses)}");

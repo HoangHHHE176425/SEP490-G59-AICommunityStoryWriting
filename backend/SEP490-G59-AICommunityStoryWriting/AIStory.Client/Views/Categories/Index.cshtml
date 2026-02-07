@@ -29,13 +29,6 @@
                             </select>
                         </div>
                         <div class="col-md-2">
-                            <label class="form-label">Loại</label>
-                            <select class="form-select" id="viewMode" onchange="loadCategories()">
-                                <option value="">Tất cả</option>
-                                <option value="roots">Chỉ loại gốc</option>
-                            </select>
-                        </div>
-                        <div class="col-md-2">
                             <label class="form-label">Sắp xếp</label>
                             <select class="form-select" id="sortBy" onchange="loadCategories()">
                                 <option value="name">Tên</option>
@@ -80,7 +73,6 @@
                                 <tr>
                                     <th>ID</th>
                                     <th>Tên</th>
-                                    <th>Thuộc loại</th>
                                     <th>Slug</th>
                                     <th>Mô tả</th>
                                     <th>Số truyện</th>
@@ -119,13 +111,6 @@
             <div class="modal-body">
                 <form id="categoryForm">
                     <input type="hidden" id="categoryId">
-                    <div class="mb-3">
-                        <label for="categoryParentId" class="form-label">Thuộc loại cha</label>
-                        <select class="form-select" id="categoryParentId">
-                            <option value="">— Loại truyện (gốc) —</option>
-                        </select>
-                        <small class="form-text text-muted">Để trống = Loại truyện (Truyện ngắn, Truyện dài...). Chọn một = Thể loại con (A, B, C...).</small>
-                    </div>
                     <div class="mb-3">
                         <label for="categoryName" class="form-label">Tên thể loại <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="categoryName" required>
@@ -185,7 +170,6 @@
                 currentPage = page;
                 const search = document.getElementById('searchInput').value.trim();
                 const statusFilter = document.getElementById('statusFilter').value;
-                const viewMode = document.getElementById('viewMode').value;
                 const sortBy = document.getElementById('sortBy').value;
                 const sortOrder = document.getElementById('sortOrder').value;
                 const pageSize = parseInt(document.getElementById('pageSize').value);
@@ -196,7 +180,6 @@
                     pageSize: pageSize,
                     search: search || null,
                     isActive: statusFilter ? (statusFilter === 'true') : null,
-                    rootsOnly: viewMode === 'roots' ? true : null,
                     sortBy: sortBy,
                     sortOrder: sortOrder
                 };
@@ -222,7 +205,7 @@
             const tbody = document.getElementById('categoriesTableBody');
 
             if (categories.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" class="text-center">Không có dữ liệu</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center">Không có dữ liệu</td></tr>';
                 return;
             }
 
@@ -265,16 +248,13 @@
         }
 
         function categoryRow(cat, isChild) {
-            const indent = isChild ? '<span class="ms-3 text-muted">↳</span> ' : '';
             return `
                 <tr>
                     <td>${cat.id}</td>
                     <td>
-                        ${indent}
                         ${cat.iconUrl ? `<img src="http://localhost:5000${cat.iconUrl}" alt="${cat.name}" class="rounded" style="width:32px;height:32px;object-fit:cover;">` : '<i class="bi bi-tag text-muted"></i>'}
                         <strong class="ms-2">${cat.name}</strong>
                     </td>
-                    <td>${cat.parentName || '<em>Loại truyện (gốc)</em>'}</td>
                     <td><code>${cat.slug}</code></td>
                     <td>${cat.description || '-'}</td>
                     <td><span class="badge bg-info">${cat.storyCount || 0}</span></td>
@@ -306,20 +286,11 @@
             document.getElementById('categoryIsActive').checked = true;
             document.getElementById('categoryIconPreview').innerHTML = '';
             document.getElementById('categoryIconImage').value = '';
-            await loadParentDropdown();
             new bootstrap.Modal(document.getElementById('categoryModal')).show();
-        }
-
-        async function loadParentDropdown() {
-            const roots = await ApiService.getCategories(true, null, true);
-            const sel = document.getElementById('categoryParentId');
-            sel.innerHTML = '<option value="">— Loại truyện (gốc) —</option>' +
-                roots.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
         }
 
         async function editCategory(id) {
             try {
-                await loadParentDropdown();
                 const category = await ApiService.getCategoryById(id);
                 editingCategoryId = id;
                 document.getElementById('categoryModalTitle').textContent = 'Sửa thể loại';
@@ -327,7 +298,6 @@
                 document.getElementById('categoryName').value = category.name;
                 document.getElementById('categoryDescription').value = category.description || '';
                 document.getElementById('categoryIsActive').checked = category.isActive;
-                document.getElementById('categoryParentId').value = category.parentId ?? '';
                 document.getElementById('categoryIconImage').value = '';
                 if (category.iconUrl) {
                     document.getElementById('categoryIconPreview').innerHTML =
@@ -367,9 +337,6 @@
                 formData.append('Name', document.getElementById('categoryName').value);
                 formData.append('Description', document.getElementById('categoryDescription').value);
                 formData.append('IsActive', document.getElementById('categoryIsActive').checked);
-
-                const parentId = document.getElementById('categoryParentId').value;
-                if (parentId) formData.append('ParentId', parentId);
 
                 const iconFile = document.getElementById('categoryIconImage').files[0];
                 if (iconFile) {
