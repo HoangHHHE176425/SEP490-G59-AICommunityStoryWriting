@@ -6,6 +6,5 @@
         public string? Description { get; set; }
         public string? IconUrl { get; set; }
         public bool IsActive { get; set; } = true;
-        public Guid? ParentId { get; set; }
     }
 }
