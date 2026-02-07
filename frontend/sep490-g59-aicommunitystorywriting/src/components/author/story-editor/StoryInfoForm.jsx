@@ -1,63 +1,9 @@
-import { useState, useEffect } from 'react';
 import { X, Plus, ChevronDown } from 'lucide-react';
-import { getCategoriesWithPagination } from '../../../api/category/categoryApi';
 
 export function StoryInfoForm({ formData, onChange, onImageUpload }) {
 
     const statusOptions = ['Đang ra', 'Hoàn thành', 'Tạm dừng'];
     const ageRatings = ['Phù hợp mọi lứa tuổi', 'Từ 13 tuổi', 'Từ 16 tuổi', 'Từ 18 tuổi'];
-
-    const storyTypes = [
-        { value: 'long', label: 'Truyện dài' },
-        { value: 'short', label: 'Truyện ngắn' }
-    ];
-
-    const [allCategories, setAllCategories] = useState([]);
-    const [categoriesLoading, setCategoriesLoading] = useState(true);
-    const [categoriesError, setCategoriesError] = useState(null);
-
-    useEffect(() => {
-        let cancelled = false;
-        async function load() {
-            setCategoriesLoading(true);
-            setCategoriesError(null);
-            try {
-                const res = await getCategoriesWithPagination({
-                    page: 1,
-                    pageSize: 500,
-                    includeInactive: false
-                });
-                const items = (res.items || []).map((c) => ({ id: c.id, name: c.name || '' }));
-                if (!cancelled) {
-                    setAllCategories(items);
-                }
-            } catch (e) {
-                if (!cancelled) {
-                    setCategoriesError(e.message || 'Không tải được thể loại');
-                    setAllCategories([]);
-                }
-            } finally {
-                if (!cancelled) setCategoriesLoading(false);
-            }
-        }
-        load();
-        return () => { cancelled = true; };
-    }, []);
-
-    const availableCategories = allCategories;
-
-    const handleCategoryToggle = (category) => {
-        const name = typeof category === 'string' ? category : category.name;
-        const newCategories = formData.categories.includes(name)
-            ? formData.categories.filter(c => c !== name)
-            : [...formData.categories, name];
-        onChange('categories', newCategories);
-    };
-
-    const handleStoryTypeChange = (newType) => {
-        // Reset categories khi đổi loại truyện - cập nhật một lần để tránh state bị ghi đè
-        onChange({ storyType: newType, categories: [] });
-    };
 
     return (
         <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '2rem' }}>
@@ -185,80 +131,41 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                         </div>
                     </div>
 
-                    {/* Status and Story Type */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                        <div>
-                            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                Trạng thái
-                            </label>
-                            <div style={{ position: 'relative' }}>
-                                <select
-                                    value={formData.status}
-                                    onChange={(e) => onChange('status', e.target.value)}
-                                    style={{
-                                        width: '100%',
-                                        padding: '0.75rem',
-                                        backgroundColor: '#f9fafb',
-                                        border: '1px solid #e5e7eb',
-                                        borderRadius: '4px',
-                                        fontSize: '0.875rem',
-                                        outline: 'none',
-                                        appearance: 'none',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    {statusOptions.map(opt => (
-                                        <option key={opt} value={opt}>{opt}</option>
-                                    ))}
-                                </select>
-                                <ChevronDown style={{
-                                    position: 'absolute',
-                                    right: '0.75rem',
-                                    top: '50%',
-                                    transform: 'translateY(-50%)',
-                                    width: '16px',
-                                    height: '16px',
-                                    pointerEvents: 'none',
-                                    color: '#6b7280'
-                                }} />
-                            </div>
-                        </div>
-
-                        <div>
-                            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                Thể loại <span style={{ color: '#ef4444' }}>*</span>
-                            </label>
-                            <div style={{ position: 'relative' }}>
-                                <select
-                                    value={formData.storyType}
-                                    onChange={(e) => handleStoryTypeChange(e.target.value)}
-                                    style={{
-                                        width: '100%',
-                                        padding: '0.75rem',
-                                        backgroundColor: '#f9fafb',
-                                        border: '1px solid #e5e7eb',
-                                        borderRadius: '4px',
-                                        fontSize: '0.875rem',
-                                        outline: 'none',
-                                        appearance: 'none',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    {storyTypes.map(type => (
-                                        <option key={type.value} value={type.value}>{type.label}</option>
-                                    ))}
-                                </select>
-                                <ChevronDown style={{
-                                    position: 'absolute',
-                                    right: '0.75rem',
-                                    top: '50%',
-                                    transform: 'translateY(-50%)',
-                                    width: '16px',
-                                    height: '16px',
-                                    pointerEvents: 'none',
-                                    color: '#6b7280'
-                                }} />
-                            </div>
+                    {/* Status */}
+                    <div>
+                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                            Trạng thái
+                        </label>
+                        <div style={{ position: 'relative' }}>
+                            <select
+                                value={formData.status}
+                                onChange={(e) => onChange('status', e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    padding: '0.75rem',
+                                    backgroundColor: '#f9fafb',
+                                    border: '1px solid #e5e7eb',
+                                    borderRadius: '4px',
+                                    fontSize: '0.875rem',
+                                    outline: 'none',
+                                    appearance: 'none',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                {statusOptions.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                            </select>
+                            <ChevronDown style={{
+                                position: 'absolute',
+                                right: '0.75rem',
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                width: '16px',
+                                height: '16px',
+                                pointerEvents: 'none',
+                                color: '#6b7280'
+                            }} />
                         </div>
                     </div>
 
@@ -297,70 +204,6 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                                 pointerEvents: 'none',
                                 color: '#6b7280'
                             }} />
-                        </div>
-                    </div>
-
-                    {/* Categories */}
-                    <div>
-                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                            Thể loại chi tiết (Chọn tối đa 3)
-                        </label>
-                        <div style={{
-                            padding: '0.75rem',
-                            backgroundColor: '#f0fdf4',
-                            border: '1px solid #bbf7d0',
-                            borderRadius: '4px',
-                            fontSize: '0.75rem',
-                            color: '#166534',
-                            marginBottom: '0.75rem'
-                        }}>
-                            💡 Đang hiển thị thể loại cho <strong>{formData.storyType === 'long' ? 'Truyện dài' : 'Truyện ngắn'}</strong>
-                        </div>
-                        {categoriesLoading && (
-                            <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.75rem' }}>Đang tải thể loại...</p>
-                        )}
-                        {categoriesError && (
-                            <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '0.75rem' }}>{categoriesError}</p>
-                        )}
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                            {!categoriesLoading && availableCategories.map((cat) => {
-                                const name = cat.name;
-                                const isSelected = formData.categories.includes(name);
-                                const isDisabled = formData.categories.length >= 3 && !isSelected;
-                                return (
-                                    <button
-                                        key={cat.id}
-                                        type="button"
-                                        onClick={() => {
-                                            if (formData.categories.length < 3 || isSelected) {
-                                                handleCategoryToggle(cat);
-                                            }
-                                        }}
-                                        disabled={isDisabled}
-                                        style={{
-                                            padding: '0.5rem 1rem',
-                                            backgroundColor: isSelected ? '#13ec5b' : '#ffffff',
-                                            border: '1px solid #e5e7eb',
-                                            borderRadius: '4px',
-                                            fontSize: '0.875rem',
-                                            color: isSelected ? '#ffffff' : '#333333',
-                                            cursor: isDisabled ? 'not-allowed' : 'pointer',
-                                            opacity: isDisabled ? 0.5 : 1,
-                                            transition: 'all 0.2s'
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            if (!isDisabled) {
-                                                e.currentTarget.style.transform = 'scale(1.05)';
-                                            }
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.currentTarget.style.transform = 'scale(1)';
-                                        }}
-                                    >
-                                        {name}
-                                    </button>
-                                );
-                            })}
                         </div>
                     </div>
 
