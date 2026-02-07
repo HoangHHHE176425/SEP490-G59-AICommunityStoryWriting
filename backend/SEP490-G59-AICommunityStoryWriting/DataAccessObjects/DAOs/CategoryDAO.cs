@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
 
