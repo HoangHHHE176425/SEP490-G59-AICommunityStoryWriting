@@ -10,13 +10,15 @@ import Profile from './pages/profile/Profile';
 import { ChapterReader } from './pages/chapter-detail/ChapterReader';
 import { AuthorStoryManagement } from './pages/author/AuthorStoryManagement';
 import { StoryBrowse } from './pages/story-list/StoryBrowse';
+import AboutUs from './pages/aboutus/AboutUs';
 
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Homepage />} />
+          <Route path="/" element={<AboutUs />} />
+          <Route path="/home" element={<Homepage />} />
           <Route path="/story" element={<StoryDetail />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/login" element={<Login />} />
@@ -26,6 +28,7 @@ export default function App() {
           <Route path="/chapter" element={<ChapterReader />} />
           <Route path="/author" element={<AuthorStoryManagement />} />
           <Route path="/story-list" element={<StoryBrowse />} />
+          <Route path="/about-us" element={<AboutUs />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

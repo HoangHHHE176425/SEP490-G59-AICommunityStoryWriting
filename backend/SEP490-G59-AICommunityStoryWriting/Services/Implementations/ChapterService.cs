@@ -52,7 +52,7 @@ namespace Services.Implementations
             // Determine status - default to DRAFT if not specified or invalid
             var status = "DRAFT";
             var publishedAt = (DateTime?)null;
-            var validStatuses = new[] { "DRAFT", "PUBLISHED", "ARCHIVED" };
+            var validStatuses = new[] { "DRAFT", "PENDING_REVIEW", "REJECTED", "PUBLISHED", "HIDDEN", "ARCHIVED" };
             if (!string.IsNullOrWhiteSpace(request.Status) && validStatuses.Contains(request.Status.ToUpper()))
             {
                 status = request.Status.ToUpper();
@@ -190,7 +190,7 @@ namespace Services.Implementations
 
             if (!string.IsNullOrWhiteSpace(request.Status))
             {
-                var validStatuses = new[] { "DRAFT", "PUBLISHED", "ARCHIVED" };
+                var validStatuses = new[] { "DRAFT", "PENDING_REVIEW", "REJECTED", "PUBLISHED", "HIDDEN", "ARCHIVED" };
                 if (!validStatuses.Contains(request.Status.ToUpper()))
                 {
                     throw new ArgumentException($"Invalid status. Must be one of: {string.Join(", ", validStatuses)}");
