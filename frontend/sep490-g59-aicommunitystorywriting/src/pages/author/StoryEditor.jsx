@@ -108,10 +108,6 @@ export function StoryEditor({ story, onSave, onCancel }) {
             showToast('Vui lòng nhập tên truyện', 'error');
             return false;
         }
-        if (formData.categories.length === 0) {
-            showToast('Vui lòng chọn ít nhất 1 thể loại', 'error');
-            return false;
-        }
         if (!formData.cover) {
             showToast('Vui lòng tải ảnh bìa lên', 'error');
             return false;
@@ -235,14 +231,6 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                     <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Tên truyện:</div>
                                         <div style={{ fontSize: '0.875rem', color: '#333333', fontWeight: 500 }}>{formData.title}</div>
-                                    </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
-                                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Loại truyện:</div>
-                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>{formData.storyType === 'long' ? 'Truyện dài' : 'Truyện ngắn'}</div>
-                                    </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
-                                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Thể loại:</div>
-                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>{formData.categories.join(', ')}</div>
                                     </div>
                                     <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Số chương:</div>
