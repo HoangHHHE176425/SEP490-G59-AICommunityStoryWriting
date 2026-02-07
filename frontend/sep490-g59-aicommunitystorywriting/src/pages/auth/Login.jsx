@@ -38,7 +38,7 @@ export default function Login() {
         try {
             const result = await login(formData.email, formData.password);
             if (result.success) {
-                navigate('/');
+                navigate('/home');
             } else {
                 setError(result.message || 'Đăng nhập thất bại');
             }
@@ -55,7 +55,7 @@ export default function Login() {
         try {
             const result = await loginWithGoogle();
             if (result.success) {
-                navigate('/');
+                navigate('/home');
             } else {
                 setError('Đăng nhập Google thất bại');
             }
@@ -72,7 +72,7 @@ export default function Login() {
         try {
             const result = await loginWithFacebook();
             if (result.success) {
-                navigate('/');
+                navigate('/home');
             } else {
                 setError('Đăng nhập Facebook thất bại');
             }
