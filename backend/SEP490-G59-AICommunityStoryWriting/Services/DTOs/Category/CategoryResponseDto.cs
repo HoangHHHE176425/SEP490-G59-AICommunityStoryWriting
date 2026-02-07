@@ -10,7 +10,5 @@
         public bool IsActive { get; set; }
         public DateTime? CreatedAt { get; set; }
         public int StoryCount { get; set; }
-        public Guid? ParentId { get; set; }
-        public string? ParentName { get; set; }
     }
 }
