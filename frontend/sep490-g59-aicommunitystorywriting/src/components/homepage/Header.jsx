@@ -7,8 +7,7 @@ export function Header() {
     const navigate = useNavigate();
     const { user, logout, isAuthenticated } = useAuth();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const [isShortStoryOpen, setIsShortStoryOpen] = useState(false);
-    const [isLongStoryOpen, setIsLongStoryOpen] = useState(false);
+    const [isGenreOpen, setIsGenreOpen] = useState(false);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
     const userCoins = user?.coins || 0;
@@ -35,14 +34,14 @@ export function Header() {
     ];
 
     return (
-        <header className="sticky top-0 z-50 w-full bg-white/80 dark:bg-background-dark/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800">
+        <header className="sticky top-0 z-50 w-full bg-slate-900/95 backdrop-blur-md border-b border-slate-700/50">
             <div className="max-w-[1280px] mx-auto px-4 h-16 flex items-center justify-between gap-8">
                 {/* Logo & Brand */}
-                <Link to="/" className="flex items-center gap-2 shrink-0 hover:opacity-80 transition-opacity">
+                <Link to="/home" className="flex items-center gap-2 shrink-0 hover:opacity-80 transition-opacity">
                     <div className="size-9 bg-primary rounded-lg flex items-center justify-center text-white">
                         <BookOpen className="w-5 h-5" />
                     </div>
-                    <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">Waka</h1>
+                    <h1 className="text-xl font-bold tracking-tight text-white">CSW_AI</h1>
                 </Link>
 
                 {/* Search Bar (Center) */}
@@ -52,7 +51,7 @@ export function Header() {
                             <Search className="w-5 h-5" />
                         </div>
                         <input
-                            className="block w-full pl-10 pr-4 py-2 bg-slate-100 dark:bg-slate-800 border-none rounded-full text-sm focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500 outline-none"
+                            className="block w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-full text-sm focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-slate-500 outline-none text-white"
                             placeholder="Tìm kiếm truyện, tác giả, thể loại..."
                             type="text"
                         />
@@ -61,24 +60,22 @@ export function Header() {
 
                 {/* Main Nav & User Actions */}
                 <nav className="flex items-center gap-6">
-                    <div className="hidden lg:flex items-center gap-6 text-sm font-semibold text-slate-600 dark:text-slate-300">
-                        {/* Truyện ngắn with dropdown */}
+                    <div className="hidden lg:flex items-center gap-6 text-sm font-semibold text-slate-300">
+                        <Link to="/home" className="hover:text-primary transition-colors">Trang chủ</Link>
+                        {/* Thể loại dropdown */}
                         <div className="relative group">
                             <button
                                 className="flex items-center gap-1 hover:text-primary transition-colors"
-                                onClick={() => {
-                                    setIsShortStoryOpen(!isShortStoryOpen);
-                                    setIsLongStoryOpen(false);
-                                }}
-                                onBlur={() => setTimeout(() => setIsShortStoryOpen(false), 200)}
+                                onClick={() => setIsGenreOpen(!isGenreOpen)}
+                                onBlur={() => setTimeout(() => setIsGenreOpen(false), 200)}
                             >
-                                Truyện ngắn
-                                <ChevronDown className={`w-4 h-4 transition-transform ${isShortStoryOpen ? 'rotate-180' : ''}`} />
+                                Thể loại
+                                <ChevronDown className={`w-4 h-4 transition-transform ${isGenreOpen ? 'rotate-180' : ''}`} />
                             </button>
 
-                            {isShortStoryOpen && (
+                            {isGenreOpen && (
                                 <div
-                                    className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl overflow-hidden"
+                                    className="absolute top-full left-0 mt-2 w-56 bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden"
                                     onMouseDown={(e) => e.preventDefault()}
                                 >
                                     <div className="grid grid-cols-1 py-2">
@@ -86,41 +83,7 @@ export function Header() {
                                             <a
                                                 key={genre}
                                                 href="#"
-                                                className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
-                                            >
-                                                {genre}
-                                            </a>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Truyện dài with dropdown */}
-                        <div className="relative group">
-                            <button
-                                className="flex items-center gap-1 hover:text-primary transition-colors"
-                                onClick={() => {
-                                    setIsLongStoryOpen(!isLongStoryOpen);
-                                    setIsShortStoryOpen(false);
-                                }}
-                                onBlur={() => setTimeout(() => setIsLongStoryOpen(false), 200)}
-                            >
-                                Truyện dài
-                                <ChevronDown className={`w-4 h-4 transition-transform ${isLongStoryOpen ? 'rotate-180' : ''}`} />
-                            </button>
-
-                            {isLongStoryOpen && (
-                                <div
-                                    className="absolute top-full left-0 mt-2 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl overflow-hidden"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                >
-                                    <div className="grid grid-cols-1 py-2">
-                                        {genres.map((genre) => (
-                                            <a
-                                                key={genre}
-                                                href="#"
-                                                className="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
+                                                className="px-4 py-2 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
                                             >
                                                 {genre}
                                             </a>
@@ -131,23 +94,24 @@ export function Header() {
                         </div>
 
                         <a className="hover:text-primary transition-colors" href="#">Bài viết</a>
+                        <Link to="/about-us" className="hover:text-primary transition-colors">Về chúng tôi</Link>
                         <a className="hover:text-primary transition-colors" href="#">Đăng bài</a>
                     </div>
 
-                    <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden lg:block"></div>
+                    <div className="h-6 w-px bg-slate-700 hidden lg:block"></div>
 
                     <div className="flex items-center gap-3">
                         {isAuthenticated ? (
                             <>
                                 {/* Coin Balance */}
-                                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-full">
-                                    <Coins className="w-4 h-4 text-amber-500" />
-                                    <span className="text-sm font-bold text-amber-700 dark:text-amber-400">{userCoins.toLocaleString()}</span>
+                                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 border border-amber-700/50 rounded-full">
+                                    <Coins className="w-4 h-4 text-amber-400" />
+                                    <span className="text-sm font-bold text-amber-400">{userCoins.toLocaleString()}</span>
                                 </div>
 
-                                <button className="p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors relative">
+                                <button className="p-2 text-slate-300 hover:bg-slate-800 rounded-full transition-colors relative">
                                     <Bell className="w-5 h-5" />
-                                    <span className="absolute top-2 right-2 size-2 bg-primary border-2 border-white dark:border-background-dark rounded-full"></span>
+                                    <span className="absolute top-2 right-2 size-2 bg-primary border-2 border-slate-900 rounded-full"></span>
                                 </button>
 
                                 <button className="hidden sm:flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all">
@@ -155,49 +119,54 @@ export function Header() {
                                     Viết truyện
                                 </button>
 
-                                {/* User Avatar with Dropdown */}
-                                <div className="relative">
-                                    <button
-                                        className="size-9 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden border-2 border-slate-200 dark:border-slate-800 hover:border-primary transition-colors"
-                                        onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                                        onBlur={() => setTimeout(() => setIsUserMenuOpen(false), 200)}
+                                {/* User Avatar - click to Homepage; Chevron for user menu */}
+                                <div className="relative flex items-center gap-0.5">
+                                    <Link
+                                        to="/home"
+                                        className="block size-9 rounded-full overflow-hidden border-2 border-slate-700 hover:border-primary transition-colors shrink-0"
                                     >
                                         <img
                                             alt="User Avatar"
                                             className="w-full h-full object-cover"
                                             src={user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'}
                                         />
+                                    </Link>
+                                    <button
+                                        className="p-1 -ml-1 text-slate-400 hover:text-primary rounded transition-colors"
+                                        onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                                        onBlur={() => setTimeout(() => setIsUserMenuOpen(false), 200)}
+                                    >
+                                        <ChevronDown className={`w-4 h-4 transition-transform ${isUserMenuOpen ? 'rotate-180' : ''}`} />
                                     </button>
-
                                     {isUserMenuOpen && (
-                                        <div className="absolute top-full right-0 mt-2 w-56 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl overflow-hidden">
+                                        <div
+                                            className="absolute top-full right-0 mt-2 w-56 bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden z-50"
+                                            onMouseDown={(e) => e.preventDefault()}
+                                        >
                                             <div className="py-2">
-                                                <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-                                                    <p className="font-semibold text-slate-900 dark:text-white">{user?.name || 'Người dùng'}</p>
-                                                    <p className="text-sm text-slate-500 dark:text-slate-400">{user?.email || ''}</p>
+                                                <div className="px-4 py-3 border-b border-slate-700">
+                                                    <p className="font-semibold text-white">{user?.name || 'Người dùng'}</p>
+                                                    <p className="text-sm text-slate-400">{user?.email || ''}</p>
                                                 </div>
-
                                                 <Link
                                                     to="/profile"
-                                                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
+                                                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
                                                     onClick={() => setIsUserMenuOpen(false)}
                                                 >
                                                     <User className="w-4 h-4" />
                                                     Thông tin cá nhân
                                                 </Link>
-
                                                 <a
                                                     href="#"
-                                                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
+                                                    className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
                                                 >
                                                     <Library className="w-4 h-4" />
                                                     Tủ sách
                                                 </a>
-
-                                                <div className="border-t border-slate-200 dark:border-slate-700 mt-1 pt-1">
+                                                <div className="border-t border-slate-700 mt-1 pt-1">
                                                     <button
                                                         onClick={handleLogout}
-                                                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                                                        className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:bg-red-950/30 transition-colors"
                                                     >
                                                         <LogOut className="w-4 h-4" />
                                                         Đăng xuất
@@ -212,7 +181,7 @@ export function Header() {
                             <>
                                 <Link
                                     to="/login"
-                                    className="hidden sm:flex items-center gap-2 px-4 py-2 text-slate-700 dark:text-slate-300 font-semibold hover:text-primary transition-colors"
+                                    className="hidden sm:flex items-center gap-2 px-4 py-2 text-slate-300 font-semibold hover:text-primary transition-colors"
                                 >
                                     Đăng nhập
                                 </Link>
@@ -226,7 +195,7 @@ export function Header() {
                         )}
 
                         <button
-                            className="lg:hidden p-2"
+                            className="lg:hidden p-2 text-slate-300 hover:text-white"
                             onClick={() => setIsMenuOpen(!isMenuOpen)}
                         >
                             {isMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -237,16 +206,16 @@ export function Header() {
 
             {/* Mobile Menu */}
             {isMenuOpen && (
-                <div className="lg:hidden border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-background-dark">
+                <div className="lg:hidden border-t border-slate-700 bg-slate-900">
                     <div className="max-w-[1280px] mx-auto px-4 py-4 flex flex-col gap-4">
                         {/* Coin Balance Mobile */}
                         {isAuthenticated && (
-                            <div className="flex items-center justify-between p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                            <div className="flex items-center justify-between p-3 bg-amber-950/40 border border-amber-700/50 rounded-lg">
                                 <div className="flex items-center gap-2">
-                                    <Coins className="w-5 h-5 text-amber-500" />
-                                    <span className="font-semibold text-slate-900 dark:text-white">Số dư xu</span>
+                                    <Coins className="w-5 h-5 text-amber-400" />
+                                    <span className="font-semibold text-white">Số dư xu</span>
                                 </div>
-                                <span className="text-lg font-bold text-amber-700 dark:text-amber-400">{userCoins.toLocaleString()}</span>
+                                <span className="text-lg font-bold text-amber-400">{userCoins.toLocaleString()}</span>
                             </div>
                         )}
 
@@ -255,16 +224,17 @@ export function Header() {
                                 <Search className="w-5 h-5" />
                             </div>
                             <input
-                                className="block w-full pl-10 pr-4 py-2 bg-slate-100 dark:bg-slate-800 border-none rounded-full text-sm outline-none"
+                                className="block w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-full text-sm outline-none text-white placeholder:text-slate-500"
                                 placeholder="Tìm kiếm..."
                                 type="text"
                             />
                         </div>
 
                         <div className="flex flex-col gap-3">
+                            <Link to="/home" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Trang chủ</Link>
                             <details className="group">
-                                <summary className="flex items-center justify-between text-slate-600 dark:text-slate-300 hover:text-primary transition-colors font-semibold cursor-pointer list-none">
-                                    Truyện ngắn
+                                <summary className="flex items-center justify-between text-slate-300 hover:text-primary transition-colors font-semibold cursor-pointer list-none">
+                                    Thể loại
                                     <ChevronDown className="w-4 h-4 group-open:rotate-180 transition-transform" />
                                 </summary>
                                 <div className="mt-2 ml-4 flex flex-col gap-2">
@@ -272,7 +242,7 @@ export function Header() {
                                         <a
                                             key={genre}
                                             href="#"
-                                            className="text-sm text-slate-500 dark:text-slate-400 hover:text-primary transition-colors"
+                                            className="text-sm text-slate-400 hover:text-primary transition-colors"
                                         >
                                             {genre}
                                         </a>
@@ -280,40 +250,23 @@ export function Header() {
                                 </div>
                             </details>
 
-                            <details className="group">
-                                <summary className="flex items-center justify-between text-slate-600 dark:text-slate-300 hover:text-primary transition-colors font-semibold cursor-pointer list-none">
-                                    Truyện dài
-                                    <ChevronDown className="w-4 h-4 group-open:rotate-180 transition-transform" />
-                                </summary>
-                                <div className="mt-2 ml-4 flex flex-col gap-2">
-                                    {genres.map((genre) => (
-                                        <a
-                                            key={genre}
-                                            href="#"
-                                            className="text-sm text-slate-500 dark:text-slate-400 hover:text-primary transition-colors"
-                                        >
-                                            {genre}
-                                        </a>
-                                    ))}
-                                </div>
-                            </details>
-
-                            <a className="text-slate-600 dark:text-slate-300 hover:text-primary transition-colors font-semibold" href="#">Bài viết</a>
-                            <a className="text-slate-600 dark:text-slate-300 hover:text-primary transition-colors font-semibold" href="#">Đăng bài</a>
+                            <a className="text-slate-300 hover:text-primary transition-colors font-semibold" href="#">Bài viết</a>
+                            <Link to="/about-us" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Về chúng tôi</Link>
+                            <a className="text-slate-300 hover:text-primary transition-colors font-semibold" href="#">Đăng bài</a>
 
                             {isAuthenticated ? (
                                 <>
-                                    <div className="border-t border-slate-200 dark:border-slate-700 my-2"></div>
+                                    <div className="border-t border-slate-700 my-2"></div>
 
                                     {/* User Menu Mobile */}
                                     <Link
                                         to="/profile"
-                                        className="flex items-center gap-3 text-slate-600 dark:text-slate-300 hover:text-primary transition-colors font-semibold"
+                                        className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold"
                                     >
                                         <User className="w-4 h-4" />
                                         Thông tin cá nhân
                                     </Link>
-                                    <a className="flex items-center gap-3 text-slate-600 dark:text-slate-300 hover:text-primary transition-colors font-semibold" href="#">
+                                    <a className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold" href="#">
                                         <Library className="w-4 h-4" />
                                         Tủ sách
                                     </a>
@@ -327,16 +280,16 @@ export function Header() {
                                 </>
                             ) : (
                                 <>
-                                    <div className="border-t border-slate-200 dark:border-slate-700 my-2"></div>
+                                    <div className="border-t border-slate-700 my-2"></div>
                                     <Link
                                         to="/login"
-                                        className="text-slate-600 dark:text-slate-300 hover:text-primary transition-colors font-semibold"
+                                        className="text-slate-300 hover:text-primary transition-colors font-semibold"
                                     >
                                         Đăng nhập
                                     </Link>
                                     <Link
                                         to="/register"
-                                        className="text-slate-600 dark:text-slate-300 hover:text-primary transition-colors font-semibold"
+                                        className="text-slate-300 hover:text-primary transition-colors font-semibold"
                                     >
                                         Đăng ký
                                     </Link>
