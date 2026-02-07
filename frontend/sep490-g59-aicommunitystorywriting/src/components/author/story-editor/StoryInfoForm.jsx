@@ -2,14 +2,6 @@ import { useState, useEffect } from 'react';
 import { X, Plus, ChevronDown } from 'lucide-react';
 import { getCategoriesWithPagination } from '../../../api/category/categoryApi';
 
-// Parent ID của thể loại gốc (BE) - dùng để lọc thể loại truyện dài / truyện ngắn
-const PARENT_ID_LONG = 'AF3C494B-2A64-45AE-89E9-73998391AB78';  // Truyện dài
-const PARENT_ID_SHORT = 'D488A3A0-5971-42C5-A7E4-CB35BEBBE6B6'; // Truyện ngắn
-
-function normalizeParentId(id) {
-    return (id || '').toString().toUpperCase().replace(/-/g, '');
-}
-
 export function StoryInfoForm({ formData, onChange, onImageUpload }) {
 
     const statusOptions = ['Đang ra', 'Hoàn thành', 'Tạm dừng'];
@@ -20,8 +12,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
         { value: 'short', label: 'Truyện ngắn' }
     ];
 
-    const [longCategories, setLongCategories] = useState([]);
-    const [shortCategories, setShortCategories] = useState([]);
+    const [allCategories, setAllCategories] = useState([]);
     const [categoriesLoading, setCategoriesLoading] = useState(true);
     const [categoriesError, setCategoriesError] = useState(null);
 
@@ -34,28 +25,16 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                 const res = await getCategoriesWithPagination({
                     page: 1,
                     pageSize: 500,
-                    excludeRoots: true,
                     includeInactive: false
                 });
-                const long = [];
-                const short = [];
-                const longId = normalizeParentId(PARENT_ID_LONG);
-                const shortId = normalizeParentId(PARENT_ID_SHORT);
-                (res.items || []).forEach((c) => {
-                    const pid = normalizeParentId(c.parentId);
-                    const item = { id: c.id, name: c.name || '' };
-                    if (pid === longId) long.push(item);
-                    else if (pid === shortId) short.push(item);
-                });
+                const items = (res.items || []).map((c) => ({ id: c.id, name: c.name || '' }));
                 if (!cancelled) {
-                    setLongCategories(long);
-                    setShortCategories(short);
+                    setAllCategories(items);
                 }
             } catch (e) {
                 if (!cancelled) {
                     setCategoriesError(e.message || 'Không tải được thể loại');
-                    setLongCategories([]);
-                    setShortCategories([]);
+                    setAllCategories([]);
                 }
             } finally {
                 if (!cancelled) setCategoriesLoading(false);
@@ -65,7 +44,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
         return () => { cancelled = true; };
     }, []);
 
-    const availableCategories = formData.storyType === 'short' ? shortCategories : longCategories;
+    const availableCategories = allCategories;
 
     const handleCategoryToggle = (category) => {
         const name = typeof category === 'string' ? category : category.name;
