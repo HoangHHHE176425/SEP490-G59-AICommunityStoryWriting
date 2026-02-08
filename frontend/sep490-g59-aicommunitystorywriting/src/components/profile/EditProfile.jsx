@@ -1,19 +1,23 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { User, Mail, Phone, CreditCard, Save, AlertCircle, Lock, Eye, EyeOff, X, CheckCircle } from 'lucide-react';
+import { User, Mail, Phone, CreditCard, Save, AlertCircle, Lock, Eye, EyeOff, X, CheckCircle, ImageUp } from 'lucide-react';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 export default function EditProfile() {
-    const { user } = useAuth();
+    const { user, updateMyProfile, changeMyPassword, uploadMyAvatar } = useAuth();
     const [formData, setFormData] = useState({
-        displayName: user?.name || '',
+        displayName: user?.displayName || '',
         email: user?.email || '',
-        phone: '0912 345 678',
-        idNumber: '001234567890',
-        bio: 'Tôi là một tác giả đam mê văn học, chuyên viết các thể loại võ hiệp và tu tiên. Với hơn 5 năm kinh nghiệm sáng tác, tôi luôn cố gắng mang đến những câu chuyện hấp dẫn và đầy cảm xúc cho độc giả.',
+        phone: user?.phone || '',
+        idNumber: user?.idNumber || '',
+        bio: user?.bio || user?.description || '',
     });
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [avatarLoading, setAvatarLoading] = useState(false);
+    const [avatarError, setAvatarError] = useState('');
+    const [avatarSuccess, setAvatarSuccess] = useState(false);
     
     // Password change modal state
     const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -31,6 +35,16 @@ export default function EditProfile() {
     const [passwordSuccess, setPasswordSuccess] = useState(false);
     const [passwordLoading, setPasswordLoading] = useState(false);
 
+    useEffect(() => {
+        setFormData({
+            displayName: user?.displayName || '',
+            email: user?.email || '',
+            phone: user?.phone || '',
+            idNumber: user?.idNumber || '',
+            bio: user?.bio || user?.description || '',
+        });
+    }, [user]);
+
     const handleChange = (e) => {
         setFormData({
             ...formData,
@@ -46,11 +60,19 @@ export default function EditProfile() {
         setSuccess(false);
         setLoading(true);
 
-        // Mock API call
         try {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            setSuccess(true);
-            setTimeout(() => setSuccess(false), 3000);
+            const res = await updateMyProfile({
+                displayName: formData.displayName,
+                phone: formData.phone || null,
+                idNumber: formData.idNumber || null,
+                bio: formData.bio || null,
+            });
+            if (res.success) {
+                setSuccess(true);
+                setTimeout(() => setSuccess(false), 3000);
+            } else {
+                setError(res.message || 'Cập nhật thất bại');
+            }
         } catch (err) {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
         } finally {
@@ -89,19 +111,26 @@ export default function EditProfile() {
 
         setPasswordLoading(true);
 
-        // Mock API call - replace with actual API
         try {
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            setPasswordSuccess(true);
-            setPasswordData({
-                currentPassword: '',
-                newPassword: '',
-                confirmPassword: '',
+            const res = await changeMyPassword({
+                currentPassword: passwordData.currentPassword,
+                newPassword: passwordData.newPassword,
+                confirmPassword: passwordData.confirmPassword,
             });
-            setTimeout(() => {
-                setShowPasswordModal(false);
-                setPasswordSuccess(false);
-            }, 2000);
+            if (res.success) {
+                setPasswordSuccess(true);
+                setPasswordData({
+                    currentPassword: '',
+                    newPassword: '',
+                    confirmPassword: '',
+                });
+                setTimeout(() => {
+                    setShowPasswordModal(false);
+                    setPasswordSuccess(false);
+                }, 1200);
+            } else {
+                setPasswordError(res.message || 'Mật khẩu hiện tại không đúng hoặc đã xảy ra lỗi.');
+            }
         } catch (err) {
             setPasswordError('Mật khẩu hiện tại không đúng hoặc đã xảy ra lỗi.');
         } finally {
@@ -131,6 +160,66 @@ export default function EditProfile() {
             )}
 
             <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Avatar upload */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                        <div className="flex items-center gap-4">
+                            <div className="size-14 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700">
+                                {user?.avatarUrl ? (
+                                    <img src={resolveBackendUrl(user.avatarUrl)} alt="Avatar" className="w-full h-full object-cover" />
+                                ) : null}
+                            </div>
+                            <div>
+                                <p className="font-semibold text-slate-900 dark:text-white">Ảnh đại diện</p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">JPG/PNG/GIF/WEBP, tối đa 2MB</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                            <input
+                                id="avatar-upload"
+                                type="file"
+                                accept=".jpg,.jpeg,.png,.gif,.webp"
+                                className="hidden"
+                                onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    setAvatarError('');
+                                    setAvatarSuccess(false);
+                                    setAvatarLoading(true);
+                                    try {
+                                        const res = await uploadMyAvatar(file);
+                                        if (res.success) {
+                                            setAvatarSuccess(true);
+                                            setTimeout(() => setAvatarSuccess(false), 2500);
+                                        } else {
+                                            setAvatarError(res.message || 'Upload avatar thất bại');
+                                        }
+                                    } catch {
+                                        setAvatarError('Đã xảy ra lỗi. Vui lòng thử lại.');
+                                    } finally {
+                                        setAvatarLoading(false);
+                                        e.target.value = '';
+                                    }
+                                }}
+                            />
+                            <label
+                                htmlFor="avatar-upload"
+                                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold cursor-pointer transition-all ${
+                                    avatarLoading
+                                        ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 cursor-not-allowed'
+                                        : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200'
+                                }`}
+                            >
+                                <ImageUp className="w-4 h-4" />
+                                {avatarLoading ? 'Đang tải...' : 'Tải ảnh lên'}
+                            </label>
+                        </div>
+                    </div>
+
+                    {avatarError && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{avatarError}</p>}
+                    {avatarSuccess && <p className="mt-3 text-sm text-green-600 dark:text-green-400">Upload avatar thành công!</p>}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                         <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
@@ -165,7 +254,7 @@ export default function EditProfile() {
                                 value={formData.email}
                                 onChange={handleChange}
                                 className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
-                                required
+                                readOnly
                             />
                         </div>
                     </div>
