@@ -189,7 +189,7 @@ export function CategoryManagement() {
         }
 
         // Get base URL (remove /api if present, as static files are served from root)
-        let baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+        let baseUrl = import.meta.env.VITE_API_URL || 'https://localhost:7117/api';
         // Remove /api suffix if present, as static files are served from root
         baseUrl = baseUrl.replace(/\/api\/?$/, '');
         // Ensure baseUrl doesn't end with /
