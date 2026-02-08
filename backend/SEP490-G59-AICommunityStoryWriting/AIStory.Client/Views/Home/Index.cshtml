@@ -1,0 +1,79 @@
+﻿@{
+    ViewData["Title"] = "AI Story Platform - Dashboard";
+}
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <div class="text-center mb-5">
+                <h1 class="display-4"><i class="bi bi-book"></i> AI Story Platform</h1>
+                <p class="lead">Hệ thống quản lý truyện và chapters</p>
+            </div>
+
+            <div class="row g-4">
+                <!-- Categories Card -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body text-center">
+                            <i class="bi bi-tags" style="font-size: 3rem; color: #0d6efd;"></i>
+                            <h5 class="card-title mt-3">Quản lý Thể loại</h5>
+                            <p class="card-text">Tạo và quản lý các thể loại truyện</p>
+                            <a href="/Categories" class="btn btn-primary">
+                                <i class="bi bi-arrow-right"></i> Xem chi tiết
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stories Card -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body text-center">
+                            <i class="bi bi-book" style="font-size: 3rem; color: #198754;"></i>
+                            <h5 class="card-title mt-3">Quản lý Truyện</h5>
+                            <p class="card-text">Tạo và quản lý các truyện với cover image</p>
+                            <a href="/Stories" class="btn btn-success">
+                                <i class="bi bi-arrow-right"></i> Xem chi tiết
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chapters Card -->
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body text-center">
+                            <i class="bi bi-list-ol" style="font-size: 3rem; color: #ffc107;"></i>
+                            <h5 class="card-title mt-3">Quản lý Chapters</h5>
+                            <p class="card-text">Tạo và quản lý các chapters của truyện</p>
+                            <a href="/Chapters" class="btn btn-warning">
+                                <i class="bi bi-arrow-right"></i> Xem chi tiết
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row mt-5">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-info-circle"></i> Hướng dẫn sử dụng</h5>
+                        </div>
+                        <div class="card-body">
+                            <ol>
+                                <li><strong>Tạo Thể loại:</strong> Vào mục "Thể loại" để tạo các thể loại truyện (Tiên Hiệp, Kiếm Hiệp, v.v.)</li>
+                                <li><strong>Tạo Truyện:</strong> Vào mục "Truyện" để tạo truyện mới với cover image và thông tin cơ bản</li>
+                                <li><strong>Tạo Chapters:</strong> Vào chi tiết truyện để thêm các chapters với nội dung</li>
+                                <li><strong>Publish:</strong> Sau khi hoàn thành, có thể publish truyện và chapters để công khai</li>
+                            </ol>
+                            <div class="alert alert-info mt-3">
+                                <strong>Lưu ý:</strong> Đảm bảo API đang chạy tại <code>http://localhost:5000</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

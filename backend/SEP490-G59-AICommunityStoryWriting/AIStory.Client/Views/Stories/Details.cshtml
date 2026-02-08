@@ -1,0 +1,509 @@
+﻿@{
+    ViewData["Title"] = "Chi tiết Truyện";
+    var storyId = ViewBag.StoryId;
+}
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <a href="/Stories" class="btn btn-secondary mb-3">
+                <i class="bi bi-arrow-left"></i> Quay lại
+            </a>
+
+            <!-- Story Details -->
+            <div class="card mb-4" id="storyDetailsCard">
+                <div class="card-body">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Story Actions -->
+            <div class="card mb-4" id="storyActionsCard" style="display: none;">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div>
+                            <h6 class="mb-1">Trạng thái truyện</h6>
+                            <span id="storyStatusBadge" class="badge bg-secondary">Đang tải...</span>
+                        </div>
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-success" id="publishStoryBtn" onclick="publishStoryFromDetails()" style="display: none;">
+                                <i class="bi bi-check-circle"></i> Publish Truyện
+                            </button>
+                            <button class="btn btn-warning" id="unpublishStoryBtn" onclick="unpublishStoryFromDetails()" style="display: none;">
+                                <i class="bi bi-x-circle"></i> Unpublish Truyện
+                            </button>
+                            <button class="btn btn-info" onclick="window.location.href='/Stories'">
+                                <i class="bi bi-list"></i> Danh sách Truyện
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chapters Section -->
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="bi bi-list-ol"></i> Danh sách Chapters
+                        <span id="chaptersCountBadge" class="badge bg-info ms-2">0</span>
+                    </h5>
+                    <button class="btn btn-primary btn-sm" onclick="showCreateChapterModal()">
+                        <i class="bi bi-plus-circle"></i> Thêm Chapter
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div id="chaptersContainer">
+                        <div class="text-center">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create/Edit Chapter Modal -->
+<div class="modal fade" id="chapterModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="chapterModalTitle">Tạo Chapter mới</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="chapterForm">
+                    <input type="hidden" id="chapterId">
+                    <div class="row">
+                        <div class="col-md-8 mb-3">
+                            <label for="chapterTitle" class="form-label">Tiêu đề <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="chapterTitle" required>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="chapterOrderIndex" class="form-label">Thứ tự <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="chapterOrderIndex" required min="1">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="chapterContent" class="form-label">Nội dung</label>
+                        <textarea class="form-control" id="chapterContent" rows="10"></textarea>
+                        <small class="form-text text-muted">Số từ: <span id="wordCount">0</span></small>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="chapterAccessType" class="form-label">Loại truy cập</label>
+                            <select class="form-select" id="chapterAccessType">
+                                <option value="FREE">Miễn phí</option>
+                                <option value="PAID">Trả phí</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="chapterCoinPrice" class="form-label">Giá (coin) <span id="coinPriceRequired" class="text-danger" style="display: none;">*</span></label>
+                            <input type="number" class="form-control" id="chapterCoinPrice" value="0" min="0" disabled>
+                            <div class="invalid-feedback">
+                                Vui lòng nhập giá coin cho chapter trả phí.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="chapterAiContributionRatio" class="form-label">Tỷ lệ AI đóng góp (%)</label>
+                            <input type="number" class="form-control" id="chapterAiContributionRatio" value="0" min="0" max="100" step="0.01">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <div class="form-check mt-4">
+                                <input class="form-check-input" type="checkbox" id="chapterIsAiClean">
+                                <label class="form-check-label" for="chapterIsAiClean">
+                                    Đã được AI làm sạch
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                <button type="button" class="btn btn-outline-secondary" onclick="saveChapter('DRAFT')" id="saveDraftBtn">
+                    <i class="bi bi-save"></i> Lưu nháp
+                </button>
+                <button type="button" class="btn btn-primary" onclick="saveChapter('PUBLISHED')" id="publishBtn">
+                    <i class="bi bi-check-circle"></i> Xuất bản
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const storyId = '@(storyId)';
+        let story = null;
+        let chapters = [];
+        let editingChapterId = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStoryDetails();
+            loadChapters();
+
+            // Update coin price field when access type changes
+            document.getElementById('chapterAccessType').addEventListener('change', updateCoinPriceField);
+
+            // Update word count on content change
+            document.getElementById('chapterContent').addEventListener('input', function() {
+                const content = this.value;
+                const wordCount = content.trim() === '' ? 0 : content.trim().split(/\s+/).length;
+                document.getElementById('wordCount').textContent = wordCount;
+            });
+
+            // Check if should auto-open create chapter modal
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('createChapter') === 'true') {
+                setTimeout(() => {
+                    showCreateChapterModal();
+                    // Remove query parameter from URL
+                    window.history.replaceState({}, document.title, window.location.pathname);
+                }, 500);
+            }
+        });
+
+        async function loadStoryDetails() {
+            try {
+                story = await ApiService.getStoryById(storyId);
+                renderStoryDetails();
+            } catch (error) {
+                Utils.showAlert('Lỗi khi tải thông tin truyện: ' + error.message, 'danger');
+            }
+        }
+
+        function renderStoryDetails() {
+            const card = document.getElementById('storyDetailsCard');
+            card.innerHTML = `
+                <div class="row">
+                    <div class="col-md-3">
+                        ${story.coverImage ?
+                            `<img src="http://localhost:5000${story.coverImage}" class="img-fluid rounded" alt="${story.title}">` :
+                            `<div class="bg-secondary d-flex align-items-center justify-content-center rounded" style="height: 300px;">
+                                <i class="bi bi-image text-white" style="font-size: 4rem;"></i>
+                            </div>`
+                        }
+                    </div>
+                    <div class="col-md-9">
+                        <h2>${story.title}</h2>
+                        <p class="text-muted">${story.summary || 'Chưa có mô tả'}</p>
+                        <div class="mb-3">
+                            <span class="badge bg-primary">${story.categoryName || 'N/A'}</span>
+                            <span class="badge ${story.status === 'PUBLISHED' ? 'bg-success' : 'bg-secondary'}" id="storyStatusDisplay">${story.status || 'DRAFT'}</span>
+                            <span class="badge bg-info">${story.totalChapters || 0} chương</span>
+                            <span class="badge bg-warning">${Utils.formatNumber(story.totalViews || 0)} lượt xem</span>
+                            <span class="badge bg-danger">${Utils.formatNumber(story.totalFavorites || 0)} yêu thích</span>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p><strong>Độ tuổi:</strong> ${story.ageRating || 'ALL'}</p>
+                            </div>
+                            <div class="col-md-6">
+                                <p><strong>Tổng số từ:</strong> ${Utils.formatNumber(story.wordCount || 0)}</p>
+                                <p><strong>Đánh giá trung bình:</strong> ${story.avgRating ? story.avgRating.toFixed(2) : '0.00'}/5.00</p>
+                                <p><strong>Ngày tạo:</strong> ${Utils.formatDate(story.createdAt)}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Show story actions and update status
+            const actionsCard = document.getElementById('storyActionsCard');
+            actionsCard.style.display = 'block';
+
+            const statusBadge = document.getElementById('storyStatusBadge');
+            const publishBtn = document.getElementById('publishStoryBtn');
+            const unpublishBtn = document.getElementById('unpublishStoryBtn');
+
+            if (story.status === 'PUBLISHED') {
+                statusBadge.className = 'badge bg-success';
+                statusBadge.textContent = 'Đã Publish';
+                publishBtn.style.display = 'none';
+                unpublishBtn.style.display = 'inline-block';
+            } else {
+                statusBadge.className = 'badge bg-secondary';
+                statusBadge.textContent = 'Draft';
+                publishBtn.style.display = 'inline-block';
+                unpublishBtn.style.display = 'none';
+            }
+        }
+
+        async function loadChapters() {
+            try {
+                chapters = await ApiService.getChaptersByStoryId(storyId);
+                renderChapters();
+            } catch (error) {
+                Utils.showAlert('Lỗi khi tải danh sách chapters: ' + error.message, 'danger');
+            }
+        }
+
+        function renderChapters() {
+            const container = document.getElementById('chaptersContainer');
+            const countBadge = document.getElementById('chaptersCountBadge');
+
+            if (chapters.length === 0) {
+                container.innerHTML = `
+                    <div class="alert alert-info text-center">
+                        <i class="bi bi-info-circle" style="font-size: 2rem;"></i>
+                        <p class="mt-2 mb-0">Chưa có chapter nào. Hãy tạo chapter đầu tiên để bắt đầu!</p>
+                        <button class="btn btn-primary mt-3" onclick="showCreateChapterModal()">
+                            <i class="bi bi-plus-circle"></i> Tạo Chapter đầu tiên
+                        </button>
+                    </div>
+                `;
+                if (countBadge) countBadge.textContent = '0';
+                return;
+            }
+
+            if (countBadge) countBadge.textContent = chapters.length;
+
+            container.innerHTML = chapters.map(chapter => `
+                <div class="card mb-2">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div class="flex-grow-1">
+                                <h6 class="card-title">
+                                    <span class="badge bg-secondary me-2">Chương ${chapter.orderIndex}</span>
+                                    ${chapter.title}
+                                </h6>
+                                <p class="card-text text-muted mb-2">
+                                    <small>
+                                        ${chapter.wordCount ? Utils.formatNumber(chapter.wordCount) + ' từ' : ''} |
+                                        ${Utils.formatDate(chapter.createdAt)}
+                                    </small>
+                                </p>
+                                <div>
+                                    <span class="badge ${chapter.status === 'PUBLISHED' ? 'bg-success' : 'bg-secondary'}">${chapter.status || 'DRAFT'}</span>
+                                    <span class="badge ${chapter.accessType === 'FREE' ? 'bg-info' : 'bg-warning'}">${chapter.accessType || 'FREE'}</span>
+                                    ${chapter.coinPrice > 0 ? `<span class="badge bg-danger">${chapter.coinPrice} coin</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="ms-3">
+                                <button class="btn btn-sm btn-info" onclick="viewChapter('${chapter.id}')" title="Xem">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                                <button class="btn btn-sm btn-primary" onclick="editChapter('${chapter.id}')" title="Sửa">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn btn-sm btn-success" onclick="publishChapter('${chapter.id}')" title="Publish" ${chapter.status === 'PUBLISHED' ? 'disabled' : ''}>
+                                    <i class="bi bi-check-circle"></i>
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteChapter('${chapter.id}')" title="Xóa">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function showCreateChapterModal() {
+            editingChapterId = null;
+            document.getElementById('chapterModalTitle').textContent = chapters.length === 0 ?
+                'Tạo Chapter đầu tiên' : 'Tạo Chapter mới';
+            document.getElementById('chapterForm').reset();
+            document.getElementById('chapterId').value = '';
+            document.getElementById('chapterOrderIndex').value = chapters.length + 1;
+            document.getElementById('chapterAccessType').value = 'FREE';
+            document.getElementById('chapterCoinPrice').value = 0;
+            document.getElementById('chapterAiContributionRatio').value = 0;
+            document.getElementById('chapterIsAiClean').checked = false;
+            document.getElementById('wordCount').textContent = '0';
+
+            // Update coin price field based on access type
+            updateCoinPriceField();
+
+            // Show both buttons for create mode
+            document.getElementById('saveDraftBtn').style.display = 'inline-block';
+            document.getElementById('publishBtn').style.display = 'inline-block';
+
+            const modal = new bootstrap.Modal(document.getElementById('chapterModal'));
+            modal.show();
+
+            // Focus on title input
+            setTimeout(() => {
+                document.getElementById('chapterTitle').focus();
+            }, 300);
+        }
+
+        async function editChapter(id) {
+            try {
+                const chapter = await ApiService.getChapterById(id);
+                editingChapterId = id;
+                document.getElementById('chapterModalTitle').textContent = 'Sửa Chapter';
+                document.getElementById('chapterId').value = chapter.id;
+                document.getElementById('chapterTitle').value = chapter.title;
+                document.getElementById('chapterContent').value = chapter.content || '';
+                document.getElementById('chapterOrderIndex').value = chapter.orderIndex;
+                document.getElementById('chapterAccessType').value = chapter.accessType || 'FREE';
+                document.getElementById('chapterCoinPrice').value = chapter.coinPrice || 0;
+                document.getElementById('chapterAiContributionRatio').value = chapter.aiContributionRatio || 0;
+                document.getElementById('chapterIsAiClean').checked = chapter.isAiClean || false;
+
+                // Update coin price field based on access type
+                updateCoinPriceField();
+
+                // Show buttons based on current status
+                const currentStatus = chapter.status || 'DRAFT';
+                if (currentStatus === 'PUBLISHED') {
+                    // If already published, only show "Lưu nháp" button
+                    document.getElementById('saveDraftBtn').style.display = 'inline-block';
+                    document.getElementById('publishBtn').style.display = 'none';
+                } else {
+                    // If draft, show both buttons
+                    document.getElementById('saveDraftBtn').style.display = 'inline-block';
+                    document.getElementById('publishBtn').style.display = 'inline-block';
+                }
+
+                const wordCount = chapter.content ? chapter.content.trim().split(/\s+/).length : 0;
+                document.getElementById('wordCount').textContent = wordCount;
+
+                new bootstrap.Modal(document.getElementById('chapterModal')).show();
+            } catch (error) {
+                Utils.showAlert('Lỗi khi tải thông tin chapter: ' + error.message, 'danger');
+            }
+        }
+
+        function updateCoinPriceField() {
+            const accessType = document.getElementById('chapterAccessType').value;
+            const coinPriceInput = document.getElementById('chapterCoinPrice');
+            const coinPriceRequired = document.getElementById('coinPriceRequired');
+
+            if (accessType === 'PAID') {
+                coinPriceInput.disabled = false;
+                coinPriceInput.required = true;
+                coinPriceInput.setAttribute('min', '1');
+                coinPriceRequired.style.display = 'inline';
+                // If coin price is 0, set it to empty to force user input
+                if (parseInt(coinPriceInput.value) === 0) {
+                    coinPriceInput.value = '';
+                }
+            } else {
+                coinPriceInput.disabled = true;
+                coinPriceInput.required = false;
+                coinPriceInput.setAttribute('min', '0');
+                coinPriceInput.value = 0;
+                coinPriceRequired.style.display = 'none';
+                coinPriceInput.classList.remove('is-invalid');
+            }
+        }
+
+        async function saveChapter(status) {
+            const form = document.getElementById('chapterForm');
+            const accessType = document.getElementById('chapterAccessType').value;
+            const coinPriceInput = document.getElementById('chapterCoinPrice');
+            const coinPrice = parseInt(coinPriceInput.value) || 0;
+
+            // Validate coin price for PAID chapters
+            if (accessType === 'PAID') {
+                if (!coinPriceInput.value || coinPrice <= 0) {
+                    coinPriceInput.classList.add('is-invalid');
+                    coinPriceInput.focus();
+                    Utils.showAlert('Vui lòng nhập giá coin lớn hơn 0 cho chapter trả phí.', 'danger');
+                    return;
+                }
+                coinPriceInput.classList.remove('is-invalid');
+            }
+
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+
+            try {
+                const data = {
+                    storyId: storyId,
+                    title: document.getElementById('chapterTitle').value,
+                    content: document.getElementById('chapterContent').value,
+                    orderIndex: parseInt(document.getElementById('chapterOrderIndex').value),
+                    status: status || 'DRAFT',
+                    accessType: accessType,
+                    coinPrice: accessType === 'PAID' ? coinPrice : 0,
+                    aiContributionRatio: parseFloat(document.getElementById('chapterAiContributionRatio').value),
+                    isAiClean: document.getElementById('chapterIsAiClean').checked
+                };
+
+                if (editingChapterId) {
+                    await ApiService.updateChapter(editingChapterId, data);
+                    if (status === 'PUBLISHED') {
+                        Utils.showAlert('Xuất bản chapter thành công!', 'success');
+                    } else {
+                        Utils.showAlert('Cập nhật chapter thành công!', 'success');
+                    }
+                } else {
+                    await ApiService.createChapter(data);
+                    if (status === 'PUBLISHED') {
+                        Utils.showAlert('Tạo và xuất bản chapter thành công!', 'success');
+                    } else {
+                        Utils.showAlert('Tạo chapter nháp thành công!', 'success');
+                    }
+                }
+
+                bootstrap.Modal.getInstance(document.getElementById('chapterModal')).hide();
+                loadChapters();
+                loadStoryDetails(); // Reload to update stats
+            } catch (error) {
+                Utils.showAlert('Lỗi: ' + error.message, 'danger');
+            }
+        }
+
+        async function deleteChapter(id) {
+            if (!confirm('Bạn có chắc chắn muốn xóa chapter này?')) return;
+
+            try {
+                await ApiService.deleteChapter(id);
+                Utils.showAlert('Xóa chapter thành công!', 'success');
+                loadChapters();
+                loadStoryDetails(); // Reload to update stats
+            } catch (error) {
+                Utils.showAlert('Lỗi: ' + error.message, 'danger');
+            }
+        }
+
+        async function publishChapter(id) {
+            try {
+                await ApiService.publishChapter(id);
+                Utils.showAlert('Publish chapter thành công!', 'success');
+                loadChapters();
+                loadStoryDetails();
+            } catch (error) {
+                Utils.showAlert('Lỗi: ' + error.message, 'danger');
+            }
+        }
+
+        function viewChapter(id) {
+            window.location.href = `/Chapters/Read/${encodeURIComponent(id)}`;
+        }
+
+        async function publishStoryFromDetails() {
+            try {
+                await ApiService.publishStory(storyId);
+                Utils.showAlert('Publish truyện thành công!', 'success');
+                await loadStoryDetails();
+            } catch (error) {
+                Utils.showAlert('Lỗi: ' + error.message, 'danger');
+            }
+        }
+
+        async function unpublishStoryFromDetails() {
+            try {
+                await ApiService.unpublishStory(storyId);
+                Utils.showAlert('Unpublish truyện thành công!', 'success');
+                await loadStoryDetails();
+            } catch (error) {
+                Utils.showAlert('Lỗi: ' + error.message, 'danger');
+            }
+        }
+    </script>
+}
