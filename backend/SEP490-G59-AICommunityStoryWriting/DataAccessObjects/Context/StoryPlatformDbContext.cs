@@ -106,7 +106,7 @@ public partial class StoryPlatformDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
-            optionsBuilder.UseSqlServer("Server=HOANGBOSUA\\SQLEXPRESS;Database=story_platform_v13;Trusted_Connection=True;TrustServerCertificate=True;Command Timeout=300");
+            optionsBuilder.UseSqlServer("Server=localhost;Database=story_platform_v13;Trusted_Connection=True;TrustServerCertificate=True");
         }
     }
 
