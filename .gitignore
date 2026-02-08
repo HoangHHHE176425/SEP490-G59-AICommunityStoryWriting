@@ -14,3 +14,11 @@ obj/
 # OS
 Thumbs.db
 .DS_Store
+
+# Temporary / Backup files
+*.tmp
+*.bak
+*.backup
+
+# Upload files
+**/wwwroot/uploads/

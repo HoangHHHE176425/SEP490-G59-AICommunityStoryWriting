@@ -69,7 +69,7 @@ export default function Register() {
             if (result.success) {
                 setSuccess(true);
                 setTimeout(() => {
-                    navigate('/');
+                    navigate('/home');
                 }, 1500);
             } else {
                 setError(result.message || 'Đăng ký thất bại');
@@ -87,7 +87,7 @@ export default function Register() {
         try {
             const result = await loginWithGoogle();
             if (result.success) {
-                navigate('/');
+                navigate('/home');
             } else {
                 setError('Đăng ký Google thất bại');
             }
@@ -104,7 +104,7 @@ export default function Register() {
         try {
             const result = await loginWithFacebook();
             if (result.success) {
-                navigate('/');
+                navigate('/home');
             } else {
                 setError('Đăng ký Facebook thất bại');
             }

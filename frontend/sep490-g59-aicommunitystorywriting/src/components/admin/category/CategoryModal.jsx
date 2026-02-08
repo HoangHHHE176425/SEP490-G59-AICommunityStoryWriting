@@ -1,38 +1,76 @@
 import { useState, useEffect } from 'react';
 import { X, Save, AlertCircle, Upload, Image as ImageIcon } from 'lucide-react';
 
-export function CategoryModal({ isOpen, onClose, onSave, category }) {
+export function CategoryModal({ isOpen, onClose, onSave, category, isViewOnly = false }) {
     const [formData, setFormData] = useState({
         name: '',
         slug: '',
         description: '',
         icon_url: '',
-        story_type: 'long', // 'long' or 'short'
+        iconFile: null, // File object for API
         is_active: true
     });
 
     const [errors, setErrors] = useState({});
     const [imagePreview, setImagePreview] = useState(null);
 
+    // Get full icon URL for preview
+    const getIconUrl = (iconUrl) => {
+        if (!iconUrl) return '';
+        if (iconUrl.startsWith('http://') || iconUrl.startsWith('https://')) {
+            // Check if it's a valid absolute URL
+            try {
+                const urlObj = new URL(iconUrl);
+                if (urlObj.hostname && urlObj.hostname !== 'uploads' && urlObj.hostname.includes('.')) {
+                    return iconUrl;
+                }
+            } catch {
+                // Invalid URL, treat as relative path
+            }
+        }
+
+        // Handle relative paths
+        let path = iconUrl;
+        if (iconUrl.startsWith('http://uploads/') || iconUrl.startsWith('https://uploads/')) {
+            path = iconUrl.replace(/^https?:\/\/uploads\//, '/uploads/');
+        } else if (iconUrl.startsWith('http://') || iconUrl.startsWith('https://')) {
+            path = iconUrl.replace(/^https?:\/\//, '/');
+        }
+
+        if (!path.startsWith('/')) {
+            path = '/' + path;
+        }
+
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+        const baseUrl = apiUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
+        return `${baseUrl}${path}`;
+    };
+
     useEffect(() => {
         if (category) {
+            // Map API response fields to formData
+            // API returns: iconUrl (camelCase), isActive (camelCase)
+            // Form expects: icon_url (snake_case), is_active (snake_case)
+            const iconUrl = category.iconUrl || '';
+            const fullIconUrl = getIconUrl(iconUrl);
+
             // eslint-disable-next-line react-hooks/set-state-in-effect
             setFormData({
-                name: category.name,
-                slug: category.slug,
+                name: category.name || '',
+                slug: category.slug || '',
                 description: category.description || '',
-                icon_url: category.icon_url || '',
-                story_type: category.story_type || 'long',
-                is_active: category.is_active
+                icon_url: iconUrl, // Keep original for API, use fullIconUrl for preview
+                iconFile: null, // Reset file when editing (user can upload new one)
+                is_active: category.isActive !== false // Handle both camelCase and snake_case
             });
-            setImagePreview(category.icon_url || null);
+            setImagePreview(fullIconUrl || null);
         } else {
             setFormData({
                 name: '',
                 slug: '',
                 description: '',
                 icon_url: '',
-                story_type: 'long',
+                iconFile: null,
                 is_active: true
             });
             setImagePreview(null);
@@ -65,9 +103,20 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
     const handleImageUpload = (e) => {
         const file = e.target.files[0];
         if (file) {
-            // Validate file type
+            // Validate file type - check MIME type
             if (!file.type.startsWith('image/')) {
                 setErrors(prev => ({ ...prev, icon_url: 'Vui lòng chọn file ảnh hợp lệ' }));
+                return;
+            }
+
+            // Validate file extension (backend requires: jpg, jpeg, png, gif, webp, svg)
+            const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
+            const fileExtension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+            if (!allowedExtensions.includes(fileExtension)) {
+                setErrors(prev => ({
+                    ...prev,
+                    icon_url: 'Định dạng file không hợp lệ. Chỉ chấp nhận: JPG, JPEG, PNG, GIF, WEBP, SVG'
+                }));
                 return;
             }
 
@@ -77,11 +126,15 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                 return;
             }
 
-            // Create preview
+            // Create preview and save File object
             const reader = new FileReader();
             reader.onloadend = () => {
                 setImagePreview(reader.result);
-                setFormData(prev => ({ ...prev, icon_url: reader.result }));
+                setFormData(prev => ({
+                    ...prev,
+                    icon_url: reader.result,
+                    iconFile: file // Save File object for API
+                }));
                 setErrors(prev => ({ ...prev, icon_url: null }));
             };
             reader.readAsDataURL(file);
@@ -99,7 +152,8 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
             newErrors.slug = 'Slug không được để trống';
         }
 
-        if (!formData.icon_url.trim()) {
+        // Icon is required: either existing icon_url or new iconFile
+        if (!formData.icon_url.trim() && !formData.iconFile) {
             newErrors.icon_url = 'Vui lòng tải lên ảnh icon';
         }
 
@@ -109,6 +163,11 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
 
     const handleSubmit = (e) => {
         e.preventDefault();
+
+        // Don't submit if in view-only mode
+        if (isViewOnly) {
+            return;
+        }
 
         if (validateForm()) {
             onSave(formData);
@@ -164,7 +223,7 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                     }}
                 >
                     <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1e293b', margin: 0 }}>
-                        {category ? 'Chỉnh sửa thể loại' : 'Thêm thể loại mới'}
+                        {isViewOnly ? 'Chi tiết thể loại' : (category ? 'Chỉnh sửa thể loại' : 'Thêm thể loại mới')}
                     </h2>
                     <button
                         onClick={onClose}
@@ -194,16 +253,18 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                             type="text"
                             value={formData.name}
                             onChange={handleNameChange}
+                            readOnly={isViewOnly}
                             placeholder="Ví dụ: Tiên hiệp"
                             style={{
                                 width: '100%',
                                 padding: '0.625rem 1rem',
-                                backgroundColor: '#f8fafc',
+                                backgroundColor: isViewOnly ? '#f1f5f9' : '#f8fafc',
                                 border: errors.name ? '1px solid #ef4444' : '1px solid #e2e8f0',
                                 borderRadius: '0.5rem',
                                 outline: 'none',
                                 fontSize: '0.875rem',
                                 color: '#1e293b',
+                                cursor: isViewOnly ? 'not-allowed' : 'text',
                                 transition: 'all 0.2s'
                             }}
                             onFocus={(e) => {
@@ -234,16 +295,18 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                             type="text"
                             value={formData.slug}
                             onChange={(e) => setFormData(prev => ({ ...prev, slug: e.target.value }))}
+                            readOnly={true}
                             placeholder="tien-hiep"
                             style={{
                                 width: '100%',
                                 padding: '0.625rem 1rem',
-                                backgroundColor: '#f8fafc',
+                                backgroundColor: '#f1f5f9',
                                 border: errors.slug ? '1px solid #ef4444' : '1px solid #e2e8f0',
                                 borderRadius: '0.5rem',
                                 outline: 'none',
                                 fontSize: '0.875rem',
                                 color: '#1e293b',
+                                cursor: 'not-allowed',
                                 transition: 'all 0.2s'
                             }}
                             onFocus={(e) => {
@@ -268,43 +331,6 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                         </p>
                     </div>
 
-                    {/* Story Type */}
-                    <div>
-                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.5rem' }}>
-                            Loại truyện <span style={{ color: '#ef4444' }}>*</span>
-                        </label>
-                        <select
-                            value={formData.story_type}
-                            onChange={(e) => setFormData(prev => ({ ...prev, story_type: e.target.value }))}
-                            style={{
-                                width: '100%',
-                                padding: '0.625rem 1rem',
-                                backgroundColor: '#f8fafc',
-                                border: '1px solid #e2e8f0',
-                                borderRadius: '0.5rem',
-                                outline: 'none',
-                                fontSize: '0.875rem',
-                                color: '#1e293b',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s'
-                            }}
-                            onFocus={(e) => {
-                                e.currentTarget.style.borderColor = '#13ec5b';
-                                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.1)';
-                            }}
-                            onBlur={(e) => {
-                                e.currentTarget.style.borderColor = '#e2e8f0';
-                                e.currentTarget.style.boxShadow = 'none';
-                            }}
-                        >
-                            <option value="long">Truyện dài</option>
-                            <option value="short">Truyện ngắn</option>
-                        </select>
-                        <p style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: '#64748b', margin: '0.25rem 0 0 0' }}>
-                            Chọn loại truyện mà thể loại này áp dụng
-                        </p>
-                    </div>
-
                     {/* Icon Upload */}
                     <div>
                         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.5rem' }}>
@@ -313,45 +339,47 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
 
                         <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
                             {/* Upload Button */}
-                            <label
-                                style={{
-                                    flex: 1,
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    padding: '2rem 1rem',
-                                    backgroundColor: '#f8fafc',
-                                    border: errors.icon_url ? '2px dashed #ef4444' : '2px dashed #e2e8f0',
-                                    borderRadius: '0.5rem',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s'
-                                }}
-                                onMouseEnter={(e) => {
-                                    if (!errors.icon_url) {
-                                        e.currentTarget.style.borderColor = '#13ec5b';
-                                        e.currentTarget.style.backgroundColor = 'rgba(19, 236, 91, 0.05)';
-                                    }
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.style.borderColor = errors.icon_url ? '#ef4444' : '#e2e8f0';
-                                    e.currentTarget.style.backgroundColor = '#f8fafc';
-                                }}
-                            >
-                                <Upload style={{ width: '32px', height: '32px', color: '#64748b', marginBottom: '0.5rem' }} />
-                                <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b', margin: 0 }}>
-                                    Tải ảnh lên
-                                </p>
-                                <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                                    PNG, JPG, GIF (Max 2MB)
-                                </p>
-                                <input
-                                    type="file"
-                                    accept="image/*"
-                                    onChange={handleImageUpload}
-                                    style={{ display: 'none' }}
-                                />
-                            </label>
+                            {!isViewOnly && (
+                                <label
+                                    style={{
+                                        flex: 1,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        padding: '2rem 1rem',
+                                        backgroundColor: '#f8fafc',
+                                        border: errors.icon_url ? '2px dashed #ef4444' : '2px dashed #e2e8f0',
+                                        borderRadius: '0.5rem',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        if (!errors.icon_url) {
+                                            e.currentTarget.style.borderColor = '#13ec5b';
+                                            e.currentTarget.style.backgroundColor = 'rgba(19, 236, 91, 0.05)';
+                                        }
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.borderColor = errors.icon_url ? '#ef4444' : '#e2e8f0';
+                                        e.currentTarget.style.backgroundColor = '#f8fafc';
+                                    }}
+                                >
+                                    <Upload style={{ width: '32px', height: '32px', color: '#64748b', marginBottom: '0.5rem' }} />
+                                    <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b', margin: 0 }}>
+                                        Tải ảnh lên
+                                    </p>
+                                    <p style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+                                        JPG, JPEG, PNG, GIF, WEBP, SVG (Max 2MB)
+                                    </p>
+                                    <input
+                                        type="file"
+                                        accept=".jpg,.jpeg,.png,.gif,.webp,.svg,image/jpeg,image/png,image/gif,image/webp,image/svg+xml"
+                                        onChange={handleImageUpload}
+                                        style={{ display: 'none' }}
+                                    />
+                                </label>
+                            )}
 
                             {/* Image Preview */}
                             {imagePreview && (
@@ -367,33 +395,35 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                                             border: '1px solid #e2e8f0'
                                         }}
                                     />
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setImagePreview(null);
-                                            setFormData(prev => ({ ...prev, icon_url: '' }));
-                                        }}
-                                        style={{
-                                            position: 'absolute',
-                                            top: '-8px',
-                                            right: '-8px',
-                                            width: '24px',
-                                            height: '24px',
-                                            backgroundColor: '#ef4444',
-                                            color: '#ffffff',
-                                            border: 'none',
-                                            borderRadius: '9999px',
-                                            cursor: 'pointer',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            fontSize: '12px',
-                                            fontWeight: 'bold',
-                                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
-                                        }}
-                                    >
-                                        ×
-                                    </button>
+                                    {!isViewOnly && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setImagePreview(null);
+                                                setFormData(prev => ({ ...prev, icon_url: '', iconFile: null }));
+                                            }}
+                                            style={{
+                                                position: 'absolute',
+                                                top: '-8px',
+                                                right: '-8px',
+                                                width: '24px',
+                                                height: '24px',
+                                                backgroundColor: '#ef4444',
+                                                color: '#ffffff',
+                                                border: 'none',
+                                                borderRadius: '9999px',
+                                                cursor: 'pointer',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                fontSize: '12px',
+                                                fontWeight: 'bold',
+                                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                                            }}
+                                        >
+                                            ×
+                                        </button>
+                                    )}
                                 </div>
                             )}
                         </div>
@@ -414,18 +444,20 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                         <textarea
                             value={formData.description}
                             onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                            readOnly={isViewOnly}
                             placeholder="Nhập mô tả chi tiết về thể loại này..."
                             rows={4}
                             style={{
                                 width: '100%',
                                 padding: '0.625rem 1rem',
-                                backgroundColor: '#f8fafc',
+                                backgroundColor: isViewOnly ? '#f1f5f9' : '#f8fafc',
                                 border: '1px solid #e2e8f0',
                                 borderRadius: '0.5rem',
                                 outline: 'none',
                                 fontSize: '0.875rem',
                                 color: '#1e293b',
                                 resize: 'none',
+                                cursor: isViewOnly ? 'not-allowed' : 'text',
                                 transition: 'all 0.2s'
                             }}
                             onFocus={(e) => {
@@ -459,11 +491,12 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                                 Bật/tắt thể loại này trên trang web
                             </p>
                         </div>
-                        <label style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
+                        <label style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', cursor: isViewOnly ? 'not-allowed' : 'pointer' }}>
                             <input
                                 type="checkbox"
                                 checked={formData.is_active}
                                 onChange={(e) => setFormData(prev => ({ ...prev, is_active: e.target.checked }))}
+                                disabled={isViewOnly}
                                 style={{ display: 'none' }}
                             />
                             <div
@@ -494,52 +527,78 @@ export function CategoryModal({ isOpen, onClose, onSave, category }) {
                     </div>
 
                     {/* Actions */}
-                    <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            style={{
-                                flex: 1,
-                                padding: '0.625rem 1rem',
-                                backgroundColor: '#f1f5f9',
-                                color: '#1e293b',
-                                fontSize: '0.875rem',
-                                fontWeight: 'bold',
-                                border: 'none',
-                                borderRadius: '0.5rem',
-                                cursor: 'pointer',
-                                transition: 'background-color 0.2s'
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#e2e8f0'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
-                        >
-                            Hủy
-                        </button>
-                        <button
-                            type="submit"
-                            style={{
-                                flex: 1,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '0.5rem',
-                                padding: '0.625rem 1rem',
-                                backgroundColor: '#13ec5b',
-                                color: '#ffffff',
-                                fontSize: '0.875rem',
-                                fontWeight: 'bold',
-                                border: 'none',
-                                borderRadius: '0.5rem',
-                                cursor: 'pointer',
-                                transition: 'background-color 0.2s'
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#10d352'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#13ec5b'}
-                        >
-                            <Save style={{ width: '16px', height: '16px' }} />
-                            {category ? 'Cập nhật' : 'Thêm mới'}
-                        </button>
-                    </div>
+                    {!isViewOnly && (
+                        <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                style={{
+                                    flex: 1,
+                                    padding: '0.625rem 1rem',
+                                    backgroundColor: '#f1f5f9',
+                                    color: '#1e293b',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 'bold',
+                                    border: 'none',
+                                    borderRadius: '0.5rem',
+                                    cursor: 'pointer',
+                                    transition: 'background-color 0.2s'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#e2e8f0'}
+                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                type="submit"
+                                style={{
+                                    flex: 1,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '0.5rem',
+                                    padding: '0.625rem 1rem',
+                                    backgroundColor: '#13ec5b',
+                                    color: '#ffffff',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 'bold',
+                                    border: 'none',
+                                    borderRadius: '0.5rem',
+                                    cursor: 'pointer',
+                                    transition: 'background-color 0.2s'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#10d352'}
+                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#13ec5b'}
+                            >
+                                <Save style={{ width: '16px', height: '16px' }} />
+                                {category ? 'Cập nhật' : 'Thêm mới'}
+                            </button>
+                        </div>
+                    )}
+                    {isViewOnly && (
+                        <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0' }}>
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                style={{
+                                    width: '100%',
+                                    padding: '0.625rem 1rem',
+                                    backgroundColor: '#13ec5b',
+                                    color: '#ffffff',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 'bold',
+                                    border: 'none',
+                                    borderRadius: '0.5rem',
+                                    cursor: 'pointer',
+                                    transition: 'background-color 0.2s'
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#10d352'}
+                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#13ec5b'}
+                            >
+                                Đóng
+                            </button>
+                        </div>
+                    )}
                 </form>
             </div>
         </div>
