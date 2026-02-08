@@ -1,40 +1,37 @@
 import { Header } from '../../components/homepage/Header';
-import { Footer } from '../../components/homepage/Footer';
-import { FeaturedBanner } from '../../components/homepage/FeaturedBanner';
-import { HotStories } from '../../components/homepage/HotStories';
+import { HeroCarousel } from '../../components/homepage/HeroCarousel';
 import { NewUpdates } from '../../components/homepage/NewUpdates';
+import { RecommendedStories } from '../../components/homepage/RecommendedStories';
+import { HotStories } from '../../components/homepage/HotStories';
 import { CompletedStories } from '../../components/homepage/CompletedStories';
-import { TopAuthors } from '../../components/homepage/TopAuthors';
-import { Community } from '../../components/homepage/Community';
-import { HomeCTA } from '../../components/homepage/HomeCTA';
-import { Rankings } from '../../components/homepage/Rankings';
+import { Sidebar } from '../../components/homepage/Sidebar';
+import { Footer } from '../../components/homepage/Footer';
 
 export default function Homepage() {
-  return (
-    <div className="w-full bg-gray-50">
-      <Header />
+    return (
+        <div className="min-h-screen bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 transition-colors duration-200">
+            <Header />
 
-      <FeaturedBanner />
+            <main className="max-w-[1280px] mx-auto px-4 py-6 flex flex-col gap-10">
+                <HeroCarousel />
 
-      <div className="max-w-[1400px] mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-8">
-          <div className="space-y-8">
-            <HotStories />
-            <NewUpdates />
-            <CompletedStories />
-            <TopAuthors />
-            <Community />
-          </div>
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                    {/* Main content */}
+                    <div className="lg:col-span-8 flex flex-col gap-10">
+                        <NewUpdates />
+                        <RecommendedStories />
+                        <HotStories />
+                        <CompletedStories />
+                    </div>
 
-          <div className="lg:sticky lg:top-8 lg:self-start">
-            <Rankings />
-          </div>
+                    {/* Sidebar */}
+                    <aside className="lg:col-span-4">
+                        <Sidebar />
+                    </aside>
+                </div>
+            </main>
+
+            <Footer />
         </div>
-      </div>
-
-      <HomeCTA />
-
-      <Footer />
-    </div>
-  );
+    );
 }
