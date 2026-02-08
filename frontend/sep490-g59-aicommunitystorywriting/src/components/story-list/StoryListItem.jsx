@@ -1,4 +1,3 @@
-/* eslint-disable no-dupe-keys */
 import { Eye, Heart, BookOpen, Star } from 'lucide-react';
 
 export function StoryListItem({ story }) {
@@ -69,14 +68,13 @@ export function StoryListItem({ story }) {
                 <p style={{
                     fontSize: '0.875rem',
                     color: '#64748b',
-                    marginBottom: '0.75rem',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     display: '-webkit-box',
                     WebkitLineClamp: 2,
                     WebkitBoxOrient: 'vertical',
                     margin: 0,
-                    marginBottom: '0.75rem'
+                    marginBottom: '0.75rem',
                 }}>
                     {story.description}
                 </p>

@@ -1,41 +1,51 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertCircle, CheckCircle, Mail, ShieldCheck } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { useAuth } from '../../contexts/AuthContext';
+import { Mail, ShieldCheck, AlertCircle, CheckCircle } from 'lucide-react';
 
 export default function VerifyOtp() {
     const navigate = useNavigate();
-    const { verifyOtp } = useAuth();
     const [searchParams] = useSearchParams();
+    const { verifyOtp } = useAuth();
 
     const initialEmail = useMemo(() => searchParams.get('email') || '', [searchParams]);
 
-    const [email, setEmail] = useState(initialEmail);
-    const [otpCode, setOtpCode] = useState('');
+    const [formData, setFormData] = useState({
+        email: initialEmail,
+        otpCode: '',
+    });
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
-    const [loading, setLoading] = useState(false);
+    const [successMessage, setSuccessMessage] = useState('');
+
+    const handleChange = (e) => {
+        setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+        setError('');
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setSuccess(false);
+        setSuccessMessage('');
 
-        if (!email || !otpCode) {
-            setError('Vui lòng nhập email và mã OTP');
+        if (!formData.email || !formData.otpCode) {
+            setError('Vui lòng nhập email và mã OTP.');
             return;
         }
 
         setLoading(true);
         try {
-            const result = await verifyOtp(email, otpCode);
+            const result = await verifyOtp(formData.email, formData.otpCode);
             if (result.success) {
                 setSuccess(true);
-                setTimeout(() => navigate('/login'), 1500);
+                setSuccessMessage(result.message || 'Xác thực thành công. Bạn có thể đăng nhập.');
+                setTimeout(() => navigate('/login'), 1200);
             } else {
-                setError(result.message || 'Xác thực OTP thất bại');
+                setError(result.message || 'Xác thực thất bại.');
             }
         } catch {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
@@ -61,16 +71,14 @@ export default function VerifyOtp() {
                                 Xác Thực OTP
                             </h1>
                             <p className="text-slate-600 dark:text-slate-400">
-                                Nhập mã OTP đã được gửi tới email của bạn
+                                Nhập mã OTP đã được gửi về email để kích hoạt tài khoản.
                             </p>
                         </div>
 
                         {success && (
-                            <div className="mb-6 p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-3">
-                                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                                <p className="text-sm text-green-600 dark:text-green-400">
-                                    Xác thực thành công! Đang chuyển sang đăng nhập...
-                                </p>
+                            <div className="mb-6 p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg flex items-start gap-3">
+                                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
+                                <p className="text-sm text-green-600 dark:text-green-400">{successMessage}</p>
                             </div>
                         )}
 
@@ -83,7 +91,10 @@ export default function VerifyOtp() {
 
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
-                                <label htmlFor="email" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                                <label
+                                    htmlFor="email"
+                                    className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2"
+                                >
                                     Email
                                 </label>
                                 <div className="relative">
@@ -94,11 +105,8 @@ export default function VerifyOtp() {
                                         id="email"
                                         name="email"
                                         type="email"
-                                        value={email}
-                                        onChange={(e) => {
-                                            setEmail(e.target.value);
-                                            setError('');
-                                        }}
+                                        value={formData.email}
+                                        onChange={handleChange}
                                         className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
                                         placeholder="email@example.com"
                                         required
@@ -107,19 +115,18 @@ export default function VerifyOtp() {
                             </div>
 
                             <div>
-                                <label htmlFor="otpCode" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                                <label
+                                    htmlFor="otpCode"
+                                    className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2"
+                                >
                                     Mã OTP
                                 </label>
                                 <input
                                     id="otpCode"
                                     name="otpCode"
                                     type="text"
-                                    inputMode="numeric"
-                                    value={otpCode}
-                                    onChange={(e) => {
-                                        setOtpCode(e.target.value);
-                                        setError('');
-                                    }}
+                                    value={formData.otpCode}
+                                    onChange={handleChange}
                                     className="block w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none tracking-widest"
                                     placeholder="Nhập OTP"
                                     required
@@ -137,8 +144,11 @@ export default function VerifyOtp() {
 
                         <div className="mt-6 text-center">
                             <p className="text-sm text-slate-600 dark:text-slate-400">
-                                Đã xác thực rồi?{' '}
-                                <Link to="/login" className="font-semibold text-primary hover:text-primary/80 transition-colors">
+                                Đã có tài khoản?{' '}
+                                <Link
+                                    to="/login"
+                                    className="font-semibold text-primary hover:text-primary/80 transition-colors"
+                                >
                                     Đăng nhập
                                 </Link>
                             </p>
@@ -150,4 +160,3 @@ export default function VerifyOtp() {
         </div>
     );
 }
-

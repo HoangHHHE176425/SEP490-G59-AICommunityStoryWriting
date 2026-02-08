@@ -1,4 +1,3 @@
-/* eslint-disable no-dupe-keys */
 import { useState } from 'react';
 import { PublicationList } from '../../../components/admin/publication/PublicationList';
 import { PublicationDetailModal } from '../../../components/admin/publication/PublicationDetailModal';
@@ -175,7 +174,6 @@ export function PublicationManagement() {
                     fontSize: '1.875rem',
                     fontWeight: 700,
                     color: '#1e293b',
-                    marginBottom: '0.5rem',
                     margin: 0,
                     marginBottom: '0.5rem'
                 }}>

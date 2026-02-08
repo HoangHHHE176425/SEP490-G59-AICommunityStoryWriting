@@ -1,51 +1,72 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertCircle, CheckCircle, Lock, Mail, ShieldCheck } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useAuth } from '../../contexts/AuthContext';
+import { Mail, Lock, AlertCircle, CheckCircle, Eye, EyeOff, KeyRound } from 'lucide-react';
 
 export default function ResetPassword() {
     const navigate = useNavigate();
-    const { resetPassword } = useAuth();
     const [searchParams] = useSearchParams();
+    const { resetPassword } = useAuth();
 
     const initialEmail = useMemo(() => searchParams.get('email') || '', [searchParams]);
 
-    const [email, setEmail] = useState(initialEmail);
-    const [otpCode, setOtpCode] = useState('');
-    const [newPassword, setNewPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
+    const [formData, setFormData] = useState({
+        email: initialEmail,
+        otpCode: '',
+        newPassword: '',
+        confirmPassword: '',
+    });
+
+    const [showPasswords, setShowPasswords] = useState({
+        new: false,
+        confirm: false,
+    });
+    const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
-    const [loading, setLoading] = useState(false);
+    const [successMessage, setSuccessMessage] = useState('');
+
+    const handleChange = (e) => {
+        setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+        setError('');
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setSuccess(false);
+        setSuccessMessage('');
 
-        if (!email || !otpCode || !newPassword || !confirmPassword) {
-            setError('Vui lòng điền đầy đủ thông tin');
+        if (!formData.email || !formData.otpCode || !formData.newPassword || !formData.confirmPassword) {
+            setError('Vui lòng điền đầy đủ thông tin.');
             return;
         }
-        if (newPassword.length < 6) {
-            setError('Mật khẩu phải có ít nhất 6 ký tự');
+        if (formData.newPassword.length < 6) {
+            setError('Mật khẩu mới phải có ít nhất 6 ký tự.');
             return;
         }
-        if (newPassword !== confirmPassword) {
-            setError('Mật khẩu xác nhận không khớp');
+        if (formData.newPassword !== formData.confirmPassword) {
+            setError('Mật khẩu xác nhận không khớp.');
             return;
         }
 
         setLoading(true);
         try {
-            const result = await resetPassword(email, otpCode, newPassword, confirmPassword);
+            const result = await resetPassword({
+                email: formData.email,
+                otpCode: formData.otpCode,
+                newPassword: formData.newPassword,
+                confirmPassword: formData.confirmPassword,
+            });
+
             if (result.success) {
                 setSuccess(true);
-                setTimeout(() => navigate('/login'), 1500);
+                setSuccessMessage(result.message || 'Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại.');
+                setTimeout(() => navigate('/login'), 1200);
             } else {
-                setError(result.message || 'Đặt lại mật khẩu thất bại');
+                setError(result.message || 'Đặt lại mật khẩu thất bại.');
             }
         } catch {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
@@ -62,7 +83,7 @@ export default function ResetPassword() {
                     <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl p-8 border border-slate-200 dark:border-slate-700">
                         <div className="flex justify-center mb-6">
                             <div className="size-12 bg-primary rounded-lg flex items-center justify-center text-white shadow-lg">
-                                <ShieldCheck className="w-7 h-7" />
+                                <KeyRound className="w-7 h-7" />
                             </div>
                         </div>
 
@@ -71,16 +92,14 @@ export default function ResetPassword() {
                                 Đặt Lại Mật Khẩu
                             </h1>
                             <p className="text-slate-600 dark:text-slate-400">
-                                Nhập OTP và mật khẩu mới của bạn
+                                Nhập OTP và mật khẩu mới để hoàn tất.
                             </p>
                         </div>
 
                         {success && (
-                            <div className="mb-6 p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-3">
-                                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                                <p className="text-sm text-green-600 dark:text-green-400">
-                                    Đặt lại mật khẩu thành công! Đang chuyển sang đăng nhập...
-                                </p>
+                            <div className="mb-6 p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg flex items-start gap-3">
+                                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
+                                <p className="text-sm text-green-600 dark:text-green-400">{successMessage}</p>
                             </div>
                         )}
 
@@ -104,11 +123,8 @@ export default function ResetPassword() {
                                         id="email"
                                         name="email"
                                         type="email"
-                                        value={email}
-                                        onChange={(e) => {
-                                            setEmail(e.target.value);
-                                            setError('');
-                                        }}
+                                        value={formData.email}
+                                        onChange={handleChange}
                                         className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
                                         placeholder="email@example.com"
                                         required
@@ -124,12 +140,8 @@ export default function ResetPassword() {
                                     id="otpCode"
                                     name="otpCode"
                                     type="text"
-                                    inputMode="numeric"
-                                    value={otpCode}
-                                    onChange={(e) => {
-                                        setOtpCode(e.target.value);
-                                        setError('');
-                                    }}
+                                    value={formData.otpCode}
+                                    onChange={handleChange}
                                     className="block w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none tracking-widest"
                                     placeholder="Nhập OTP"
                                     required
@@ -147,22 +159,26 @@ export default function ResetPassword() {
                                     <input
                                         id="newPassword"
                                         name="newPassword"
-                                        type="password"
-                                        value={newPassword}
-                                        onChange={(e) => {
-                                            setNewPassword(e.target.value);
-                                            setError('');
-                                        }}
-                                        className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
-                                        placeholder="••••••••"
+                                        type={showPasswords.new ? 'text' : 'password'}
+                                        value={formData.newPassword}
+                                        onChange={handleChange}
+                                        className="block w-full pl-10 pr-12 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
+                                        placeholder="Tối thiểu 6 ký tự"
                                         required
                                     />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPasswords((p) => ({ ...p, new: !p.new }))}
+                                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                                    >
+                                        {showPasswords.new ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                    </button>
                                 </div>
                             </div>
 
                             <div>
                                 <label htmlFor="confirmPassword" className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                                    Xác nhận mật khẩu
+                                    Xác nhận mật khẩu mới
                                 </label>
                                 <div className="relative">
                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -171,16 +187,19 @@ export default function ResetPassword() {
                                     <input
                                         id="confirmPassword"
                                         name="confirmPassword"
-                                        type="password"
-                                        value={confirmPassword}
-                                        onChange={(e) => {
-                                            setConfirmPassword(e.target.value);
-                                            setError('');
-                                        }}
-                                        className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
-                                        placeholder="••••••••"
+                                        type={showPasswords.confirm ? 'text' : 'password'}
+                                        value={formData.confirmPassword}
+                                        onChange={handleChange}
+                                        className="block w-full pl-10 pr-12 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
                                         required
                                     />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPasswords((p) => ({ ...p, confirm: !p.confirm }))}
+                                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                                    >
+                                        {showPasswords.confirm ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                    </button>
                                 </div>
                             </div>
 
@@ -189,7 +208,7 @@ export default function ResetPassword() {
                                 disabled={loading}
                                 className="w-full py-3 bg-primary text-white font-bold rounded-lg hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary/25"
                             >
-                                {loading ? 'Đang đặt lại...' : 'Đặt Lại Mật Khẩu'}
+                                {loading ? 'Đang xử lý...' : 'Đặt lại mật khẩu'}
                             </button>
                         </form>
 
@@ -197,7 +216,7 @@ export default function ResetPassword() {
                             <p className="text-sm text-slate-600 dark:text-slate-400">
                                 Quay lại{' '}
                                 <Link to="/login" className="font-semibold text-primary hover:text-primary/80 transition-colors">
-                                    đăng nhập
+                                    Đăng nhập
                                 </Link>
                             </p>
                         </div>
@@ -208,4 +227,3 @@ export default function ResetPassword() {
         </div>
     );
 }
-

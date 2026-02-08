@@ -85,19 +85,11 @@ export default function ForgotPassword() {
                                 <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
                                 <div className="flex-1">
                                     <p className="text-sm font-semibold text-green-600 dark:text-green-400 mb-1">
-                                        Email đã được gửi!
+                                        OTP đã được gửi!
                                     </p>
                                     <p className="text-sm text-green-600 dark:text-green-400">
-                                        Vui lòng kiểm tra hộp thư của bạn để lấy mã OTP và tiếp tục đặt lại mật khẩu.
+                                        Vui lòng kiểm tra hộp thư của bạn để lấy OTP, sau đó đặt lại mật khẩu.
                                     </p>
-                                    <div className="mt-3">
-                                        <Link
-                                            to={`/reset-password?email=${encodeURIComponent(email)}`}
-                                            className="inline-flex items-center justify-center px-4 py-2 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 transition-all"
-                                        >
-                                            Tiếp tục đặt lại mật khẩu
-                                        </Link>
-                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -146,7 +138,7 @@ export default function ForgotPassword() {
                                 disabled={loading}
                                 className="w-full py-3 bg-primary text-white font-bold rounded-lg hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary/25"
                             >
-                                {loading ? 'Đang gửi...' : 'Gửi Email Đặt Lại'}
+                                {loading ? 'Đang gửi...' : 'Gửi OTP'}
                             </button>
 
                             {/* Info Message */}
@@ -155,7 +147,7 @@ export default function ForgotPassword() {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
                                 <p>
-                                    Bạn sẽ nhận được email với hướng dẫn chi tiết để đặt lại mật khẩu của mình.
+                                    Bạn sẽ nhận được email chứa mã OTP để đặt lại mật khẩu.
                                 </p>
                             </div>
                         </form>
@@ -167,19 +159,26 @@ export default function ForgotPassword() {
                                 </p>
                                 <ul className="text-sm text-slate-600 dark:text-slate-400 space-y-1 list-disc list-inside">
                                     <li>Kiểm tra cả thư mục Spam/Junk nếu không thấy email</li>
-                                    <li>Link đặt lại mật khẩu có hiệu lực trong 24 giờ</li>
+                                    <li>Mã OTP có hiệu lực trong thời gian giới hạn</li>
                                     <li>Nếu vẫn không nhận được email, vui lòng thử lại sau vài phút</li>
                                 </ul>
                             </div>
 
+                            <Link
+                                to={`/reset-password?email=${encodeURIComponent(email)}`}
+                                className="w-full inline-flex justify-center py-3 bg-primary text-white font-bold rounded-lg hover:bg-primary/90 transition-all shadow-lg shadow-primary/25"
+                            >
+                                Nhập OTP & đặt lại mật khẩu
+                            </Link>
+
                             <button
+                                type="button"
                                 onClick={() => {
                                     setSuccess(false);
-                                    setEmail('');
                                 }}
                                 className="w-full py-3 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-all"
                             >
-                                Gửi lại email
+                                Gửi lại OTP
                             </button>
                         </div>
                     )}
