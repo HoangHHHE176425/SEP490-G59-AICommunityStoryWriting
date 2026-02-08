@@ -200,22 +200,6 @@ export function CategoryDetailModal({ category, onClose }) {
                                     {formatDate(category.created_at)}
                                 </div>
                             </div>
-
-                            {category.story_type && (
-                                <div style={{
-                                    padding: '1rem',
-                                    backgroundColor: '#f8fafc',
-                                    borderRadius: '8px',
-                                    border: '1px solid #e2e8f0'
-                                }}>
-                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem', textTransform: 'uppercase' }}>
-                                        Loại truyện
-                                    </div>
-                                    <div style={{ fontSize: '1rem', fontWeight: 600, color: '#1e293b' }}>
-                                        {category.story_type === 'long' ? 'Truyện dài' : category.story_type === 'short' ? 'Truyện ngắn' : 'Tất cả'}
-                                    </div>
-                                </div>
-                            )}
                         </div>
                     </div>
 

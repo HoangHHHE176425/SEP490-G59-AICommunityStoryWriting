@@ -2,7 +2,7 @@ import axiosInstance from "../axiosInstance";
 
 /**
  * Tạo thể loại mới.
- * @param {Object} data - { name (required), description?, isActive?, parentId?, iconImage? (File) }
+ * @param {Object} data - { name (required), description?, isActive?, iconImage? (File) }
  * @returns {Promise} - Created category từ server
  * @throws {Error} Nếu name không được cung cấp hoặc rỗng
  */
@@ -31,11 +31,6 @@ export async function createCategory(data) {
 
     // IsActive: BIT DEFAULT 1 - convert boolean to string for FormData
     formData.append("IsActive", String(data.isActive !== false));
-
-    // ParentId: UNIQUEIDENTIFIER NULL - chỉ gửi nếu có giá trị hợp lệ
-    if (data.parentId != null && data.parentId !== "" && data.parentId !== "null" && data.parentId !== "undefined") {
-        formData.append("ParentId", data.parentId);
-    }
 
     // IconImage: File - chỉ gửi nếu là File object hợp lệ và có extension hợp lệ
     if (data.iconImage instanceof File) {
@@ -95,7 +90,7 @@ export async function getAllCategories(params = {}) {
  *   pageSize?: number, 
  *   search?: string, 
  *   isActive?: boolean, 
- *   parentId?: string (Guid),
+ *   includeInactive?: boolean,
  *   sortBy?: string,
  *   sortOrder?: 'asc' | 'desc'
  * }
@@ -118,12 +113,6 @@ export async function getCategoriesWithPagination(params = {}) {
     }
     if (params.includeInactive !== undefined && params.includeInactive !== null) {
         queryParams.append("includeInactive", params.includeInactive);
-    }
-    if (params.parentId != null) {
-        queryParams.append("parentId", params.parentId);
-    }
-    if (params.excludeRoots !== undefined && params.excludeRoots !== null) {
-        queryParams.append("excludeRoots", params.excludeRoots);
     }
     if (params.sortBy != null) {
         queryParams.append("sortBy", params.sortBy);
@@ -162,7 +151,7 @@ export async function getCategoryBySlug(slug) {
 /**
  * Cập nhật thể loại.
  * @param {string} id - Guid của category cần cập nhật
- * @param {Object} data - { name (required), description?, isActive?, parentId?, iconImage? (File) }
+ * @param {Object} data - { name (required), description?, isActive?, iconImage? (File) }
  * @returns {Promise} - Response từ server (NoContent nếu thành công)
  * @throws {Error} Nếu name không được cung cấp hoặc rỗng
  */
@@ -191,11 +180,6 @@ export async function updateCategory(id, data) {
 
     // IsActive: BIT DEFAULT 1 - convert boolean to string for FormData
     formData.append("IsActive", String(data.isActive !== false));
-
-    // ParentId: UNIQUEIDENTIFIER NULL - chỉ gửi nếu có giá trị hợp lệ
-    if (data.parentId != null && data.parentId !== "" && data.parentId !== "null" && data.parentId !== "undefined") {
-        formData.append("ParentId", data.parentId);
-    }
 
     // IconImage: File - chỉ gửi nếu là File object hợp lệ và có extension hợp lệ
     if (data.iconImage instanceof File) {
