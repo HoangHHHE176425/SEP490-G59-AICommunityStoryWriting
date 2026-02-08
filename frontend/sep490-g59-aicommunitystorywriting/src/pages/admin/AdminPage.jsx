@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { AdminDashboard } from '../../components/admin/AdminDashboard';
-import { CategoryManagement } from './category/CategoryManagement';
-import { PublicationManagement } from './publication/PublicationManagement';
+import { CategoryManagement } from '../../components/admin/CategoryManagement';
 
 export function AdminPage() {
     // eslint-disable-next-line no-unused-vars
@@ -14,15 +13,13 @@ export function AdminPage() {
                 return <AdminDashboard />;
             case 'categories':
                 return <CategoryManagement />;
-            case 'publication':
-                return <PublicationManagement />;
             case 'stories':
                 return (
                     <div className="text-center py-12">
-                        <h2 className="text-xl font-bold text-slate-900 mb-2">
+                        <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
                             Quản lý truyện
                         </h2>
-                        <p className="text-slate-500">
+                        <p className="text-slate-500 dark:text-slate-400">
                             Trang đang được phát triển...
                         </p>
                     </div>
@@ -30,10 +27,10 @@ export function AdminPage() {
             case 'users':
                 return (
                     <div className="text-center py-12">
-                        <h2 className="text-xl font-bold text-slate-900 mb-2">
+                        <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
                             Quản lý người dùng
                         </h2>
-                        <p className="text-slate-500">
+                        <p className="text-slate-500 dark:text-slate-400">
                             Trang đang được phát triển...
                         </p>
                     </div>
@@ -41,10 +38,10 @@ export function AdminPage() {
             case 'comments':
                 return (
                     <div className="text-center py-12">
-                        <h2 className="text-xl font-bold text-slate-900 mb-2">
+                        <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
                             Quản lý bình luận
                         </h2>
-                        <p className="text-slate-500">
+                        <p className="text-slate-500 dark:text-slate-400">
                             Trang đang được phát triển...
                         </p>
                     </div>
@@ -52,10 +49,10 @@ export function AdminPage() {
             case 'settings':
                 return (
                     <div className="text-center py-12">
-                        <h2 className="text-xl font-bold text-slate-900 mb-2">
+                        <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
                             Cài đặt
                         </h2>
-                        <p className="text-slate-500">
+                        <p className="text-slate-500 dark:text-slate-400">
                             Trang đang được phát triển...
                         </p>
                     </div>
@@ -66,7 +63,7 @@ export function AdminPage() {
     };
 
     return (
-        <AdminLayout activePage={activePage} onNavigate={setActivePage}>
+        <AdminLayout activePage={activePage}>
             {renderPage()}
         </AdminLayout>
     );

@@ -1,71 +1,111 @@
-import { Link } from 'react-router-dom';
-import { ImageWithFallback } from '../figma/ImageWithFallback';
-import { Eye, Flame, Star } from 'lucide-react';
-import { storyImages } from '../../assets/image/storyImages';
+import { Flame, ChevronRight, Eye, MessageCircle } from 'lucide-react';
 
-const STORIES = [
-  { id: 1, title: 'Phong Vân Thiên Hạ', author: 'Ngạo Thiên Tử', chapter: 'Chương 1245', genre: 'Võ Hiệp', views: '3.8M', rating: 4.9, badge: 'HOT' },
-  { id: 2, title: 'Kiếm Thần Truyền Kỳ', author: 'Huyền Vũ', chapter: 'Chương 987', genre: 'Tu Tiên', views: '3.2M', rating: 4.8, badge: 'HOT' },
-  { id: 3, title: 'Ma Pháp Sư Tối Cao', author: 'Minh Trinh', chapter: 'Chương 756', genre: 'Huyền Huyễn', views: '2.9M', rating: 4.7 },
-  { id: 4, title: 'Cyber Thế Giới', author: 'Thanh Lương', chapter: 'Chương 543', genre: 'Khoa Huyễn', views: '2.6M', rating: 4.6, badge: 'HOT' },
-  { id: 5, title: 'Tình Yêu Và Vận Mệnh', author: 'Kim Dung', chapter: 'Chương 321', genre: 'Ngôn Tình', views: '2.3M', rating: 4.8 },
-  { id: 6, title: 'Quỷ Dạ Truyền Thuyết', author: 'Vũ Phong', chapter: 'Chương 198', genre: 'Kinh Dị', views: '2.1M', rating: 4.5, badge: 'HOT' },
+const hotBooks = [
+    {
+        id: 1,
+        title: 'Tiên Võ Đế Tôn',
+        author: 'Lục Đạo Tam Sinh',
+        chapter: 'Chương 6789',
+        views: '125M',
+        comments: '45K',
+        cover: 'https://images.unsplash.com/photo-1598669266459-eef1467c15be?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxmYW50YXN5JTIwd2FycmlvciUyMGJvb2t8ZW58MXx8fHwxNzY4NDg2MzI5fDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral'
+    },
+    {
+        id: 2,
+        title: 'Vạn Cổ Đệ Nhất Thần',
+        author: 'Phong Thanh Dương',
+        chapter: 'Chương 5432',
+        views: '98M',
+        comments: '38K',
+        cover: 'https://images.unsplash.com/photo-1762554914464-1ea94ff92f49?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxtYWdpYyUyMHNwZWxsJTIwYm9va3xlbnwxfHx8fDE3Njg0ODYzMjl8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral'
+    },
+    {
+        id: 3,
+        title: 'Long Vương Truyền Thuyết',
+        author: 'Đường Gia Tam Thiếu',
+        chapter: 'Chương 4567',
+        views: '87M',
+        comments: '32K',
+        cover: 'https://images.unsplash.com/photo-1764768306669-d0ab6d67b00b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxhbmNpZW50JTIwc3dvcmR8ZW58MXx8fHwxNzY4NDU5ODkxfDA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral'
+    },
+    {
+        id: 4,
+        title: 'Vũ Động Càn Khôn',
+        author: 'Thiên Tằm Thổ Đậu',
+        chapter: 'Chương 3890',
+        views: '76M',
+        comments: '28K',
+        cover: 'https://images.unsplash.com/photo-1610926597998-fc7f2c1b89b0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxteXN0aWNhbCUyMGRyYWdvbnxlbnwxfHx8fDE3Njg0ODYzMzB8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral'
+    },
+    {
+        id: 5,
+        title: 'Nguyên Tôn',
+        author: 'Thiên Tằm Thổ Đậu',
+        chapter: 'Chương 2987',
+        views: '65M',
+        comments: '25K',
+        cover: 'https://images.unsplash.com/photo-1500245804862-0692ee1bbee8?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxyb21hbnRpYyUyMHN1bnNldHxlbnwxfHx8fDE3Njg0NTI0MDh8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral'
+    },
+    {
+        id: 6,
+        title: 'Huyết Ma Nhân Gian',
+        author: 'Mộng Nhập Thần Cơ',
+        chapter: 'Chương 2345',
+        views: '54M',
+        comments: '21K',
+        cover: 'https://images.unsplash.com/photo-1633901605644-e7f62844a460?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxteXN0ZXJpb3VzJTIwZm9yZXN0fGVufDF8fHx8MTc2ODQ4NjMzMHww&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral'
+    }
 ];
 
 export function HotStories() {
-  return (
-    <section className="bg-white rounded-2xl border border-gray-200 p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-[#FB2C36] to-[#E01F2E] rounded-lg flex items-center justify-center">
-            <Flame className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h2 className="text-[#1A2332] font-bold text-[24px]">Truyện Hot</h2>
-            <p className="text-[#90A1B9] font-normal text-[14px]">Truyện được yêu thích nhất hiện nay</p>
-          </div>
-        </div>
-        <Link to="/story-list" className="text-[#13EC5B] hover:text-[#11D350] font-semibold text-[14px] flex items-center gap-1">
-          Xem tất cả <span>→</span>
-        </Link>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {STORIES.map((story) => (
-          <div key={story.id} className="group relative overflow-hidden rounded-xl border border-gray-200 hover:border-[#FB2C36] hover:shadow-xl transition-all cursor-pointer">
-            <div className="relative h-48 overflow-hidden">
-              <ImageWithFallback src={storyImages[story.title]} alt={story.title} className="w-full h-full object-cover object-[center_25%] group-hover:scale-110 transition-transform duration-300" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent"></div>
-              {story.badge && (
-                <div className="absolute top-3 right-3">
-                  <span className="px-3 py-1 bg-[#FB2C36] text-white rounded-full font-bold text-[11px] flex items-center gap-1 shadow-lg">
-                    <Flame className="w-3 h-3" /> {story.badge}
-                  </span>
+    return (
+        <section>
+            <div className="flex items-center justify-between mb-6 px-2 border-l-4 border-primary">
+                <div className="flex items-center gap-3">
+                    <Flame className="w-6 h-6 text-orange-500" />
+                    <h3 className="text-xl font-bold dark:text-white">Truyện Hot Nhất</h3>
                 </div>
-              )}
-              <div className="absolute top-3 left-3">
-                <span className="px-2 py-1 bg-white/20 backdrop-blur-sm border border-white/30 text-white rounded font-semibold text-[10px]">{story.genre}</span>
-              </div>
-              <div className="absolute bottom-0 inset-x-0 p-4">
-                <h3 className="text-white font-bold text-[16px] mb-1 line-clamp-1 group-hover:text-[#13EC5B] transition-colors">{story.title}</h3>
-                <p className="text-gray-300 font-normal text-[12px] mb-2">{story.author}</p>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1">
-                      <Eye className="w-3 h-3 text-gray-300" />
-                      <span className="text-gray-300 font-medium text-[11px]">{story.views}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Star className="w-3 h-3 text-[#FFA500] fill-[#FFA500]" />
-                      <span className="text-white font-semibold text-[11px]">{story.rating}</span>
-                    </div>
-                  </div>
-                  <span className="text-[#13EC5B] font-bold text-[11px]">{story.chapter}</span>
-                </div>
-              </div>
+                <a className="text-sm font-semibold text-primary hover:underline flex items-center gap-1" href="#">
+                    Xem tất cả <ChevronRight className="w-4 h-4" />
+                </a>
             </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 gap-4 md:gap-6">
+                {hotBooks.map((book) => (
+                    <div key={book.id} className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden hover:shadow-lg transition-shadow group cursor-pointer">
+                        <div className="flex gap-4 p-4">
+                            <div className="relative w-20 h-28 rounded-lg overflow-hidden shrink-0">
+                                <img
+                                    alt={book.title}
+                                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                                    src={book.cover}
+                                />
+                            </div>
+                            <div className="flex-1 flex flex-col justify-between min-w-0">
+                                <div>
+                                    <h4 className="font-bold text-sm line-clamp-2 group-hover:text-primary transition-colors mb-1">
+                                        {book.title}
+                                    </h4>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">{book.author}</p>
+                                    <span className="text-[10px] font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded inline-block">
+                                        {book.chapter}
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-2">
+                                    <span className="flex items-center gap-1">
+                                        <Eye className="w-3 h-3" />
+                                        {book.views}
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                        <MessageCircle className="w-3 h-3" />
+                                        {book.comments}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </section>
+    );
 }

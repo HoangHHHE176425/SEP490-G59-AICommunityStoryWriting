@@ -1,35 +1,27 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { User, Mail, Phone, CreditCard, Save, AlertCircle, Lock, Eye, EyeOff, X, CheckCircle } from 'lucide-react';
+import { User, Mail, Phone, CreditCard, Save, AlertCircle } from 'lucide-react';
 
 export default function EditProfile() {
-    const { user } = useAuth();
+    const { user, updateProfile, uploadAvatar } = useAuth();
     const [formData, setFormData] = useState({
-        displayName: user?.name || '',
+        displayName: user?.profile?.displayName || user?.name || '',
         email: user?.email || '',
-        phone: '0912 345 678',
-        idNumber: '001234567890',
-        bio: 'Tôi là một tác giả đam mê văn học, chuyên viết các thể loại võ hiệp và tu tiên. Với hơn 5 năm kinh nghiệm sáng tác, tôi luôn cố gắng mang đến những câu chuyện hấp dẫn và đầy cảm xúc cho độc giả.',
+        phone: user?.profile?.phone || '',
+        idNumber: user?.profile?.idNumber || '',
+        bio: user?.profile?.bio || '',
+        description: user?.profile?.description || '',
+        avatarUrl: user?.profile?.avatarUrl || user?.avatar || '',
     });
+    const [avatarFile, setAvatarFile] = useState(null);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
     const [loading, setLoading] = useState(false);
-    
-    // Password change modal state
-    const [showPasswordModal, setShowPasswordModal] = useState(false);
-    const [passwordData, setPasswordData] = useState({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: '',
-    });
-    const [showPasswords, setShowPasswords] = useState({
-        current: false,
-        new: false,
-        confirm: false,
-    });
-    const [passwordError, setPasswordError] = useState('');
-    const [passwordSuccess, setPasswordSuccess] = useState(false);
-    const [passwordLoading, setPasswordLoading] = useState(false);
+
+    const avatarPreviewUrl = useMemo(() => {
+        if (!avatarFile) return null;
+        return URL.createObjectURL(avatarFile);
+    }, [avatarFile]);
 
     const handleChange = (e) => {
         setFormData({
@@ -46,66 +38,36 @@ export default function EditProfile() {
         setSuccess(false);
         setLoading(true);
 
-        // Mock API call
         try {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            setSuccess(true);
-            setTimeout(() => setSuccess(false), 3000);
-        } catch (err) {
+            if (avatarFile) {
+                const up = await uploadAvatar(avatarFile);
+                if (!up.success) {
+                    setError(up.message || 'Upload avatar thất bại');
+                    return;
+                }
+                // backend returns relative url; AuthContext refreshProfile will update user.avatar
+                setAvatarFile(null);
+            }
+
+            const result = await updateProfile({
+                displayName: formData.displayName,
+                phone: formData.phone,
+                idNumber: formData.idNumber,
+                bio: formData.bio,
+                description: formData.description,
+                // avatarUrl is updated via upload endpoint; keep manual url as fallback if user uses it
+                avatarUrl: formData.avatarUrl,
+            });
+            if (result.success) {
+                setSuccess(true);
+                setTimeout(() => setSuccess(false), 3000);
+            } else {
+                setError(result.message || 'Đã xảy ra lỗi. Vui lòng thử lại.');
+            }
+        } catch {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
         } finally {
             setLoading(false);
-        }
-    };
-
-    const handlePasswordChange = (e) => {
-        setPasswordData({
-            ...passwordData,
-            [e.target.name]: e.target.value,
-        });
-        setPasswordError('');
-        setPasswordSuccess(false);
-    };
-
-    const handlePasswordSubmit = async (e) => {
-        e.preventDefault();
-        setPasswordError('');
-        setPasswordSuccess(false);
-
-        if (!passwordData.currentPassword || !passwordData.newPassword || !passwordData.confirmPassword) {
-            setPasswordError('Vui lòng điền đầy đủ thông tin');
-            return;
-        }
-
-        if (passwordData.newPassword.length < 6) {
-            setPasswordError('Mật khẩu mới phải có ít nhất 6 ký tự');
-            return;
-        }
-
-        if (passwordData.newPassword !== passwordData.confirmPassword) {
-            setPasswordError('Mật khẩu xác nhận không khớp');
-            return;
-        }
-
-        setPasswordLoading(true);
-
-        // Mock API call - replace with actual API
-        try {
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            setPasswordSuccess(true);
-            setPasswordData({
-                currentPassword: '',
-                newPassword: '',
-                confirmPassword: '',
-            });
-            setTimeout(() => {
-                setShowPasswordModal(false);
-                setPasswordSuccess(false);
-            }, 2000);
-        } catch (err) {
-            setPasswordError('Mật khẩu hiện tại không đúng hoặc đã xảy ra lỗi.');
-        } finally {
-            setPasswordLoading(false);
         }
     };
 
@@ -165,7 +127,7 @@ export default function EditProfile() {
                                 value={formData.email}
                                 onChange={handleChange}
                                 className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
-                                required
+                                disabled
                             />
                         </div>
                     </div>
@@ -221,15 +183,66 @@ export default function EditProfile() {
                     />
                 </div>
 
-                <div className="flex justify-between items-center">
-                    <button
-                        type="button"
-                        onClick={() => setShowPasswordModal(true)}
-                        className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:text-primary transition-colors"
-                    >
-                        <Lock className="w-4 h-4" />
-                        Đổi mật khẩu
-                    </button>
+                <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                        Mô tả
+                    </label>
+                    <textarea
+                        name="description"
+                        value={formData.description}
+                        onChange={handleChange}
+                        rows={3}
+                        className="block w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none resize-none"
+                        placeholder="Nhập mô tả..."
+                    />
+                </div>
+
+                <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                        Ảnh đại diện
+                    </label>
+                    <div className="flex items-center gap-4">
+                        <div className="size-14 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700 border border-slate-200 dark:border-slate-600">
+                            <img
+                                src={avatarPreviewUrl || user?.avatar || formData.avatarUrl}
+                                alt="avatar"
+                                className="w-full h-full object-cover"
+                            />
+                        </div>
+                        <div className="flex-1">
+                            <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => {
+                                    const f = e.target.files?.[0] || null;
+                                    setAvatarFile(f);
+                                    setError('');
+                                    setSuccess(false);
+                                }}
+                                className="block w-full text-sm text-slate-700 dark:text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary file:text-white file:font-semibold hover:file:bg-primary/90"
+                            />
+                            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                Hỗ trợ JPG/PNG/GIF/WEBP, tối đa 2MB.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="mt-4">
+                        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                            Hoặc dán Avatar URL (tuỳ chọn)
+                        </label>
+                        <input
+                            name="avatarUrl"
+                            type="url"
+                            value={formData.avatarUrl}
+                            onChange={handleChange}
+                            className="block w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
+                            placeholder="https://..."
+                        />
+                    </div>
+                </div>
+
+                <div className="flex justify-end gap-4">
                     <button
                         type="submit"
                         disabled={loading}
@@ -240,169 +253,6 @@ export default function EditProfile() {
                     </button>
                 </div>
             </form>
-
-            {/* Password Change Modal */}
-            {showPasswordModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl max-w-md w-full border border-slate-200 dark:border-slate-700">
-                        <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-700">
-                            <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-                                Đổi mật khẩu
-                            </h3>
-                            <button
-                                onClick={() => {
-                                    setShowPasswordModal(false);
-                                    setPasswordData({
-                                        currentPassword: '',
-                                        newPassword: '',
-                                        confirmPassword: '',
-                                    });
-                                    setPasswordError('');
-                                    setPasswordSuccess(false);
-                                }}
-                                className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
-                            >
-                                <X className="w-5 h-5 text-slate-500 dark:text-slate-400" />
-                            </button>
-                        </div>
-
-                        <form onSubmit={handlePasswordSubmit} className="p-6 space-y-4">
-                            {passwordError && (
-                                <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-3">
-                                    <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0" />
-                                    <p className="text-sm text-red-600 dark:text-red-400">{passwordError}</p>
-                                </div>
-                            )}
-
-                            {passwordSuccess && (
-                                <div className="p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-3">
-                                    <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-                                    <p className="text-sm text-green-600 dark:text-green-400">
-                                        Đổi mật khẩu thành công!
-                                    </p>
-                                </div>
-                            )}
-
-                            <div>
-                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                                    Mật khẩu hiện tại
-                                </label>
-                                <div className="relative">
-                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <Lock className="w-5 h-5 text-slate-400" />
-                                    </div>
-                                    <input
-                                        name="currentPassword"
-                                        type={showPasswords.current ? 'text' : 'password'}
-                                        value={passwordData.currentPassword}
-                                        onChange={handlePasswordChange}
-                                        className="block w-full pl-10 pr-12 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
-                                        required
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowPasswords({ ...showPasswords, current: !showPasswords.current })}
-                                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                                    >
-                                        {showPasswords.current ? (
-                                            <EyeOff className="w-5 h-5" />
-                                        ) : (
-                                            <Eye className="w-5 h-5" />
-                                        )}
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                                    Mật khẩu mới
-                                </label>
-                                <div className="relative">
-                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <Lock className="w-5 h-5 text-slate-400" />
-                                    </div>
-                                    <input
-                                        name="newPassword"
-                                        type={showPasswords.new ? 'text' : 'password'}
-                                        value={passwordData.newPassword}
-                                        onChange={handlePasswordChange}
-                                        className="block w-full pl-10 pr-12 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
-                                        placeholder="Tối thiểu 6 ký tự"
-                                        required
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowPasswords({ ...showPasswords, new: !showPasswords.new })}
-                                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                                    >
-                                        {showPasswords.new ? (
-                                            <EyeOff className="w-5 h-5" />
-                                        ) : (
-                                            <Eye className="w-5 h-5" />
-                                        )}
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                                    Xác nhận mật khẩu mới
-                                </label>
-                                <div className="relative">
-                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <Lock className="w-5 h-5 text-slate-400" />
-                                    </div>
-                                    <input
-                                        name="confirmPassword"
-                                        type={showPasswords.confirm ? 'text' : 'password'}
-                                        value={passwordData.confirmPassword}
-                                        onChange={handlePasswordChange}
-                                        className="block w-full pl-10 pr-12 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
-                                        required
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowPasswords({ ...showPasswords, confirm: !showPasswords.confirm })}
-                                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-                                    >
-                                        {showPasswords.confirm ? (
-                                            <EyeOff className="w-5 h-5" />
-                                        ) : (
-                                            <Eye className="w-5 h-5" />
-                                        )}
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="flex justify-end gap-4 pt-4">
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setShowPasswordModal(false);
-                                        setPasswordData({
-                                            currentPassword: '',
-                                            newPassword: '',
-                                            confirmPassword: '',
-                                        });
-                                        setPasswordError('');
-                                        setPasswordSuccess(false);
-                                    }}
-                                    className="px-6 py-3 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-all"
-                                >
-                                    Hủy
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={passwordLoading}
-                                    className="px-6 py-3 bg-primary text-white font-bold rounded-lg hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary/25"
-                                >
-                                    {passwordLoading ? 'Đang xử lý...' : 'Đổi mật khẩu'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
         </div>
     );
 }

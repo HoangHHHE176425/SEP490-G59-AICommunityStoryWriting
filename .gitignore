@@ -19,6 +19,3 @@ Thumbs.db
 *.tmp
 *.bak
 *.backup
-
-# Upload files
-**/wwwroot/uploads/
