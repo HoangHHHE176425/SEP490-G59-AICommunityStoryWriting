@@ -1,11 +1,6 @@
-﻿using BusinessObjects.Entities;
-using BusinessObjects.Models;
+﻿using BusinessObjects;
+using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace DataAccessObjects.DAOs
 {
@@ -18,68 +13,71 @@ namespace DataAccessObjects.DAOs
             get { lock (instanceLock) { return instance ??= new UserDAO(); } }
         }
 
-        public async Task<User?> FindUserByEmail(StoryPlatformDbContext context, string email)
+        public async Task<users?> FindUserByEmail(StoryPlatformDbContext context, string email)
         {
-            return await context.Users.Include(u => u.UserProfile)
-                                      .FirstOrDefaultAsync(u => u.Email == email);
+            return await context.users.Include(u => u.user_profiles)
+                                      .FirstOrDefaultAsync(u => u.email == email);
         }
 
-        public async Task<User?> FindUserById(StoryPlatformDbContext context, Guid id)
+        public async Task<users?> FindUserById(StoryPlatformDbContext context, Guid id)
         {
-            return await context.Users
-                .Include(u => u.UserProfile)
-                .Include(u => u.Stories) // Include truyện để đếm view, like, số lượng
-                .FirstOrDefaultAsync(u => u.Id == id);
+            return await context.users
+                .Include(u => u.user_profiles)
+                .Include(u => u.stories) // Include truyện để đếm view, like, số lượng
+                .FirstOrDefaultAsync(u => u.id == id);
         }
 
         public async Task<bool> CheckEmailExists(StoryPlatformDbContext context, string email)
         {
-            return await context.Users.AnyAsync(u => u.Email == email);
+            return await context.users.AnyAsync(u => u.email == email);
         }
 
-        public async Task AddUser(StoryPlatformDbContext context, User user)
+        public async Task AddUser(StoryPlatformDbContext context, users user)
         {
-            context.Users.Add(user);
+            context.users.Add(user);
             await context.SaveChangesAsync();
         }
 
-        public async Task UpdateUser(StoryPlatformDbContext context, User user)
+        public async Task UpdateUser(StoryPlatformDbContext context, users user)
         {
-            context.Users.Update(user);
+            context.users.Update(user);
             await context.SaveChangesAsync();
         }
 
-        public async Task AddToken(StoryPlatformDbContext context, AuthToken token)
+        public async Task AddToken(StoryPlatformDbContext context, auth_tokens token)
         {
-            context.AuthTokens.Add(token);
+            context.auth_tokens.Add(token);
             await context.SaveChangesAsync();
         }
         public async Task<bool> IsNicknameExist(StoryPlatformDbContext context, string nickname, Guid currentUserId)
         {
-            return await context.UserProfiles
-                .AnyAsync(p => p.Nickname == nickname && p.UserId != currentUserId);
+            return await context.user_profiles
+                .AnyAsync(p => p.nickname == nickname && p.user_id != currentUserId);
         }
         public async Task SoftDeleteUser(StoryPlatformDbContext context, Guid userId)
         {
-            var user = await context.Users.FindAsync(userId);
+            var user = await context.users.FindAsync(userId);
             if (user != null)
             {
 
-                user.Status = "DELETED";
+                user.status = "DELETED";
 
 
-                user.Email = $"deleted_{Guid.NewGuid()}@deleted.store";
+                user.email = $"deleted_{Guid.NewGuid()}@deleted.store";
 
 
-                user.PasswordHash = "DELETED_USER_" + Guid.NewGuid().ToString();
-                // ------------------------
+                user.password_hash = "DELETED_USER_" + Guid.NewGuid().ToString();
 
-                // 3. Cập nhật ngày
-                user.UpdatedAt = DateTime.UtcNow;
+                user.updated_at = DateTime.UtcNow;
 
-                context.Users.Update(user);
+                context.users.Update(user);
                 await context.SaveChangesAsync();
             }
+        }
+        public static bool Exists(Guid id)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.users.Any(u => u.id == id);
         }
     }
 }
