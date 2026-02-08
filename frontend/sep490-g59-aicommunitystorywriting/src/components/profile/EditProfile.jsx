@@ -1,19 +1,27 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { User, Mail, Phone, CreditCard, Save, AlertCircle } from 'lucide-react';
 
 export default function EditProfile() {
-    const { user } = useAuth();
+    const { user, updateProfile, uploadAvatar } = useAuth();
     const [formData, setFormData] = useState({
-        displayName: user?.name || '',
+        displayName: user?.profile?.displayName || user?.name || '',
         email: user?.email || '',
-        phone: '0912 345 678',
-        idNumber: '001234567890',
-        bio: 'Tôi là một tác giả đam mê văn học, chuyên viết các thể loại võ hiệp và tu tiên. Với hơn 5 năm kinh nghiệm sáng tác, tôi luôn cố gắng mang đến những câu chuyện hấp dẫn và đầy cảm xúc cho độc giả.',
+        phone: user?.profile?.phone || '',
+        idNumber: user?.profile?.idNumber || '',
+        bio: user?.profile?.bio || '',
+        description: user?.profile?.description || '',
+        avatarUrl: user?.profile?.avatarUrl || user?.avatar || '',
     });
+    const [avatarFile, setAvatarFile] = useState(null);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
     const [loading, setLoading] = useState(false);
+
+    const avatarPreviewUrl = useMemo(() => {
+        if (!avatarFile) return null;
+        return URL.createObjectURL(avatarFile);
+    }, [avatarFile]);
 
     const handleChange = (e) => {
         setFormData({
@@ -30,12 +38,33 @@ export default function EditProfile() {
         setSuccess(false);
         setLoading(true);
 
-        // Mock API call
         try {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            setSuccess(true);
-            setTimeout(() => setSuccess(false), 3000);
-        } catch (err) {
+            if (avatarFile) {
+                const up = await uploadAvatar(avatarFile);
+                if (!up.success) {
+                    setError(up.message || 'Upload avatar thất bại');
+                    return;
+                }
+                // backend returns relative url; AuthContext refreshProfile will update user.avatar
+                setAvatarFile(null);
+            }
+
+            const result = await updateProfile({
+                displayName: formData.displayName,
+                phone: formData.phone,
+                idNumber: formData.idNumber,
+                bio: formData.bio,
+                description: formData.description,
+                // avatarUrl is updated via upload endpoint; keep manual url as fallback if user uses it
+                avatarUrl: formData.avatarUrl,
+            });
+            if (result.success) {
+                setSuccess(true);
+                setTimeout(() => setSuccess(false), 3000);
+            } else {
+                setError(result.message || 'Đã xảy ra lỗi. Vui lòng thử lại.');
+            }
+        } catch {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
         } finally {
             setLoading(false);
@@ -98,7 +127,7 @@ export default function EditProfile() {
                                 value={formData.email}
                                 onChange={handleChange}
                                 className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
-                                required
+                                disabled
                             />
                         </div>
                     </div>
@@ -152,6 +181,65 @@ export default function EditProfile() {
                         className="block w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none resize-none"
                         placeholder="Nhập giới thiệu về bản thân..."
                     />
+                </div>
+
+                <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                        Mô tả
+                    </label>
+                    <textarea
+                        name="description"
+                        value={formData.description}
+                        onChange={handleChange}
+                        rows={3}
+                        className="block w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none resize-none"
+                        placeholder="Nhập mô tả..."
+                    />
+                </div>
+
+                <div>
+                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                        Ảnh đại diện
+                    </label>
+                    <div className="flex items-center gap-4">
+                        <div className="size-14 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700 border border-slate-200 dark:border-slate-600">
+                            <img
+                                src={avatarPreviewUrl || user?.avatar || formData.avatarUrl}
+                                alt="avatar"
+                                className="w-full h-full object-cover"
+                            />
+                        </div>
+                        <div className="flex-1">
+                            <input
+                                type="file"
+                                accept="image/*"
+                                onChange={(e) => {
+                                    const f = e.target.files?.[0] || null;
+                                    setAvatarFile(f);
+                                    setError('');
+                                    setSuccess(false);
+                                }}
+                                className="block w-full text-sm text-slate-700 dark:text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary file:text-white file:font-semibold hover:file:bg-primary/90"
+                            />
+                            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                Hỗ trợ JPG/PNG/GIF/WEBP, tối đa 2MB.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="mt-4">
+                        <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                            Hoặc dán Avatar URL (tuỳ chọn)
+                        </label>
+                        <input
+                            name="avatarUrl"
+                            type="url"
+                            value={formData.avatarUrl}
+                            onChange={handleChange}
+                            className="block w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
+                            placeholder="https://..."
+                        />
+                    </div>
                 </div>
 
                 <div className="flex justify-end gap-4">

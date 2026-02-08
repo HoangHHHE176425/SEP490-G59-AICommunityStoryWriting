@@ -4,13 +4,13 @@ namespace Repositories.Interfaces
 {
     public interface IUserRepository
     {
-        Task<User?> GetUserByEmail(string email);
-        Task<User?> GetUserById(Guid id); 
+        Task<users?> GetUserByEmail(string email);
+        Task<users?> GetUserById(Guid id); 
         Task<bool> IsEmailExist(string email);
-        Task AddUser(User user);
-        Task UpdateUser(User user);
+        Task AddUser(users user);
+        Task UpdateUser(users user);
         Task DeleteUser(Guid userId);
         Task<bool> IsNicknameExist(string nickname, Guid currentUserId);
-        Task AddRefreshToken(AuthToken token);
+        Task AddRefreshToken(auth_tokens token);
     }
 }

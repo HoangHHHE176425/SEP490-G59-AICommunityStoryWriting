@@ -12,7 +12,7 @@ namespace AIStory.Services.Helpers
         private readonly IConfiguration _config;
         public JwtHelper(IConfiguration config) { _config = config; }
 
-        public string GenerateToken(User user)
+        public string GenerateToken(users user)
         {
             var key = _config["Jwt:Key"];
             var issuer = _config["Jwt:Issuer"];
@@ -23,9 +23,9 @@ namespace AIStory.Services.Helpers
 
             var claims = new List<Claim>
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()), // Guid -> String
-                new Claim(JwtRegisteredClaimNames.Email, user.Email),
-                new Claim("role", user.Role ?? "USER")
+                new Claim(JwtRegisteredClaimNames.Sub, user.id.ToString()), // Guid -> String
+                new Claim(JwtRegisteredClaimNames.Email, user.email),
+                new Claim("role", user.role ?? "USER")
             };
 
             var token = new JwtSecurityToken(

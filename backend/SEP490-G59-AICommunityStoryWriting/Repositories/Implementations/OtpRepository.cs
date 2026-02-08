@@ -1,5 +1,5 @@
-﻿using BusinessObjects.Entities;
-using BusinessObjects.Models;
+﻿using BusinessObjects;
+using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Repositories.Interfaces;
 using System;
@@ -19,10 +19,10 @@ namespace Repositories.Implementations
             _context = context;
         }
 
-        public Task AddOtp(OtpVerification otp)
+        public Task AddOtp(otp_verifications otp)
             => OtpDAO.Instance.AddOtp(_context, otp);
 
-        public Task<OtpVerification?> GetValidOtp(Guid userId, string otpCode, string type)
+        public Task<otp_verifications?> GetValidOtp(Guid userId, string otpCode, string type)
             => OtpDAO.Instance.GetValidOtp(_context, userId, otpCode, type);
 
         public Task MarkOtpAsUsed(Guid otpId)

@@ -13,14 +13,13 @@ export default function Profile() {
     const { user } = useAuth();
     const [activeTab, setActiveTab] = useState('info');
 
-    // Mock data - replace with actual data from API
-    const profileData = {
-        displayName: user?.name || 'Nguyễn Văn A',
-        email: user?.email || 'hungdqhe171841@gmail.com',
-        tags: ['Tác giả sáng tạo', 'Đam mê văn học'],
+    const profileData = user?.profile || {
+        displayName: user?.name || 'Người dùng',
+        email: user?.email || '',
+        tags: ['Thành viên'],
         stats: {
-            currentCoins: 1250,
-            storiesWritten: 5,
+            currentCoins: user?.coins || 0,
+            storiesWritten: 0,
         },
     };
 
@@ -75,13 +74,13 @@ export default function Profile() {
                                     <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-full">
                                         <Coins className="w-4 h-4 text-amber-500" />
                                         <span className="text-sm font-bold text-amber-700 dark:text-amber-400">
-                                            {profileData.stats.currentCoins.toLocaleString()} Coins
+                                            {(profileData.stats?.currentCoins ?? 0).toLocaleString()} Coins
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-full">
                                         <BookOpen className="w-4 h-4 text-green-500" />
                                         <span className="text-sm font-bold text-green-700 dark:text-green-400">
-                                            {profileData.stats.storiesWritten} Truyện
+                                            {profileData.stats?.storiesWritten ?? 0} Truyện
                                         </span>
                                     </div>
                                 </div>

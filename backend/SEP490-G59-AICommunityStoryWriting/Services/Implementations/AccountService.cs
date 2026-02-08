@@ -32,7 +32,7 @@ namespace Services.Implementations
             if (user == null) throw new Exception("Không tìm thấy người dùng.");
 
 
-            bool isPasswordCorrect = BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.PasswordHash);
+            bool isPasswordCorrect = BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.password_hash);
 
             if (!isPasswordCorrect)
             {
@@ -48,8 +48,8 @@ namespace Services.Implementations
             // 4. Mã hóa mật khẩu mới và lưu vào DB
             string newPasswordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
 
-            user.PasswordHash = newPasswordHash;
-            user.UpdatedAt = DateTime.UtcNow;
+            user.password_hash = newPasswordHash;
+            user.updated_at = DateTime.UtcNow;
 
             // 5. Gọi Repository để update
             await _userRepo.UpdateUser(user);
@@ -60,13 +60,13 @@ namespace Services.Implementations
             var user = await _userRepo.GetUserById(userId);
             if (user == null) throw new Exception("User not found");
 
-            if (user.UserProfile == null)
+            if (user.user_profiles == null)
             {
-                user.UserProfile = new UserProfile
+                user.user_profiles = new user_profiles
                 {
-                    UserId = userId,
-                    SocialLinks = "{}",
-                    Settings = "{\"allow_notif\": true}"
+                    user_id = userId,
+                    social_links = "{}",
+                    settings = "{\"allow_notif\": true}"
                 };
             }
 
@@ -74,25 +74,25 @@ namespace Services.Implementations
             if (!string.IsNullOrEmpty(request.DisplayName))
             {
                 // Chỉ check nếu nickname thay đổi so với cái cũ
-                if (request.DisplayName != user.UserProfile.Nickname)
+                if (request.DisplayName != user.user_profiles.nickname)
                 {
                     bool isExist = await _userRepo.IsNicknameExist(request.DisplayName, userId);
                     if (isExist)
                     {
                         throw new Exception($"Tên hiển thị '{request.DisplayName}' đã được sử dụng. Vui lòng chọn tên khác.");
                     }
-                    user.UserProfile.Nickname = request.DisplayName;
+                    user.user_profiles.nickname = request.DisplayName;
                 }
             }
 
-            if (!string.IsNullOrEmpty(request.Phone)) user.UserProfile.Phone = request.Phone;
-            if (!string.IsNullOrEmpty(request.IdNumber)) user.UserProfile.IdNumber = request.IdNumber;
-            if (request.Bio != null) user.UserProfile.Bio = request.Bio;
-            if (request.Description != null) user.UserProfile.Description = request.Description;
-            if (!string.IsNullOrEmpty(request.AvatarUrl)) user.UserProfile.AvatarUrl = request.AvatarUrl;
+            if (!string.IsNullOrEmpty(request.Phone)) user.user_profiles.Phone = request.Phone;
+            if (!string.IsNullOrEmpty(request.IdNumber)) user.user_profiles.IdNumber = request.IdNumber;
+            if (request.Bio != null) user.user_profiles.bio = request.Bio;
+            if (request.Description != null) user.user_profiles.description = request.Description;
+            if (!string.IsNullOrEmpty(request.AvatarUrl)) user.user_profiles.avatar_url = request.AvatarUrl;
 
-            user.UserProfile.UpdatedAt = DateTime.UtcNow;
-            user.UpdatedAt = DateTime.UtcNow;
+            user.user_profiles.updated_at = DateTime.UtcNow;
+            user.updated_at = DateTime.UtcNow;
 
             await _userRepo.UpdateUser(user);
         }
@@ -102,35 +102,35 @@ namespace Services.Implementations
             var user = await _userRepo.GetUserById(userId);
             if (user == null) throw new Exception("User not found");
 
-            int storyCount = user.Stories?.Count ?? 0;
-            long totalReads = user.Stories?.Sum(s => s.TotalViews ?? 0) ?? 0;
-            int totalLikes = user.Stories?.Sum(s => s.TotalFavorites ?? 0) ?? 0;
+            int storyCount = user.stories?.Count ?? 0;
+            long totalReads = user.stories?.Sum(s => s.total_views ?? 0) ?? 0;
+            int totalLikes = user.stories?.Sum(s => s.total_favorites ?? 0) ?? 0;
 
             // 2. Tạo Tags (Giả lập logic hiển thị)
             var tags = new List<string>();
             if (storyCount > 0) tags.Add("Tác giả");
-            if (user.Role == "ADMIN") tags.Add("Quản trị viên");
+            if (user.role == "ADMIN") tags.Add("Quản trị viên");
             if (totalReads > 1000) tags.Add("Cây bút vàng");
             if (tags.Count == 0) tags.Add("Thành viên mới");
 
             return new UserProfileResponse
             {
-                Id = user.Id,
-                Email = user.Email,
+                Id = user.id,
+                Email = user.email,
 
-                DisplayName = !string.IsNullOrEmpty(user.UserProfile?.Nickname)
-                              ? user.UserProfile.Nickname
-                              : user.Email.Split('@')[0],
+                DisplayName = !string.IsNullOrEmpty(user.user_profiles?.nickname)
+                              ? user.user_profiles.nickname
+                              : user.email.Split('@')[0],
 
-                Phone = user.UserProfile?.Phone ?? "",
-                IdNumber = user.UserProfile?.IdNumber ?? "",
-                Bio = user.UserProfile?.Bio ?? "",
-                Description = user.UserProfile?.Description ?? "",
-                AvatarUrl = user.UserProfile?.AvatarUrl ?? "",
+                Phone = user.user_profiles?.Phone ?? "",
+                IdNumber = user.user_profiles?.IdNumber ?? "",
+                Bio = user.user_profiles?.bio ?? "",
+                Description = user.user_profiles?.description ?? "",
+                AvatarUrl = user.user_profiles?.avatar_url ?? "",
 
-                JoinDate = user.CreatedAt?.ToString("dd/MM/yyyy") ?? DateTime.UtcNow.ToString("dd/MM/yyyy"),
+                JoinDate = user.created_at?.ToString("dd/MM/yyyy") ?? DateTime.UtcNow.ToString("dd/MM/yyyy"),
 
-                IsVerified = user.Status == "ACTIVE",
+                IsVerified = user.status == "ACTIVE",
 
                 Tags = tags,
 

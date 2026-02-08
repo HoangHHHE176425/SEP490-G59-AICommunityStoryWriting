@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Account;
 using Services.Interfaces;
@@ -90,6 +90,66 @@ namespace AIStory.API.Controllers
                 Guid userId = GetUserIdFromToken();
                 var profile = await _accountService.GetProfileAsync(userId);
                 return Ok(profile);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("avatar")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> UploadAvatar([FromForm] IFormFile avatar)
+        {
+            if (avatar == null || avatar.Length == 0)
+            {
+                return BadRequest(new { message = "Vui lòng chọn file ảnh." });
+            }
+
+            // Validate extension
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
+            var fileExtension = Path.GetExtension(avatar.FileName).ToLowerInvariant();
+            if (!allowedExtensions.Contains(fileExtension))
+            {
+                return BadRequest(new { message = $"Invalid file type. Allowed types: {string.Join(", ", allowedExtensions)}" });
+            }
+
+            // Validate size (max 2MB)
+            if (avatar.Length > 2 * 1024 * 1024)
+            {
+                return BadRequest(new { message = "File size exceeds 2MB limit" });
+            }
+
+            try
+            {
+                Guid userId = GetUserIdFromToken();
+
+                var uploadsFolder = Path.Combine(
+                    Directory.GetCurrentDirectory(),
+                    "wwwroot",
+                    "uploads",
+                    "avatars"
+                );
+
+                if (!Directory.Exists(uploadsFolder))
+                    Directory.CreateDirectory(uploadsFolder);
+
+                var fileName = $"{userId}_{Guid.NewGuid()}{fileExtension}";
+                var filePath = Path.Combine(uploadsFolder, fileName);
+
+                using (var stream = new FileStream(filePath, FileMode.Create))
+                {
+                    await avatar.CopyToAsync(stream);
+                }
+
+                var avatarUrl = $"/uploads/avatars/{fileName}";
+
+                await _accountService.UpdateProfileAsync(userId, new UpdateProfileRequest
+                {
+                    AvatarUrl = avatarUrl
+                });
+
+                return Ok(new { message = "Upload avatar thành công!", avatarUrl });
             }
             catch (Exception ex)
             {

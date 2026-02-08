@@ -74,7 +74,7 @@ export default function ForgotPassword() {
                                 Quên Mật Khẩu
                             </h1>
                             <p className="text-slate-600 dark:text-slate-400">
-                                Nhập email của bạn để nhận link đặt lại mật khẩu
+                                Nhập email của bạn để nhận mã OTP đặt lại mật khẩu
                             </p>
                         </div>
 
@@ -88,8 +88,16 @@ export default function ForgotPassword() {
                                         Email đã được gửi!
                                     </p>
                                     <p className="text-sm text-green-600 dark:text-green-400">
-                                        Vui lòng kiểm tra hộp thư của bạn và làm theo hướng dẫn để đặt lại mật khẩu.
+                                        Vui lòng kiểm tra hộp thư của bạn để lấy mã OTP và tiếp tục đặt lại mật khẩu.
                                     </p>
+                                    <div className="mt-3">
+                                        <Link
+                                            to={`/reset-password?email=${encodeURIComponent(email)}`}
+                                            className="inline-flex items-center justify-center px-4 py-2 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 transition-all"
+                                        >
+                                            Tiếp tục đặt lại mật khẩu
+                                        </Link>
+                                    </div>
                                 </div>
                             </div>
                         </div>
