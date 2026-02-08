@@ -19,6 +19,7 @@ export default function Register() {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
+    const [successMessage, setSuccessMessage] = useState('');
 
     const handleChange = (e) => {
         setFormData({
@@ -68,9 +69,10 @@ export default function Register() {
             const result = await register(formData.email, formData.password, formData.name);
             if (result.success) {
                 setSuccess(true);
+                setSuccessMessage(result.message || 'Đăng ký thành công. Vui lòng kiểm tra email để lấy OTP.');
                 setTimeout(() => {
                     navigate(`/verify-otp?email=${encodeURIComponent(formData.email)}`);
-                }, 1500);
+                }, 800);
             } else {
                 setError(result.message || 'Đăng ký thất bại');
             }
@@ -87,7 +89,7 @@ export default function Register() {
         try {
             const result = await loginWithGoogle();
             if (result.success) {
-                navigate('/');
+                navigate('/home');
             } else {
                 setError('Đăng ký Google thất bại');
             }
@@ -104,7 +106,7 @@ export default function Register() {
         try {
             const result = await loginWithFacebook();
             if (result.success) {
-                navigate('/');
+                navigate('/home');
             } else {
                 setError('Đăng ký Facebook thất bại');
             }
@@ -143,7 +145,7 @@ export default function Register() {
                         <div className="mb-6 p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-3">
                             <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" />
                             <p className="text-sm text-green-600 dark:text-green-400">
-                                Đăng ký thành công! Vui lòng kiểm tra email để lấy OTP. Đang chuyển hướng...
+                                {successMessage || 'Đăng ký thành công!'}
                             </p>
                         </div>
                     )}

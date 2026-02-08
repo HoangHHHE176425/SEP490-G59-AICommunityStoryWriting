@@ -42,9 +42,11 @@ namespace AIStory.API
                             "http://localhost:5000",
                             "http://localhost:3000",
                             "http://localhost:5173", // Vite default port
+                            "http://localhost:5174", // Vite dev port
                             "http://localhost:5175", // Vite dev port (current)
                             "http://localhost:8080",
                             "https://localhost:7258",
+                            "https://localhost:5174",
                             "http://localhost:16164"
                         )
                         .AllowAnyMethod()
