@@ -1,6 +1,5 @@
 import axios from "axios";
 
-// Use HTTPS by default to avoid preflight redirect (backend uses UseHttpsRedirection)
 const apiUrl = import.meta.env.VITE_API_URL || "https://localhost:7117/api";
 
 const axiosInstance = axios.create({
@@ -11,113 +10,84 @@ const axiosInstance = axios.create({
     withCredentials: true,
 });
 
-const ACCESS_TOKEN_KEY = "accessToken";
-
-export function getStoredAccessToken() {
-    try {
-        return localStorage.getItem(ACCESS_TOKEN_KEY);
-    } catch {
-        return null;
-    }
+function getAccessToken() {
+    return localStorage.getItem("accessToken");
 }
 
-export function setStoredAccessToken(token) {
-    try {
-        if (token) localStorage.setItem(ACCESS_TOKEN_KEY, token);
-    } catch {
-        // ignore
-    }
+function setAccessToken(token) {
+    if (token) localStorage.setItem("accessToken", token);
 }
 
-export function clearStoredAccessToken() {
-    try {
-        localStorage.removeItem(ACCESS_TOKEN_KEY);
-    } catch {
-        // ignore
-    }
+function clearAccessToken() {
+    localStorage.removeItem("accessToken");
 }
 
-// Attach access token (Bearer) on each request
+// A separate client without interceptors to avoid infinite loops when refreshing.
+const refreshClient = axios.create({
+    baseURL: apiUrl,
+    withCredentials: true,
+    headers: { "Content-Type": "application/json" },
+});
+
 axiosInstance.interceptors.request.use(
     (config) => {
-        const token = getStoredAccessToken();
+        const token = getAccessToken();
         if (token) {
-            config.headers = config.headers || {};
-            if (!config.headers.Authorization) {
-                config.headers.Authorization = `Bearer ${token}`;
-            }
+            config.headers = config.headers ?? {};
+            config.headers.Authorization = `Bearer ${token}`;
         }
         return config;
     },
     (error) => Promise.reject(error)
 );
 
-// Refresh access token on 401 (refresh token is HttpOnly cookie)
-const refreshClient = axios.create({
-    baseURL: apiUrl,
-    headers: { "Content-Type": "application/json" },
-    withCredentials: true,
-});
-
-let refreshPromise = null;
-
-function isAuthRoute(url = "") {
-    const u = String(url).toLowerCase();
-    return (
-        u.includes("/auth/login") ||
-        u.includes("/auth/register") ||
-        u.includes("/auth/verify-otp") ||
-        u.includes("/auth/refresh") ||
-        u.includes("/auth/logout") ||
-        u.includes("/auth/forgot-password") ||
-        u.includes("/auth/reset-password")
-    );
-}
-
 axiosInstance.interceptors.response.use(
     (response) => response,
     async (error) => {
+        const originalRequest = error?.config;
         const status = error?.response?.status;
-        const originalConfig = error?.config;
 
-        if (!originalConfig || status !== 401) {
+        if (!originalRequest || status !== 401) {
             return Promise.reject(error);
         }
 
-        // Don't attempt refresh for auth endpoints
-        if (isAuthRoute(originalConfig.url)) {
+        // Avoid retry loops.
+        if (originalRequest._retry) {
             return Promise.reject(error);
         }
 
-        if (originalConfig.__isRetryRequest) {
+        // Don't try refresh for auth endpoints.
+        const url = String(originalRequest.url || "");
+        const isAuthEndpoint =
+            url.includes("/Auth/login") ||
+            url.includes("/Auth/register") ||
+            url.includes("/Auth/verify-otp") ||
+            url.includes("/Auth/forgot-password") ||
+            url.includes("/Auth/reset-password") ||
+            url.includes("/Auth/refresh");
+
+        if (isAuthEndpoint) {
             return Promise.reject(error);
         }
-        originalConfig.__isRetryRequest = true;
+
+        originalRequest._retry = true;
 
         try {
-            if (!refreshPromise) {
-                refreshPromise = refreshClient
-                    .post("/auth/refresh")
-                    .then((r) => r.data)
-                    .finally(() => {
-                        refreshPromise = null;
-                    });
-            }
-
-            const data = await refreshPromise;
-            const newToken = data?.accessToken || data?.AccessToken;
+            const refreshRes = await refreshClient.post("/Auth/refresh");
+            const newToken = refreshRes?.data?.accessToken;
             if (!newToken) {
-                clearStoredAccessToken();
+                clearAccessToken();
                 return Promise.reject(error);
             }
 
-            setStoredAccessToken(newToken);
-            originalConfig.headers = originalConfig.headers || {};
-            originalConfig.headers.Authorization = `Bearer ${newToken}`;
-            return axiosInstance(originalConfig);
+            setAccessToken(newToken);
+            originalRequest.headers = originalRequest.headers ?? {};
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+
+            return axiosInstance(originalRequest);
         } catch (refreshErr) {
-            clearStoredAccessToken();
-            return Promise.reject(error);
+            clearAccessToken();
+            return Promise.reject(refreshErr);
         }
     }
 );

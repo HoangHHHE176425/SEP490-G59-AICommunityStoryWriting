@@ -1,23 +1,23 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { User, Mail, Phone, CreditCard, Save, AlertCircle, Lock, Eye, EyeOff, X, CheckCircle } from 'lucide-react';
+import { User, Mail, Phone, CreditCard, Save, AlertCircle, Lock, Eye, EyeOff, X, CheckCircle, ImageUp } from 'lucide-react';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 export default function EditProfile() {
-    const { user, updateProfile, changePassword, uploadAvatar } = useAuth();
-    const profile = user?.profile || {};
+    const { user, updateMyProfile, changeMyPassword, uploadMyAvatar } = useAuth();
     const [formData, setFormData] = useState({
-        displayName: profile.displayName || user?.name || '',
-        email: profile.email || user?.email || '',
-        phone: profile.phone || '',
-        idNumber: profile.idNumber || '',
-        bio: profile.bio || profile.description || '',
+        displayName: user?.displayName || '',
+        email: user?.email || '',
+        phone: user?.phone || '',
+        idNumber: user?.idNumber || '',
+        bio: user?.bio || user?.description || '',
     });
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
     const [loading, setLoading] = useState(false);
     const [avatarLoading, setAvatarLoading] = useState(false);
     const [avatarError, setAvatarError] = useState('');
-    const [avatarSuccess, setAvatarSuccess] = useState('');
+    const [avatarSuccess, setAvatarSuccess] = useState(false);
     
     // Password change modal state
     const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -36,13 +36,12 @@ export default function EditProfile() {
     const [passwordLoading, setPasswordLoading] = useState(false);
 
     useEffect(() => {
-        const p = user?.profile || {};
         setFormData({
-            displayName: p.displayName || user?.name || '',
-            email: p.email || user?.email || '',
-            phone: p.phone || '',
-            idNumber: p.idNumber || '',
-            bio: p.bio || p.description || '',
+            displayName: user?.displayName || '',
+            email: user?.email || '',
+            phone: user?.phone || '',
+            idNumber: user?.idNumber || '',
+            bio: user?.bio || user?.description || '',
         });
     }, [user]);
 
@@ -62,17 +61,17 @@ export default function EditProfile() {
         setLoading(true);
 
         try {
-            const result = await updateProfile({
+            const res = await updateMyProfile({
                 displayName: formData.displayName,
-                phone: formData.phone,
-                idNumber: formData.idNumber,
-                bio: formData.bio,
+                phone: formData.phone || null,
+                idNumber: formData.idNumber || null,
+                bio: formData.bio || null,
             });
-            if (result.success) {
+            if (res.success) {
                 setSuccess(true);
                 setTimeout(() => setSuccess(false), 3000);
             } else {
-                setError(result.message || 'Đã xảy ra lỗi. Vui lòng thử lại.');
+                setError(res.message || 'Cập nhật thất bại');
             }
         } catch (err) {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
@@ -113,13 +112,12 @@ export default function EditProfile() {
         setPasswordLoading(true);
 
         try {
-            const result = await changePassword({
+            const res = await changeMyPassword({
                 currentPassword: passwordData.currentPassword,
                 newPassword: passwordData.newPassword,
                 confirmPassword: passwordData.confirmPassword,
             });
-
-            if (result.success) {
+            if (res.success) {
                 setPasswordSuccess(true);
                 setPasswordData({
                     currentPassword: '',
@@ -131,34 +129,12 @@ export default function EditProfile() {
                     setPasswordSuccess(false);
                 }, 1200);
             } else {
-                setPasswordError(result.message || 'Mật khẩu hiện tại không đúng hoặc đã xảy ra lỗi.');
+                setPasswordError(res.message || 'Mật khẩu hiện tại không đúng hoặc đã xảy ra lỗi.');
             }
         } catch (err) {
             setPasswordError('Mật khẩu hiện tại không đúng hoặc đã xảy ra lỗi.');
         } finally {
             setPasswordLoading(false);
-        }
-    };
-
-    const handleAvatarChange = async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        setAvatarError('');
-        setAvatarSuccess('');
-        setAvatarLoading(true);
-        try {
-            const result = await uploadAvatar(file);
-            if (result.success) {
-                setAvatarSuccess(result.message || 'Upload avatar thành công!');
-            } else {
-                setAvatarError(result.message || 'Upload avatar thất bại.');
-            }
-        } catch {
-            setAvatarError('Upload avatar thất bại.');
-        } finally {
-            setAvatarLoading(false);
-            // allow re-select same file
-            e.target.value = '';
         }
     };
 
@@ -183,51 +159,65 @@ export default function EditProfile() {
                 </div>
             )}
 
-            {(avatarError || avatarSuccess) && (
-                <div
-                    className={`mb-6 p-4 rounded-lg border ${
-                        avatarError
-                            ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
-                            : 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800'
-                    }`}
-                >
-                    <p
-                        className={`text-sm ${
-                            avatarError ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'
-                        }`}
-                    >
-                        {avatarError || avatarSuccess}
-                    </p>
-                </div>
-            )}
-
             <form onSubmit={handleSubmit} className="space-y-6">
-                <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                        Avatar
-                    </label>
-                    <div className="flex items-center gap-4">
-                        <div className="size-12 rounded-full overflow-hidden border border-slate-200 dark:border-slate-600 bg-slate-100 dark:bg-slate-700">
-                            <img
-                                alt="Avatar"
-                                className="w-full h-full object-cover"
-                                src={
-                                    user?.avatar ||
-                                    'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'
-                                }
-                            />
+                {/* Avatar upload */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                        <div className="flex items-center gap-4">
+                            <div className="size-14 rounded-full overflow-hidden bg-slate-200 dark:bg-slate-700">
+                                {user?.avatarUrl ? (
+                                    <img src={resolveBackendUrl(user.avatarUrl)} alt="Avatar" className="w-full h-full object-cover" />
+                                ) : null}
+                            </div>
+                            <div>
+                                <p className="font-semibold text-slate-900 dark:text-white">Ảnh đại diện</p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">JPG/PNG/GIF/WEBP, tối đa 2MB</p>
+                            </div>
                         </div>
-                        <input
-                            type="file"
-                            accept="image/*"
-                            onChange={handleAvatarChange}
-                            disabled={avatarLoading}
-                            className="block w-full text-sm text-slate-700 dark:text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-slate-100 dark:file:bg-slate-700 file:text-slate-700 dark:file:text-slate-200 hover:file:bg-slate-200 dark:hover:file:bg-slate-600"
-                        />
+                        <div className="flex items-center gap-3">
+                            <input
+                                id="avatar-upload"
+                                type="file"
+                                accept=".jpg,.jpeg,.png,.gif,.webp"
+                                className="hidden"
+                                onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    setAvatarError('');
+                                    setAvatarSuccess(false);
+                                    setAvatarLoading(true);
+                                    try {
+                                        const res = await uploadMyAvatar(file);
+                                        if (res.success) {
+                                            setAvatarSuccess(true);
+                                            setTimeout(() => setAvatarSuccess(false), 2500);
+                                        } else {
+                                            setAvatarError(res.message || 'Upload avatar thất bại');
+                                        }
+                                    } catch {
+                                        setAvatarError('Đã xảy ra lỗi. Vui lòng thử lại.');
+                                    } finally {
+                                        setAvatarLoading(false);
+                                        e.target.value = '';
+                                    }
+                                }}
+                            />
+                            <label
+                                htmlFor="avatar-upload"
+                                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold cursor-pointer transition-all ${
+                                    avatarLoading
+                                        ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 cursor-not-allowed'
+                                        : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200'
+                                }`}
+                            >
+                                <ImageUp className="w-4 h-4" />
+                                {avatarLoading ? 'Đang tải...' : 'Tải ảnh lên'}
+                            </label>
+                        </div>
                     </div>
-                    {avatarLoading && (
-                        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Đang upload...</p>
-                    )}
+
+                    {avatarError && <p className="mt-3 text-sm text-red-600 dark:text-red-400">{avatarError}</p>}
+                    {avatarSuccess && <p className="mt-3 text-sm text-green-600 dark:text-green-400">Upload avatar thành công!</p>}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -263,8 +253,8 @@ export default function EditProfile() {
                                 type="email"
                                 value={formData.email}
                                 onChange={handleChange}
-                                disabled
-                                className="block w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-500 dark:text-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
+                                className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
+                                readOnly
                             />
                         </div>
                     </div>

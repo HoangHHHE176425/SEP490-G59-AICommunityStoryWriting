@@ -31,24 +31,20 @@ namespace AIStory.API
                     options.JsonSerializerOptions.WriteIndented = true;
                 });
             builder.Services.AddDbContext<StoryPlatformDbContext>();
-
             // CORS Configuration
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowClient", policy =>
                 {
-                    policy.WithOrigins(
-                            "http://localhost:5210",
-                            "http://localhost:5000",
-                            "http://localhost:3000",
-                            "http://localhost:5173", // Vite default port
-                            "http://localhost:5174", // Vite dev port
-                            "http://localhost:5175", // Vite dev port (current)
-                            "http://localhost:8080",
-                            "https://localhost:7258",
-                            "https://localhost:5174",
-                            "http://localhost:16164"
-                        )
+                    // Allow any localhost/127.0.0.1 origin (any port) for development.
+                    // This avoids CORS issues when Vite auto-picks 5174/5175... if 5173 is busy.
+                    policy.SetIsOriginAllowed(origin =>
+                        {
+                            if (string.IsNullOrWhiteSpace(origin)) return false;
+                            if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
+                            return uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                                   || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase);
+                        })
                         .AllowAnyMethod()
                         .AllowAnyHeader()
                         .AllowCredentials();
@@ -155,7 +151,6 @@ namespace AIStory.API
 
             // Enable CORS
             app.UseCors("AllowClient");
-
             app.UseAuthentication();
             app.UseAuthorization();
 

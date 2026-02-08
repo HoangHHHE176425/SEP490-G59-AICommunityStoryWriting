@@ -16,7 +16,6 @@ public partial class user_profiles
 
     [Column("id_number")]
     public string? IdNumber { get; set; }
-
     public string? bio { get; set; }
 
     public string? description { get; set; }
