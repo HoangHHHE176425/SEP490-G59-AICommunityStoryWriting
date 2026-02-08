@@ -1,79 +1,60 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import {
-    clearStoredAccessToken,
-    getStoredAccessToken,
-    setStoredAccessToken,
-} from '../api/axiosInstance';
 import * as authApi from '../api/auth/authApi';
 import * as accountApi from '../api/account/accountApi';
 
-const AuthContext = createContext(null);
-
-function getApiOrigin() {
-    const base = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-    // remove trailing "/api" (or "/api/") to get server origin
-    return String(base).replace(/\/api\/?$/i, '');
-}
-
-function resolveAvatarUrl(avatarUrl) {
-    if (!avatarUrl) return null;
-    const url = String(avatarUrl);
-    if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    // backend returns relative path like "/uploads/avatars/..."
-    return `${getApiOrigin()}${url.startsWith('/') ? '' : '/'}${url}`;
-}
-
-function mapProfileToUser(profile) {
-    return {
-        id: profile?.id,
-        email: profile?.email,
-        name: profile?.displayName || 'User',
-        avatar: resolveAvatarUrl(profile?.avatarUrl),
-        coins: profile?.stats?.currentCoins ?? 0,
-        profile, // keep raw profile for profile pages
-    };
+// Preserve context identity across Vite HMR to avoid "useAuth must be used within AuthProvider"
+// when modules reload and recreate a new Context instance.
+// eslint-disable-next-line no-undef
+const AuthContext =
+    import.meta?.hot?.data?.AuthContext ?? createContext(null);
+// eslint-disable-next-line no-undef
+if (import.meta?.hot) {
+    // eslint-disable-next-line no-undef
+    import.meta.hot.data.AuthContext = AuthContext;
 }
 
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    async function loadProfile() {
+    const saveUser = (u) => {
+        setUser(u);
+        if (u) localStorage.setItem('user', JSON.stringify(u));
+        else localStorage.removeItem('user');
+    };
+
+    const fetchProfile = async () => {
         const profile = await accountApi.getMyProfile();
-        const mapped = mapProfileToUser(profile);
-        setUser(mapped);
-        localStorage.setItem('user', JSON.stringify(mapped));
-        return mapped;
-    }
+        saveUser(profile);
+        return profile;
+    };
 
-    // Load user/token from localStorage on mount
+    // Load cached user + try restore session (refresh cookie -> access token -> profile)
     useEffect(() => {
-        const init = async () => {
-            const token = getStoredAccessToken();
-            const savedUser = localStorage.getItem('user');
-
-            if (savedUser) {
-                try {
-                    setUser(JSON.parse(savedUser));
-                } catch {
-                    localStorage.removeItem('user');
-                }
-            }
-
-            if (!token) {
-                // no token => treat as logged out
-                clearStoredAccessToken();
-                localStorage.removeItem('user');
-                setUser(null);
-                setLoading(false);
-                return;
-            }
-
+        const savedUser = localStorage.getItem('user');
+        if (savedUser) {
             try {
-                await loadProfile();
+                setUser(JSON.parse(savedUser));
+            } catch (error) {
+                console.error('Error parsing saved user:', error);
+                localStorage.removeItem('user');
+            }
+        }
+
+        const bootstrap = async () => {
+            try {
+                const token = localStorage.getItem('accessToken');
+                // Only try refresh if we have evidence of a previous session (cached user).
+                // This avoids noisy 401s on first-time visits (especially with StrictMode double-invoking effects).
+                if (!token && savedUser) {
+                    await authApi.refresh();
+                }
+                const tokenNow = localStorage.getItem('accessToken');
+                if (tokenNow) {
+                    await fetchProfile();
+                }
             } catch {
-                // token invalid/expired and refresh failed
-                clearStoredAccessToken();
+                localStorage.removeItem('accessToken');
                 localStorage.removeItem('user');
                 setUser(null);
             } finally {
@@ -81,124 +62,74 @@ export function AuthProvider({ children }) {
             }
         };
 
-        init();
+        bootstrap();
     }, []);
 
     const login = async (email, password) => {
-        try {
-            const data = await authApi.login({ email, password }); // { accessToken }
-            const accessToken = data?.accessToken || data?.AccessToken;
-            if (!accessToken) {
-                return { success: false, message: 'Thiếu access token từ server.' };
-            }
-            setStoredAccessToken(accessToken);
+        const result = await authApi.login({ email, password });
+        if (!result.success) return result;
 
-            const mapped = await loadProfile();
-            return { success: true, user: mapped };
-        } catch (e) {
-            return { success: false, message: e?.message || 'Đăng nhập thất bại' };
+        try {
+            const profile = await fetchProfile();
+            return { success: true, user: profile };
+        } catch (err) {
+            // Token exists but cannot fetch profile
+            return { success: false, message: err?.message || 'Đăng nhập thất bại' };
         }
     };
 
     const register = async (email, password, name) => {
-        try {
-            const res = await authApi.register({ email, password, fullName: name });
-            return { success: true, message: res?.message, email };
-        } catch (e) {
-            return { success: false, message: e?.message || 'Đăng ký thất bại' };
-        }
-    };
-
-    const loginWithGoogle = async () => {
-        return { success: false, message: 'Hiện chưa hỗ trợ đăng nhập Google.' };
-    };
-
-    const loginWithFacebook = async () => {
-        return { success: false, message: 'Hiện chưa hỗ trợ đăng nhập Facebook.' };
-    };
-
-    const forgotPassword = async (email) => {
-        try {
-            const res = await authApi.forgotPassword({ email });
-            return { success: true, message: res?.message };
-        } catch (e) {
-            return { success: false, message: e?.message || 'Gửi OTP thất bại' };
-        }
-    };
-
-    const resetPassword = async ({ email, otpCode, newPassword, confirmPassword }) => {
-        try {
-            const res = await authApi.resetPassword({ email, otpCode, newPassword, confirmPassword });
-            return { success: true, message: res?.message };
-        } catch (e) {
-            return { success: false, message: e?.message || 'Đặt lại mật khẩu thất bại' };
-        }
+        return await authApi.register({ email, password, fullName: name });
     };
 
     const verifyOtp = async (email, otpCode) => {
-        try {
-            const res = await authApi.verifyOtp({ email, otpCode });
-            return { success: true, message: res?.message };
-        } catch (e) {
-            return { success: false, message: e?.message || 'Xác thực OTP thất bại' };
-        }
+        return await authApi.verifyOtp({ email, otpCode });
     };
 
-    const logout = () => {
-        // best-effort server logout (clear refresh cookie)
-        authApi.logout().catch(() => {});
-        clearStoredAccessToken();
-        localStorage.removeItem('user');
+    const loginWithGoogle = async () => {
+        return { success: false, message: 'Google login chưa được tích hợp ở backend.' };
+    };
+
+    const loginWithFacebook = async () => {
+        return { success: false, message: 'Facebook login chưa được tích hợp ở backend.' };
+    };
+
+    const forgotPassword = async (email) => {
+        return await authApi.forgotPassword({ email });
+    };
+
+    const resetPassword = async (email, otpCode, newPassword, confirmPassword) => {
+        return await authApi.resetPassword({ email, otpCode, newPassword, confirmPassword });
+    };
+
+    const logout = async () => {
+        await authApi.logout();
         setUser(null);
     };
 
-    // Account APIs
-    const refreshProfile = async () => {
-        try {
-            const mapped = await loadProfile();
-            return { success: true, user: mapped };
-        } catch (e) {
-            return { success: false, message: e?.message || 'Không lấy được profile' };
-        }
+    const updateMyProfile = async (payload) => {
+        const res = await accountApi.updateProfile(payload);
+        if (!res.success) return res;
+        await fetchProfile();
+        return { success: true };
     };
 
-    const updateProfile = async (payload) => {
-        try {
-            const res = await accountApi.updateProfile(payload);
-            await loadProfile();
-            return { success: true, message: res?.message };
-        } catch (e) {
-            return { success: false, message: e?.message || 'Cập nhật profile thất bại' };
-        }
+    const changeMyPassword = async (payload) => {
+        return await accountApi.changePassword(payload);
     };
 
-    const changePassword = async (payload) => {
-        try {
-            const res = await accountApi.changePassword(payload);
-            return { success: true, message: res?.message };
-        } catch (e) {
-            return { success: false, message: e?.message || 'Đổi mật khẩu thất bại' };
-        }
+    const deleteMyAccount = async () => {
+        const res = await accountApi.deleteAccount();
+        if (!res.success) return res;
+        await logout();
+        return { success: true };
     };
 
-    const uploadAvatar = async (file) => {
-        try {
-            const res = await accountApi.uploadAvatar(file);
-            await loadProfile();
-            return { success: true, message: res?.message, avatarUrl: resolveAvatarUrl(res?.avatarUrl) };
-        } catch (e) {
-            return { success: false, message: e?.message || 'Upload avatar thất bại' };
-        }
-    };
-
-    const deleteAccount = async () => {
-        try {
-            const res = await accountApi.deleteAccount();
-            logout();
-            return { success: true, message: res?.message };
-        } catch (e) {
-            return { success: false, message: e?.message || 'Xóa tài khoản thất bại' };
-        }
+    const uploadMyAvatar = async (file) => {
+        const res = await accountApi.uploadAvatar(file);
+        if (!res.success) return res;
+        await fetchProfile();
+        return res;
     };
 
     const value = {
@@ -212,12 +143,12 @@ export function AuthProvider({ children }) {
         forgotPassword,
         resetPassword,
         logout,
-        refreshProfile,
-        updateProfile,
-        changePassword,
-        uploadAvatar,
-        deleteAccount,
-        isAuthenticated: !!user && !!getStoredAccessToken(),
+        fetchProfile,
+        updateMyProfile,
+        changeMyPassword,
+        deleteMyAccount,
+        uploadMyAvatar,
+        isAuthenticated: !!user,
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

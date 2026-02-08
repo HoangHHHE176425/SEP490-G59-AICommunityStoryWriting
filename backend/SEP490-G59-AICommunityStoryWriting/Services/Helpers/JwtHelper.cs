@@ -18,6 +18,18 @@ namespace AIStory.Services.Helpers
             var issuer = _config["Jwt:Issuer"];
             var audience = _config["Jwt:Audience"];
             var expireMinutesRaw = _config["Jwt:ExpireMinutes"];
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                throw new InvalidOperationException("Missing Jwt:Key configuration.");
+            }
+            if (string.IsNullOrWhiteSpace(issuer))
+            {
+                issuer = "AIStory.API";
+            }
+            if (string.IsNullOrWhiteSpace(audience))
+            {
+                audience = "AIStory.Client";
+            }
             var expireMinutes = 120;
             if (!string.IsNullOrWhiteSpace(expireMinutesRaw) && int.TryParse(expireMinutesRaw, out var m) && m > 0)
             {

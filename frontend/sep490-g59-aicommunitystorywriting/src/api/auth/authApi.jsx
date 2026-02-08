@@ -1,91 +1,98 @@
 import axiosInstance from "../axiosInstance";
 
-function getAxiosErrorMessage(error) {
-    // Axios error shape: error.response?.data?.message or error.message
-    const msg =
-        error?.response?.data?.message ||
-        error?.response?.data?.title || // sometimes ASP.NET returns { title: ... }
-        error?.message;
-    return msg || "Đã xảy ra lỗi. Vui lòng thử lại.";
+function getErrorMessage(err) {
+    return (
+        err?.response?.data?.message ||
+        err?.response?.data?.title ||
+        err?.message ||
+        "Đã xảy ra lỗi. Vui lòng thử lại."
+    );
 }
 
 export async function register({ email, password, fullName }) {
     try {
-        const res = await axiosInstance.post("/auth/register", {
+        const res = await axiosInstance.post("/Auth/register", {
             email,
             password,
             fullName,
         });
-        return res.data;
-    } catch (e) {
-        throw new Error(getAxiosErrorMessage(e));
+        return { success: true, data: res.data };
+    } catch (err) {
+        return { success: false, message: getErrorMessage(err) };
     }
 }
 
 export async function verifyOtp({ email, otpCode }) {
     try {
-        const res = await axiosInstance.post("/auth/verify-otp", {
+        const res = await axiosInstance.post("/Auth/verify-otp", {
             email,
             otpCode,
         });
-        return res.data;
-    } catch (e) {
-        throw new Error(getAxiosErrorMessage(e));
+        return { success: true, data: res.data };
+    } catch (err) {
+        return { success: false, message: getErrorMessage(err) };
     }
 }
 
 export async function login({ email, password }) {
     try {
-        const res = await axiosInstance.post("/auth/login", {
-            email,
-            password,
-        });
-        return res.data; // { accessToken }
-    } catch (e) {
-        throw new Error(getAxiosErrorMessage(e));
+        const res = await axiosInstance.post("/Auth/login", { email, password });
+        const accessToken = res?.data?.accessToken;
+        if (accessToken) {
+            localStorage.setItem("accessToken", accessToken);
+        }
+        return { success: true, accessToken };
+    } catch (err) {
+        return { success: false, message: getErrorMessage(err) };
     }
 }
 
 export async function refresh() {
+    // Used when you want to refresh proactively (interceptor handles most cases).
     try {
-        // refreshToken is stored in HttpOnly cookie, sent automatically (credentials include)
-        const res = await axiosInstance.post("/auth/refresh");
-        return res.data; // { accessToken }
-    } catch (e) {
-        throw new Error(getAxiosErrorMessage(e));
+        const res = await axiosInstance.post("/Auth/refresh");
+        const accessToken = res?.data?.accessToken;
+        if (accessToken) {
+            localStorage.setItem("accessToken", accessToken);
+        }
+        return { success: true, accessToken };
+    } catch (err) {
+        return { success: false, message: getErrorMessage(err) };
     }
 }
 
 export async function logout() {
     try {
-        const res = await axiosInstance.post("/auth/logout");
-        return res.data;
-    } catch (e) {
-        // logout should be best-effort; still surface message if needed
-        throw new Error(getAxiosErrorMessage(e));
+        await axiosInstance.post("/Auth/logout");
+    } catch {
+        // ignore
+    } finally {
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("user");
     }
+    return { success: true };
 }
 
 export async function forgotPassword({ email }) {
     try {
-        const res = await axiosInstance.post("/auth/forgot-password", { email });
-        return res.data;
-    } catch (e) {
-        throw new Error(getAxiosErrorMessage(e));
+        const res = await axiosInstance.post("/Auth/forgot-password", { email });
+        return { success: true, data: res.data };
+    } catch (err) {
+        return { success: false, message: getErrorMessage(err) };
     }
 }
 
 export async function resetPassword({ email, otpCode, newPassword, confirmPassword }) {
     try {
-        const res = await axiosInstance.post("/auth/reset-password", {
+        const res = await axiosInstance.post("/Auth/reset-password", {
             email,
             otpCode,
             newPassword,
             confirmPassword,
         });
-        return res.data;
-    } catch (e) {
-        throw new Error(getAxiosErrorMessage(e));
+        return { success: true, data: res.data };
+    } catch (err) {
+        return { success: false, message: getErrorMessage(err) };
     }
 }
 
