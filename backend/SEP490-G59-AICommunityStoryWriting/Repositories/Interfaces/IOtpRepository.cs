@@ -9,9 +9,9 @@ namespace Repositories.Interfaces
 {
     public interface IOtpRepository
     {
-        Task AddOtp(OtpVerification otp);
+        Task AddOtp(otp_verifications otp);
 
-        Task<OtpVerification?> GetValidOtp(Guid userId, string otpCode, string type);
+        Task<otp_verifications?> GetValidOtp(Guid userId, string otpCode, string type);
         Task MarkOtpAsUsed(Guid otpId);
     }
 }

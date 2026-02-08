@@ -69,7 +69,7 @@ export default function Register() {
             if (result.success) {
                 setSuccess(true);
                 setTimeout(() => {
-                    navigate('/');
+                    navigate(`/verify-otp?email=${encodeURIComponent(formData.email)}`);
                 }, 1500);
             } else {
                 setError(result.message || 'Đăng ký thất bại');
@@ -143,7 +143,7 @@ export default function Register() {
                         <div className="mb-6 p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg flex items-center gap-3">
                             <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" />
                             <p className="text-sm text-green-600 dark:text-green-400">
-                                Đăng ký thành công! Đang chuyển hướng...
+                                Đăng ký thành công! Vui lòng kiểm tra email để lấy OTP. Đang chuyển hướng...
                             </p>
                         </div>
                     )}

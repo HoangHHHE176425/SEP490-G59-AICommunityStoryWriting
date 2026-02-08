@@ -1,5 +1,5 @@
-﻿using BusinessObjects.Entities;
-using BusinessObjects.Models;
+﻿using BusinessObjects;
+using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Repositories.Interfaces;
 
@@ -14,19 +14,19 @@ namespace Repositories.Implementations
             _context = context;
         }
 
-        public async Task<User?> GetUserByEmail(string email)
+        public async Task<users?> GetUserByEmail(string email)
             => await UserDAO.Instance.FindUserByEmail(_context, email);
 
-        public async Task<User?> GetUserById(Guid id)
+        public async Task<users?> GetUserById(Guid id)
             => await UserDAO.Instance.FindUserById(_context, id);
 
         public async Task<bool> IsEmailExist(string email)
             => await UserDAO.Instance.CheckEmailExists(_context, email);
 
-        public async Task AddUser(User user)
+        public async Task AddUser(users user)
             => await UserDAO.Instance.AddUser(_context, user);
 
-        public async Task UpdateUser(User user)
+        public async Task UpdateUser(users user)
             => await UserDAO.Instance.UpdateUser(_context, user);
         public async Task<bool> IsNicknameExist(string nickname, Guid currentUserId)
         {
@@ -34,7 +34,7 @@ namespace Repositories.Implementations
         }
         public Task DeleteUser(Guid userId)
          => UserDAO.Instance.SoftDeleteUser(_context, userId);
-        public async Task AddRefreshToken(AuthToken token)
+        public async Task AddRefreshToken(auth_tokens token)
             => await UserDAO.Instance.AddToken(_context, token);
     }
 }

@@ -1,5 +1,5 @@
-﻿using BusinessObjects.Entities;
-using BusinessObjects.Models;
+﻿using BusinessObjects;
+using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace DataAccessObjects.DAOs
@@ -13,31 +13,31 @@ namespace DataAccessObjects.DAOs
             get { lock (instanceLock) { return instance ??= new OtpDAO(); } }
         }
 
-        public async Task AddOtp(StoryPlatformDbContext context, OtpVerification otp)
+        public async Task AddOtp(StoryPlatformDbContext context, otp_verifications otp)
         {
-            context.OtpVerifications.Add(otp);
+            context.otp_verifications.Add(otp);
             await context.SaveChangesAsync();
         }
 
-        public async Task<OtpVerification?> GetValidOtp(StoryPlatformDbContext context, Guid userId, string otpCode, string type)
+        public async Task<otp_verifications?> GetValidOtp(StoryPlatformDbContext context, Guid userId, string otpCode, string type)
         {
-            return await context.OtpVerifications
-                .Where(o => o.UserId == userId
-                         && o.OtpCode == otpCode
-                         && o.Type == type
-                         && (o.IsUsed == false || o.IsUsed == null)
-                         && o.ExpiredAt > DateTime.UtcNow)
-                .OrderByDescending(o => o.CreatedAt)
+            return await context.otp_verifications
+                .Where(o => o.user_id == userId
+                         && o.otp_code == otpCode
+                         && o.type == type
+                         && (o.is_used == false || o.is_used == null)
+                         && o.expired_at > DateTime.UtcNow)
+                .OrderByDescending(o => o.created_at)
                 .FirstOrDefaultAsync();
         }
 
         public async Task MarkOtpAsUsed(StoryPlatformDbContext context, Guid otpId)
         {
-            var otp = await context.OtpVerifications.FindAsync(otpId);
+            var otp = await context.otp_verifications.FindAsync(otpId);
             if (otp != null)
             {
-                otp.IsUsed = true;
-                context.OtpVerifications.Update(otp);
+                otp.is_used = true;
+                context.otp_verifications.Update(otp);
                 await context.SaveChangesAsync();
             }
         }

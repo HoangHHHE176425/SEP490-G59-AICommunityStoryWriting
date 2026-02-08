@@ -28,21 +28,21 @@ namespace AIStory.Services.Implementations
                 throw new Exception("Email already exists.");
 
             var newUserId = Guid.NewGuid();
-            var newUser = new User
+            var newUser = new users
             {
-                Id = newUserId,
-                Email = request.Email,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
-                Role = "USER",
-                Status = "PENDING", 
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                UserProfile = new UserProfile
+                id = newUserId,
+                email = request.Email,
+                password_hash = BCrypt.Net.BCrypt.HashPassword(request.Password),
+                role = "USER",
+                status = "PENDING", 
+                created_at = DateTime.UtcNow,
+                updated_at = DateTime.UtcNow,
+                user_profiles = new user_profiles
                 {
-                    UserId = newUserId,
-                    Nickname = request.FullName ?? request.Email.Split('@')[0],
-                    Settings = "{\"allow_notif\":true}",
-                    UpdatedAt = DateTime.UtcNow
+                    user_id = newUserId,
+                    nickname = request.FullName ?? request.Email.Split('@')[0],
+                    settings = "{\"allow_notif\":true}",
+                    updated_at = DateTime.UtcNow
                 }
             };
 
@@ -50,15 +50,15 @@ namespace AIStory.Services.Implementations
 
             // 3. Tạo OTP
             var otpCode = new Random().Next(100000, 999999).ToString();
-            var otp = new OtpVerification
+            var otp = new otp_verifications
             {
-                Id = Guid.NewGuid(),
-                UserId = newUserId,
-                OtpCode = otpCode,
-                Type = "EMAIL_VERIFICATION",
-                IsUsed = false,
-                ExpiredAt = DateTime.UtcNow.AddMinutes(5),
-                CreatedAt = DateTime.UtcNow
+                id = Guid.NewGuid(),
+                user_id = newUserId,
+                otp_code = otpCode,
+                type = "EMAIL_VERIFICATION",
+                is_used = false,
+                expired_at = DateTime.UtcNow.AddMinutes(5),
+                created_at = DateTime.UtcNow
             };
             await _otpRepo.AddOtp(otp);
 
@@ -72,43 +72,43 @@ namespace AIStory.Services.Implementations
             var user = await _userRepo.GetUserByEmail(request.Email);
             if (user == null) throw new Exception("User not found.");
 
-            if (user.Status == "ACTIVE") throw new Exception("Account already active.");
+            if (user.status == "ACTIVE") throw new Exception("Account already active.");
 
-            var validOtp = await _otpRepo.GetValidOtp(user.Id, request.OtpCode, "EMAIL_VERIFICATION");
+            var validOtp = await _otpRepo.GetValidOtp(user.id, request.OtpCode, "EMAIL_VERIFICATION");
             if (validOtp == null) throw new Exception("Invalid or expired OTP.");
 
-            user.Status = "ACTIVE";
-            user.EmailVerifiedAt = DateTime.UtcNow;
+            user.status = "ACTIVE";
+            user.email_verified_at = DateTime.UtcNow;
             await _userRepo.UpdateUser(user);
 
             // Hủy OTP
-            await _otpRepo.MarkOtpAsUsed(validOtp.Id);
+            await _otpRepo.MarkOtpAsUsed(validOtp.id);
         }
 
         public async Task<AuthResponse> LoginAsync(LoginRequest request)
         {
             var user = await _userRepo.GetUserByEmail(request.Email);
 
-            if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+            if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.password_hash))
             {
                 throw new Exception("Invalid email or password.");
             }
 
             // CHECK TRẠNG THÁI
-            if (user.Status != "ACTIVE")
+            if (user.status != "ACTIVE")
             {
                 throw new Exception("Account is not verified. Please check email for OTP.");
             }
 
             var accessToken = _jwtHelper.GenerateToken(user);
-            var refreshToken = new AuthToken
+            var refreshToken = new auth_tokens
             {
-                Id = Guid.NewGuid(), 
-                UserId = user.Id,    
-                RefreshToken = Guid.NewGuid().ToString(),
-                DeviceInfo = "Unknown",
-                ExpiresAt = DateTime.UtcNow.AddDays(30),
-                CreatedAt = DateTime.UtcNow
+                id = Guid.NewGuid(), 
+                user_id = user.id,    
+                refresh_token = Guid.NewGuid().ToString(),
+                device_info = "Unknown",
+                expires_at = DateTime.UtcNow.AddDays(30),
+                created_at = DateTime.UtcNow
             };
 
             await _userRepo.AddRefreshToken(refreshToken);
@@ -116,7 +116,7 @@ namespace AIStory.Services.Implementations
             return new AuthResponse
             {
                 AccessToken = accessToken,
-                RefreshToken = refreshToken.RefreshToken
+                RefreshToken = refreshToken.refresh_token
             };
         }
 
@@ -126,7 +126,7 @@ namespace AIStory.Services.Implementations
             var user = await _userRepo.GetUserByEmail(request.Email);
             if (user == null) throw new Exception("Người dùng không tồn tại.");
 
-            var validOtp = await _otpRepo.GetValidOtp(user.Id, request.OtpCode, "RESET_PASSWORD");
+            var validOtp = await _otpRepo.GetValidOtp(user.id, request.OtpCode, "RESET_PASSWORD");
 
             if (validOtp == null)
             {
@@ -135,12 +135,12 @@ namespace AIStory.Services.Implementations
 
 
             string passwordHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
-            user.PasswordHash = passwordHash; 
-            user.UpdatedAt = DateTime.UtcNow;
+            user.password_hash = passwordHash; 
+            user.updated_at = DateTime.UtcNow;
 
             await _userRepo.UpdateUser(user);
 
-            await _otpRepo.MarkOtpAsUsed(validOtp.Id);
+            await _otpRepo.MarkOtpAsUsed(validOtp.id);
         }
         public async Task ForgotPasswordAsync(ForgotPasswordRequest request)
         {
@@ -156,15 +156,15 @@ namespace AIStory.Services.Implementations
             // 2. Tạo OTP
             var otpCode = new Random().Next(100000, 999999).ToString();
 
-            var otp = new OtpVerification
+            var otp = new otp_verifications
             {
-                Id = Guid.NewGuid(),
-                UserId = user.Id,
-                OtpCode = otpCode,
-                Type = "RESET_PASSWORD",
-                IsUsed = false,
-                ExpiredAt = DateTime.UtcNow.AddMinutes(15),
-                CreatedAt = DateTime.UtcNow
+                id = Guid.NewGuid(),
+                user_id = user.id,
+                otp_code = otpCode,
+                type = "RESET_PASSWORD",
+                is_used = false,
+                expired_at = DateTime.UtcNow.AddMinutes(15),
+                created_at = DateTime.UtcNow
             };
 
             // 3. Lưu OTP

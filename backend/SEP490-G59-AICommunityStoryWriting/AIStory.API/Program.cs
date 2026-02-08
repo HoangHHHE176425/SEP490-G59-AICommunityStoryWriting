@@ -1,4 +1,4 @@
-﻿using AIStory.Services.Helpers;
+using AIStory.Services.Helpers;
 using AIStory.Services.Implementations;
 using BusinessObjects;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -42,6 +42,7 @@ namespace AIStory.API
                             "http://localhost:5000",
                             "http://localhost:3000",
                             "http://localhost:5173", // Vite default port
+                            "http://localhost:5175", // Vite dev port (current)
                             "http://localhost:8080",
                             "https://localhost:7258",
                             "http://localhost:16164"
@@ -153,6 +154,7 @@ namespace AIStory.API
             // Enable CORS
             app.UseCors("AllowClient");
 
+            app.UseAuthentication();
             app.UseAuthorization();
 
             app.MapControllers();
