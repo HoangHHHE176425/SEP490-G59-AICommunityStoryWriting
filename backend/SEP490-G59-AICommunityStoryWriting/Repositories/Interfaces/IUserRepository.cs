@@ -1,4 +1,4 @@
-﻿using BusinessObjects.Entities;
+using BusinessObjects.Entities;
 
 namespace Repositories.Interfaces
 {
@@ -12,5 +12,7 @@ namespace Repositories.Interfaces
         Task DeleteUser(Guid userId);
         Task<bool> IsNicknameExist(string nickname, Guid currentUserId);
         Task AddRefreshToken(auth_tokens token);
+        Task<auth_tokens?> GetRefreshToken(string refreshToken);
+        Task DeleteRefreshToken(string refreshToken);
     }
 }

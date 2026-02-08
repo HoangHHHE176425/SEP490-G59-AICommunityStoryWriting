@@ -1,4 +1,4 @@
-﻿using BusinessObjects.Entities; // Đảm bảo namespace này chứa class 'user'
+using BusinessObjects.Entities; // Đảm bảo namespace này chứa class 'user'
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
@@ -17,6 +17,12 @@ namespace AIStory.Services.Helpers
             var key = _config["Jwt:Key"];
             var issuer = _config["Jwt:Issuer"];
             var audience = _config["Jwt:Audience"];
+            var expireMinutesRaw = _config["Jwt:ExpireMinutes"];
+            var expireMinutes = 120;
+            if (!string.IsNullOrWhiteSpace(expireMinutesRaw) && int.TryParse(expireMinutesRaw, out var m) && m > 0)
+            {
+                expireMinutes = m;
+            }
 
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
@@ -32,7 +38,7 @@ namespace AIStory.Services.Helpers
                 issuer: issuer,
                 audience: audience,
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(120),
+                expires: DateTime.UtcNow.AddMinutes(expireMinutes),
                 signingCredentials: credentials);
 
             return new JwtSecurityTokenHandler().WriteToken(token);

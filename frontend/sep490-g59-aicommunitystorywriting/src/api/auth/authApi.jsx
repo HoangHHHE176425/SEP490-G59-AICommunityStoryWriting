@@ -40,8 +40,28 @@ export async function login({ email, password }) {
             email,
             password,
         });
-        return res.data; // { accessToken, refreshToken }
+        return res.data; // { accessToken }
     } catch (e) {
+        throw new Error(getAxiosErrorMessage(e));
+    }
+}
+
+export async function refresh() {
+    try {
+        // refreshToken is stored in HttpOnly cookie, sent automatically (credentials include)
+        const res = await axiosInstance.post("/auth/refresh");
+        return res.data; // { accessToken }
+    } catch (e) {
+        throw new Error(getAxiosErrorMessage(e));
+    }
+}
+
+export async function logout() {
+    try {
+        const res = await axiosInstance.post("/auth/logout");
+        return res.data;
+    } catch (e) {
+        // logout should be best-effort; still surface message if needed
         throw new Error(getAxiosErrorMessage(e));
     }
 }

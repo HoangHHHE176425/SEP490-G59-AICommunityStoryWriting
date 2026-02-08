@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Repositories.Interfaces;
@@ -36,5 +36,11 @@ namespace Repositories.Implementations
          => UserDAO.Instance.SoftDeleteUser(_context, userId);
         public async Task AddRefreshToken(auth_tokens token)
             => await UserDAO.Instance.AddToken(_context, token);
+
+        public async Task<auth_tokens?> GetRefreshToken(string refreshToken)
+            => await UserDAO.Instance.GetRefreshToken(_context, refreshToken);
+
+        public async Task DeleteRefreshToken(string refreshToken)
+            => await UserDAO.Instance.DeleteRefreshToken(_context, refreshToken);
     }
 }

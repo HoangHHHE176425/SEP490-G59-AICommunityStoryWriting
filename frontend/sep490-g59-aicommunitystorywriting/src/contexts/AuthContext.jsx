@@ -5,7 +5,6 @@ import * as accountApi from '../api/account/accountApi';
 const AuthContext = createContext(null);
 
 const ACCESS_TOKEN_KEY = 'accessToken';
-const REFRESH_TOKEN_KEY = 'refreshToken';
 const USER_KEY = 'user';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
@@ -126,14 +125,12 @@ export function AuthProvider({ children }) {
         try {
             const data = await authApi.login({ email, password });
             const accessToken = data?.accessToken || data?.AccessToken;
-            const refreshToken = data?.refreshToken || data?.RefreshToken;
 
-            if (!accessToken || !refreshToken) {
+            if (!accessToken) {
                 return { success: false, message: 'Dữ liệu đăng nhập không hợp lệ' };
             }
 
             localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-            localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
 
             const tokenUser = buildUserFromAccessToken(accessToken) || { email };
 
@@ -225,7 +222,16 @@ export function AuthProvider({ children }) {
         setUser(null);
         localStorage.removeItem(USER_KEY);
         localStorage.removeItem(ACCESS_TOKEN_KEY);
-        localStorage.removeItem(REFRESH_TOKEN_KEY);
+    };
+
+    const logoutServer = async () => {
+        try {
+            await authApi.logout();
+        } catch {
+            // ignore
+        } finally {
+            logout();
+        }
     };
 
     const refreshProfile = async () => {
@@ -298,7 +304,7 @@ export function AuthProvider({ children }) {
         changePassword,
         deleteMyAccount,
         uploadAvatar,
-        logout,
+        logout: logoutServer,
         isAuthenticated: !!user,
     };
 
