@@ -156,13 +156,14 @@ export function Header() {
                                                     <User className="w-4 h-4" />
                                                     Thông tin cá nhân
                                                 </Link>
-                                                <a
-                                                    href="#"
+                                                <Link
+                                                    to="/library"
                                                     className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
+                                                    onClick={() => setIsUserMenuOpen(false)}
                                                 >
                                                     <Library className="w-4 h-4" />
                                                     Tủ sách
-                                                </a>
+                                                </Link>
                                                 <div className="border-t border-slate-700 mt-1 pt-1">
                                                     <button
                                                         onClick={handleLogout}
@@ -266,10 +267,14 @@ export function Header() {
                                         <User className="w-4 h-4" />
                                         Thông tin cá nhân
                                     </Link>
-                                    <a className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold" href="#">
+                                    <Link
+                                        to="/library"
+                                        className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold"
+                                        onClick={() => setIsMenuOpen(false)}
+                                    >
                                         <Library className="w-4 h-4" />
                                         Tủ sách
-                                    </a>
+                                    </Link>
                                     <button
                                         onClick={handleLogout}
                                         className="flex items-center gap-3 text-red-600 dark:text-red-400 hover:text-red-700 transition-colors font-semibold"

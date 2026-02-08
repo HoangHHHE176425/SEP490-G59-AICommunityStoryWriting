@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Mail, Lock, User, Eye, EyeOff, AlertCircle, CheckCircle, UserPlus } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
+import { PolicyModal } from '../../components/auth/PolicyModal';
 
 export default function Register() {
     const navigate = useNavigate();
@@ -19,6 +20,9 @@ export default function Register() {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
+    const [policyAccepted, setPolicyAccepted] = useState(false);
+    const [showPolicyModal, setShowPolicyModal] = useState(false);
+    const [pendingRegister, setPendingRegister] = useState(false);
 
     const handleChange = (e) => {
         setFormData({
@@ -53,17 +57,10 @@ export default function Register() {
         return true;
     };
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
+    const doRegister = async () => {
+        setLoading(true);
         setError('');
         setSuccess(false);
-
-        if (!validateForm()) {
-            return;
-        }
-
-        setLoading(true);
-
         try {
             const result = await register(formData.email, formData.password, formData.name);
             if (result.success) {
@@ -79,6 +76,38 @@ export default function Register() {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setSuccess(false);
+
+        if (!validateForm()) {
+            return;
+        }
+
+        if (!policyAccepted) {
+            setPendingRegister(true);
+            setShowPolicyModal(true);
+            return;
+        }
+
+        await doRegister();
+    };
+
+    const handlePolicyAccept = () => {
+        setShowPolicyModal(false);
+        setPolicyAccepted(true);
+        if (pendingRegister) {
+            setPendingRegister(false);
+            doRegister();
+        }
+    };
+
+    const handlePolicyDecline = () => {
+        setShowPolicyModal(false);
+        setPendingRegister(false);
     };
 
     const handleGoogleLogin = async () => {
@@ -340,13 +369,13 @@ export default function Register() {
                             />
                             <label htmlFor="terms" className="ml-2 text-sm text-slate-600 dark:text-slate-400">
                                 Tôi đồng ý với{' '}
-                                <Link to="/terms" className="text-primary hover:text-primary/80 font-semibold">
-                                    Điều khoản sử dụng
-                                </Link>{' '}
-                                và{' '}
-                                <Link to="/privacy" className="text-primary hover:text-primary/80 font-semibold">
-                                    Chính sách bảo mật
-                                </Link>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPolicyModal(true)}
+                                    className="text-primary hover:text-primary/80 font-semibold underline"
+                                >
+                                    Điều khoản & Chính sách
+                                </button>
                             </label>
                         </div>
 
@@ -372,10 +401,16 @@ export default function Register() {
                         </p>
                     </div>
                 </div>
-                </div>
+</div>
             </div>
+            <PolicyModal
+                isOpen={showPolicyModal}
+                onClose={handlePolicyDecline}
+                onAccept={handlePolicyAccept}
+                onDecline={handlePolicyDecline}
+            />
             <Footer />
         </div>
-        
+
     );
 }

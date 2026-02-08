@@ -11,6 +11,7 @@ import { ChapterReader } from './pages/chapter-detail/ChapterReader';
 import { AuthorStoryManagement } from './pages/author/AuthorStoryManagement';
 import { StoryBrowse } from './pages/story-list/StoryBrowse';
 import AboutUs from './pages/aboutus/AboutUs';
+import { LibraryPage } from './pages/library/LibraryPage';
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/chapter" element={<ChapterReader />} />
           <Route path="/author" element={<AuthorStoryManagement />} />
           <Route path="/story-list" element={<StoryBrowse />} />
+          <Route path="/library" element={<LibraryPage />} />
           <Route path="/about-us" element={<AboutUs />} />
         </Routes>
       </BrowserRouter>
