@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -48,6 +48,24 @@ namespace DataAccessObjects.DAOs
         {
             context.auth_tokens.Add(token);
             await context.SaveChangesAsync();
+        }
+
+        public async Task<auth_tokens?> GetRefreshToken(StoryPlatformDbContext context, string refreshToken)
+        {
+            var now = DateTime.UtcNow;
+            return await context.auth_tokens
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.refresh_token == refreshToken && t.expires_at > now);
+        }
+
+        public async Task DeleteRefreshToken(StoryPlatformDbContext context, string refreshToken)
+        {
+            var token = await context.auth_tokens.FirstOrDefaultAsync(t => t.refresh_token == refreshToken);
+            if (token != null)
+            {
+                context.auth_tokens.Remove(token);
+                await context.SaveChangesAsync();
+            }
         }
         public async Task<bool> IsNicknameExist(StoryPlatformDbContext context, string nickname, Guid currentUserId)
         {

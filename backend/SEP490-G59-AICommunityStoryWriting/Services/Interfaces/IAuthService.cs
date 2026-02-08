@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Identity.Data;
+using Microsoft.AspNetCore.Identity.Data;
 using Services.DTOs.Auth;
 using System;
 using System.Collections.Generic;
@@ -15,6 +15,8 @@ namespace Services.Interfaces
         Task VerifyAccountAsync(VerifyOtpRequest request);
 
         Task<AuthResponse> LoginAsync(DTOs.Auth.LoginRequest request);
+        Task<AuthResponse> RefreshAsync(string refreshToken);
+        Task LogoutAsync(string refreshToken);
         Task ForgotPasswordAsync(DTOs.Auth.ForgotPasswordRequest request);
         Task ResetPasswordAsync(DTOs.Auth.ResetPasswordRequest request);
     }

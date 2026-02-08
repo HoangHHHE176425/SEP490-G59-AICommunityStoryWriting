@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
@@ -37,6 +37,11 @@ namespace Services.DTOs.Auth
     public class AuthResponse
     {
         public string AccessToken { get; set; } = null!;
-        public string RefreshToken { get; set; } = null!;
+        public string? RefreshToken { get; set; }
+    }
+
+    public class AccessTokenResponse
+    {
+        public string AccessToken { get; set; } = null!;
     }
 }

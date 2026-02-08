@@ -54,6 +54,8 @@ function createAxiosLikeClient({ baseURL, headers, withCredentials } = {}) {
             headers: { ...client.defaults.headers, ...(config.headers || {}) },
             withCredentials: config.withCredentials ?? client.defaults.withCredentials,
             data,
+            _retry: config._retry,
+            _skipAuthRefresh: config._skipAuthRefresh,
         };
 
         // Apply request interceptors (axios-like)
@@ -103,6 +105,43 @@ function createAxiosLikeClient({ baseURL, headers, withCredentials } = {}) {
 
         const res = await fetch(fullUrl, fetchInit);
         const body = await parseResponseBody(res);
+
+        // Auto refresh access token once on 401 (professional flow: refresh token in HttpOnly cookie)
+        const urlStr = String(cfg.url || "");
+        const isAuthEndpoint =
+            urlStr.includes("/auth/login") ||
+            urlStr.includes("/auth/refresh") ||
+            urlStr.includes("/auth/logout") ||
+            urlStr.includes("/auth/register") ||
+            urlStr.includes("/auth/verify-otp") ||
+            urlStr.includes("/auth/forgot-password") ||
+            urlStr.includes("/auth/reset-password");
+
+        if (
+            res.status === 401 &&
+            !cfg._retry &&
+            !cfg._skipAuthRefresh &&
+            !isAuthEndpoint
+        ) {
+            try {
+                const refreshUrl = joinUrl(cfg.baseURL, "auth/refresh");
+                const refreshRes = await fetch(refreshUrl, {
+                    method: "POST",
+                    credentials: cfg.withCredentials ? "include" : "same-origin",
+                    headers: { "Content-Type": "application/json" },
+                });
+                const refreshBody = await parseResponseBody(refreshRes);
+                if (refreshRes.ok) {
+                    const newAccessToken = refreshBody?.accessToken || refreshBody?.AccessToken;
+                    if (newAccessToken) {
+                        localStorage.setItem("accessToken", newAccessToken);
+                        return await request(method, url, data, { ...config, _retry: true });
+                    }
+                }
+            } catch {
+                // ignore and fall through to throwing original error
+            }
+        }
 
         if (!res.ok) {
             const message = body?.message || body?.title || `HTTP ${res.status}`;

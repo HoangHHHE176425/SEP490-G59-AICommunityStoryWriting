@@ -1,9 +1,10 @@
-﻿using AIStory.Services.Helpers;
+using AIStory.Services.Helpers;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
 using Repositories.Interfaces;
 using Services.DTOs.Auth;
 using Services.Interfaces;
+using System.Security.Cryptography;
 
 namespace AIStory.Services.Implementations
 {
@@ -101,11 +102,12 @@ namespace AIStory.Services.Implementations
             }
 
             var accessToken = _jwtHelper.GenerateToken(user);
+            var refreshTokenValue = GenerateRefreshToken();
             var refreshToken = new auth_tokens
             {
                 id = Guid.NewGuid(), 
                 user_id = user.id,    
-                refresh_token = Guid.NewGuid().ToString(),
+                refresh_token = refreshTokenValue,
                 device_info = "Unknown",
                 expires_at = DateTime.UtcNow.AddDays(30),
                 created_at = DateTime.UtcNow
@@ -118,6 +120,59 @@ namespace AIStory.Services.Implementations
                 AccessToken = accessToken,
                 RefreshToken = refreshToken.refresh_token
             };
+        }
+
+        public async Task<AuthResponse> RefreshAsync(string refreshToken)
+        {
+            var tokenRow = await _userRepo.GetRefreshToken(refreshToken);
+            if (tokenRow == null || tokenRow.user_id == null)
+            {
+                throw new Exception("Invalid refresh token.");
+            }
+
+            // rotate refresh token
+            var user = await _userRepo.GetUserById(tokenRow.user_id.Value);
+            if (user == null)
+            {
+                throw new Exception("User not found.");
+            }
+
+            var newAccessToken = _jwtHelper.GenerateToken(user);
+            var newRefreshTokenValue = GenerateRefreshToken();
+
+            var newRow = new auth_tokens
+            {
+                id = Guid.NewGuid(),
+                user_id = user.id,
+                refresh_token = newRefreshTokenValue,
+                device_info = tokenRow.device_info,
+                expires_at = DateTime.UtcNow.AddDays(30),
+                created_at = DateTime.UtcNow
+            };
+
+            await _userRepo.AddRefreshToken(newRow);
+            await _userRepo.DeleteRefreshToken(refreshToken);
+
+            return new AuthResponse
+            {
+                AccessToken = newAccessToken,
+                RefreshToken = newRefreshTokenValue
+            };
+        }
+
+        public async Task LogoutAsync(string refreshToken)
+        {
+            await _userRepo.DeleteRefreshToken(refreshToken);
+        }
+
+        private static string GenerateRefreshToken()
+        {
+            // 64 bytes -> 86 chars base64url (approx), good entropy
+            var bytes = RandomNumberGenerator.GetBytes(64);
+            return Convert.ToBase64String(bytes)
+                .Replace("+", "-")
+                .Replace("/", "_")
+                .Replace("=", "");
         }
 
 

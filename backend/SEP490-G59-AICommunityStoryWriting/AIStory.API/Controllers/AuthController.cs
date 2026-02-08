@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Auth; // Đảm bảo namespace chứa VerifyOtpRequest
 using Services.Interfaces;
 
@@ -51,12 +51,65 @@ namespace AIStory.API.Controllers
             try
             {
                 var response = await _authService.LoginAsync(request);
-                return Ok(response);
+
+                // Store refresh token in HttpOnly cookie (professional approach)
+                if (!string.IsNullOrEmpty(response.RefreshToken))
+                {
+                    SetRefreshTokenCookie(response.RefreshToken);
+                }
+
+                // Return access token only (refresh in cookie)
+                return Ok(new AccessTokenResponse { AccessToken = response.AccessToken });
             }
             catch (Exception ex)
             {
 
                 return Unauthorized(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("refresh")]
+        public async Task<IActionResult> Refresh()
+        {
+            try
+            {
+                var refreshToken = Request.Cookies["refreshToken"];
+                if (string.IsNullOrEmpty(refreshToken))
+                {
+                    return Unauthorized(new { message = "Missing refresh token." });
+                }
+
+                var response = await _authService.RefreshAsync(refreshToken);
+                if (!string.IsNullOrEmpty(response.RefreshToken))
+                {
+                    SetRefreshTokenCookie(response.RefreshToken);
+                }
+
+                return Ok(new AccessTokenResponse { AccessToken = response.AccessToken });
+            }
+            catch (Exception ex)
+            {
+                return Unauthorized(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("logout")]
+        public async Task<IActionResult> Logout()
+        {
+            try
+            {
+                var refreshToken = Request.Cookies["refreshToken"];
+                if (!string.IsNullOrEmpty(refreshToken))
+                {
+                    await _authService.LogoutAsync(refreshToken);
+                }
+
+                DeleteRefreshTokenCookie();
+                return Ok(new { message = "Logged out." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
             }
         }
 
@@ -97,6 +150,31 @@ namespace AIStory.API.Controllers
             {
                 return BadRequest(new { message = ex.Message });
             }
+        }
+
+        private void SetRefreshTokenCookie(string refreshToken)
+        {
+            var options = new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = true, // required for SameSite=None in modern browsers
+                SameSite = SameSiteMode.None,
+                Expires = DateTimeOffset.UtcNow.AddDays(30),
+                Path = "/"
+            };
+
+            Response.Cookies.Append("refreshToken", refreshToken, options);
+        }
+
+        private void DeleteRefreshTokenCookie()
+        {
+            var options = new CookieOptions
+            {
+                Secure = true,
+                SameSite = SameSiteMode.None,
+                Path = "/"
+            };
+            Response.Cookies.Delete("refreshToken", options);
         }
     }
 }
