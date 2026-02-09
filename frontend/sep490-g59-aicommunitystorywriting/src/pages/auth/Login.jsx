@@ -57,7 +57,7 @@ export default function Login() {
             if (result.success) {
                 navigate('/home');
             } else {
-                setError('Đăng nhập Google thất bại');
+                setError(result.message || 'Đăng nhập Google thất bại');
             }
         } catch (err) {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
@@ -74,7 +74,7 @@ export default function Login() {
             if (result.success) {
                 navigate('/home');
             } else {
-                setError('Đăng nhập Facebook thất bại');
+                setError(result.message || 'Đăng nhập Facebook thất bại');
             }
         } catch (err) {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');

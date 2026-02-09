@@ -96,19 +96,24 @@
                         <small class="form-text text-muted">Số từ: <span id="wordCount">0</span></small>
                     </div>
                     <div class="row">
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
+                            <label for="chapterStatus" class="form-label">Trạng thái</label>
+                            <select class="form-select" id="chapterStatus">
+                                <option value="DRAFT">Draft</option>
+                                <option value="PUBLISHED">Published</option>
+                                <option value="ARCHIVED">Archived</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
                             <label for="chapterAccessType" class="form-label">Loại truy cập</label>
                             <select class="form-select" id="chapterAccessType">
                                 <option value="FREE">Miễn phí</option>
                                 <option value="PAID">Trả phí</option>
                             </select>
                         </div>
-                        <div class="col-md-6 mb-3">
-                            <label for="chapterCoinPrice" class="form-label">Giá (coin) <span id="coinPriceRequired" class="text-danger" style="display: none;">*</span></label>
-                            <input type="number" class="form-control" id="chapterCoinPrice" value="0" min="0" disabled>
-                            <div class="invalid-feedback">
-                                Vui lòng nhập giá coin cho chapter trả phí.
-                            </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="chapterCoinPrice" class="form-label">Giá (coin)</label>
+                            <input type="number" class="form-control" id="chapterCoinPrice" value="0" min="0">
                         </div>
                     </div>
                     <div class="row">
@@ -129,12 +134,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-                <button type="button" class="btn btn-outline-secondary" onclick="saveChapter('DRAFT')" id="saveDraftBtn">
-                    <i class="bi bi-save"></i> Lưu nháp
-                </button>
-                <button type="button" class="btn btn-primary" onclick="saveChapter('PUBLISHED')" id="publishBtn">
-                    <i class="bi bi-check-circle"></i> Xuất bản
-                </button>
+                <button type="button" class="btn btn-primary" onclick="saveChapter()">Lưu</button>
             </div>
         </div>
     </div>
@@ -142,7 +142,7 @@
 
 @section Scripts {
     <script>
-        const storyId = '@(storyId)';
+        const storyId = @(storyId);
         let story = null;
         let chapters = [];
         let editingChapterId = null;
@@ -150,9 +150,6 @@
         document.addEventListener('DOMContentLoaded', function() {
             loadStoryDetails();
             loadChapters();
-
-            // Update coin price field when access type changes
-            document.getElementById('chapterAccessType').addEventListener('change', updateCoinPriceField);
 
             // Update word count on content change
             document.getElementById('chapterContent').addEventListener('input', function() {
@@ -206,6 +203,8 @@
                         <div class="row">
                             <div class="col-md-6">
                                 <p><strong>Độ tuổi:</strong> ${story.ageRating || 'ALL'}</p>
+                                <p><strong>Số chương dự kiến:</strong> ${story.expectedChapters || 0}</p>
+                                <p><strong>Tần suất ra mắt:</strong> ${story.releaseFrequencyDays || 7} ngày</p>
                             </div>
                             <div class="col-md-6">
                                 <p><strong>Tổng số từ:</strong> ${Utils.formatNumber(story.wordCount || 0)}</p>
@@ -289,16 +288,16 @@
                                 </div>
                             </div>
                             <div class="ms-3">
-                                <button class="btn btn-sm btn-info" onclick="viewChapter('${chapter.id}')" title="Xem">
+                                <button class="btn btn-sm btn-info" onclick="viewChapter(${chapter.id})" title="Xem">
                                     <i class="bi bi-eye"></i>
                                 </button>
-                                <button class="btn btn-sm btn-primary" onclick="editChapter('${chapter.id}')" title="Sửa">
+                                <button class="btn btn-sm btn-primary" onclick="editChapter(${chapter.id})" title="Sửa">
                                     <i class="bi bi-pencil"></i>
                                 </button>
-                                <button class="btn btn-sm btn-success" onclick="publishChapter('${chapter.id}')" title="Publish" ${chapter.status === 'PUBLISHED' ? 'disabled' : ''}>
+                                <button class="btn btn-sm btn-success" onclick="publishChapter(${chapter.id})" title="Publish" ${chapter.status === 'PUBLISHED' ? 'disabled' : ''}>
                                     <i class="bi bi-check-circle"></i>
                                 </button>
-                                <button class="btn btn-sm btn-danger" onclick="deleteChapter('${chapter.id}')" title="Xóa">
+                                <button class="btn btn-sm btn-danger" onclick="deleteChapter(${chapter.id})" title="Xóa">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </div>
@@ -315,18 +314,12 @@
             document.getElementById('chapterForm').reset();
             document.getElementById('chapterId').value = '';
             document.getElementById('chapterOrderIndex').value = chapters.length + 1;
+            document.getElementById('chapterStatus').value = 'DRAFT';
             document.getElementById('chapterAccessType').value = 'FREE';
             document.getElementById('chapterCoinPrice').value = 0;
             document.getElementById('chapterAiContributionRatio').value = 0;
             document.getElementById('chapterIsAiClean').checked = false;
             document.getElementById('wordCount').textContent = '0';
-
-            // Update coin price field based on access type
-            updateCoinPriceField();
-
-            // Show both buttons for create mode
-            document.getElementById('saveDraftBtn').style.display = 'inline-block';
-            document.getElementById('publishBtn').style.display = 'inline-block';
 
             const modal = new bootstrap.Modal(document.getElementById('chapterModal'));
             modal.show();
@@ -346,25 +339,11 @@
                 document.getElementById('chapterTitle').value = chapter.title;
                 document.getElementById('chapterContent').value = chapter.content || '';
                 document.getElementById('chapterOrderIndex').value = chapter.orderIndex;
+                document.getElementById('chapterStatus').value = chapter.status || 'DRAFT';
                 document.getElementById('chapterAccessType').value = chapter.accessType || 'FREE';
                 document.getElementById('chapterCoinPrice').value = chapter.coinPrice || 0;
                 document.getElementById('chapterAiContributionRatio').value = chapter.aiContributionRatio || 0;
                 document.getElementById('chapterIsAiClean').checked = chapter.isAiClean || false;
-
-                // Update coin price field based on access type
-                updateCoinPriceField();
-
-                // Show buttons based on current status
-                const currentStatus = chapter.status || 'DRAFT';
-                if (currentStatus === 'PUBLISHED') {
-                    // If already published, only show "Lưu nháp" button
-                    document.getElementById('saveDraftBtn').style.display = 'inline-block';
-                    document.getElementById('publishBtn').style.display = 'none';
-                } else {
-                    // If draft, show both buttons
-                    document.getElementById('saveDraftBtn').style.display = 'inline-block';
-                    document.getElementById('publishBtn').style.display = 'inline-block';
-                }
 
                 const wordCount = chapter.content ? chapter.content.trim().split(/\s+/).length : 0;
                 document.getElementById('wordCount').textContent = wordCount;
@@ -375,47 +354,8 @@
             }
         }
 
-        function updateCoinPriceField() {
-            const accessType = document.getElementById('chapterAccessType').value;
-            const coinPriceInput = document.getElementById('chapterCoinPrice');
-            const coinPriceRequired = document.getElementById('coinPriceRequired');
-
-            if (accessType === 'PAID') {
-                coinPriceInput.disabled = false;
-                coinPriceInput.required = true;
-                coinPriceInput.setAttribute('min', '1');
-                coinPriceRequired.style.display = 'inline';
-                // If coin price is 0, set it to empty to force user input
-                if (parseInt(coinPriceInput.value) === 0) {
-                    coinPriceInput.value = '';
-                }
-            } else {
-                coinPriceInput.disabled = true;
-                coinPriceInput.required = false;
-                coinPriceInput.setAttribute('min', '0');
-                coinPriceInput.value = 0;
-                coinPriceRequired.style.display = 'none';
-                coinPriceInput.classList.remove('is-invalid');
-            }
-        }
-
-        async function saveChapter(status) {
+        async function saveChapter() {
             const form = document.getElementById('chapterForm');
-            const accessType = document.getElementById('chapterAccessType').value;
-            const coinPriceInput = document.getElementById('chapterCoinPrice');
-            const coinPrice = parseInt(coinPriceInput.value) || 0;
-
-            // Validate coin price for PAID chapters
-            if (accessType === 'PAID') {
-                if (!coinPriceInput.value || coinPrice <= 0) {
-                    coinPriceInput.classList.add('is-invalid');
-                    coinPriceInput.focus();
-                    Utils.showAlert('Vui lòng nhập giá coin lớn hơn 0 cho chapter trả phí.', 'danger');
-                    return;
-                }
-                coinPriceInput.classList.remove('is-invalid');
-            }
-
             if (!form.checkValidity()) {
                 form.reportValidity();
                 return;
@@ -427,27 +367,19 @@
                     title: document.getElementById('chapterTitle').value,
                     content: document.getElementById('chapterContent').value,
                     orderIndex: parseInt(document.getElementById('chapterOrderIndex').value),
-                    status: status || 'DRAFT',
-                    accessType: accessType,
-                    coinPrice: accessType === 'PAID' ? coinPrice : 0,
+                    status: document.getElementById('chapterStatus').value,
+                    accessType: document.getElementById('chapterAccessType').value,
+                    coinPrice: parseInt(document.getElementById('chapterCoinPrice').value),
                     aiContributionRatio: parseFloat(document.getElementById('chapterAiContributionRatio').value),
                     isAiClean: document.getElementById('chapterIsAiClean').checked
                 };
 
                 if (editingChapterId) {
                     await ApiService.updateChapter(editingChapterId, data);
-                    if (status === 'PUBLISHED') {
-                        Utils.showAlert('Xuất bản chapter thành công!', 'success');
-                    } else {
-                        Utils.showAlert('Cập nhật chapter thành công!', 'success');
-                    }
+                    Utils.showAlert('Cập nhật chapter thành công!', 'success');
                 } else {
                     await ApiService.createChapter(data);
-                    if (status === 'PUBLISHED') {
-                        Utils.showAlert('Tạo và xuất bản chapter thành công!', 'success');
-                    } else {
-                        Utils.showAlert('Tạo chapter nháp thành công!', 'success');
-                    }
+                    Utils.showAlert('Tạo chapter thành công!', 'success');
                 }
 
                 bootstrap.Modal.getInstance(document.getElementById('chapterModal')).hide();
@@ -483,7 +415,8 @@
         }
 
         function viewChapter(id) {
-            window.location.href = `/Chapters/Read/${encodeURIComponent(id)}`;
+            // Navigate to reading page
+            window.location.href = `/Chapters/Read/${id}`;
         }
 
         async function publishStoryFromDetails() {

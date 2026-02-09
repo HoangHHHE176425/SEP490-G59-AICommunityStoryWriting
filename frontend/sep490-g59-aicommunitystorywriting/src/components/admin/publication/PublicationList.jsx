@@ -1,4 +1,3 @@
-/* eslint-disable no-dupe-keys */
 import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen } from 'lucide-react';
 
 export function PublicationList({ publications, onViewDetail }) {
@@ -88,7 +87,7 @@ export function PublicationList({ publications, onViewDetail }) {
                 border: '1px solid #e2e8f0'
             }}>
                 <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📋</div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.5rem', margin: 0, marginBottom: '0.5rem' }}>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#1e293b', margin: 0, marginBottom: '0.5rem' }}>
                     Không có yêu cầu nào
                 </h3>
                 <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
@@ -147,7 +146,6 @@ export function PublicationList({ publications, onViewDetail }) {
                                         fontSize: '1.125rem',
                                         fontWeight: 600,
                                         color: '#1e293b',
-                                        marginBottom: '0.25rem',
                                         margin: 0,
                                         marginBottom: '0.25rem'
                                     }}>

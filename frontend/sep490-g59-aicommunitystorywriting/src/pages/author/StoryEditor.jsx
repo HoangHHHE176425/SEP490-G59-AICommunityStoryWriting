@@ -24,7 +24,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
     });
 
     const [chapters, setChapters] = useState([
-        { id: 1, number: 1, title: '', content: '', accessType: 'public', price: 0 }
+        { id: 1, number: 1, title: '', content: '' }
     ]);
 
     const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
@@ -55,12 +55,8 @@ export function StoryEditor({ story, onSave, onCancel }) {
 
     const minChapters = formData.storyType === 'short' ? 1 : 5;
 
-    const handleFormDataChange = (fieldOrUpdates, value) => {
-        if (typeof fieldOrUpdates === 'object' && fieldOrUpdates !== null && value === undefined) {
-            setFormData(prev => ({ ...prev, ...fieldOrUpdates }));
-        } else {
-            setFormData(prev => ({ ...prev, [fieldOrUpdates]: value }));
-        }
+    const handleFormDataChange = (field, value) => {
+        setFormData({ ...formData, [field]: value });
     };
 
     const handleImageUpload = (e) => {
@@ -75,14 +71,12 @@ export function StoryEditor({ story, onSave, onCancel }) {
         }
     };
 
-    const handleChapterChange = (fieldOrUpdates, value) => {
+    const handleChapterChange = (field, value) => {
         const updatedChapters = [...chapters];
-        const current = updatedChapters[currentChapterIndex];
-        if (typeof fieldOrUpdates === 'object' && fieldOrUpdates !== null && value === undefined) {
-            updatedChapters[currentChapterIndex] = { ...current, ...fieldOrUpdates };
-        } else {
-            updatedChapters[currentChapterIndex] = { ...current, [fieldOrUpdates]: value };
-        }
+        updatedChapters[currentChapterIndex] = {
+            ...updatedChapters[currentChapterIndex],
+            [field]: value
+        };
         setChapters(updatedChapters);
     };
 
@@ -91,9 +85,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
             id: Date.now(),
             number: chapters.length + 1,
             title: '',
-            content: '',
-            accessType: 'public',
-            price: 0
+            content: ''
         };
         setChapters([...chapters, newChapter]);
         setCurrentChapterIndex(chapters.length);
@@ -237,8 +229,12 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                         <div style={{ fontSize: '0.875rem', color: '#333333', fontWeight: 500 }}>{formData.title}</div>
                                     </div>
                                     <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
+                                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Loại truyện:</div>
+                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>{formData.storyType === 'long' ? 'Truyện dài' : 'Truyện ngắn'}</div>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Thể loại:</div>
-                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>{formData.categories?.join(', ') || '-'}</div>
+                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>{formData.categories.join(', ')}</div>
                                     </div>
                                     <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Số chương:</div>
@@ -360,7 +356,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                             </button>
 
                             <div style={{ display: 'flex', gap: '1rem' }}>
-                                {currentStep >= 3 && (
+                                {currentStep > 1 && (
                                     <button
                                         onClick={() => handleSubmit(true)}
                                         style={{

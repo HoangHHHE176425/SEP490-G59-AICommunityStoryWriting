@@ -64,7 +64,7 @@ function HeroSection() {
             </button>
 
             <button
-              onClick={() => navigate('/home')}
+              onClick={() => navigate('/story-list')}
               className="px-8 py-4 bg-white/10 backdrop-blur-sm border-2 border-white/20 text-white rounded-xl hover:bg-white/20 transition-all font-bold text-lg flex items-center gap-3"
             >
               <BookOpen className="w-5 h-5" />
@@ -672,7 +672,7 @@ function CTASection() {
           </button>
 
           <button
-            onClick={() => navigate('/home')}
+            onClick={() => navigate('/story-list')}
             className="px-10 py-5 bg-white/10 backdrop-blur-sm border-2 border-white/20 text-white rounded-xl hover:bg-white/20 transition-all font-bold text-xl flex items-center gap-3"
           >
             <BookOpen className="w-5 h-5" />

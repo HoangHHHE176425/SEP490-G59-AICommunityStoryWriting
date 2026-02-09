@@ -1,6 +1,6 @@
 ﻿@{
     ViewData["Title"] = "Đọc Truyện";
-    var chapterId = ViewBag.ChapterId ?? Guid.Empty;
+    var chapterId = ViewBag.ChapterId ?? 0;
 }
 
 <div class="container-fluid px-0">
@@ -126,7 +126,7 @@
 
 @section Scripts {
     <script>
-        const chapterId = '@(chapterId)';
+        const chapterId = @(chapterId);
         let currentChapter = null;
         let storyId = null;
         let allChapters = [];
@@ -138,54 +138,29 @@
 
         async function loadChapter() {
             try {
-                // Load chapter - this is critical, if it fails, we can't continue
                 currentChapter = await ApiService.getChapterById(chapterId);
                 if (!currentChapter) {
                     Utils.showAlert('Không tìm thấy chapter', 'danger');
-                    setTimeout(() => {
-                        window.location.href = '/Stories';
-                    }, 2000);
+                    window.location.href = '/Stories';
                     return;
                 }
 
                 storyId = currentChapter.storyId;
 
-                // Render chapter first so user can read even if other calls fail
+                // Load story info
+                const story = await ApiService.getStoryById(storyId);
+                document.getElementById('storyTitleHeader').textContent = story.title;
+                document.getElementById('backToStoryLink').href = `/Stories/Details/${storyId}`;
+
+                // Load all chapters to enable navigation
+                allChapters = await ApiService.getChaptersByStoryId(storyId);
+                allChapters = Array.from(allChapters).sort((a, b) => a.orderIndex - b.orderIndex);
+                currentChapterIndex = allChapters.findIndex(c => c.id === chapterId);
+
                 renderChapter();
-
-                // Load story info - non-critical, show warning if fails
-                try {
-                    const story = await ApiService.getStoryById(storyId);
-                    if (story && story.title) {
-                        document.getElementById('storyTitleHeader').textContent = story.title;
-                        document.getElementById('backToStoryLink').href = `/Stories/Details/${encodeURIComponent(storyId)}`;
-                    }
-                } catch (error) {
-                    console.warn('Không thể tải thông tin story:', error);
-                    document.getElementById('storyTitleHeader').textContent = 'Đang tải...';
-                    document.getElementById('backToStoryLink').href = '/Stories';
-                }
-
-                // Load all chapters for navigation - non-critical, show warning if fails
-                try {
-                    allChapters = await ApiService.getChaptersByStoryId(storyId);
-                    if (allChapters && Array.isArray(allChapters)) {
-                        allChapters = Array.from(allChapters).sort((a, b) => a.orderIndex - b.orderIndex);
-                        currentChapterIndex = allChapters.findIndex(c => c.id === chapterId);
-                        updateNavigation();
-                    }
-                } catch (error) {
-                    console.warn('Không thể tải danh sách chapters:', error);
-                    // Disable navigation buttons if we can't load chapter list
-                    document.getElementById('prevChapterBtn').disabled = true;
-                    document.getElementById('nextChapterBtn').disabled = true;
-                }
+                updateNavigation();
             } catch (error) {
-                // Only show error if chapter itself failed to load
-                Utils.showAlert('Lỗi khi tải chapter: ' + (error.message || 'Không xác định'), 'danger');
-                setTimeout(() => {
-                    window.location.href = '/Stories';
-                }, 2000);
+                Utils.showAlert('Lỗi khi tải chapter: ' + error.message, 'danger');
             }
         }
 
@@ -236,20 +211,14 @@
             const prevBtn = document.getElementById('prevChapterBtn');
             const nextBtn = document.getElementById('nextChapterBtn');
 
-            if (!allChapters || !Array.isArray(allChapters) || allChapters.length === 0) {
-                prevBtn.disabled = true;
-                nextBtn.disabled = true;
-                return;
-            }
-
-            if (currentChapterIndex > 0 && currentChapterIndex < allChapters.length) {
+            if (currentChapterIndex > 0) {
                 prevBtn.disabled = false;
                 prevBtn.onclick = () => navigateToChapter(allChapters[currentChapterIndex - 1].id);
             } else {
                 prevBtn.disabled = true;
             }
 
-            if (currentChapterIndex >= 0 && currentChapterIndex < allChapters.length - 1) {
+            if (currentChapterIndex < allChapters.length - 1) {
                 nextBtn.disabled = false;
                 nextBtn.onclick = () => navigateToChapter(allChapters[currentChapterIndex + 1].id);
             } else {
@@ -258,17 +227,13 @@
         }
 
         function navigateToChapter(newChapterId) {
-            window.location.href = `/Chapters/Read/${encodeURIComponent(newChapterId)}`;
+            window.location.href = `/Chapters/Read/${newChapterId}`;
         }
 
         function navigateChapter(direction) {
-            if (!allChapters || !Array.isArray(allChapters) || allChapters.length === 0) {
-                return;
-            }
-
-            if (direction === 'prev' && currentChapterIndex > 0 && currentChapterIndex < allChapters.length) {
+            if (direction === 'prev' && currentChapterIndex > 0) {
                 navigateToChapter(allChapters[currentChapterIndex - 1].id);
-            } else if (direction === 'next' && currentChapterIndex >= 0 && currentChapterIndex < allChapters.length - 1) {
+            } else if (direction === 'next' && currentChapterIndex < allChapters.length - 1) {
                 navigateToChapter(allChapters[currentChapterIndex + 1].id);
             }
         }
@@ -307,16 +272,12 @@
 
         // Keyboard navigation
         document.addEventListener('keydown', function(e) {
-            if (!allChapters || !Array.isArray(allChapters) || allChapters.length === 0) {
-                return;
-            }
-
             // Left arrow - previous chapter
-            if (e.key === 'ArrowLeft' && currentChapterIndex > 0 && currentChapterIndex < allChapters.length) {
+            if (e.key === 'ArrowLeft' && currentChapterIndex > 0) {
                 navigateToChapter(allChapters[currentChapterIndex - 1].id);
             }
             // Right arrow - next chapter
-            else if (e.key === 'ArrowRight' && currentChapterIndex >= 0 && currentChapterIndex < allChapters.length - 1) {
+            else if (e.key === 'ArrowRight' && currentChapterIndex < allChapters.length - 1) {
                 navigateToChapter(allChapters[currentChapterIndex + 1].id);
             }
             // Escape - exit fullscreen

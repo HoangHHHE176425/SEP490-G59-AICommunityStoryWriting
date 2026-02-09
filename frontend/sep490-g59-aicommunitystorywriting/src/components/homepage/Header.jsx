@@ -2,6 +2,7 @@ import { Search, Bell, Edit, BookOpen, Menu, X, ChevronDown, Coins, User, Librar
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 export function Header() {
     const navigate = useNavigate();
@@ -10,10 +11,10 @@ export function Header() {
     const [isGenreOpen, setIsGenreOpen] = useState(false);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
 
-    const userCoins = user?.coins || 0;
+    const userCoins = user?.stats?.currentCoins ?? 0;
 
-    const handleLogout = () => {
-        logout();
+    const handleLogout = async () => {
+        await logout();
         setIsUserMenuOpen(false);
         navigate('/');
     };
@@ -128,7 +129,10 @@ export function Header() {
                                         <img
                                             alt="User Avatar"
                                             className="w-full h-full object-cover"
-                                            src={user?.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'}
+                                            src={
+                                                resolveBackendUrl(user?.avatarUrl) ||
+                                                'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'
+                                            }
                                         />
                                     </Link>
                                     <button
@@ -145,7 +149,7 @@ export function Header() {
                                         >
                                             <div className="py-2">
                                                 <div className="px-4 py-3 border-b border-slate-700">
-                                                    <p className="font-semibold text-white">{user?.name || 'Người dùng'}</p>
+                                                    <p className="font-semibold text-white">{user?.displayName || 'Người dùng'}</p>
                                                     <p className="text-sm text-slate-400">{user?.email || ''}</p>
                                                 </div>
                                                 <Link
