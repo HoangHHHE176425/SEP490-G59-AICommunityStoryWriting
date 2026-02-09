@@ -1,3 +1,6 @@
+
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Chapters;
 
@@ -14,8 +17,9 @@ namespace AIStory.API.Controllers
             _chapterService = chapterService;
         }
 
-        /// <summary>Tạo chapter mới</summary>
+        /// <summary>Tạo chapter mới - Chỉ AUTHOR</summary>
         [HttpPost]
+        [Authorize(Roles = "AUTHOR")]
         public IActionResult Create([FromBody] CreateChapterRequestDto request)
         {
             try
@@ -37,8 +41,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy danh sách chapters với pagination và filtering</summary>
+        /// <summary>Lấy danh sách chapters với pagination và filtering (cho phép xem không cần đăng nhập)</summary>
         [HttpGet]
+        [AllowAnonymous]
         public IActionResult GetAll([FromQuery] ChapterQueryDto query)
         {
             try
@@ -52,8 +57,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy chapter theo ID (Guid)</summary>
+        /// <summary>Lấy chapter theo ID (Guid) (cho phép xem không cần đăng nhập)</summary>
         [HttpGet("{id:guid}")]
+        [AllowAnonymous]
         public IActionResult GetById(Guid id)
         {
             try
@@ -67,8 +73,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy tất cả chapters của một story (Guid)</summary>
+        /// <summary>Lấy tất cả chapters của một story (Guid) (cho phép xem không cần đăng nhập)</summary>
         [HttpGet("story/{storyId:guid}")]
+        [AllowAnonymous]
         public IActionResult GetByStoryId(Guid storyId)
         {
             try
@@ -82,8 +89,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy chapter theo story ID (Guid) và order index</summary>
+        /// <summary>Lấy chapter theo story ID (Guid) và order index (cho phép xem không cần đăng nhập)</summary>
         [HttpGet("story/{storyId:guid}/order/{orderIndex:int}")]
+        [AllowAnonymous]
         public IActionResult GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex)
         {
             try
@@ -97,8 +105,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Cập nhật chapter</summary>
+        /// <summary>Cập nhật chapter - Chỉ AUTHOR (chỉ được sửa chapter của chính mình)</summary>
         [HttpPut("{id:guid}")]
+        [Authorize(Roles = "AUTHOR")]
         public IActionResult Update(Guid id, [FromBody] UpdateChapterRequestDto request)
         {
             try
@@ -120,8 +129,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Xóa chapter</summary>
+        /// <summary>Xóa chapter - Chỉ AUTHOR (chỉ được xóa chapter của chính mình)</summary>
         [HttpDelete("{id:guid}")]
+        [Authorize(Roles = "AUTHOR")]
         public IActionResult Delete(Guid id)
         {
             try
@@ -135,8 +145,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Publish chapter</summary>
+        /// <summary>Publish chapter - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/publish")]
+        [Authorize(Roles = "AUTHOR")]
         public IActionResult Publish(Guid id)
         {
             try
@@ -150,8 +161,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Unpublish chapter</summary>
+        /// <summary>Unpublish chapter - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/unpublish")]
+        [Authorize(Roles = "AUTHOR")]
         public IActionResult Unpublish(Guid id)
         {
             try
@@ -165,8 +177,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Sắp xếp lại thứ tự chapter</summary>
+        /// <summary>Sắp xếp lại thứ tự chapter - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/reorder")]
+        [Authorize(Roles = "AUTHOR")]
         public IActionResult Reorder(Guid id, [FromBody] int newOrderIndex)
         {
             try

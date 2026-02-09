@@ -1,0 +1,134 @@
+﻿@{
+    ViewData["Title"] = "Đăng nhập";
+}
+
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-5">
+            <div class="card shadow">
+                <div class="card-body p-5">
+                    <h2 class="card-title text-center mb-4">
+                        <i class="bi bi-box-arrow-in-right"></i> Đăng nhập
+                    </h2>
+
+                    <form id="loginForm">
+                        <div class="mb-3">
+                            <label for="email" class="form-label">Email</label>
+                            <input type="email" class="form-control" id="email" required autocomplete="email">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Mật khẩu</label>
+                            <input type="password" class="form-control" id="password" required autocomplete="current-password">
+                        </div>
+
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="rememberMe">
+                            <label class="form-check-label" for="rememberMe">
+                                Ghi nhớ đăng nhập
+                            </label>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary w-100 mb-3">
+                            <i class="bi bi-box-arrow-in-right"></i> Đăng nhập
+                        </button>
+
+                        <div class="text-center">
+                            <a href="#" onclick="showForgotPassword()" class="text-decoration-none">Quên mật khẩu?</a>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <div class="text-center">
+                            <span class="text-muted">Chưa có tài khoản? </span>
+                            <a asp-controller="Auth" asp-action="Register" class="text-decoration-none">Đăng ký ngay</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Forgot Password Modal -->
+<div class="modal fade" id="forgotPasswordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Quên mật khẩu</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="forgotPasswordForm">
+                    <div class="mb-3">
+                        <label for="forgotEmail" class="form-label">Email</label>
+                        <input type="email" class="form-control" id="forgotEmail" required>
+                        <small class="text-muted">Nhập email để nhận mã OTP khôi phục mật khẩu</small>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Gửi mã OTP</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        // Tự động điền email nếu có trong URL
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const emailParam = urlParams.get('email');
+            if (emailParam) {
+                document.getElementById('email').value = emailParam;
+            }
+        });
+
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await ApiService.login(email, password);
+
+                // Lưu token vào localStorage
+                AuthHelper.setToken(response.accessToken);
+
+                // Lấy thông tin user từ token (bao gồm Author ID)
+                await AuthHelper.loadUserInfo();
+
+                Utils.showAlert('Đăng nhập thành công!', 'success');
+
+                // Lấy returnUrl nếu có
+                const urlParams = new URLSearchParams(window.location.search);
+                const returnUrl = urlParams.get('returnUrl') || '/';
+
+                // Chuyển hướng về trang đã yêu cầu hoặc trang chủ
+                setTimeout(() => {
+                    window.location.href = returnUrl;
+                }, 1000);
+            } catch (error) {
+                Utils.showAlert('Đăng nhập thất bại: ' + error.message, 'danger');
+            }
+        });
+
+        function showForgotPassword() {
+            new bootstrap.Modal(document.getElementById('forgotPasswordModal')).show();
+        }
+
+        document.getElementById('forgotPasswordForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const email = document.getElementById('forgotEmail').value;
+
+            try {
+                await ApiService.forgotPassword(email);
+                Utils.showAlert('Mã OTP đã được gửi đến email của bạn. Vui lòng kiểm tra hộp thư.', 'success');
+                bootstrap.Modal.getInstance(document.getElementById('forgotPasswordModal')).hide();
+            } catch (error) {
+                Utils.showAlert('Lỗi: ' + error.message, 'danger');
+            }
+        });
+    </script>
+}

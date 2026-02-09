@@ -2,6 +2,8 @@
 
 namespace AIStory.Client.Controllers
 {
+    // Không dùng [Authorize] ở đây vì Client dùng JWT từ localStorage
+    // Frontend JavaScript sẽ kiểm tra authentication và role
     public class ChaptersController : Controller
     {
         public IActionResult Index()
@@ -9,7 +11,7 @@ namespace AIStory.Client.Controllers
             return View();
         }
 
-        public IActionResult ByStory(int? storyId)
+        public IActionResult ByStory(Guid? storyId)
         {
             if (!storyId.HasValue)
             {
@@ -19,7 +21,7 @@ namespace AIStory.Client.Controllers
             return View();
         }
 
-        public IActionResult Read(int? id)
+        public IActionResult Read(Guid? id)
         {
             if (!id.HasValue)
             {
