@@ -7,7 +7,7 @@
         <div class="col-12">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h2><i class="bi bi-book"></i> Quản lý Truyện</h2>
-                <button class="btn btn-primary" onclick="showCreateStoryModal()">
+                <button class="btn btn-primary" id="createStoryBtn" onclick="showCreateStoryModal()">
                     <i class="bi bi-plus-circle"></i> Tạo truyện mới
                 </button>
             </div>
@@ -91,15 +91,11 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                @if (string.IsNullOrWhiteSpace(ViewBag.DefaultAuthorId as string))
-                {
-                    <div class="alert alert-warning small py-2 mb-3">
-                        <strong>Lưu ý:</strong> Chưa cấu hình AuthorId. Để tạo truyện, thêm <code>DefaultAuthorIdForStories</code> trong <code>appsettings.json</code> (Guid của user trong bảng users).
-                    </div>
-                }
                 <form id="storyForm">
                     <input type="hidden" id="storyId">
-                    <input type="hidden" id="defaultAuthorId" value="@(ViewBag.DefaultAuthorId ?? "")">
+                    <div id="authWarning" class="alert alert-warning small py-2 mb-3" style="display: none;">
+                        <strong>Lưu ý:</strong> Vui lòng <a asp-controller="Auth" asp-action="Login">đăng nhập</a> để tạo truyện.
+                    </div>
                     <div class="mb-3">
                         <label for="storyTitle" class="form-label">Tiêu đề <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="storyTitle" required>
@@ -172,9 +168,48 @@
         let editingStoryId = null;
 
         document.addEventListener('DOMContentLoaded', function() {
+            // Kiểm tra authentication và role
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để truy cập trang này.', 'warning');
+                setTimeout(() => {
+                    window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                }, 1500);
+                return;
+            }
+
+            // Kiểm tra role AUTHOR
+            if (!AuthHelper.isAuthor()) {
+                Utils.showAlert('Bạn không có quyền truy cập trang này. Chỉ AUTHOR mới được quản lý stories và chapters.', 'danger');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
+                return;
+            }
+
+            // Load user info và cập nhật UI
+            AuthHelper.loadUserInfo().then(() => {
+                updateAuthUI();
+            });
             loadCategories();
             loadStories();
         });
+
+        // Cập nhật UI dựa trên trạng thái đăng nhập và role
+        function updateAuthUI() {
+            const isAuthenticated = typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated();
+            const isAuthor = typeof AuthHelper !== 'undefined' && AuthHelper.isAuthor();
+            const createStoryBtn = document.getElementById('createStoryBtn');
+
+            if (createStoryBtn) {
+                if (!isAuthenticated || !isAuthor) {
+                    // Ẩn nút nếu không phải AUTHOR
+                    createStoryBtn.style.display = 'none';
+                } else {
+                    createStoryBtn.style.display = 'block';
+                    createStoryBtn.onclick = showCreateStoryModal;
+                }
+            }
+        }
 
         async function loadCategories() {
             try {
@@ -204,12 +239,21 @@
         async function loadStories(page = 1) {
             try {
                 currentPage = page;
+
+                // Lấy AuthorId từ token để chỉ hiển thị stories của author hiện tại
+                const authorId = AuthHelper.getAuthorId();
+                if (!authorId) {
+                    Utils.showAlert('Không thể lấy thông tin author. Vui lòng đăng nhập lại.', 'warning');
+                    return;
+                }
+
                 const query = {
                     page: page,
                     pageSize: parseInt(document.getElementById('pageSize').value),
                     search: document.getElementById('searchInput').value,
                     categoryId: document.getElementById('categoryFilter').value || null,
                     status: document.getElementById('statusFilter').value || null,
+                    authorId: authorId, // Chỉ lấy stories của author hiện tại
                     sortBy: document.getElementById('sortBy').value,
                     sortOrder: document.getElementById('sortOrder').value
                 };
@@ -333,6 +377,17 @@
         }
 
         function showCreateStoryModal() {
+            // Kiểm tra authentication và role AUTHOR
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để tạo truyện.', 'warning');
+                window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                return;
+            }
+            if (!AuthHelper.isAuthor()) {
+                Utils.showAlert('Chỉ AUTHOR mới được tạo truyện.', 'danger');
+                return;
+            }
+
             editingStoryId = null;
             document.getElementById('storyModalTitle').textContent = 'Tạo truyện mới';
             document.getElementById('storyForm').reset();
@@ -340,10 +395,22 @@
             document.getElementById('editStoryFields').style.display = 'none';
             document.getElementById('storyCategories').selectedIndex = -1;
             document.getElementById('coverImagePreview').innerHTML = '';
+            document.getElementById('authWarning').style.display = 'none';
             new bootstrap.Modal(document.getElementById('storyModal')).show();
         }
 
         async function editStory(id) {
+            // Kiểm tra authentication và role AUTHOR
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để chỉnh sửa truyện.', 'warning');
+                window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                return;
+            }
+            if (!AuthHelper.isAuthor()) {
+                Utils.showAlert('Chỉ AUTHOR mới được chỉnh sửa truyện.', 'danger');
+                return;
+            }
+
             try {
                 const story = await ApiService.getStoryById(id);
                 editingStoryId = id;
@@ -355,6 +422,7 @@
                 document.getElementById('storyProgressStatus').value = story.storyProgressStatus || 'ONGOING';
                 document.getElementById('storyStatus').value = story.status || 'DRAFT';
                 document.getElementById('editStoryFields').style.display = 'block';
+                document.getElementById('authWarning').style.display = 'none';
 
                 document.getElementById('storyCoverImage').value = '';
 
@@ -416,10 +484,8 @@
                     formData.append('AgeRating', document.getElementById('storyAgeRating').value);
                     formData.append('StoryProgressStatus', document.getElementById('storyProgressStatus').value);
 
-                    const defaultAuthorId = document.getElementById('defaultAuthorId').value?.trim();
-                    if (defaultAuthorId) {
-                        formData.append('AuthorId', defaultAuthorId);
-                    }
+                    // Lấy Author ID từ token (không cần gửi trong formData nữa vì backend sẽ lấy từ JWT)
+                    // Token đã được tự động thêm vào header bởi auth-helper
 
                     const coverImage = document.getElementById('storyCoverImage').files[0];
                     if (coverImage) {
@@ -442,6 +508,16 @@
         }
 
         async function deleteStory(id) {
+            // Kiểm tra authentication và role AUTHOR
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để xóa truyện.', 'warning');
+                return;
+            }
+            if (!AuthHelper.isAuthor()) {
+                Utils.showAlert('Chỉ AUTHOR mới được xóa truyện.', 'danger');
+                return;
+            }
+
             if (!confirm('Bạn có chắc chắn muốn xóa truyện này?')) return;
 
             try {

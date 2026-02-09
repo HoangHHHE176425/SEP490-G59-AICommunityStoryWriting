@@ -148,6 +148,28 @@
         let editingChapterId = null;
 
         document.addEventListener('DOMContentLoaded', function() {
+            // Kiểm tra authentication và role
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để truy cập trang này.', 'warning');
+                setTimeout(() => {
+                    window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                }, 1500);
+                return;
+            }
+
+            // Kiểm tra role AUTHOR
+            if (!AuthHelper.isAuthor()) {
+                Utils.showAlert('Bạn không có quyền truy cập trang này. Chỉ AUTHOR mới được quản lý stories và chapters.', 'danger');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
+                return;
+            }
+
+            // Load user info và cập nhật UI
+            AuthHelper.loadUserInfo().then(() => {
+                updateAuthUI();
+            });
             loadStoryDetails();
             loadChapters();
 
@@ -175,6 +197,18 @@
         async function loadStoryDetails() {
             try {
                 story = await ApiService.getStoryById(storyId);
+
+                // Kiểm tra story có thuộc về author hiện tại không
+                const currentAuthorId = AuthHelper.getAuthorId();
+                const storyAuthorId = story?.authorId || story?.author_id;
+                if (story && storyAuthorId && storyAuthorId !== currentAuthorId) {
+                    Utils.showAlert('Bạn không có quyền xem truyện này. Chỉ có thể xem truyện của chính mình.', 'danger');
+                    setTimeout(() => {
+                        window.location.href = '/Stories';
+                    }, 2000);
+                    return;
+                }
+
                 renderStoryDetails();
             } catch (error) {
                 Utils.showAlert('Lỗi khi tải thông tin truyện: ' + error.message, 'danger');
@@ -309,6 +343,13 @@
         }
 
         function showCreateChapterModal() {
+            // Kiểm tra authentication
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để tạo chapter.', 'warning');
+                window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                return;
+            }
+
             editingChapterId = null;
             document.getElementById('chapterModalTitle').textContent = chapters.length === 0 ?
                 'Tạo Chapter đầu tiên' : 'Tạo Chapter mới';
@@ -338,6 +379,12 @@
         }
 
         async function editChapter(id) {
+            // Kiểm tra authentication
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để chỉnh sửa chapter.', 'warning');
+                return;
+            }
+
             try {
                 const chapter = await ApiService.getChapterById(id);
                 editingChapterId = id;
@@ -400,6 +447,12 @@
         }
 
         async function saveChapter(status) {
+            // Kiểm tra authentication
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để lưu chapter.', 'warning');
+                return;
+            }
+
             const form = document.getElementById('chapterForm');
             const accessType = document.getElementById('chapterAccessType').value;
             const coinPriceInput = document.getElementById('chapterCoinPrice');
@@ -459,6 +512,12 @@
         }
 
         async function deleteChapter(id) {
+            // Kiểm tra authentication
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để xóa chapter.', 'warning');
+                return;
+            }
+
             if (!confirm('Bạn có chắc chắn muốn xóa chapter này?')) return;
 
             try {
@@ -472,6 +531,12 @@
         }
 
         async function publishChapter(id) {
+            // Kiểm tra authentication
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để xuất bản chapter.', 'warning');
+                return;
+            }
+
             try {
                 await ApiService.publishChapter(id);
                 Utils.showAlert('Publish chapter thành công!', 'success');
@@ -487,6 +552,12 @@
         }
 
         async function publishStoryFromDetails() {
+            // Kiểm tra authentication
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để xuất bản truyện.', 'warning');
+                return;
+            }
+
             try {
                 await ApiService.publishStory(storyId);
                 Utils.showAlert('Publish truyện thành công!', 'success');
@@ -497,6 +568,12 @@
         }
 
         async function unpublishStoryFromDetails() {
+            // Kiểm tra authentication
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để hủy xuất bản truyện.', 'warning');
+                return;
+            }
+
             try {
                 await ApiService.unpublishStory(storyId);
                 Utils.showAlert('Unpublish truyện thành công!', 'success');

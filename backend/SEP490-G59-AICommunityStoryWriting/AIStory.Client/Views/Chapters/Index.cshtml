@@ -14,8 +14,10 @@
                 <div class="card-body">
                     <div class="row g-3">
                         <div class="col-md-3">
-                            <label class="form-label">Story ID (Guid)</label>
-                            <input type="text" class="form-control" id="storyIdFilter" placeholder="Nhập Story ID (Guid)..." onchange="loadChapters()">
+                            <label class="form-label">Story (chọn từ danh sách của bạn)</label>
+                            <select class="form-select" id="storyIdFilter" onchange="loadChapters()">
+                                <option value="">Tất cả stories của tôi</option>
+                            </select>
                         </div>
                         <div class="col-md-2">
                             <label class="form-label">Trạng thái</label>
@@ -110,25 +112,168 @@
         let totalPages = 1;
 
         document.addEventListener('DOMContentLoaded', function() {
-            loadChapters();
+            // Kiểm tra authentication và role
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để truy cập trang này.', 'warning');
+                setTimeout(() => {
+                    window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                }, 1500);
+                return;
+            }
+
+            // Kiểm tra role AUTHOR
+            if (!AuthHelper.isAuthor()) {
+                Utils.showAlert('Bạn không có quyền truy cập trang này. Chỉ AUTHOR mới được quản lý stories và chapters.', 'danger');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
+                return;
+            }
+
+            // Load user info và cập nhật UI
+            AuthHelper.loadUserInfo().then(() => {
+                loadAuthorStories();
+                loadChapters();
+            });
         });
+
+        // Load danh sách stories của author để hiển thị trong dropdown
+        async function loadAuthorStories() {
+            try {
+                const authorId = AuthHelper.getAuthorId();
+                if (!authorId) return;
+
+                const storiesQuery = {
+                    page: 1,
+                    pageSize: 1000, // Lấy tất cả stories
+                    authorId: authorId
+                };
+                const storiesResult = await ApiService.getStories(storiesQuery);
+                const stories = storiesResult.items;
+
+                const storySelect = document.getElementById('storyIdFilter');
+                storySelect.innerHTML = '<option value="">Tất cả stories của tôi</option>';
+                stories.forEach(story => {
+                    const option = document.createElement('option');
+                    option.value = story.id;
+                    option.textContent = `${story.title} (${story.totalChapters || 0} chapters)`;
+                    storySelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading author stories:', error);
+            }
+        }
 
         async function loadChapters(page = 1) {
             try {
                 currentPage = page;
+
+                // Lấy AuthorId từ token
+                const authorId = AuthHelper.getAuthorId();
+                if (!authorId) {
+                    Utils.showAlert('Không thể lấy thông tin author. Vui lòng đăng nhập lại.', 'warning');
+                    return;
+                }
+
+                // Lấy danh sách stories của author hiện tại
+                const storiesQuery = {
+                    page: 1,
+                    pageSize: 1000, // Lấy tất cả stories của author
+                    authorId: authorId
+                };
+                const storiesResult = await ApiService.getStories(storiesQuery);
+                const authorStoryIds = storiesResult.items.map(s => s.id);
+
+                if (authorStoryIds.length === 0) {
+                    chapters = [];
+                    totalPages = 0;
+                    renderChapters();
+                    renderPagination();
+                    return;
+                }
+
+                // Nếu có filter storyId từ dropdown, kiểm tra story đó có thuộc về author không
+                const storyIdFilter = document.getElementById('storyIdFilter').value;
+                let storyId = null;
+                if (storyIdFilter) {
+                    if (authorStoryIds.includes(storyIdFilter)) {
+                        storyId = storyIdFilter;
+                    } else {
+                        Utils.showAlert('Story không thuộc về bạn.', 'warning');
+                        document.getElementById('storyIdFilter').value = '';
+                        return;
+                    }
+                }
+
                 const query = {
                     page: page,
                     pageSize: parseInt(document.getElementById('pageSize').value),
-                    storyId: document.getElementById('storyIdFilter').value || null,
+                    storyId: storyId,
                     status: document.getElementById('statusFilter').value || null,
                     accessType: document.getElementById('accessTypeFilter').value || null,
                     sortBy: document.getElementById('sortBy').value,
                     sortOrder: document.getElementById('sortOrder').value
                 };
 
-                const result = await ApiService.getChapters(query);
-                chapters = result.items;
-                totalPages = result.totalPages;
+                // Nếu không có storyId filter, chỉ lấy chapters của stories thuộc về author
+                // (API sẽ filter theo storyId, nhưng nếu không có storyId thì sẽ lấy tất cả)
+                // Vì vậy, nếu không có storyId, chúng ta cần load chapters của từng story và merge
+                if (!storyId) {
+                    // Load chapters của tất cả stories của author
+                    const allChapters = [];
+                    for (const sid of authorStoryIds) {
+                        try {
+                            const chaptersForStory = await ApiService.getChaptersByStoryId(sid);
+                            allChapters.push(...chaptersForStory);
+                        } catch (error) {
+                            console.error(`Error loading chapters for story ${sid}:`, error);
+                        }
+                    }
+
+                    // Apply filters
+                    let filteredChapters = allChapters;
+                    const statusFilter = document.getElementById('statusFilter').value;
+                    if (statusFilter) {
+                        filteredChapters = filteredChapters.filter(c => c.status === statusFilter);
+                    }
+                    const accessTypeFilter = document.getElementById('accessTypeFilter').value;
+                    if (accessTypeFilter) {
+                        filteredChapters = filteredChapters.filter(c => c.accessType === accessTypeFilter);
+                    }
+
+                    // Sort
+                    const sortBy = document.getElementById('sortBy').value;
+                    const sortOrder = document.getElementById('sortOrder').value;
+                    filteredChapters.sort((a, b) => {
+                        let aVal, bVal;
+                        switch (sortBy) {
+                            case 'created_at':
+                                aVal = new Date(a.createdAt || 0);
+                                bVal = new Date(b.createdAt || 0);
+                                break;
+                            case 'published_at':
+                                aVal = new Date(a.publishedAt || 0);
+                                bVal = new Date(b.publishedAt || 0);
+                                break;
+                            default:
+                                aVal = a.orderIndex || 0;
+                                bVal = b.orderIndex || 0;
+                        }
+                        return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+                    });
+
+                    // Pagination
+                    const pageSize = parseInt(document.getElementById('pageSize').value);
+                    const startIndex = (page - 1) * pageSize;
+                    chapters = filteredChapters.slice(startIndex, startIndex + pageSize);
+                    totalPages = Math.ceil(filteredChapters.length / pageSize);
+                } else {
+                    // Có storyId filter, dùng API bình thường
+                    const result = await ApiService.getChapters(query);
+                    chapters = result.items;
+                    totalPages = result.totalPages;
+                }
+
                 renderChapters();
                 renderPagination();
             } catch (error) {
