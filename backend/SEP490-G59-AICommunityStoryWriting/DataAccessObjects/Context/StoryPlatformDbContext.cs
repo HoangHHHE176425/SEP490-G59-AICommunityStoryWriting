@@ -106,7 +106,7 @@ public partial class StoryPlatformDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
-            optionsBuilder.UseSqlServer("Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v6;Encrypt=True;TrustServerCertificate=True;");
+            optionsBuilder.UseSqlServer("Server=HOANGBOSUA\\SQLEXPRESS;uid=sa;password=a123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;");
         }
     }
 
