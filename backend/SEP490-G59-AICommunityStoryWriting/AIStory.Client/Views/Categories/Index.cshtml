@@ -7,7 +7,7 @@
         <div class="col-12">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h2><i class="bi bi-tags"></i> Quản lý Thể loại</h2>
-                <button class="btn btn-primary" onclick="showCreateCategoryModal()">
+                <button class="btn btn-primary" id="createCategoryBtn" onclick="showCreateCategoryModal()">
                     <i class="bi bi-plus-circle"></i> Tạo thể loại mới
                 </button>
             </div>
@@ -154,8 +154,47 @@
 
         // Load categories on page load
         document.addEventListener('DOMContentLoaded', function() {
+            // Kiểm tra authentication và role
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để truy cập trang này.', 'warning');
+                setTimeout(() => {
+                    window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                }, 1500);
+                return;
+            }
+
+            // Kiểm tra role ADMIN
+            if (!AuthHelper.isAdmin()) {
+                Utils.showAlert('Bạn không có quyền truy cập trang này. Chỉ ADMIN mới được quản lý categories.', 'danger');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
+                return;
+            }
+
+            // Load user info và cập nhật UI
+            AuthHelper.loadUserInfo().then(() => {
+                updateAuthUI();
+            });
             loadCategories();
         });
+
+        // Cập nhật UI dựa trên trạng thái đăng nhập và role
+        function updateAuthUI() {
+            const isAuthenticated = typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated();
+            const isAdmin = typeof AuthHelper !== 'undefined' && AuthHelper.isAdmin();
+            const createCategoryBtn = document.getElementById('createCategoryBtn');
+
+            if (createCategoryBtn) {
+                if (!isAuthenticated || !isAdmin) {
+                    // Ẩn nút nếu không phải ADMIN
+                    createCategoryBtn.style.display = 'none';
+                } else {
+                    createCategoryBtn.style.display = 'block';
+                    createCategoryBtn.onclick = showCreateCategoryModal;
+                }
+            }
+        }
 
         function debounceSearch() {
             clearTimeout(searchTimeout);
@@ -279,6 +318,13 @@
         }
 
         async function showCreateCategoryModal() {
+            // Kiểm tra authentication
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để tạo thể loại.', 'warning');
+                window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                return;
+            }
+
             editingCategoryId = null;
             document.getElementById('categoryModalTitle').textContent = 'Tạo thể loại mới';
             document.getElementById('categoryForm').reset();
@@ -290,6 +336,16 @@
         }
 
         async function editCategory(id) {
+            // Kiểm tra authentication và role ADMIN
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để chỉnh sửa thể loại.', 'warning');
+                return;
+            }
+            if (!AuthHelper.isAdmin()) {
+                Utils.showAlert('Chỉ ADMIN mới được chỉnh sửa thể loại.', 'danger');
+                return;
+            }
+
             try {
                 const category = await ApiService.getCategoryById(id);
                 editingCategoryId = id;
@@ -359,6 +415,16 @@
         }
 
         async function deleteCategory(id) {
+            // Kiểm tra authentication và role ADMIN
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để xóa thể loại.', 'warning');
+                return;
+            }
+            if (!AuthHelper.isAdmin()) {
+                Utils.showAlert('Chỉ ADMIN mới được xóa thể loại.', 'danger');
+                return;
+            }
+
             if (!confirm('Bạn có chắc chắn muốn xóa thể loại này?')) return;
 
             try {
@@ -371,6 +437,16 @@
         }
 
         async function toggleCategoryActive(id) {
+            // Kiểm tra authentication và role ADMIN
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để thay đổi trạng thái thể loại.', 'warning');
+                return;
+            }
+            if (!AuthHelper.isAdmin()) {
+                Utils.showAlert('Chỉ ADMIN mới được thay đổi trạng thái thể loại.', 'danger');
+                return;
+            }
+
             try {
                 await ApiService.toggleCategoryActive(id);
                 Utils.showAlert('Cập nhật trạng thái thành công!', 'success');

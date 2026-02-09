@@ -5,11 +5,19 @@ const API_BASE_URL = 'http://localhost:5000/api';
 class ApiService {
     static async request(url, options = {}) {
         try {
+            // Tự động thêm Authorization header nếu có token
+            const headers = {
+                'Content-Type': 'application/json',
+                ...options.headers
+            };
+
+            // Lấy token từ auth helper nếu có
+            if (typeof AuthHelper !== 'undefined' && AuthHelper.getToken()) {
+                headers['Authorization'] = `Bearer ${AuthHelper.getToken()}`;
+            }
+
             const response = await fetch(`${API_BASE_URL}${url}`, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...options.headers
-                },
+                headers: headers,
                 ...options
             });
 
@@ -76,8 +84,15 @@ class ApiService {
     }
 
     static async createCategory(formData) {
+        const headers = {};
+        // Thêm Authorization header nếu có token
+        if (typeof AuthHelper !== 'undefined' && AuthHelper.getToken()) {
+            headers['Authorization'] = `Bearer ${AuthHelper.getToken()}`;
+        }
+
         return fetch(`${API_BASE_URL}/categories`, {
             method: 'POST',
+            headers: headers,
             body: formData
         }).then(async (response) => {
             if (!response.ok) {
@@ -89,8 +104,15 @@ class ApiService {
     }
 
     static async updateCategory(id, formData) {
+        const headers = {};
+        // Thêm Authorization header nếu có token
+        if (typeof AuthHelper !== 'undefined' && AuthHelper.getToken()) {
+            headers['Authorization'] = `Bearer ${AuthHelper.getToken()}`;
+        }
+
         return fetch(`${API_BASE_URL}/categories/${id}`, {
             method: 'PUT',
+            headers: headers,
             body: formData
         }).then(async (response) => {
             if (!response.ok) {
@@ -145,8 +167,15 @@ class ApiService {
     }
 
     static async createStory(formData) {
+        const headers = {};
+        // Thêm Authorization header nếu có token
+        if (typeof AuthHelper !== 'undefined' && AuthHelper.getToken()) {
+            headers['Authorization'] = `Bearer ${AuthHelper.getToken()}`;
+        }
+
         return fetch(`${API_BASE_URL}/stories`, {
             method: 'POST',
+            headers: headers,
             body: formData
         }).then(async (response) => {
             if (!response.ok) {
@@ -159,8 +188,15 @@ class ApiService {
     }
 
     static async updateStory(id, formData) {
+        const headers = {};
+        // Thêm Authorization header nếu có token
+        if (typeof AuthHelper !== 'undefined' && AuthHelper.getToken()) {
+            headers['Authorization'] = `Bearer ${AuthHelper.getToken()}`;
+        }
+
         return fetch(`${API_BASE_URL}/stories/${id}`, {
             method: 'PUT',
+            headers: headers,
             body: formData
         }).then(async (response) => {
             if (!response.ok) {
@@ -250,6 +286,54 @@ class ApiService {
         return this.request(`/chapters/${id}/reorder`, {
             method: 'POST',
             body: JSON.stringify(newOrderIndex)
+        });
+    }
+
+    // Authentication API
+    static async register(email, password, fullName = 'New User') {
+        return this.request('/auth/register', {
+            method: 'POST',
+            body: JSON.stringify({ email, password, fullName })
+        });
+    }
+
+    static async verifyOtp(email, otpCode) {
+        return this.request('/auth/verify-otp', {
+            method: 'POST',
+            body: JSON.stringify({ email, otpCode })
+        });
+    }
+
+    static async login(email, password) {
+        return this.request('/auth/login', {
+            method: 'POST',
+            body: JSON.stringify({ email, password })
+        });
+    }
+
+    static async logout() {
+        return this.request('/auth/logout', {
+            method: 'POST'
+        });
+    }
+
+    static async refreshToken() {
+        return this.request('/auth/refresh', {
+            method: 'POST'
+        });
+    }
+
+    static async forgotPassword(email) {
+        return this.request('/auth/forgot-password', {
+            method: 'POST',
+            body: JSON.stringify({ email })
+        });
+    }
+
+    static async resetPassword(token, newPassword) {
+        return this.request('/auth/reset-password', {
+            method: 'POST',
+            body: JSON.stringify({ token, newPassword })
         });
     }
 }
