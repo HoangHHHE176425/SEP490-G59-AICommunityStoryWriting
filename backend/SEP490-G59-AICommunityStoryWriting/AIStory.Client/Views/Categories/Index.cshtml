@@ -7,7 +7,7 @@
         <div class="col-12">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <h2><i class="bi bi-tags"></i> Quản lý Thể loại</h2>
-                <button class="btn btn-primary" onclick="showCreateCategoryModal()">
+                <button class="btn btn-primary" id="createCategoryBtn" onclick="showCreateCategoryModal()">
                     <i class="bi bi-plus-circle"></i> Tạo thể loại mới
                 </button>
             </div>
@@ -16,13 +16,41 @@
             <div class="card mb-3">
                 <div class="card-body">
                     <div class="row g-3">
-                        <div class="col-md-6">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="includeInactive" onchange="loadCategories()">
-                                <label class="form-check-label" for="includeInactive">
-                                    Hiển thị thể loại không hoạt động
-                                </label>
-                            </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Tìm kiếm</label>
+                            <input type="text" class="form-control" id="searchInput" placeholder="Tên, mô tả, slug..." onkeyup="debounceSearch()">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Trạng thái</label>
+                            <select class="form-select" id="statusFilter" onchange="loadCategories()">
+                                <option value="">Tất cả</option>
+                                <option value="true">Hoạt động</option>
+                                <option value="false">Không hoạt động</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Sắp xếp</label>
+                            <select class="form-select" id="sortBy" onchange="loadCategories()">
+                                <option value="name">Tên</option>
+                                <option value="created_at">Ngày tạo</option>
+                                <option value="story_count">Số truyện</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Thứ tự</label>
+                            <select class="form-select" id="sortOrder" onchange="loadCategories()">
+                                <option value="asc">Tăng dần</option>
+                                <option value="desc">Giảm dần</option>
+                            </select>
+                        </div>
+                        <div class="col-md-1">
+                            <label class="form-label">Số trang</label>
+                            <select class="form-select" id="pageSize" onchange="loadCategories()">
+                                <option value="10">10</option>
+                                <option value="20" selected>20</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -31,6 +59,14 @@
             <!-- Categories Table -->
             <div class="card">
                 <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <span class="text-muted">Tổng số: <strong id="totalCount">0</strong></span>
+                        </div>
+                        <div>
+                            <span class="text-muted">Trang <strong id="currentPage">1</strong> / <strong id="totalPages">1</strong></span>
+                        </div>
+                    </div>
                     <div class="table-responsive">
                         <table class="table table-hover">
                             <thead>
@@ -47,7 +83,7 @@
                             </thead>
                             <tbody id="categoriesTableBody">
                                 <tr>
-                                    <td colspan="8" class="text-center">
+                                    <td colspan="9" class="text-center">
                                         <div class="spinner-border text-primary" role="status">
                                             <span class="visually-hidden">Loading...</span>
                                         </div>
@@ -56,6 +92,8 @@
                             </tbody>
                         </table>
                     </div>
+                    <!-- Pagination -->
+                    <nav id="paginationNav" class="mt-3"></nav>
                 </div>
             </div>
         </div>
@@ -82,8 +120,10 @@
                         <textarea class="form-control" id="categoryDescription" rows="3"></textarea>
                     </div>
                     <div class="mb-3">
-                        <label for="categoryIconUrl" class="form-label">Icon URL</label>
-                        <input type="url" class="form-control" id="categoryIconUrl">
+                        <label for="categoryIconImage" class="form-label">Icon / Ảnh thể loại</label>
+                        <input type="file" class="form-control" id="categoryIconImage" accept="image/*" onchange="previewCategoryIcon(this)">
+                        <small class="form-text text-muted">Jpg, png, gif, webp, svg — tối đa 2MB</small>
+                        <div id="categoryIconPreview" class="mt-2"></div>
                     </div>
                     <div class="mb-3">
                         <div class="form-check">
@@ -107,17 +147,94 @@
     <script>
         let categories = [];
         let editingCategoryId = null;
+        let currentPage = 1;
+        let totalPages = 1;
+        let totalCount = 0;
+        let searchTimeout = null;
 
         // Load categories on page load
         document.addEventListener('DOMContentLoaded', function() {
+            // Kiểm tra authentication và role
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để truy cập trang này.', 'warning');
+                setTimeout(() => {
+                    window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                }, 1500);
+                return;
+            }
+
+            // Kiểm tra role ADMIN
+            if (!AuthHelper.isAdmin()) {
+                Utils.showAlert('Bạn không có quyền truy cập trang này. Chỉ ADMIN mới được quản lý categories.', 'danger');
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
+                return;
+            }
+
+            // Load user info và cập nhật UI
+            AuthHelper.loadUserInfo().then(() => {
+                updateAuthUI();
+            });
             loadCategories();
         });
 
-        async function loadCategories() {
+        // Cập nhật UI dựa trên trạng thái đăng nhập và role
+        function updateAuthUI() {
+            const isAuthenticated = typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated();
+            const isAdmin = typeof AuthHelper !== 'undefined' && AuthHelper.isAdmin();
+            const createCategoryBtn = document.getElementById('createCategoryBtn');
+
+            if (createCategoryBtn) {
+                if (!isAuthenticated || !isAdmin) {
+                    // Ẩn nút nếu không phải ADMIN
+                    createCategoryBtn.style.display = 'none';
+                } else {
+                    createCategoryBtn.style.display = 'block';
+                    createCategoryBtn.onclick = showCreateCategoryModal;
+                }
+            }
+        }
+
+        function debounceSearch() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                currentPage = 1; // Reset to first page on new search
+                loadCategories();
+            }, 500);
+        }
+
+        async function loadCategories(page = 1) {
             try {
-                const includeInactive = document.getElementById('includeInactive').checked;
-                categories = await ApiService.getCategories(includeInactive);
+                currentPage = page;
+                const search = document.getElementById('searchInput').value.trim();
+                const statusFilter = document.getElementById('statusFilter').value;
+                const sortBy = document.getElementById('sortBy').value;
+                const sortOrder = document.getElementById('sortOrder').value;
+                const pageSize = parseInt(document.getElementById('pageSize').value);
+
+                // Always use pagination API for better performance and features
+                const query = {
+                    page: page,
+                    pageSize: pageSize,
+                    search: search || null,
+                    isActive: statusFilter ? (statusFilter === 'true') : null,
+                    sortBy: sortBy,
+                    sortOrder: sortOrder
+                };
+
+                const result = await ApiService.getCategoriesWithPagination(query);
+                categories = result.items || [];
+                totalCount = result.totalCount || 0;
+                totalPages = result.totalPages || 1;
+
+                // Update pagination info
+                document.getElementById('totalCount').textContent = totalCount;
+                document.getElementById('currentPage').textContent = currentPage;
+                document.getElementById('totalPages').textContent = totalPages;
+
                 renderCategories();
+                renderPagination();
             } catch (error) {
                 Utils.showAlert('Lỗi khi tải danh sách thể loại: ' + error.message, 'danger');
             }
@@ -125,15 +242,58 @@
 
         function renderCategories() {
             const tbody = document.getElementById('categoriesTableBody');
+
             if (categories.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="8" class="text-center">Không có dữ liệu</td></tr>';
                 return;
             }
 
-            tbody.innerHTML = categories.map(cat => `
+            // Render flat list (pagination mode)
+            tbody.innerHTML = categories.map(cat => categoryRow(cat, false)).join('');
+        }
+
+        function renderPagination() {
+            const nav = document.getElementById('paginationNav');
+            if (totalPages <= 1) {
+                nav.innerHTML = '';
+                return;
+            }
+
+            let pagination = '<ul class="pagination justify-content-center">';
+
+            // Previous button
+            pagination += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="loadCategories(${currentPage - 1}); return false;">Trước</a>
+            </li>`;
+
+            // Page numbers
+            for (let i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+                    pagination += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+                        <a class="page-link" href="#" onclick="loadCategories(${i}); return false;">${i}</a>
+                    </li>`;
+                } else if (i === currentPage - 3 || i === currentPage + 3) {
+                    pagination += '<li class="page-item disabled"><span class="page-link">...</span></li>';
+                }
+            }
+
+            // Next button
+            pagination += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                <a class="page-link" href="#" onclick="loadCategories(${currentPage + 1}); return false;">Sau</a>
+            </li>`;
+
+            pagination += '</ul>';
+            nav.innerHTML = pagination;
+        }
+
+        function categoryRow(cat, isChild) {
+            return `
                 <tr>
                     <td>${cat.id}</td>
-                    <td><strong>${cat.name}</strong></td>
+                    <td>
+                        ${cat.iconUrl ? `<img src="http://localhost:5000${cat.iconUrl}" alt="${cat.name}" class="rounded" style="width:32px;height:32px;object-fit:cover;">` : '<i class="bi bi-tag text-muted"></i>'}
+                        <strong class="ms-2">${cat.name}</strong>
+                    </td>
                     <td><code>${cat.slug}</code></td>
                     <td>${cat.description || '-'}</td>
                     <td><span class="badge bg-info">${cat.storyCount || 0}</span></td>
@@ -144,30 +304,48 @@
                     </td>
                     <td>${Utils.formatDate(cat.createdAt)}</td>
                     <td>
-                        <button class="btn btn-sm btn-primary" onclick="editCategory(${cat.id})" title="Sửa">
+                        <button class="btn btn-sm btn-primary" onclick="editCategory('${cat.id}')" title="Sửa">
                             <i class="bi bi-pencil"></i>
                         </button>
-                        <button class="btn btn-sm btn-warning" onclick="toggleCategoryActive(${cat.id})" title="Bật/Tắt">
+                        <button class="btn btn-sm btn-warning" onclick="toggleCategoryActive('${cat.id}')" title="Bật/Tắt">
                             <i class="bi bi-toggle-${cat.isActive ? 'on' : 'off'}"></i>
                         </button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteCategory(${cat.id})" title="Xóa">
+                        <button class="btn btn-sm btn-danger" onclick="deleteCategory('${cat.id}')" title="Xóa">
                             <i class="bi bi-trash"></i>
                         </button>
                     </td>
-                </tr>
-            `).join('');
+                </tr>`;
         }
 
-        function showCreateCategoryModal() {
+        async function showCreateCategoryModal() {
+            // Kiểm tra authentication
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để tạo thể loại.', 'warning');
+                window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                return;
+            }
+
             editingCategoryId = null;
             document.getElementById('categoryModalTitle').textContent = 'Tạo thể loại mới';
             document.getElementById('categoryForm').reset();
             document.getElementById('categoryId').value = '';
             document.getElementById('categoryIsActive').checked = true;
+            document.getElementById('categoryIconPreview').innerHTML = '';
+            document.getElementById('categoryIconImage').value = '';
             new bootstrap.Modal(document.getElementById('categoryModal')).show();
         }
 
         async function editCategory(id) {
+            // Kiểm tra authentication và role ADMIN
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để chỉnh sửa thể loại.', 'warning');
+                return;
+            }
+            if (!AuthHelper.isAdmin()) {
+                Utils.showAlert('Chỉ ADMIN mới được chỉnh sửa thể loại.', 'danger');
+                return;
+            }
+
             try {
                 const category = await ApiService.getCategoryById(id);
                 editingCategoryId = id;
@@ -175,11 +353,31 @@
                 document.getElementById('categoryId').value = category.id;
                 document.getElementById('categoryName').value = category.name;
                 document.getElementById('categoryDescription').value = category.description || '';
-                document.getElementById('categoryIconUrl').value = category.iconUrl || '';
                 document.getElementById('categoryIsActive').checked = category.isActive;
+                document.getElementById('categoryIconImage').value = '';
+                if (category.iconUrl) {
+                    document.getElementById('categoryIconPreview').innerHTML =
+                        `<img src="http://localhost:5000${category.iconUrl}" class="img-thumbnail" style="max-height:80px;">
+                         <p class="text-muted mt-1 small">Ảnh hiện tại. Chọn ảnh mới để thay thế.</p>`;
+                } else {
+                    document.getElementById('categoryIconPreview').innerHTML = '';
+                }
                 new bootstrap.Modal(document.getElementById('categoryModal')).show();
             } catch (error) {
                 Utils.showAlert('Lỗi khi tải thông tin thể loại: ' + error.message, 'danger');
+            }
+        }
+
+        function previewCategoryIcon(input) {
+            const preview = document.getElementById('categoryIconPreview');
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    preview.innerHTML = `<img src="${e.target.result}" class="img-thumbnail" style="max-height:80px;">`;
+                };
+                reader.readAsDataURL(input.files[0]);
+            } else {
+                preview.innerHTML = '';
             }
         }
 
@@ -191,45 +389,68 @@
             }
 
             try {
-                const data = {
-                    name: document.getElementById('categoryName').value,
-                    description: document.getElementById('categoryDescription').value,
-                    iconUrl: document.getElementById('categoryIconUrl').value,
-                    isActive: document.getElementById('categoryIsActive').checked
-                };
+                const formData = new FormData();
+                formData.append('Name', document.getElementById('categoryName').value);
+                formData.append('Description', document.getElementById('categoryDescription').value);
+                formData.append('IsActive', document.getElementById('categoryIsActive').checked);
+
+                const iconFile = document.getElementById('categoryIconImage').files[0];
+                if (iconFile) {
+                    formData.append('IconImage', iconFile);
+                }
 
                 if (editingCategoryId) {
-                    await ApiService.updateCategory(editingCategoryId, data);
+                    await ApiService.updateCategory(editingCategoryId, formData);
                     Utils.showAlert('Cập nhật thể loại thành công!', 'success');
                 } else {
-                    await ApiService.createCategory(data);
+                    await ApiService.createCategory(formData);
                     Utils.showAlert('Tạo thể loại thành công!', 'success');
                 }
 
                 bootstrap.Modal.getInstance(document.getElementById('categoryModal')).hide();
-                loadCategories();
+                loadCategories(currentPage);
             } catch (error) {
                 Utils.showAlert('Lỗi: ' + error.message, 'danger');
             }
         }
 
         async function deleteCategory(id) {
+            // Kiểm tra authentication và role ADMIN
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để xóa thể loại.', 'warning');
+                return;
+            }
+            if (!AuthHelper.isAdmin()) {
+                Utils.showAlert('Chỉ ADMIN mới được xóa thể loại.', 'danger');
+                return;
+            }
+
             if (!confirm('Bạn có chắc chắn muốn xóa thể loại này?')) return;
 
             try {
                 await ApiService.deleteCategory(id);
                 Utils.showAlert('Xóa thể loại thành công!', 'success');
-                loadCategories();
+                loadCategories(currentPage);
             } catch (error) {
                 Utils.showAlert('Lỗi: ' + error.message, 'danger');
             }
         }
 
         async function toggleCategoryActive(id) {
+            // Kiểm tra authentication và role ADMIN
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để thay đổi trạng thái thể loại.', 'warning');
+                return;
+            }
+            if (!AuthHelper.isAdmin()) {
+                Utils.showAlert('Chỉ ADMIN mới được thay đổi trạng thái thể loại.', 'danger');
+                return;
+            }
+
             try {
                 await ApiService.toggleCategoryActive(id);
                 Utils.showAlert('Cập nhật trạng thái thành công!', 'success');
-                loadCategories();
+                loadCategories(currentPage);
             } catch (error) {
                 Utils.showAlert('Lỗi: ' + error.message, 'danger');
             }

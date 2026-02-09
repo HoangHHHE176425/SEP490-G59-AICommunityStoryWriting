@@ -9,6 +9,7 @@ using Repositories.Implementations;
 using Repositories.Interfaces;
 using Services.Implementations;
 using Services.Interfaces;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 
@@ -44,12 +45,12 @@ namespace AIStory.API
                 {
 
                     policy.SetIsOriginAllowed(origin =>
-                        {
-                            if (string.IsNullOrWhiteSpace(origin)) return false;
-                            if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
-                            return uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-                                   || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase);
-                        })
+                    {
+                        if (string.IsNullOrWhiteSpace(origin)) return false;
+                        if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
+                        return uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                               || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase);
+                    })
                         .AllowAnyMethod()
                         .AllowAnyHeader()
                         .AllowCredentials();
@@ -96,7 +97,8 @@ namespace AIStory.API
                             ValidIssuer = jwtIssuer,
                             ValidAudience = jwtAudience,
                             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-                            ClockSkew = TimeSpan.Zero
+                            ClockSkew = TimeSpan.Zero,
+                            RoleClaimType = ClaimTypes.Role // Đảm bảo role claim được nhận diện đúng
                         };
                     });
             }
