@@ -41,9 +41,11 @@ namespace AIStory.Services.Helpers
 
             var claims = new List<Claim>
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.id.ToString()), // Guid -> String
+                new Claim(JwtRegisteredClaimNames.Sub, user.id.ToString()), // Guid -> String (JWT standard)
+                new Claim(ClaimTypes.NameIdentifier, user.id.ToString()), // ASP.NET Core standard
                 new Claim(JwtRegisteredClaimNames.Email, user.email),
-                new Claim("role", user.role ?? "USER")
+                new Claim(ClaimTypes.Role, user.role ?? "USER"), // ASP.NET Core role claim
+                new Claim("role", user.role ?? "USER") // Custom claim (backup)
             };
 
             var token = new JwtSecurityToken(
