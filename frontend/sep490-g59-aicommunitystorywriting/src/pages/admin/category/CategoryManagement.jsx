@@ -38,6 +38,7 @@ export function CategoryManagement() {
             const queryParams = {
                 page: 1,
                 pageSize: 1000, // Get all categories for stats
+                excludeRoots: true, // Exclude root categories (parent_id = null)
                 includeInactive: true, // Include all statuses for stats
             };
 
@@ -90,6 +91,7 @@ export function CategoryManagement() {
                 page: page,
                 pageSize: pageSize,
                 search: searchTerm || null,
+                excludeRoots: true, // Exclude root categories (parent_id = null)
             };
 
             if (filterStatus === 'active') {
@@ -106,7 +108,8 @@ export function CategoryManagement() {
 
             const result = await getCategoriesWithPagination(queryParams);
 
-            // Use data directly from API
+            // Backend already filters out root categories (parent_id = null) when excludeRoots = true
+            // So we can use the data directly without client-side filtering
             const categoriesData = result.items || [];
             const backendTotalCount = result.totalCount || 0;
             const backendTotalPages = result.totalPages || 1;
@@ -152,6 +155,24 @@ export function CategoryManagement() {
         ));
     };
 
+    // Map story_type to parentId
+    const getParentIdByStoryType = (storyType) => {
+        const parentIdMap = {
+            'long': 'AF3C494B-2A64-45AE-89E9-73998391AB78',  // Truyện dài
+            'short': 'D488A3A0-5971-42C5-A7E4-CB35BEBBE6B6'  // Truyện ngắn
+        };
+        return parentIdMap[storyType] || null;
+    };
+
+    // Map parentId to story_type for display
+    const getStoryTypeByParentId = (parentId) => {
+        if (!parentId) return null;
+        const parentIdStr = parentId.toString().toUpperCase();
+        if (parentIdStr === 'AF3C494B-2A64-45AE-89E9-73998391AB78') return 'long';
+        if (parentIdStr === 'D488A3A0-5971-42C5-A7E4-CB35BEBBE6B6') return 'short';
+        return null;
+    };
+
     // Get full icon URL (handle relative paths)
     const getIconUrl = (iconUrl) => {
         if (!iconUrl) return '';
@@ -189,7 +210,7 @@ export function CategoryManagement() {
         }
 
         // Get base URL (remove /api if present, as static files are served from root)
-        let baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+        let baseUrl = import.meta.env.VITE_API_URL || 'https://localhost:7117/api';
         // Remove /api suffix if present, as static files are served from root
         baseUrl = baseUrl.replace(/\/api\/?$/, '');
         // Ensure baseUrl doesn't end with /
@@ -201,11 +222,15 @@ export function CategoryManagement() {
     const handleSaveCategory = async (categoryData) => {
         try {
             if (editingCategory) {
+                // Map story_type to parentId
+                const parentId = getParentIdByStoryType(categoryData.story_type || 'long');
+
                 // Call API to update category
                 await updateCategory(editingCategory.id, {
                     name: categoryData.name,
                     description: categoryData.description || '',
                     isActive: categoryData.is_active !== false,
+                    parentId: parentId,
                     iconImage: categoryData.iconFile || null
                 });
 
@@ -216,12 +241,16 @@ export function CategoryManagement() {
                 // Show success message
                 showToast('Cập nhật thể loại thành công!', 'success');
             } else {
+                // Map story_type to parentId
+                const parentId = getParentIdByStoryType(categoryData.story_type || 'long');
+
                 // Call API to create category
                 // eslint-disable-next-line no-unused-vars
                 const newCategory = await createCategory({
                     name: categoryData.name,
                     description: categoryData.description || '',
                     isActive: categoryData.is_active !== false,
+                    parentId: parentId,
                     iconImage: categoryData.iconFile || null
                 });
 
@@ -451,6 +480,9 @@ export function CategoryManagement() {
                                         Slug
                                     </th>
                                     <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
+                                        Loại truyện
+                                    </th>
+                                    <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
                                         Mô tả
                                     </th>
                                     <th style={{ textAlign: 'left', padding: '1rem', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase' }}>
@@ -528,6 +560,44 @@ export function CategoryManagement() {
                                             <code style={{ padding: '0.25rem 0.5rem', backgroundColor: '#f1f5f9', fontSize: '0.75rem', borderRadius: '0.25rem', color: '#1e293b' }}>
                                                 {category.slug}
                                             </code>
+                                        </td>
+                                        <td style={{ padding: '1rem', verticalAlign: 'middle' }}>
+                                            {(() => {
+                                                const storyType = getStoryTypeByParentId(category.parentId);
+                                                if (!storyType) {
+                                                    return (
+                                                        <span style={{
+                                                            color: '#64748b',
+                                                            fontSize: '0.875rem',
+                                                            display: 'inline-block',
+                                                            verticalAlign: 'middle'
+                                                        }}>
+                                                            -
+                                                        </span>
+                                                    );
+                                                }
+                                                return (
+                                                    <span
+                                                        style={{
+                                                            display: 'inline-flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            gap: '0.25rem',
+                                                            padding: '0.375rem 0.75rem',
+                                                            borderRadius: '9999px',
+                                                            fontSize: '0.75rem',
+                                                            fontWeight: 600,
+                                                            backgroundColor: storyType === 'long' ? 'rgba(37, 99, 235, 0.1)' : 'rgba(168, 85, 247, 0.1)',
+                                                            color: storyType === 'long' ? '#1d4ed8' : '#7c3aed',
+                                                            whiteSpace: 'nowrap',
+                                                            verticalAlign: 'middle',
+                                                            lineHeight: '1'
+                                                        }}
+                                                    >
+                                                        {storyType === 'long' ? '📖 Truyện dài' : '📄 Truyện ngắn'}
+                                                    </span>
+                                                );
+                                            })()}
                                         </td>
                                         <td style={{ padding: '1rem' }}>
                                             <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0, maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

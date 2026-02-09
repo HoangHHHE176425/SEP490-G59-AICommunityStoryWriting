@@ -29,6 +29,7 @@
     <Folder Include="Configurations\" />
     <Folder Include="Helpers\" />
     <Folder Include="wwwroot\uploads\covers\" />
+    <Folder Include="wwwroot\uploads\avatars\" />
   </ItemGroup>
 
   <ItemGroup>

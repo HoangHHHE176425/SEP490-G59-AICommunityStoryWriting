@@ -1,4 +1,3 @@
-/* eslint-disable no-dupe-keys */
 export function EmptyState({ onClearFilters }) {
     return (
         <div style={{
@@ -9,10 +8,10 @@ export function EmptyState({ onClearFilters }) {
             border: '1px solid #e2e8f0'
         }}>
             <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📚</div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.5rem', margin: 0, marginBottom: '0.5rem' }}>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#1e293b', margin: 0, marginBottom: '0.5rem' }}>
                 Không tìm thấy truyện nào
             </h3>
-            <p style={{ fontSize: '0.875rem', color: '#64748b', marginBottom: '1.5rem', margin: 0, marginBottom: '1.5rem' }}>
+            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0, marginBottom: '1.5rem' }}>
                 Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm
             </p>
             <button
