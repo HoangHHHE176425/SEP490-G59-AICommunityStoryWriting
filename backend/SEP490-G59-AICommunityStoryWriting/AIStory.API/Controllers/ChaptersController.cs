@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Chapters;
 
 namespace AIStory.API.Controllers
