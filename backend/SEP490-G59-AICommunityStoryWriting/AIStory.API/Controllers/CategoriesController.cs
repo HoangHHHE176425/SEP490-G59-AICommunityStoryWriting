@@ -1,11 +1,14 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Categories;
 using Services.Interfaces;
+using System.Security.Claims;
 
 namespace AIStory.API.Controllers
 {
     [ApiController]
     [Route("api/categories")]
+    [Authorize] // Bắt buộc đăng nhập
     public class CategoriesController : ControllerBase
     {
         private readonly ICategoryService _categoryService;
@@ -15,9 +18,10 @@ namespace AIStory.API.Controllers
             _categoryService = categoryService;
         }
 
-        /// <summary>Tạo thể loại mới (multipart: Name, Description, IsActive, IconImage)</summary>
+        /// <summary>Tạo thể loại mới (multipart: Name, Description, IsActive, IconImage) - Chỉ ADMIN</summary>
         [HttpPost]
         [Consumes("multipart/form-data")]
+        [Authorize(Roles = "ADMIN")]
         public async Task<IActionResult> Create([FromForm] CreateCategoryWithImageRequestDto request)
         {
             try
@@ -55,8 +59,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy thể loại</summary>
+        /// <summary>Lấy thể loại (cho phép xem không cần đăng nhập)</summary>
         [HttpGet]
+        [AllowAnonymous]
         public IActionResult GetAll(
             [FromQuery] bool includeInactive = false,
             [FromQuery] Guid? parentId = null,
@@ -89,25 +94,28 @@ namespace AIStory.API.Controllers
             return Ok(categories);
         }
 
-        /// <summary>Lấy thể loại theo ID</summary>
+        /// <summary>Lấy thể loại theo ID (cho phép xem không cần đăng nhập)</summary>
         [HttpGet("{id:guid}")]
+        [AllowAnonymous]
         public IActionResult GetById(Guid id)
         {
             var category = _categoryService.GetById(id);
             return category == null ? NotFound() : Ok(category);
         }
 
-        /// <summary>Lấy thể loại theo slug</summary>
+        /// <summary>Lấy thể loại theo slug (cho phép xem không cần đăng nhập)</summary>
         [HttpGet("slug/{slug}")]
+        [AllowAnonymous]
         public IActionResult GetBySlug(string slug)
         {
             var category = _categoryService.GetBySlug(slug);
             return category == null ? NotFound() : Ok(category);
         }
 
-        /// <summary>Cập nhật thể loại (multipart: Name, Description, IsActive, IconImage)</summary>
+        /// <summary>Cập nhật thể loại (multipart: Name, Description, IsActive, IconImage) - Chỉ ADMIN</summary>
         [HttpPut("{id:guid}")]
         [Consumes("multipart/form-data")]
+        [Authorize(Roles = "ADMIN")]
         public async Task<IActionResult> Update(Guid id, [FromForm] UpdateCategoryWithImageRequestDto request)
         {
             try
@@ -147,8 +155,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Xóa thể loại</summary>
+        /// <summary>Xóa thể loại - Chỉ ADMIN</summary>
         [HttpDelete("{id:guid}")]
+        [Authorize(Roles = "ADMIN")]
         public IActionResult Delete(Guid id)
         {
             try
@@ -167,8 +176,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Bật/tắt trạng thái active</summary>
+        /// <summary>Bật/tắt trạng thái active - Chỉ ADMIN</summary>
         [HttpPatch("{id:guid}/toggle-active")]
+        [Authorize(Roles = "ADMIN")]
         public IActionResult ToggleActive(Guid id)
         {
             var toggled = _categoryService.ToggleActive(id);
