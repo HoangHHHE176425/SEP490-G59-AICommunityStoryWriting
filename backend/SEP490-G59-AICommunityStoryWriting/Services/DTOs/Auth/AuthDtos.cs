@@ -15,7 +15,8 @@ namespace Services.DTOs.Auth
         [Required, MinLength(6)]
         public string Password { get; set; } = null!;
 
-        public string FullName { get; set; } = "New User";
+        // Optional display name. If empty/null, server will default to email prefix.
+        public string? FullName { get; set; }
     }
 
     public class LoginRequest
