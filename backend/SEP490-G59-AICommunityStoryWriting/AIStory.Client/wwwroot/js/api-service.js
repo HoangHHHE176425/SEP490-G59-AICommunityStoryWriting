@@ -13,26 +13,58 @@ class ApiService {
                 ...options
             });
 
-            if (!response.ok) {
-                const error = await response.json().catch(() => ({ message: response.statusText }));
-                throw new Error(error.message || `HTTP error! status: ${response.status}`);
-            }
-
-            // Handle NoContent responses
+            // Handle NoContent responses (204) first - these are successful
             if (response.status === 204) {
                 return null;
             }
 
-            return await response.json();
+            if (!response.ok) {
+                let errorMessage = response.statusText;
+                try {
+                    const errorBody = await response.json();
+                    errorMessage = errorBody.message || errorBody.error || errorMessage;
+                } catch {
+                    // If response body is not JSON, use statusText
+                }
+                throw new Error(errorMessage || `HTTP error! status: ${response.status}`);
+            }
+
+            // Try to parse JSON, but handle empty responses gracefully
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                const text = await response.text();
+                return text ? JSON.parse(text) : null;
+            }
+
+            return null;
         } catch (error) {
             console.error('API Request Error:', error);
+            // Re-throw with a more user-friendly message if it's a network error
+            if (error instanceof TypeError && error.message.includes('fetch')) {
+                throw new Error('Không thể kết nối đến server. Vui lòng kiểm tra kết nối mạng.');
+            }
             throw error;
         }
     }
 
     // Categories API
-    static async getCategories(includeInactive = false) {
-        return this.request(`/categories?includeInactive=${includeInactive}`);
+    static async getCategories(includeInactive = false, parentId = null, rootsOnly = false) {
+        const params = new URLSearchParams();
+        params.append('includeInactive', includeInactive);
+        if (rootsOnly) params.append('rootsOnly', 'true');
+        if (parentId != null && parentId !== '') params.append('parentId', parentId);
+        return this.request(`/categories?${params.toString()}`);
+    }
+
+    static async getCategoriesWithPagination(query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach(key => {
+            if (query[key] !== null && query[key] !== undefined && query[key] !== '') {
+                params.append(key, query[key]);
+            }
+        });
+        const queryString = params.toString();
+        return this.request(`/categories${queryString ? '?' + queryString : ''}`);
     }
 
     static async getCategoryById(id) {
@@ -43,17 +75,29 @@ class ApiService {
         return this.request(`/categories/slug/${slug}`);
     }
 
-    static async createCategory(data) {
-        return this.request('/categories', {
+    static async createCategory(formData) {
+        return fetch(`${API_BASE_URL}/categories`, {
             method: 'POST',
-            body: JSON.stringify(data)
+            body: formData
+        }).then(async (response) => {
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ message: response.statusText }));
+                throw new Error(error.message || `HTTP error! status: ${response.status}`);
+            }
+            return await response.json();
         });
     }
 
-    static async updateCategory(id, data) {
-        return this.request(`/categories/${id}`, {
+    static async updateCategory(id, formData) {
+        return fetch(`${API_BASE_URL}/categories/${id}`, {
             method: 'PUT',
-            body: JSON.stringify(data)
+            body: formData
+        }).then(async (response) => {
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({ message: response.statusText }));
+                throw new Error(error.message || `HTTP error! status: ${response.status}`);
+            }
+            return response.status === 204 ? null : await response.json();
         });
     }
 
@@ -106,8 +150,9 @@ class ApiService {
             body: formData
         }).then(async (response) => {
             if (!response.ok) {
-                const error = await response.json().catch(() => ({ message: response.statusText }));
-                throw new Error(error.message || `HTTP error! status: ${response.status}`);
+                const errBody = await response.json().catch(() => ({ message: response.statusText }));
+                const msg = errBody.error || errBody.message || `HTTP error! status: ${response.status}`;
+                throw new Error(msg);
             }
             return await response.json();
         });
@@ -119,8 +164,9 @@ class ApiService {
             body: formData
         }).then(async (response) => {
             if (!response.ok) {
-                const error = await response.json().catch(() => ({ message: response.statusText }));
-                throw new Error(error.message || `HTTP error! status: ${response.status}`);
+                const errBody = await response.json().catch(() => ({ message: response.statusText }));
+                const msg = errBody.error || errBody.message || `HTTP error! status: ${response.status}`;
+                throw new Error(msg);
             }
             return response.status === 204 ? null : await response.json();
         });
