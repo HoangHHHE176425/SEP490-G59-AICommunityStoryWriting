@@ -68,7 +68,10 @@ export async function createStory(data) {
     }
 
     const ageRating = AGE_RATING_MAP[data.ageRating] || data.ageRating || "ALL";
-    const storyProgress = STORY_PROGRESS_MAP[data.status] || data.storyProgressStatus || "ONGOING";
+    const rawProgress = data.storyProgressStatus || data.status || "";
+    const storyProgress =
+        STORY_PROGRESS_MAP[rawProgress] ||
+        (["ONGOING", "COMPLETED", "HIATUS"].includes(String(rawProgress).toUpperCase()) ? String(rawProgress).toUpperCase() : "ONGOING");
     formData.append("AgeRating", ageRating);
     formData.append("StoryProgressStatus", storyProgress);
 
@@ -92,10 +95,15 @@ export async function createStory(data) {
         formData.append("CoverImage", coverFile);
     }
 
-    const response = await axiosInstance.post("/stories", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-    });
-    return response.data;
+    try {
+        const response = await axiosInstance.post("/stories", formData, {
+            headers: { "Content-Type": "multipart/form-data" },
+        });
+        return response.data;
+    } catch (err) {
+        const msg = err?.response?.data?.message ?? err?.response?.data?.error ?? err?.message;
+        throw new Error(typeof msg === "string" ? msg : "Không thể tạo truyện. Vui lòng thử lại.");
+    }
 }
 
 /**
