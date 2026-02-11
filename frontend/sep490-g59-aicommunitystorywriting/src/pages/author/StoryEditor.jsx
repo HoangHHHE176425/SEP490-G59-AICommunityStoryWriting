@@ -50,10 +50,10 @@ export function StoryEditor({ story, onSave, onCancel }) {
                 title: story.title || '',
                 author: story.author ?? name,
                 status: story.publishStatus || 'Đang ra',
-                ageRating: 'Phù hợp mọi lứa tuổi',
+                ageRating: story.ageRating ?? 'Phù hợp mọi lứa tuổi',
                 categories: normalized,
                 tags: [],
-                note: '',
+                note: story.summary ?? story.note ?? '',
                 cover: story.cover || '',
             });
         } else {
