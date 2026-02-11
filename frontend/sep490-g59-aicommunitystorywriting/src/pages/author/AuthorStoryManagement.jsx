@@ -8,7 +8,7 @@ import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
 import { createStory, updateStory, getStories, getStoryById } from '../../api/story/storyApi';
-import { createChapter, updateChapter } from '../../api/chapter/chapterApi';
+import { createChapter, updateChapter, getChapterById } from '../../api/chapter/chapterApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -165,29 +165,61 @@ export function AuthorStoryManagement({ onBack }) {
         setActiveView('addChapter');
     };
 
-    const handleEditChapter = (chapter) => {
-        setCurrentChapter(chapter);
-        setActiveView('editChapter');
+    const handleEditChapter = async (chapter) => {
+        const chapterId = chapter?.id ?? chapter?.Id;
+        if (!chapterId) {
+            showToast('Không tìm thấy ID chương', 'error');
+            return;
+        }
+
+        try {
+            // Gọi API để lấy đầy đủ thông tin chương
+            const fullChapter = await getChapterById(chapterId);
+
+            // Map dữ liệu từ API về format UI
+            const status = (fullChapter.status ?? fullChapter.Status ?? 'DRAFT').toUpperCase();
+            const accessTypeApi = (fullChapter.accessType ?? fullChapter.AccessType ?? 'FREE').toUpperCase();
+
+            const mappedChapter = {
+                id: fullChapter.id ?? fullChapter.Id,
+                number: (fullChapter.orderIndex ?? fullChapter.OrderIndex ?? 0) + 1,
+                title: fullChapter.title ?? fullChapter.Title ?? '',
+                content: fullChapter.content ?? fullChapter.Content ?? '',
+                status: status.toLowerCase(),
+                accessType: accessTypeApi === 'PAID' ? 'paid' : 'public',
+                price: fullChapter.coinPrice ?? fullChapter.CoinPrice ?? 0,
+            };
+
+            setCurrentChapter(mappedChapter);
+            setActiveView('editChapter');
+        } catch (error) {
+            const errorMessage = error?.response?.data?.message || error?.message || 'Không thể tải thông tin chương';
+            showToast(errorMessage, 'error');
+            console.error('Error loading chapter:', error);
+        }
     };
 
     const handleSaveChapter = async (chapterData) => {
         const storyId = currentStory?.id ?? currentStory?.Id;
         if (!storyId) {
-            alert('Không tìm thấy truyện');
+            showToast('Không tìm thấy truyện', 'error');
             return;
         }
 
         try {
             // Map status: 'draft' -> 'DRAFT', 'published' -> 'PENDING_REVIEW'
             const apiStatus = chapterData.status === 'published' ? 'PENDING_REVIEW' : 'DRAFT';
-            
+
             // Map accessType: 'public' -> 'FREE', 'paid' -> 'PAID'
             const apiAccessType = chapterData.accessType === 'paid' ? 'PAID' : 'FREE';
-            
-            if (!currentChapter) {
+
+            // Xác định là chỉnh sửa hay thêm mới dựa vào currentChapter hoặc chapterData.id
+            const isEditMode = currentChapter && (currentChapter.id || currentChapter.Id);
+
+            if (!isEditMode) {
                 // Thêm chương mới
                 const orderIndex = (chapterData.number || 1) - 1; // number bắt đầu từ 1, orderIndex từ 0
-                
+
                 await createChapter({
                     storyId,
                     title: chapterData.title,
@@ -197,7 +229,7 @@ export function AuthorStoryManagement({ onBack }) {
                     accessType: apiAccessType,
                     coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
                 });
-                
+
                 showToast(
                     apiStatus === 'DRAFT' ? 'Đã lưu nháp chương mới' : 'Đã xuất bản chương mới',
                     'success'
@@ -206,10 +238,10 @@ export function AuthorStoryManagement({ onBack }) {
                 // Cập nhật chương hiện có
                 const chapterId = currentChapter.id ?? currentChapter.Id;
                 if (!chapterId) {
-                    alert('Không tìm thấy ID chương');
+                    showToast('Không tìm thấy ID chương', 'error');
                     return;
                 }
-                
+
                 await updateChapter(chapterId, {
                     title: chapterData.title,
                     content: chapterData.content || '',
@@ -218,13 +250,13 @@ export function AuthorStoryManagement({ onBack }) {
                     accessType: apiAccessType,
                     coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
                 });
-                
+
                 showToast(
                     apiStatus === 'DRAFT' ? 'Đã cập nhật chương (lưu nháp)' : 'Đã cập nhật chương (xuất bản)',
                     'success'
                 );
             }
-            
+
             // Quay về danh sách chương
             setActiveView('chapterList');
             setCurrentChapter(null);
