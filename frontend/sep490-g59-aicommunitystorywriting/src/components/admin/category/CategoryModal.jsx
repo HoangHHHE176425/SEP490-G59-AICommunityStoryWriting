@@ -8,21 +8,11 @@ export function CategoryModal({ isOpen, onClose, onSave, category, isViewOnly = 
         description: '',
         icon_url: '',
         iconFile: null, // File object for API
-        story_type: 'long', // 'long' or 'short'
         is_active: true
     });
 
     const [errors, setErrors] = useState({});
     const [imagePreview, setImagePreview] = useState(null);
-
-    // Map parentId to story_type
-    const getStoryTypeByParentId = (parentId) => {
-        if (!parentId) return 'long'; // default
-        const parentIdStr = parentId.toString().toUpperCase();
-        if (parentIdStr === 'AF3C494B-2A64-45AE-89E9-73998391AB78') return 'long';
-        if (parentIdStr === 'D488A3A0-5971-42C5-A7E4-CB35BEBBE6B6') return 'short';
-        return 'long'; // default
-    };
 
     // Get full icon URL for preview
     const getIconUrl = (iconUrl) => {
@@ -59,9 +49,8 @@ export function CategoryModal({ isOpen, onClose, onSave, category, isViewOnly = 
     useEffect(() => {
         if (category) {
             // Map API response fields to formData
-            // API returns: iconUrl (camelCase), isActive (camelCase), parentId
-            // Form expects: icon_url (snake_case), is_active (snake_case), story_type
-            const storyType = getStoryTypeByParentId(category.parentId);
+            // API returns: iconUrl (camelCase), isActive (camelCase)
+            // Form expects: icon_url (snake_case), is_active (snake_case)
             const iconUrl = category.iconUrl || '';
             const fullIconUrl = getIconUrl(iconUrl);
 
@@ -72,7 +61,6 @@ export function CategoryModal({ isOpen, onClose, onSave, category, isViewOnly = 
                 description: category.description || '',
                 icon_url: iconUrl, // Keep original for API, use fullIconUrl for preview
                 iconFile: null, // Reset file when editing (user can upload new one)
-                story_type: storyType,
                 is_active: category.isActive !== false // Handle both camelCase and snake_case
             });
             setImagePreview(fullIconUrl || null);
@@ -83,7 +71,6 @@ export function CategoryModal({ isOpen, onClose, onSave, category, isViewOnly = 
                 description: '',
                 icon_url: '',
                 iconFile: null,
-                story_type: 'long',
                 is_active: true
             });
             setImagePreview(null);
@@ -341,44 +328,6 @@ export function CategoryModal({ isOpen, onClose, onSave, category, isViewOnly = 
                         )}
                         <p style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: '#64748b', margin: '0.25rem 0 0 0' }}>
                             Slug được tự động tạo từ tên thể loại
-                        </p>
-                    </div>
-
-                    {/* Story Type */}
-                    <div>
-                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 600, color: '#1e293b', marginBottom: '0.5rem' }}>
-                            Loại truyện <span style={{ color: '#ef4444' }}>*</span>
-                        </label>
-                        <select
-                            value={formData.story_type}
-                            onChange={(e) => setFormData(prev => ({ ...prev, story_type: e.target.value }))}
-                            disabled={isViewOnly}
-                            style={{
-                                width: '100%',
-                                padding: '0.625rem 1rem',
-                                backgroundColor: isViewOnly ? '#f1f5f9' : '#f8fafc',
-                                border: '1px solid #e2e8f0',
-                                borderRadius: '0.5rem',
-                                outline: 'none',
-                                fontSize: '0.875rem',
-                                color: '#1e293b',
-                                cursor: isViewOnly ? 'not-allowed' : 'pointer',
-                                transition: 'all 0.2s'
-                            }}
-                            onFocus={(e) => {
-                                e.currentTarget.style.borderColor = '#13ec5b';
-                                e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.1)';
-                            }}
-                            onBlur={(e) => {
-                                e.currentTarget.style.borderColor = '#e2e8f0';
-                                e.currentTarget.style.boxShadow = 'none';
-                            }}
-                        >
-                            <option value="long">Truyện dài</option>
-                            <option value="short">Truyện ngắn</option>
-                        </select>
-                        <p style={{ marginTop: '0.25rem', fontSize: '0.75rem', color: '#64748b', margin: '0.25rem 0 0 0' }}>
-                            Chọn loại truyện mà thể loại này áp dụng
                         </p>
                     </div>
 
