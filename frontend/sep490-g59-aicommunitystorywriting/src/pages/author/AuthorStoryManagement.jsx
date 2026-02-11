@@ -7,10 +7,11 @@ import { StoryCommentsViewer } from './StoryCommentsViewer';
 import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
-import { createStory, updateStory, getStories } from '../../api/story/storyApi';
+import { createStory, updateStory, getStories, getStoryById } from '../../api/story/storyApi';
 import { createChapter } from '../../api/chapter/chapterApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../components/author/story-editor/Toast';
 
 function mapStoryFromApi(item) {
     const status = item.status || item.Status || '';
@@ -22,18 +23,30 @@ function mapStoryFromApi(item) {
         HIATUS: 'Tạm dừng',
     };
     const publishStatus = publishStatusMap[status] || status;
-    const categories = item.categoryNames || item.CategoryNames
-        ? String(item.categoryNames || item.CategoryNames).split(',').map(s => s.trim()).filter(Boolean)
+    // Lấy thể loại từ story_categories (CategoryIds + CategoryNames)
+    const categoryIds = item.categoryIds ?? item.CategoryIds ?? [];
+    const categoryNamesStr = item.categoryNames ?? item.CategoryNames ?? '';
+    const categoryNamesArr = categoryNamesStr
+        ? String(categoryNamesStr).split(',').map((s) => s.trim()).filter(Boolean)
         : [];
+    const categories = Array.isArray(categoryIds) && categoryIds.length > 0
+        ? categoryIds.map((id, i) => ({ id, name: categoryNamesArr[i] ?? '' })).filter((c) => c.id)
+        : categoryNamesArr.map((name) => ({ id: name, name })); // fallback: chỉ có tên
     const updatedAt = item.updatedAt || item.UpdatedAt;
     const lastUpdate = updatedAt
         ? new Date(updatedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
         : '';
     const coverPath = item.coverImage ?? item.CoverImage;
+    const summary = item.summary ?? item.Summary ?? '';
+    const ageRatingMap = { ALL: 'Phù hợp mọi lứa tuổi', '13+': 'Từ 13 tuổi', '16+': 'Từ 16 tuổi', '18+': 'Từ 18 tuổi' };
+    const rawAge = item.ageRating ?? item.AgeRating ?? 'ALL';
+    const ageRating = ageRatingMap[rawAge] ?? ageRatingMap.ALL;
     return {
         id: item.id ?? item.Id,
         title: item.title ?? item.Title,
         cover: coverPath ? resolveBackendUrl(coverPath) : '',
+        summary,
+        ageRating,
         categories,
         status: status.toLowerCase(),
         chapters: item.totalChapters ?? item.TotalChapters ?? 0,
@@ -113,9 +126,16 @@ export function AuthorStoryManagement({ onBack }) {
         setActiveView('createStory');
     };
 
-    const handleEditStory = (story) => {
-        setCurrentStory(story);
-        setActiveView('editInfo');
+    const handleEditStory = async (story) => {
+        if (!story?.id) return;
+        try {
+            const fullStory = await getStoryById(story.id);
+            const mapped = mapStoryFromApi(fullStory);
+            setCurrentStory(mapped);
+            setActiveView('editInfo');
+        } catch (err) {
+            showToast(err?.response?.data?.message ?? err?.message ?? 'Không tải được thông tin truyện', 'error');
+        }
     };
 
     const handleViewChapters = (story) => {
@@ -202,10 +222,39 @@ export function AuthorStoryManagement({ onBack }) {
         }
     };
 
-    const handleSaveInfo = (infoData) => {
-        setStories(stories.map(s => s.id === currentStory.id ? { ...s, ...infoData } : s));
-        setActiveView('stories');
-        setCurrentStory(null);
+    const { showToast, ToastContainer } = useToast();
+
+    const getCategoryId = (c) => (typeof c === 'object' && c?.id ? c.id : c);
+
+    const handleSaveInfo = async (infoData) => {
+        if (!currentStory?.id) return;
+        try {
+            const rawIds = (infoData.categories || []).map(getCategoryId).filter(Boolean);
+            const categoryIds = rawIds.filter((id) =>
+                /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/i.test(String(id))
+            );
+            if (categoryIds.length === 0) {
+                showToast('Vui lòng chọn ít nhất một thể loại', 'error');
+                return;
+            }
+            const storyPublishStatus = (currentStory.status || 'draft').toUpperCase();
+            await updateStory(currentStory.id, {
+                title: infoData.title,
+                summary: infoData.note ?? '',
+                categoryIds,
+                status: storyPublishStatus,
+                storyProgressStatus: infoData.status || infoData.publishStatus,
+                ageRating: infoData.ageRating,
+                coverImage: infoData.cover,
+            });
+            setStories(stories.map(s => s.id === currentStory.id ? { ...s, ...infoData, summary: infoData.note } : s));
+            setCurrentStory((prev) => prev ? { ...prev, ...infoData, summary: infoData.note } : null);
+            showToast('Đã lưu thay đổi thông tin truyện', 'success');
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.response?.data?.error ?? err?.message ?? 'Không thể lưu thay đổi';
+            showToast(msg, 'error');
+            throw err;
+        }
     };
 
     // Render different views
@@ -224,14 +273,17 @@ export function AuthorStoryManagement({ onBack }) {
 
     if (activeView === 'editInfo') {
         return (
-            <StoryInfoEditor
-                story={currentStory}
-                onSave={handleSaveInfo}
-                onCancel={() => {
-                    setActiveView('stories');
-                    setCurrentStory(null);
-                }}
-            />
+            <>
+                <StoryInfoEditor
+                    story={currentStory}
+                    onSave={handleSaveInfo}
+                    onCancel={() => {
+                        setActiveView('stories');
+                        setCurrentStory(null);
+                    }}
+                />
+                <ToastContainer />
+            </>
         );
     }
 

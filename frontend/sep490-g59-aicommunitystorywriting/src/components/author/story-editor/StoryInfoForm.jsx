@@ -300,15 +300,15 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                         </div>
                     </div>
 
-                    {/* Note */}
+                    {/* Mô tả truyện (summary) */}
                     <div>
                         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                            Ghi chú tác giả
+                            Mô tả truyện
                         </label>
                         <textarea
                             value={formData.note}
                             onChange={(e) => onChange('note', e.target.value)}
-                            placeholder="Nhập ghi chú"
+                            placeholder="Nhập mô tả truyện"
                             rows={4}
                             style={{
                                 width: '100%',

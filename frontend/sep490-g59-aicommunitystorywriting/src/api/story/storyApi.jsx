@@ -187,26 +187,32 @@ export async function updateStory(id, data) {
     formData.append("Summary", data.summary != null ? String(data.summary).trim() : "");
     formData.append("Status", (data.status || "DRAFT").toUpperCase());
     const ageRating = AGE_RATING_MAP[data.ageRating] || data.ageRating || "ALL";
-    const storyProgress = STORY_PROGRESS_MAP[data.storyProgressStatus] || data.storyProgressStatus || "ONGOING";
+    const rawProgress = data.storyProgressStatus || data.publishStatus || data.status || "";
+    const storyProgress = STORY_PROGRESS_MAP[rawProgress] || (["ONGOING", "COMPLETED", "HIATUS"].includes(String(rawProgress).toUpperCase()) ? String(rawProgress).toUpperCase() : "ONGOING");
     formData.append("AgeRating", ageRating);
     formData.append("StoryProgressStatus", storyProgress);
 
     if (Array.isArray(data.categoryIds)) {
-        data.categoryIds.forEach((cid) => {
-            if (cid) formData.append("CategoryIds", cid);
-        });
+        const validGuids = data.categoryIds
+            .map((cid) => (typeof cid === "string" ? cid : String(cid || "")))
+            .filter((s) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s));
+        validGuids.forEach((cid) => formData.append("CategoryIds", cid));
     }
 
-    if (data.coverImage instanceof File) {
+    let coverFile = data.coverImage;
+    if (typeof coverFile === "string" && coverFile.startsWith("data:")) {
+        coverFile = dataURLtoFile(coverFile, "cover.png");
+    }
+    if (coverFile instanceof File) {
         const allowedExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
-        const ext = data.coverImage.name.toLowerCase().substring(data.coverImage.name.lastIndexOf("."));
-        if (!allowedExtensions.includes(ext)) {
+        const ext = coverFile.name.toLowerCase().substring(coverFile.name.lastIndexOf("."));
+        if (!allowedExtensions.includes(ext) && !coverFile.type?.startsWith("image/")) {
             throw new Error(`Ảnh bìa: chỉ chấp nhận ${allowedExtensions.join(", ").toUpperCase()}`);
         }
-        if (data.coverImage.size > 5 * 1024 * 1024) {
+        if (coverFile.size > 5 * 1024 * 1024) {
             throw new Error("Kích thước ảnh bìa không được vượt quá 5MB");
         }
-        formData.append("CoverImage", data.coverImage);
+        formData.append("CoverImage", coverFile);
     }
 
     const response = await axiosInstance.put(`/stories/${id}`, formData, {
