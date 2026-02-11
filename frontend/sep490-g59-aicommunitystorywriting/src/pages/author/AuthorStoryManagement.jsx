@@ -70,7 +70,15 @@ function mapStoryFromApi(item) {
 }
 
 export function AuthorStoryManagement({ onBack }) {
-    const { user } = useAuth();
+    const { user, logout } = useAuth();
+
+    // Get user display name
+    const getUserDisplayName = () => {
+        if (!user) return 'Người dùng';
+        return user.displayName ?? user.DisplayName ?? user.fullName ?? user.FullName ?? user.nickname ?? user.Nickname ?? user.userName ?? user.UserName ?? user.name ?? user.Name ?? 'Người dùng';
+    };
+
+    const userDisplayName = getUserDisplayName();
     const [activeView, setActiveView] = useState('stories');
     const [activeMenu, setActiveMenu] = useState('stories');
     const [currentStory, setCurrentStory] = useState(null);
@@ -436,14 +444,77 @@ export function AuthorStoryManagement({ onBack }) {
             <Header />
             <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5', display: 'flex' }}>
                 {/* Sidebar */}
-                <div style={{ width: '250px', backgroundColor: '#ffffff', borderRight: '1px solid #e0e0e0', padding: '2rem 0' }}>
-                    <div style={{ padding: '0 1.5rem 1.5rem', borderBottom: '1px solid #e0e0e0' }}>
-                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', margin: '0 0 1rem 0' }}>
-                            Quyền Đình
-                        </h2>
+                <div style={{
+                    width: '280px',
+                    backgroundColor: '#ffffff',
+                    borderRight: '1px solid #e0e0e0',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    height: '100vh',
+                    position: 'sticky',
+                    top: 0
+                }}>
+                    {/* User Profile Section */}
+                    <div style={{
+                        padding: '2rem 1.5rem',
+                        borderBottom: '1px solid #e0e0e0',
+                        backgroundColor: '#f9fafb'
+                    }}>
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '1rem',
+                            marginBottom: '1rem'
+                        }}>
+                            <div style={{
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '50%',
+                                backgroundColor: '#13ec5b',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#ffffff',
+                                fontSize: '1.5rem',
+                                fontWeight: 'bold',
+                                flexShrink: 0
+                            }}>
+                                {userDisplayName.charAt(0).toUpperCase()}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <h2 style={{
+                                    fontSize: '1rem',
+                                    fontWeight: 'bold',
+                                    color: '#333333',
+                                    margin: '0 0 0.25rem 0',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                }}>
+                                    {userDisplayName}
+                                </h2>
+                                <p style={{
+                                    fontSize: '0.75rem',
+                                    color: '#6b7280',
+                                    margin: 0,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                }}>
+                                    Tác giả
+                                </p>
+                            </div>
+                        </div>
                     </div>
 
-                    <nav style={{ marginTop: '1rem' }}>
+                    {/* Navigation Menu */}
+                    <nav style={{
+                        flex: 1,
+                        padding: '1rem 0',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.25rem'
+                    }}>
                         <button
                             onClick={() => {
                                 setActiveMenu('profile');
@@ -451,22 +522,33 @@ export function AuthorStoryManagement({ onBack }) {
                             }}
                             style={{
                                 width: '100%',
-                                padding: '0.75rem 1.5rem',
-                                backgroundColor: activeMenu === 'profile' ? '#f5f5f5' : 'transparent',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'profile' ? '#f0fdf4' : 'transparent',
                                 border: 'none',
+                                borderLeft: activeMenu === 'profile' ? '3px solid #13ec5b' : '3px solid transparent',
                                 textAlign: 'left',
                                 fontSize: '0.875rem',
-                                color: '#333333',
+                                fontWeight: activeMenu === 'profile' ? 600 : 500,
+                                color: activeMenu === 'profile' ? '#13ec5b' : '#333333',
                                 cursor: 'pointer',
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '0.75rem',
-                                transition: 'background-color 0.2s'
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'profile') {
+                                    e.currentTarget.style.backgroundColor = '#f9fafb';
+                                }
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'profile') {
+                                    e.currentTarget.style.backgroundColor = 'transparent';
+                                }
                             }}
                         >
-                            <User style={{ width: '18px', height: '18px' }} />
+                            <User style={{ width: '20px', height: '20px' }} />
                             Hồ sơ tác giả
-                            <ChevronRight style={{ width: '16px', height: '16px', marginLeft: 'auto' }} />
                         </button>
 
                         <button
@@ -476,46 +558,82 @@ export function AuthorStoryManagement({ onBack }) {
                             }}
                             style={{
                                 width: '100%',
-                                padding: '0.75rem 1.5rem',
-                                backgroundColor: activeMenu === 'stories' ? '#f5f5f5' : 'transparent',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'stories' ? '#f0fdf4' : 'transparent',
                                 border: 'none',
+                                borderLeft: activeMenu === 'stories' ? '3px solid #13ec5b' : '3px solid transparent',
                                 textAlign: 'left',
                                 fontSize: '0.875rem',
-                                color: '#333333',
+                                fontWeight: activeMenu === 'stories' ? 600 : 500,
+                                color: activeMenu === 'stories' ? '#13ec5b' : '#333333',
                                 cursor: 'pointer',
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '0.75rem',
-                                transition: 'background-color 0.2s'
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'stories') {
+                                    e.currentTarget.style.backgroundColor = '#f9fafb';
+                                }
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'stories') {
+                                    e.currentTarget.style.backgroundColor = 'transparent';
+                                }
                             }}
                         >
-                            <Book style={{ width: '18px', height: '18px' }} />
+                            <Book style={{ width: '20px', height: '20px' }} />
                             Truyện của tôi
-                            <ChevronRight style={{ width: '16px', height: '16px', marginLeft: 'auto' }} />
                         </button>
+                    </nav>
 
+                    {/* Logout Section */}
+                    <div style={{
+                        padding: '1rem 1.5rem',
+                        borderTop: '1px solid #e0e0e0',
+                        backgroundColor: '#f9fafb'
+                    }}>
                         <button
-                            onClick={onBack}
+                            onClick={async () => {
+                                try {
+                                    await logout();
+                                    onBack();
+                                } catch (error) {
+                                    console.error('Logout error:', error);
+                                    onBack();
+                                }
+                            }}
                             style={{
                                 width: '100%',
-                                padding: '0.75rem 1.5rem',
+                                padding: '0.875rem 1.5rem',
                                 backgroundColor: 'transparent',
-                                border: 'none',
-                                textAlign: 'left',
+                                border: '2px solid #ef4444',
+                                borderRadius: '8px',
+                                textAlign: 'center',
                                 fontSize: '0.875rem',
-                                color: '#333333',
+                                fontWeight: 600,
+                                color: '#ef4444',
                                 cursor: 'pointer',
                                 display: 'flex',
                                 alignItems: 'center',
+                                justifyContent: 'center',
                                 gap: '0.75rem',
-                                transition: 'background-color 0.2s'
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = '#fee2e2';
+                                e.currentTarget.style.borderColor = '#dc2626';
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = 'transparent';
+                                e.currentTarget.style.borderColor = '#ef4444';
                             }}
                         >
                             <LogOut style={{ width: '18px', height: '18px' }} />
                             Đăng xuất
-                            <ChevronRight style={{ width: '16px', height: '16px', marginLeft: 'auto' }} />
                         </button>
-                    </nav>
+                    </div>
                 </div>
 
                 {/* Main Content */}
@@ -606,7 +724,7 @@ export function AuthorStoryManagement({ onBack }) {
                                 <div style={{ display: 'grid', gap: '1rem' }}>
                                     <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1rem', alignItems: 'center' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Tên hiển thị</div>
-                                        <div style={{ fontSize: '0.875rem', color: '#333333', fontWeight: 500 }}>Quyền Đình</div>
+                                        <div style={{ fontSize: '0.875rem', color: '#333333', fontWeight: 500 }}>{userDisplayName}</div>
                                     </div>
                                     <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1rem', alignItems: 'center' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Giới thiệu</div>
