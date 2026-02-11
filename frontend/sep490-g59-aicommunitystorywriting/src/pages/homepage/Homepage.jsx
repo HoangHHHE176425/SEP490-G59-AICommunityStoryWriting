@@ -1,39 +1,47 @@
+import React from 'react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { FeaturedBanner } from '../../components/homepage/FeaturedBanner';
-import { HotStories } from '../../components/homepage/HotStories';
-import { NewUpdates } from '../../components/homepage/NewUpdates';
-import { CompletedStories } from '../../components/homepage/CompletedStories';
-import { TopAuthors } from '../../components/homepage/TopAuthors';
-import { Community } from '../../components/homepage/Community';
-import { HomeCTA } from '../../components/homepage/HomeCTA';
-import { Rankings } from '../../components/homepage/Rankings';
+import { HeroAuthorStoriesBanner } from '../../components/homepage/HeroAuthorStoriesBanner';
+import { TopAuthorStoriesSection } from '../../components/homepage/TopAuthorStoriesSection';
+import { NewAuthorDebutsSection } from '../../components/homepage/NewAuthorDebutsSection';
+import { AIAssistedStoriesWidget } from '../../components/homepage/AIAssistedStoriesWidget';
+import { TrendingAuthorsSection } from '../../components/homepage/TrendingAuthorsSection';
+import { CommunityHighlightsSection } from '../../components/homepage/CommunityHighlightsSection';
+import { AuthorRankingsWidget } from '../../components/homepage/AuthorRankingsWidget';
+import { CommunityEventsWidget } from '../../components/homepage/CommunityEventsWidget';
+import { CTASection } from '../../components/homepage/CTASection';
 
 export default function Homepage() {
   return (
     <div className="w-full bg-gray-50">
       <Header />
+      
+      {/* Hero Banner - Featured Author Stories */}
+      <HeroAuthorStoriesBanner />
 
-      <FeaturedBanner />
-
+      {/* Main Content - 2 Columns */}
       <div className="max-w-[1400px] mx-auto px-6 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-8">
+          {/* Left Column */}
           <div className="space-y-8">
-            <HotStories />
-            <NewUpdates />
-            <CompletedStories />
-            <TopAuthors />
-            <Community />
+            <TopAuthorStoriesSection />
+            <NewAuthorDebutsSection />
+            <AIAssistedStoriesWidget />
+            <TrendingAuthorsSection />
+            <CommunityHighlightsSection />
           </div>
 
-          <div className="lg:sticky lg:top-8 lg:self-start">
-            <Rankings />
+          {/* Right Column - Sticky Sidebar */}
+          <div className="lg:sticky lg:top-8 lg:self-start space-y-6">
+            <AuthorRankingsWidget />
+            <CommunityEventsWidget />
           </div>
         </div>
       </div>
 
-      <HomeCTA />
-
+      {/* CTA Section */}
+      <CTASection />
+      
       <Footer />
     </div>
   );
