@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut } from 'lucide-react';
 import { StoryEditor } from './StoryEditor';
 import { StoryInfoEditor } from './StoryInfoEditor';
@@ -7,46 +7,79 @@ import { StoryCommentsViewer } from './StoryCommentsViewer';
 import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
-import { createStory, updateStory } from '../../api/story/storyApi';
+import { createStory, updateStory, getStories } from '../../api/story/storyApi';
 import { createChapter } from '../../api/chapter/chapterApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { useAuth } from '../../contexts/AuthContext';
+
+function mapStoryFromApi(item) {
+    const status = item.status || item.Status || '';
+    const publishStatusMap = {
+        DRAFT: 'Lưu tạm',
+        PENDING_REVIEW: 'Chờ duyệt',
+        PUBLISHED: 'Đang ra',
+        COMPLETED: 'Hoàn thành',
+        HIATUS: 'Tạm dừng',
+    };
+    const publishStatus = publishStatusMap[status] || status;
+    const categories = item.categoryNames || item.CategoryNames
+        ? String(item.categoryNames || item.CategoryNames).split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+    const updatedAt = item.updatedAt || item.UpdatedAt;
+    const lastUpdate = updatedAt
+        ? new Date(updatedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : '';
+    const coverPath = item.coverImage ?? item.CoverImage;
+    return {
+        id: item.id ?? item.Id,
+        title: item.title ?? item.Title,
+        cover: coverPath ? resolveBackendUrl(coverPath) : '',
+        categories,
+        status: status.toLowerCase(),
+        chapters: item.totalChapters ?? item.TotalChapters ?? 0,
+        totalViews: Number(item.totalViews ?? item.TotalViews ?? 0),
+        follows: Number(item.totalFavorites ?? item.TotalFavorites ?? 0),
+        rating: item.avgRating ?? item.AvgRating ?? 0,
+        lastUpdate: lastUpdate || 'Chưa cập nhật',
+        publishStatus,
+    };
+}
 
 export function AuthorStoryManagement({ onBack }) {
-    const [activeView, setActiveView] = useState('stories'); // 'stories' | 'profile' | 'editInfo' | 'chapterList' | 'comments' | 'createStory' | 'editChapter' | 'addChapter'
+    const { user } = useAuth();
+    const [activeView, setActiveView] = useState('stories');
     const [activeMenu, setActiveMenu] = useState('stories');
     const [currentStory, setCurrentStory] = useState(null);
     const [currentChapter, setCurrentChapter] = useState(null);
+    const [stories, setStories] = useState([]);
+    const [storiesLoading, setStoriesLoading] = useState(true);
+    const [storiesError, setStoriesError] = useState(null);
 
-    const [stories, setStories] = useState([
-        {
-            id: 1,
-            title: 'Tu Tiên Chi Lộ: Hành Trình Vạn Năm',
-            cover: 'https://images.unsplash.com/photo-1589998059171-988d887df646?w=200&h=300&fit=crop',
-            storyType: 'long',
-            categories: ['Tiên hiệp', 'Huyền huyễn'],
-            status: 'published',
-            chapters: 450,
-            totalViews: 5200000,
-            follows: 8900,
-            rating: 4.8,
-            lastUpdate: 'Cập nhật 21:07 25/01/2026',
-            publishStatus: 'Đang ra',
-        },
-        {
-            id: 2,
-            title: 'Kiếm Đạo Độc Tôn',
-            cover: 'https://images.unsplash.com/photo-1612036801632-8e4cf4e2e1b7?w=200&h=300&fit=crop',
-            storyType: 'long',
-            categories: ['Kiếm hiệp'],
-            status: 'draft',
-            chapters: 25,
-            totalViews: 125000,
-            follows: 340,
-            rating: 4.5,
-            lastUpdate: 'Cập nhật 15:13 25/01/2026',
-            publishStatus: 'Lưu tạm',
-        },
-    ]);
+    const authorId = user?.id ?? user?.Id;
+
+    const loadStories = useCallback(() => {
+        if (!authorId) {
+            setStories([]);
+            setStoriesLoading(false);
+            return;
+        }
+        setStoriesLoading(true);
+        setStoriesError(null);
+        getStories({ authorId, page: 1, pageSize: 100 })
+            .then((res) => {
+                const items = res?.items ?? res?.Items ?? [];
+                setStories(items.map(mapStoryFromApi));
+            })
+            .catch((err) => {
+                setStoriesError(err?.message ?? 'Không tải được danh sách truyện');
+                setStories([]);
+            })
+            .finally(() => setStoriesLoading(false));
+    }, [authorId]);
+
+    useEffect(() => {
+        queueMicrotask(() => loadStories());
+    }, [loadStories]);
 
     // Mock comments data
     const mockComments = [
@@ -127,64 +160,45 @@ export function AuthorStoryManagement({ onBack }) {
             return;
         }
 
-        try {
-            const payload = {
+        const payload = {
+            title: storyData.title,
+            summary: storyData.note || '',
+            categoryIds: storyData.categoryIds || [],
+            ageRating: storyData.ageRating,
+            storyProgressStatus: storyData.storyProgressStatus || storyData.status,
+            coverImage: storyData.cover,
+        };
+        const created = await createStory(payload);
+        const storyId = created?.id ?? created?.Id;
+
+        const chaptersData = storyData.chaptersData || [];
+        for (let i = 0; i < chaptersData.length; i++) {
+            const ch = chaptersData[i];
+            await createChapter({
+                storyId,
+                title: ch.title,
+                content: ch.content || '',
+                orderIndex: i,
+                status: 'DRAFT',
+            });
+        }
+
+        if (!storyData.isDraft) {
+            await updateStory(storyId, {
                 title: storyData.title,
                 summary: storyData.note || '',
                 categoryIds: storyData.categoryIds || [],
+                status: 'PENDING_REVIEW',
                 ageRating: storyData.ageRating,
-                storyProgressStatus: storyData.storyProgressStatus || storyData.status,
+                storyProgressStatus: storyData.storyProgressStatus,
                 coverImage: storyData.cover,
-            };
-            const created = await createStory(payload);
-            const storyId = created?.id ?? created?.Id;
+            });
+        }
 
-            const chaptersData = storyData.chaptersData || [];
-            for (let i = 0; i < chaptersData.length; i++) {
-                const ch = chaptersData[i];
-                await createChapter({
-                    storyId,
-                    title: ch.title,
-                    content: ch.content || '',
-                    orderIndex: i,
-                    status: 'DRAFT',
-                });
-            }
-
-            if (!storyData.isDraft) {
-                await updateStory(storyId, {
-                    title: storyData.title,
-                    summary: storyData.note || '',
-                    categoryIds: storyData.categoryIds || [],
-                    status: 'PENDING_REVIEW',
-                    ageRating: storyData.ageRating,
-                    storyProgressStatus: storyData.storyProgressStatus,
-                    coverImage: storyData.cover,
-                });
-            }
-
-            const coverPath = created?.coverImage ?? created?.cover_image ?? created?.CoverImage;
-            const coverUrl = coverPath ? resolveBackendUrl(coverPath) : storyData.cover;
-            const newStory = {
-                id: storyId,
-                title: created?.title || storyData.title,
-                cover: coverUrl || storyData.cover,
-                categories: storyData.categories || [],
-                status: storyData.isDraft ? 'draft' : 'pending_review',
-                chapters: chaptersData.length,
-                totalViews: 0,
-                follows: 0,
-                rating: 0,
-                lastUpdate: 'Vừa xong',
-                publishStatus: storyData.publishStatus,
-            };
-            setStories(prev => [newStory, ...prev]);
-            if (storyData.isDraft) {
-                setActiveView('stories');
-                setCurrentStory(null);
-            }
-        } catch (err) {
-            throw err;
+        loadStories();
+        if (storyData.isDraft) {
+            setActiveView('stories');
+            setCurrentStory(null);
         }
     };
 
@@ -485,7 +499,33 @@ export function AuthorStoryManagement({ onBack }) {
                             </div>
 
                             {/* Stories List */}
-                            {stories.length === 0 ? (
+                            {storiesLoading ? (
+                                <div style={{
+                                    backgroundColor: '#ffffff',
+                                    borderRadius: '8px',
+                                    padding: '3rem',
+                                    textAlign: 'center',
+                                    border: '1px solid #e0e0e0'
+                                }}>
+                                    <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>Đang tải danh sách truyện...</p>
+                                </div>
+                            ) : storiesError ? (
+                                <div style={{
+                                    backgroundColor: '#ffffff',
+                                    borderRadius: '8px',
+                                    padding: '3rem',
+                                    textAlign: 'center',
+                                    border: '1px solid #e0e0e0'
+                                }}>
+                                    <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '1rem' }}>{storiesError}</p>
+                                    <button
+                                        onClick={() => loadStories()}
+                                        style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer' }}
+                                    >
+                                        Thử lại
+                                    </button>
+                                </div>
+                            ) : stories.length === 0 ? (
                                 <div style={{
                                     backgroundColor: '#ffffff',
                                     borderRadius: '8px',
@@ -532,7 +572,7 @@ export function AuthorStoryManagement({ onBack }) {
                                         >
                                             {/* Cover */}
                                             <img
-                                                src={story.cover}
+                                                src={story.cover || 'https://via.placeholder.com/80x107?text=No+Cover'}
                                                 alt={story.title}
                                                 style={{
                                                     width: '80px',
@@ -564,10 +604,10 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </div>
                                                     <div style={{
                                                         padding: '0.25rem 0.75rem',
-                                                        backgroundColor: story.status === 'published' ? '#d1fae5' : '#fef3c7',
+                                                        backgroundColor: (story.status === 'published' || story.status === 'pending_review') ? '#d1fae5' : '#fef3c7',
                                                         borderRadius: '4px',
                                                         fontSize: '0.75rem',
-                                                        color: story.status === 'published' ? '#065f46' : '#92400e',
+                                                        color: (story.status === 'published' || story.status === 'pending_review') ? '#065f46' : '#92400e',
                                                         marginLeft: '1rem',
                                                         flexShrink: 0
                                                     }}>
@@ -633,12 +673,12 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </div>
                                                     <div style={{
                                                         padding: '0.25rem 0.75rem',
-                                                        backgroundColor: story.status === 'draft' ? '#fef3c7' : '#d1fae5',
+                                                        backgroundColor: (story.status === 'draft' || story.status === 'pending_review') ? '#fef3c7' : '#d1fae5',
                                                         borderRadius: '4px',
                                                         fontSize: '0.75rem',
-                                                        color: story.status === 'draft' ? '#92400e' : '#065f46'
+                                                        color: (story.status === 'draft' || story.status === 'pending_review') ? '#92400e' : '#065f46'
                                                     }}>
-                                                        {story.status === 'draft' ? 'Lưu tạm' : 'Xuất bản'}
+                                                        {story.status === 'draft' ? 'Lưu tạm' : story.status === 'pending_review' ? 'Chờ duyệt' : 'Xuất bản'}
                                                     </div>
                                                     {story.status === 'draft' && (
                                                         <div style={{ fontSize: '0.75rem', color: '#ef4444' }}>
