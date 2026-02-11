@@ -19,3 +19,7 @@ Thumbs.db
 *.tmp
 *.bak
 *.backup
+
+# Local secrets (do NOT commit)
+**/appsettings.Local.json
+**/appsettings.*.Local.json

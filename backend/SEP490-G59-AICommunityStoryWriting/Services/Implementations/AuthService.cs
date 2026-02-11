@@ -29,6 +29,13 @@ namespace AIStory.Services.Implementations
                 throw new Exception("Email already exists.");
 
             var newUserId = Guid.NewGuid();
+            var baseNickname =
+                !string.IsNullOrWhiteSpace(request.FullName)
+                    ? request.FullName.Trim()
+                    : request.Email.Split('@')[0].Trim();
+
+            var nickname = await GenerateUniqueNicknameAsync(baseNickname, newUserId);
+
             var newUser = new users
             {
                 id = newUserId,
@@ -41,7 +48,7 @@ namespace AIStory.Services.Implementations
                 user_profiles = new user_profiles
                 {
                     user_id = newUserId,
-                    nickname = request.FullName ?? request.Email.Split('@')[0],
+                    nickname = nickname,
                     settings = "{\"allow_notif\":true}",
                     updated_at = DateTime.UtcNow
                 }
@@ -65,6 +72,47 @@ namespace AIStory.Services.Implementations
 
             // 4. Gửi Email (Giả lập hoặc gọi service thật)
             await _emailService.SendEmailAsync(request.Email, "Xác thực tài khoản", $"Mã OTP của bạn: {otpCode}");
+        }
+
+        private async Task<string> GenerateUniqueNicknameAsync(string baseNickname, Guid currentUserId)
+        {
+            var nick = (baseNickname ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(nick))
+            {
+                nick = "user";
+            }
+
+            // DB constraint: nickname max length 100
+            if (nick.Length > 100) nick = nick.Substring(0, 100);
+
+            // If not taken, use it directly.
+            if (!await _userRepo.IsNicknameExist(nick, currentUserId))
+            {
+                return nick;
+            }
+
+            // Try appending a short suffix.
+            for (var i = 0; i < 5; i++)
+            {
+                var suffix = new Random().Next(1000, 9999).ToString();
+                var candidateBase = nick;
+                var maxBaseLen = 100 - (1 + suffix.Length);
+                if (candidateBase.Length > maxBaseLen)
+                {
+                    candidateBase = candidateBase.Substring(0, maxBaseLen);
+                }
+                var candidate = $"{candidateBase}_{suffix}";
+                if (!await _userRepo.IsNicknameExist(candidate, currentUserId))
+                {
+                    return candidate;
+                }
+            }
+
+            // Fall back to GUID suffix (still capped to 100).
+            var guidSuffix = currentUserId.ToString("N").Substring(0, 8);
+            var maxLen = 100 - (1 + guidSuffix.Length);
+            var trimmed = nick.Length > maxLen ? nick.Substring(0, maxLen) : nick;
+            return $"{trimmed}_{guidSuffix}";
         }
 
         //  Verify OTP
