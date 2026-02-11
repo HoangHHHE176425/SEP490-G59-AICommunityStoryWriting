@@ -2,11 +2,14 @@ import { useState } from 'react';
 import { X, Plus, ChevronDown } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
+import { useAuth } from '../../contexts/AuthContext';
 
 export function StoryInfoEditor({ story, onSave, onCancel }) {
+    const { user } = useAuth();
+    const authorName = user?.displayName ?? user?.DisplayName ?? user?.fullName ?? user?.FullName ?? user?.nickname ?? user?.Nickname ?? '';
     const [formData, setFormData] = useState({
         title: story?.title || '',
-        author: 'Quyền Đình',
+        author: authorName || story?.author || '',
         storyType: story?.storyType || 'long',
         status: story?.publishStatus || 'Đang ra',
         ageRating: 'Phù hợp mọi lứa tuổi',
@@ -17,6 +20,7 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
     });
 
     const [tagInput, setTagInput] = useState('');
+    const displayAuthor = formData.author || authorName;
 
     const statusOptions = ['Đang ra', 'Hoàn thành', 'Tạm dừng'];
     const ageRatings = ['Phù hợp mọi lứa tuổi', 'Từ 13 tuổi', 'Từ 16 tuổi', 'Từ 18 tuổi'];
@@ -79,7 +83,7 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
     };
 
     const handleSubmit = () => {
-        onSave(formData);
+        onSave({ ...formData, author: displayAuthor });
     };
 
     return (
@@ -213,7 +217,7 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
                                         border: '1px solid #e5e7eb',
                                         borderRadius: '4px'
                                     }}>
-                                        <span style={{ fontSize: '0.875rem', color: '#333333' }}>{formData.author}</span>
+                                        <span style={{ fontSize: '0.875rem', color: '#333333' }}>{displayAuthor}</span>
                                     </div>
                                 </div>
 
