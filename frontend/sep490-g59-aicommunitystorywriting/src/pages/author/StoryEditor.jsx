@@ -341,13 +341,20 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                 onClick={onCancel}
                                 style={{
                                     padding: '0.75rem 2rem',
-                                    backgroundColor: '#6ee7b7',
+                                    backgroundColor: '#13ec5b',
                                     border: 'none',
-                                    borderRadius: '4px',
+                                    borderRadius: '8px',
                                     fontSize: '0.875rem',
-                                    fontWeight: 600,
+                                    fontWeight: 700,
                                     color: '#ffffff',
-                                    cursor: 'pointer'
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#10d452';
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#13ec5b';
                                 }}
                             >
                                 Về trang quản lý
@@ -369,48 +376,57 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                 style={{
                                     padding: '0.75rem 2rem',
                                     backgroundColor: '#ffffff',
-                                    border: '1px solid #e0e0e0',
-                                    borderRadius: '4px',
+                                    border: '2px solid #13ec5b',
+                                    borderRadius: '8px',
                                     fontSize: '0.875rem',
-                                    fontWeight: 600,
-                                    color: '#333333',
+                                    fontWeight: 700,
+                                    color: '#13ec5b',
                                     cursor: 'pointer',
                                     transition: 'all 0.2s'
                                 }}
                                 onMouseEnter={(e) => {
-                                    e.currentTarget.style.backgroundColor = '#f9fafb';
+                                    e.currentTarget.style.backgroundColor = '#f0fdf4';
+                                    e.currentTarget.style.borderColor = '#10d452';
                                 }}
                                 onMouseLeave={(e) => {
                                     e.currentTarget.style.backgroundColor = '#ffffff';
+                                    e.currentTarget.style.borderColor = '#13ec5b';
                                 }}
                             >
                                 {currentStep === 1 ? 'Hủy' : 'Quay lại'}
                             </button>
 
                             <div style={{ display: 'flex', gap: '1rem' }}>
-                                {currentStep > 1 && (
+                                {currentStep > 1 && currentStep !== 2 && (
                                     <button
                                         disabled={saving}
                                         onClick={() => handleSubmit(true)}
                                         style={{
                                             padding: '0.75rem 2rem',
                                             backgroundColor: '#ffffff',
-                                            border: '1px solid #6ee7b7',
-                                            borderRadius: '4px',
+                                            border: '2px solid #13ec5b',
+                                            borderRadius: '8px',
                                             fontSize: '0.875rem',
-                                            fontWeight: 600,
-                                            color: '#6ee7b7',
-                                            cursor: 'pointer',
-                                            transition: 'all 0.2s'
+                                            fontWeight: 700,
+                                            color: '#13ec5b',
+                                            cursor: saving ? 'not-allowed' : 'pointer',
+                                            transition: 'all 0.2s',
+                                            opacity: saving ? 0.6 : 1
                                         }}
                                         onMouseEnter={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#f0fdf4';
+                                            if (!saving) {
+                                                e.currentTarget.style.backgroundColor = '#f0fdf4';
+                                                e.currentTarget.style.borderColor = '#10d452';
+                                            }
                                         }}
                                         onMouseLeave={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#ffffff';
+                                            if (!saving) {
+                                                e.currentTarget.style.backgroundColor = '#ffffff';
+                                                e.currentTarget.style.borderColor = '#13ec5b';
+                                            }
                                         }}
                                     >
-                                        Lưu nháp
+                                        {saving ? 'Đang lưu...' : 'Lưu nháp'}
                                     </button>
                                 )}
 
@@ -420,43 +436,48 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                         onClick={() => handleSubmit(false)}
                                         style={{
                                             padding: '0.75rem 2rem',
-                                            backgroundColor: '#6ee7b7',
+                                            backgroundColor: '#13ec5b',
                                             border: 'none',
-                                            borderRadius: '4px',
+                                            borderRadius: '8px',
                                             fontSize: '0.875rem',
-                                            fontWeight: 600,
+                                            fontWeight: 700,
                                             color: '#ffffff',
-                                            cursor: 'pointer',
-                                            transition: 'all 0.2s'
+                                            cursor: saving ? 'not-allowed' : 'pointer',
+                                            transition: 'all 0.2s',
+                                            opacity: saving ? 0.6 : 1
                                         }}
                                         onMouseEnter={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#5dd4a3';
+                                            if (!saving) {
+                                                e.currentTarget.style.backgroundColor = '#10d452';
+                                            }
                                         }}
                                         onMouseLeave={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#6ee7b7';
+                                            if (!saving) {
+                                                e.currentTarget.style.backgroundColor = '#13ec5b';
+                                            }
                                         }}
                                     >
-                                        Đăng bài
+                                        {saving ? 'Đang xuất bản...' : 'Xuất bản'}
                                     </button>
                                 ) : (
                                     <button
                                         onClick={handleNextStep}
                                         style={{
                                             padding: '0.75rem 2rem',
-                                            backgroundColor: '#6ee7b7',
+                                            backgroundColor: '#13ec5b',
                                             border: 'none',
-                                            borderRadius: '4px',
+                                            borderRadius: '8px',
                                             fontSize: '0.875rem',
-                                            fontWeight: 600,
+                                            fontWeight: 700,
                                             color: '#ffffff',
                                             cursor: 'pointer',
                                             transition: 'all 0.2s'
                                         }}
                                         onMouseEnter={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#5dd4a3';
+                                            e.currentTarget.style.backgroundColor = '#10d452';
                                         }}
                                         onMouseLeave={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#6ee7b7';
+                                            e.currentTarget.style.backgroundColor = '#13ec5b';
                                         }}
                                     >
                                         Tiếp theo
