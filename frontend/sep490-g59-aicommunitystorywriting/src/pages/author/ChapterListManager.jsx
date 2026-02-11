@@ -1,48 +1,65 @@
-import { useState } from 'react';
-import { Plus, Eye, MessageSquare, Heart, Book, Trash2, Edit } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Eye, MessageSquare, Heart, Book } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
+import { getChaptersByStoryId } from '../../api/chapter/chapterApi';
+
+function mapChapterFromApi(item) {
+    const createdAt = item.createdAt ?? item.CreatedAt ?? item.publishedAt ?? item.PublishedAt;
+    const updatedAt = createdAt
+        ? new Date(createdAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
+        : '';
+    const status = (item.status ?? item.Status ?? 'DRAFT').toLowerCase();
+    return {
+        id: item.id ?? item.Id,
+        number: (item.orderIndex ?? item.OrderIndex ?? 0) + 1,
+        title: item.title ?? item.Title ?? '',
+        content: '',
+        status,
+        views: 0,
+        comments: 0,
+        likes: 0,
+        updatedAt,
+    };
+}
 
 export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter }) {
-    const [chapters, setChapters] = useState([
-        {
-            id: 1,
-            number: 1,
-            title: 'Khởi đầu của hành trình',
-            content: 'Nội dung chương 1...',
-            status: 'published',
-            views: 2001,
-            comments: 0,
-            likes: 0,
-            updatedAt: '15:13:31 25/01/2026'
-        },
-        {
-            id: 2,
-            number: 2,
-            title: 'Gặp gỡ người bạn đồng hành',
-            content: 'Nội dung chương 2...',
-            status: 'published',
-            views: 1850,
-            comments: 5,
-            likes: 12,
-            updatedAt: '16:20:15 25/01/2026'
-        },
-        {
-            id: 3,
-            number: 3,
-            title: 'Thử thách đầu tiên',
-            content: 'Nội dung chương 3...',
-            status: 'draft',
-            views: 0,
-            comments: 0,
-            likes: 0,
-            updatedAt: '18:45:00 25/01/2026'
-        },
-    ]);
+    const [chapters, setChapters] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        queueMicrotask(() => {
+            const storyId = story?.id ?? story?.Id;
+            if (!storyId) {
+                setChapters([]);
+                setLoading(false);
+                return;
+            }
+            setLoading(true);
+            setError(null);
+            getChaptersByStoryId(storyId)
+                .then((res) => {
+                    const items = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
+                    if (!cancelled) setChapters(items.map(mapChapterFromApi));
+                })
+                .catch((err) => {
+                    if (!cancelled) {
+                        setError(err?.message ?? 'Không tải được danh sách chương');
+                        setChapters([]);
+                    }
+                })
+                .finally(() => {
+                    if (!cancelled) setLoading(false);
+                });
+        });
+        return () => { cancelled = true; };
+    }, [story?.id ?? story?.Id]);
 
     const handleDeleteChapter = (chapterId) => {
         if (window.confirm('Bạn có chắc chắn muốn xóa chương này?')) {
-            setChapters(chapters.filter(ch => ch.id !== chapterId));
+            setChapters((prev) => prev.filter((ch) => ch.id !== chapterId));
         }
     };
 
@@ -115,7 +132,34 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                         </div>
 
                         {/* Table Body */}
-                        {chapters.length === 0 ? (
+                        {loading ? (
+                            <div style={{ padding: '3rem', textAlign: 'center' }}>
+                                <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>Đang tải danh sách chương...</p>
+                            </div>
+                        ) : error ? (
+                            <div style={{ padding: '3rem', textAlign: 'center' }}>
+                                <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '1rem' }}>{error}</p>
+                                <button
+                                    onClick={() => {
+                                        const sid = story?.id ?? story?.Id;
+                                        if (sid) {
+                                            setLoading(true);
+                                            setError(null);
+                                            getChaptersByStoryId(sid)
+                                                .then((res) => {
+                                                    const items = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
+                                                    setChapters(items.map(mapChapterFromApi));
+                                                })
+                                                .catch((e) => setError(e?.message ?? 'Lỗi tải danh sách'))
+                                                .finally(() => setLoading(false));
+                                        }
+                                    }}
+                                    style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer' }}
+                                >
+                                    Thử lại
+                                </button>
+                            </div>
+                        ) : chapters.length === 0 ? (
                             <div style={{
                                 padding: '3rem',
                                 textAlign: 'center'
