@@ -173,6 +173,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                 title: ch.title,
                 content: ch.content || '',
                 orderIndex: i,
+                status: isDraft ? 'DRAFT' : 'PENDING_REVIEW',
                 accessType: (ch.accessType === 'paid' ? 'PAID' : 'FREE'),
                 coinPrice: ch.accessType === 'paid' ? Number(ch.price) || 0 : 0,
             })),
