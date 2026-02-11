@@ -300,7 +300,9 @@ export function AuthorStoryManagement({ onBack }) {
                 title: ch.title,
                 content: ch.content || '',
                 orderIndex: i,
-                status: 'DRAFT',
+                status: ch.status || 'DRAFT',
+                accessType: ch.accessType || 'FREE',
+                coinPrice: ch.coinPrice || 0,
             });
         }
 
