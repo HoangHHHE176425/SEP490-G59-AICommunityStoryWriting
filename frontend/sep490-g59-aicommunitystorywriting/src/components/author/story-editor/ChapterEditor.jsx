@@ -1,6 +1,12 @@
 import { useState } from 'react';
 import { Sparkles, Settings, X, Lock, Unlock, Coins } from 'lucide-react';
 
+// Helper function to count words
+const countWords = (text) => {
+    if (!text || !text.trim()) return 0;
+    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+};
+
 export function ChapterEditor({ chapter, onChange }) {
     const [showSettings, setShowSettings] = useState(false);
     const [editorSettings, setEditorSettings] = useState({
@@ -401,11 +407,11 @@ export function ChapterEditor({ chapter, onChange }) {
                         }}
                     />
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
-                        <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: 0 }}>
-                            Tối thiểu 500 ký tự
+                        <p style={{ fontSize: '0.75rem', color: countWords(chapter.content) < 500 ? '#ef4444' : '#9ca3af', margin: 0 }}>
+                            Tối thiểu 500 từ
                         </p>
                         <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: 0 }}>
-                            {chapter.content.length} ký tự
+                            {countWords(chapter.content).toLocaleString()} từ
                         </p>
                     </div>
                 </div>

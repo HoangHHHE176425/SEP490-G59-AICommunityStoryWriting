@@ -107,11 +107,28 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
+                            gap: '1rem',
                             marginBottom: '2rem'
                         }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                <Book style={{ width: '24px', height: '24px', color: '#13ec5b' }} />
-                                <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                flex: '1 1 0',
+                                minWidth: 0,
+                                overflow: 'hidden'
+                            }}>
+                                <Book style={{ width: '24px', height: '24px', color: '#13ec5b', flexShrink: 0 }} />
+                                <h2 style={{
+                                    fontSize: '1.5rem',
+                                    fontWeight: 'bold',
+                                    color: '#333333',
+                                    margin: 0,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    maxWidth: '100%'
+                                }}>
                                     Danh sách chương - Truyện "{story?.title || 'Untitled'}"
                                 </h2>
                             </div>
@@ -129,7 +146,9 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                     fontWeight: 700,
                                     color: '#ffffff',
                                     cursor: 'pointer',
-                                    transition: 'all 0.2s'
+                                    transition: 'all 0.2s',
+                                    flexShrink: 0,
+                                    whiteSpace: 'nowrap'
                                 }}
                                 onMouseEnter={(e) => {
                                     e.currentTarget.style.backgroundColor = '#10d452';
@@ -340,20 +359,22 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                 onClick={onBack}
                                 style={{
                                     padding: '0.75rem 2rem',
-                                    backgroundColor: '#f1f5f9',
-                                    border: 'none',
+                                    backgroundColor: '#ffffff',
+                                    border: '2px solid #13ec5b',
                                     borderRadius: '9999px',
                                     fontSize: '0.875rem',
-                                    fontWeight: 600,
-                                    color: '#333333',
+                                    fontWeight: 700,
+                                    color: '#13ec5b',
                                     cursor: 'pointer',
                                     transition: 'all 0.2s'
                                 }}
                                 onMouseEnter={(e) => {
-                                    e.currentTarget.style.backgroundColor = '#e2e8f0';
+                                    e.currentTarget.style.backgroundColor = '#f0fdf4';
+                                    e.currentTarget.style.borderColor = '#10d452';
                                 }}
                                 onMouseLeave={(e) => {
-                                    e.currentTarget.style.backgroundColor = '#f1f5f9';
+                                    e.currentTarget.style.backgroundColor = '#ffffff';
+                                    e.currentTarget.style.borderColor = '#13ec5b';
                                 }}
                             >
                                 Quay lại

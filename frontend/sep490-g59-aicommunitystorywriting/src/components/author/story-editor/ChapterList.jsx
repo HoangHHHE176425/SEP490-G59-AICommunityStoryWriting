@@ -1,5 +1,11 @@
 import { ChevronDown, Plus } from 'lucide-react';
 
+// Helper function to count words
+const countWords = (text) => {
+    if (!text || !text.trim()) return 0;
+    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+};
+
 export function ChapterList({
     chapters,
     currentChapterIndex,
@@ -153,8 +159,8 @@ export function ChapterList({
                                     </span>
                                 )}
                             </div>
-                            <div style={{ fontSize: '0.75rem', color: ch.content.length > 0 ? '#10b981' : '#ef4444' }}>
-                                {ch.content.length > 0 ? `${ch.content.length} ký tự` : 'Chưa có nội dung'}
+                            <div style={{ fontSize: '0.75rem', color: countWords(ch.content) > 0 ? '#10b981' : '#ef4444' }}>
+                                {countWords(ch.content) > 0 ? `${countWords(ch.content)} từ` : 'Chưa có nội dung'}
                             </div>
                         </div>
                     ))}
