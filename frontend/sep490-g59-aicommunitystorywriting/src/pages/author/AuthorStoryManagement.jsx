@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut } from 'lucide-react';
 import { StoryEditor } from './StoryEditor';
 import { StoryInfoEditor } from './StoryInfoEditor';
@@ -7,43 +7,111 @@ import { StoryCommentsViewer } from './StoryCommentsViewer';
 import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
+import { createStory, updateStory, getStories, getStoryById } from '../../api/story/storyApi';
+import { createChapter, updateChapter, getChapterById } from '../../api/chapter/chapterApi';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../components/author/story-editor/Toast';
+
+function mapStoryFromApi(item) {
+    const status = item.status || item.Status || '';
+    const storyProgressStatus = item.storyProgressStatus ?? item.StoryProgressStatus ?? '';
+    const publishStatusMap = {
+        DRAFT: 'Lưu nháp',
+        PENDING_REVIEW: 'Chờ duyệt',
+        REJECTED: 'Bị từ chối',
+        PUBLISHED: 'Đã xuất bản',
+        HIDDEN: 'Đã ẩn',
+        COMPLETED: 'Hoàn thành',
+        CANCELLED: 'Đã hủy',
+    };
+    const progressStatusMap = {
+        ONGOING: 'Đang ra',
+        COMPLETED: 'Hoàn thành',
+        HIATUS: 'Tạm dừng',
+    };
+    const publishStatus = publishStatusMap[status.toUpperCase()] ?? status;
+    const progressStatusDisplay = progressStatusMap[storyProgressStatus.toUpperCase()] ?? progressStatusMap.ONGOING;
+    // Lấy thể loại từ story_categories (CategoryIds + CategoryNames)
+    const categoryIds = item.categoryIds ?? item.CategoryIds ?? [];
+    const categoryNamesStr = item.categoryNames ?? item.CategoryNames ?? '';
+    const categoryNamesArr = categoryNamesStr
+        ? String(categoryNamesStr).split(',').map((s) => s.trim()).filter(Boolean)
+        : [];
+    const categories = Array.isArray(categoryIds) && categoryIds.length > 0
+        ? categoryIds.map((id, i) => ({ id, name: categoryNamesArr[i] ?? '' })).filter((c) => c.id)
+        : categoryNamesArr.map((name) => ({ id: name, name })); // fallback: chỉ có tên
+    const updatedAt = item.updatedAt || item.UpdatedAt;
+    const lastUpdate = updatedAt
+        ? new Date(updatedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : '';
+    const coverPath = item.coverImage ?? item.CoverImage;
+    const summary = item.summary ?? item.Summary ?? '';
+    const ageRatingMap = { ALL: 'Phù hợp mọi lứa tuổi', '13+': 'Từ 13 tuổi', '16+': 'Từ 16 tuổi', '18+': 'Từ 18 tuổi' };
+    const rawAge = item.ageRating ?? item.AgeRating ?? 'ALL';
+    const ageRating = ageRatingMap[rawAge] ?? ageRatingMap.ALL;
+    return {
+        id: item.id ?? item.Id,
+        title: item.title ?? item.Title,
+        cover: coverPath ? resolveBackendUrl(coverPath) : '',
+        summary,
+        ageRating,
+        categories,
+        status: status.toLowerCase(),
+        chapters: item.totalChapters ?? item.TotalChapters ?? 0,
+        totalViews: Number(item.totalViews ?? item.TotalViews ?? 0),
+        follows: Number(item.totalFavorites ?? item.TotalFavorites ?? 0),
+        rating: item.avgRating ?? item.AvgRating ?? 0,
+        lastUpdate: lastUpdate || 'Chưa cập nhật',
+        publishStatus,
+        storyProgressStatus: storyProgressStatus || 'ONGOING',
+        progressStatusDisplay,
+    };
+}
 
 export function AuthorStoryManagement({ onBack }) {
-    const [activeView, setActiveView] = useState('stories'); // 'stories' | 'profile' | 'editInfo' | 'chapterList' | 'comments' | 'createStory' | 'editChapter' | 'addChapter'
+    const { user, logout } = useAuth();
+
+    // Get user display name
+    const getUserDisplayName = () => {
+        if (!user) return 'Người dùng';
+        return user.displayName ?? user.DisplayName ?? user.fullName ?? user.FullName ?? user.nickname ?? user.Nickname ?? user.userName ?? user.UserName ?? user.name ?? user.Name ?? 'Người dùng';
+    };
+
+    const userDisplayName = getUserDisplayName();
+    const [activeView, setActiveView] = useState('stories');
     const [activeMenu, setActiveMenu] = useState('stories');
     const [currentStory, setCurrentStory] = useState(null);
     const [currentChapter, setCurrentChapter] = useState(null);
+    const [stories, setStories] = useState([]);
+    const [storiesLoading, setStoriesLoading] = useState(true);
+    const [storiesError, setStoriesError] = useState(null);
 
-    const [stories, setStories] = useState([
-        {
-            id: 1,
-            title: 'Tu Tiên Chi Lộ: Hành Trình Vạn Năm',
-            cover: 'https://images.unsplash.com/photo-1589998059171-988d887df646?w=200&h=300&fit=crop',
-            storyType: 'long',
-            categories: ['Tiên hiệp', 'Huyền huyễn'],
-            status: 'published',
-            chapters: 450,
-            totalViews: 5200000,
-            follows: 8900,
-            rating: 4.8,
-            lastUpdate: 'Cập nhật 21:07 25/01/2026',
-            publishStatus: 'Đang ra',
-        },
-        {
-            id: 2,
-            title: 'Kiếm Đạo Độc Tôn',
-            cover: 'https://images.unsplash.com/photo-1612036801632-8e4cf4e2e1b7?w=200&h=300&fit=crop',
-            storyType: 'long',
-            categories: ['Kiếm hiệp'],
-            status: 'draft',
-            chapters: 25,
-            totalViews: 125000,
-            follows: 340,
-            rating: 4.5,
-            lastUpdate: 'Cập nhật 15:13 25/01/2026',
-            publishStatus: 'Lưu tạm',
-        },
-    ]);
+    const authorId = user?.id ?? user?.Id;
+
+    const loadStories = useCallback(() => {
+        if (!authorId) {
+            setStories([]);
+            setStoriesLoading(false);
+            return;
+        }
+        setStoriesLoading(true);
+        setStoriesError(null);
+        getStories({ authorId, page: 1, pageSize: 100 })
+            .then((res) => {
+                const items = res?.items ?? res?.Items ?? [];
+                setStories(items.map(mapStoryFromApi));
+            })
+            .catch((err) => {
+                setStoriesError(err?.message ?? 'Không tải được danh sách truyện');
+                setStories([]);
+            })
+            .finally(() => setStoriesLoading(false));
+    }, [authorId]);
+
+    useEffect(() => {
+        queueMicrotask(() => loadStories());
+    }, [loadStories]);
 
     // Mock comments data
     const mockComments = [
@@ -77,9 +145,16 @@ export function AuthorStoryManagement({ onBack }) {
         setActiveView('createStory');
     };
 
-    const handleEditStory = (story) => {
-        setCurrentStory(story);
-        setActiveView('editInfo');
+    const handleEditStory = async (story) => {
+        if (!story?.id) return;
+        try {
+            const fullStory = await getStoryById(story.id);
+            const mapped = mapStoryFromApi(fullStory);
+            setCurrentStory(mapped);
+            setActiveView('editInfo');
+        } catch (err) {
+            showToast(err?.response?.data?.message ?? err?.message ?? 'Không tải được thông tin truyện', 'error');
+        }
     };
 
     const handleViewChapters = (story) => {
@@ -98,16 +173,106 @@ export function AuthorStoryManagement({ onBack }) {
         setActiveView('addChapter');
     };
 
-    const handleEditChapter = (chapter) => {
-        setCurrentChapter(chapter);
-        setActiveView('editChapter');
+    const handleEditChapter = async (chapter) => {
+        const chapterId = chapter?.id ?? chapter?.Id;
+        if (!chapterId) {
+            showToast('Không tìm thấy ID chương', 'error');
+            return;
+        }
+
+        try {
+            // Gọi API để lấy đầy đủ thông tin chương
+            const fullChapter = await getChapterById(chapterId);
+
+            // Map dữ liệu từ API về format UI
+            const status = (fullChapter.status ?? fullChapter.Status ?? 'DRAFT').toUpperCase();
+            const accessTypeApi = (fullChapter.accessType ?? fullChapter.AccessType ?? 'FREE').toUpperCase();
+
+            const mappedChapter = {
+                id: fullChapter.id ?? fullChapter.Id,
+                number: (fullChapter.orderIndex ?? fullChapter.OrderIndex ?? 0) + 1,
+                title: fullChapter.title ?? fullChapter.Title ?? '',
+                content: fullChapter.content ?? fullChapter.Content ?? '',
+                status: status.toLowerCase(),
+                accessType: accessTypeApi === 'PAID' ? 'paid' : 'public',
+                price: fullChapter.coinPrice ?? fullChapter.CoinPrice ?? 0,
+            };
+
+            setCurrentChapter(mappedChapter);
+            setActiveView('editChapter');
+        } catch (error) {
+            const errorMessage = error?.response?.data?.message || error?.message || 'Không thể tải thông tin chương';
+            showToast(errorMessage, 'error');
+            console.error('Error loading chapter:', error);
+        }
     };
 
-    const handleSaveChapter = (chapterData) => {
-        // TODO: Save chapter to backend
-        console.log('Saving chapter:', chapterData);
-        setActiveView('chapterList');
-        setCurrentChapter(null);
+    const handleSaveChapter = async (chapterData) => {
+        const storyId = currentStory?.id ?? currentStory?.Id;
+        if (!storyId) {
+            showToast('Không tìm thấy truyện', 'error');
+            return;
+        }
+
+        try {
+            // Map status: 'draft' -> 'DRAFT', 'published' -> 'PENDING_REVIEW'
+            const apiStatus = chapterData.status === 'published' ? 'PENDING_REVIEW' : 'DRAFT';
+
+            // Map accessType: 'public' -> 'FREE', 'paid' -> 'PAID'
+            const apiAccessType = chapterData.accessType === 'paid' ? 'PAID' : 'FREE';
+
+            // Xác định là chỉnh sửa hay thêm mới dựa vào currentChapter hoặc chapterData.id
+            const isEditMode = currentChapter && (currentChapter.id || currentChapter.Id);
+
+            if (!isEditMode) {
+                // Thêm chương mới
+                const orderIndex = (chapterData.number || 1) - 1; // number bắt đầu từ 1, orderIndex từ 0
+
+                await createChapter({
+                    storyId,
+                    title: chapterData.title,
+                    content: chapterData.content || '',
+                    orderIndex,
+                    status: apiStatus,
+                    accessType: apiAccessType,
+                    coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
+                });
+
+                showToast(
+                    apiStatus === 'DRAFT' ? 'Đã lưu nháp chương mới' : 'Đã xuất bản chương mới',
+                    'success'
+                );
+            } else {
+                // Cập nhật chương hiện có
+                const chapterId = currentChapter.id ?? currentChapter.Id;
+                if (!chapterId) {
+                    showToast('Không tìm thấy ID chương', 'error');
+                    return;
+                }
+
+                await updateChapter(chapterId, {
+                    title: chapterData.title,
+                    content: chapterData.content || '',
+                    orderIndex: (chapterData.number || 1) - 1,
+                    status: apiStatus,
+                    accessType: apiAccessType,
+                    coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
+                });
+
+                showToast(
+                    apiStatus === 'DRAFT' ? 'Đã cập nhật chương (lưu nháp)' : 'Đã cập nhật chương (xuất bản)',
+                    'success'
+                );
+            }
+
+            // Quay về danh sách chương
+            setActiveView('chapterList');
+            setCurrentChapter(null);
+        } catch (error) {
+            const errorMessage = error?.response?.data?.message || error?.message || 'Không thể lưu chương';
+            showToast(errorMessage, 'error');
+            console.error('Error saving chapter:', error);
+        }
     };
 
     const handleDeleteStory = (storyId) => {
@@ -116,28 +281,91 @@ export function AuthorStoryManagement({ onBack }) {
         }
     };
 
-    const handleSaveStory = (storyData) => {
+    const handleSaveStory = async (storyData) => {
         if (currentStory) {
             setStories(stories.map(s => s.id === currentStory.id ? { ...s, ...storyData } : s));
-        } else {
-            const newStory = {
-                ...storyData,
-                id: Date.now(),
-                totalViews: 0,
-                follows: 0,
-                rating: 0,
-                lastUpdate: 'Vừa xong',
-            };
-            setStories([newStory, ...stories]);
+            setActiveView('stories');
+            setCurrentStory(null);
+            return;
         }
-        setActiveView('stories');
-        setCurrentStory(null);
+
+        const payload = {
+            title: storyData.title,
+            summary: storyData.note || '',
+            categoryIds: storyData.categoryIds || [],
+            ageRating: storyData.ageRating,
+            storyProgressStatus: storyData.storyProgressStatus || storyData.status,
+            coverImage: storyData.cover,
+        };
+        const created = await createStory(payload);
+        const storyId = created?.id ?? created?.Id;
+
+        const chaptersData = storyData.chaptersData || [];
+        for (let i = 0; i < chaptersData.length; i++) {
+            const ch = chaptersData[i];
+            await createChapter({
+                storyId,
+                title: ch.title,
+                content: ch.content || '',
+                orderIndex: i,
+                status: ch.status || 'DRAFT',
+                accessType: ch.accessType || 'FREE',
+                coinPrice: ch.coinPrice || 0,
+            });
+        }
+
+        if (!storyData.isDraft) {
+            await updateStory(storyId, {
+                title: storyData.title,
+                summary: storyData.note || '',
+                categoryIds: storyData.categoryIds || [],
+                status: 'PENDING_REVIEW',
+                ageRating: storyData.ageRating,
+                storyProgressStatus: storyData.storyProgressStatus,
+                coverImage: storyData.cover,
+            });
+        }
+
+        loadStories();
+        if (storyData.isDraft) {
+            setActiveView('stories');
+            setCurrentStory(null);
+        }
     };
 
-    const handleSaveInfo = (infoData) => {
-        setStories(stories.map(s => s.id === currentStory.id ? { ...s, ...infoData } : s));
-        setActiveView('stories');
-        setCurrentStory(null);
+    const { showToast, ToastContainer } = useToast();
+
+    const getCategoryId = (c) => (typeof c === 'object' && c?.id ? c.id : c);
+
+    const handleSaveInfo = async (infoData) => {
+        if (!currentStory?.id) return;
+        try {
+            const rawIds = (infoData.categories || []).map(getCategoryId).filter(Boolean);
+            const categoryIds = rawIds.filter((id) =>
+                /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/i.test(String(id))
+            );
+            if (categoryIds.length === 0) {
+                showToast('Vui lòng chọn ít nhất một thể loại', 'error');
+                return;
+            }
+            const storyPublishStatus = (currentStory.status || 'draft').toUpperCase();
+            await updateStory(currentStory.id, {
+                title: infoData.title,
+                summary: infoData.note ?? '',
+                categoryIds,
+                status: storyPublishStatus,
+                storyProgressStatus: infoData.status || infoData.publishStatus,
+                ageRating: infoData.ageRating,
+                coverImage: infoData.cover,
+            });
+            setStories(stories.map(s => s.id === currentStory.id ? { ...s, ...infoData, summary: infoData.note } : s));
+            setCurrentStory((prev) => prev ? { ...prev, ...infoData, summary: infoData.note } : null);
+            showToast('Đã lưu thay đổi thông tin truyện', 'success');
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.response?.data?.error ?? err?.message ?? 'Không thể lưu thay đổi';
+            showToast(msg, 'error');
+            throw err;
+        }
     };
 
     // Render different views
@@ -156,14 +384,17 @@ export function AuthorStoryManagement({ onBack }) {
 
     if (activeView === 'editInfo') {
         return (
-            <StoryInfoEditor
-                story={currentStory}
-                onSave={handleSaveInfo}
-                onCancel={() => {
-                    setActiveView('stories');
-                    setCurrentStory(null);
-                }}
-            />
+            <>
+                <StoryInfoEditor
+                    story={currentStory}
+                    onSave={handleSaveInfo}
+                    onCancel={() => {
+                        setActiveView('stories');
+                        setCurrentStory(null);
+                    }}
+                />
+                <ToastContainer />
+            </>
         );
     }
 
@@ -185,7 +416,7 @@ export function AuthorStoryManagement({ onBack }) {
         return (
             <ChapterEditorPage
                 story={currentStory}
-                chapter={currentChapter}
+                chapter={activeView === 'editChapter' ? currentChapter : null}
                 onSave={handleSaveChapter}
                 onCancel={() => {
                     setActiveView('chapterList');
@@ -213,14 +444,77 @@ export function AuthorStoryManagement({ onBack }) {
             <Header />
             <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5', display: 'flex' }}>
                 {/* Sidebar */}
-                <div style={{ width: '250px', backgroundColor: '#ffffff', borderRight: '1px solid #e0e0e0', padding: '2rem 0' }}>
-                    <div style={{ padding: '0 1.5rem 1.5rem', borderBottom: '1px solid #e0e0e0' }}>
-                        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', margin: '0 0 1rem 0' }}>
-                            Quyền Đình
-                        </h2>
+                <div style={{
+                    width: '280px',
+                    backgroundColor: '#ffffff',
+                    borderRight: '1px solid #e0e0e0',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    height: '100vh',
+                    position: 'sticky',
+                    top: 0
+                }}>
+                    {/* User Profile Section */}
+                    <div style={{
+                        padding: '2rem 1.5rem',
+                        borderBottom: '1px solid #e0e0e0',
+                        backgroundColor: '#f9fafb'
+                    }}>
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '1rem',
+                            marginBottom: '1rem'
+                        }}>
+                            <div style={{
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '50%',
+                                backgroundColor: '#13ec5b',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#ffffff',
+                                fontSize: '1.5rem',
+                                fontWeight: 'bold',
+                                flexShrink: 0
+                            }}>
+                                {userDisplayName.charAt(0).toUpperCase()}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                                <h2 style={{
+                                    fontSize: '1rem',
+                                    fontWeight: 'bold',
+                                    color: '#333333',
+                                    margin: '0 0 0.25rem 0',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                }}>
+                                    {userDisplayName}
+                                </h2>
+                                <p style={{
+                                    fontSize: '0.75rem',
+                                    color: '#6b7280',
+                                    margin: 0,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                }}>
+                                    Tác giả
+                                </p>
+                            </div>
+                        </div>
                     </div>
 
-                    <nav style={{ marginTop: '1rem' }}>
+                    {/* Navigation Menu */}
+                    <nav style={{
+                        flex: 1,
+                        padding: '1rem 0',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.25rem'
+                    }}>
                         <button
                             onClick={() => {
                                 setActiveMenu('profile');
@@ -228,22 +522,33 @@ export function AuthorStoryManagement({ onBack }) {
                             }}
                             style={{
                                 width: '100%',
-                                padding: '0.75rem 1.5rem',
-                                backgroundColor: activeMenu === 'profile' ? '#f5f5f5' : 'transparent',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'profile' ? '#f0fdf4' : 'transparent',
                                 border: 'none',
+                                borderLeft: activeMenu === 'profile' ? '3px solid #13ec5b' : '3px solid transparent',
                                 textAlign: 'left',
                                 fontSize: '0.875rem',
-                                color: '#333333',
+                                fontWeight: activeMenu === 'profile' ? 600 : 500,
+                                color: activeMenu === 'profile' ? '#13ec5b' : '#333333',
                                 cursor: 'pointer',
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '0.75rem',
-                                transition: 'background-color 0.2s'
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'profile') {
+                                    e.currentTarget.style.backgroundColor = '#f9fafb';
+                                }
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'profile') {
+                                    e.currentTarget.style.backgroundColor = 'transparent';
+                                }
                             }}
                         >
-                            <User style={{ width: '18px', height: '18px' }} />
+                            <User style={{ width: '20px', height: '20px' }} />
                             Hồ sơ tác giả
-                            <ChevronRight style={{ width: '16px', height: '16px', marginLeft: 'auto' }} />
                         </button>
 
                         <button
@@ -253,46 +558,82 @@ export function AuthorStoryManagement({ onBack }) {
                             }}
                             style={{
                                 width: '100%',
-                                padding: '0.75rem 1.5rem',
-                                backgroundColor: activeMenu === 'stories' ? '#f5f5f5' : 'transparent',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'stories' ? '#f0fdf4' : 'transparent',
                                 border: 'none',
+                                borderLeft: activeMenu === 'stories' ? '3px solid #13ec5b' : '3px solid transparent',
                                 textAlign: 'left',
                                 fontSize: '0.875rem',
-                                color: '#333333',
+                                fontWeight: activeMenu === 'stories' ? 600 : 500,
+                                color: activeMenu === 'stories' ? '#13ec5b' : '#333333',
                                 cursor: 'pointer',
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '0.75rem',
-                                transition: 'background-color 0.2s'
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'stories') {
+                                    e.currentTarget.style.backgroundColor = '#f9fafb';
+                                }
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'stories') {
+                                    e.currentTarget.style.backgroundColor = 'transparent';
+                                }
                             }}
                         >
-                            <Book style={{ width: '18px', height: '18px' }} />
+                            <Book style={{ width: '20px', height: '20px' }} />
                             Truyện của tôi
-                            <ChevronRight style={{ width: '16px', height: '16px', marginLeft: 'auto' }} />
                         </button>
+                    </nav>
 
+                    {/* Logout Section */}
+                    <div style={{
+                        padding: '1rem 1.5rem',
+                        borderTop: '1px solid #e0e0e0',
+                        backgroundColor: '#f9fafb'
+                    }}>
                         <button
-                            onClick={onBack}
+                            onClick={async () => {
+                                try {
+                                    await logout();
+                                    onBack();
+                                } catch (error) {
+                                    console.error('Logout error:', error);
+                                    onBack();
+                                }
+                            }}
                             style={{
                                 width: '100%',
-                                padding: '0.75rem 1.5rem',
+                                padding: '0.875rem 1.5rem',
                                 backgroundColor: 'transparent',
-                                border: 'none',
-                                textAlign: 'left',
+                                border: '2px solid #ef4444',
+                                borderRadius: '8px',
+                                textAlign: 'center',
                                 fontSize: '0.875rem',
-                                color: '#333333',
+                                fontWeight: 600,
+                                color: '#ef4444',
                                 cursor: 'pointer',
                                 display: 'flex',
                                 alignItems: 'center',
+                                justifyContent: 'center',
                                 gap: '0.75rem',
-                                transition: 'background-color 0.2s'
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = '#fee2e2';
+                                e.currentTarget.style.borderColor = '#dc2626';
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = 'transparent';
+                                e.currentTarget.style.borderColor = '#ef4444';
                             }}
                         >
                             <LogOut style={{ width: '18px', height: '18px' }} />
                             Đăng xuất
-                            <ChevronRight style={{ width: '16px', height: '16px', marginLeft: 'auto' }} />
                         </button>
-                    </nav>
+                    </div>
                 </div>
 
                 {/* Main Content */}
@@ -383,7 +724,7 @@ export function AuthorStoryManagement({ onBack }) {
                                 <div style={{ display: 'grid', gap: '1rem' }}>
                                     <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1rem', alignItems: 'center' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Tên hiển thị</div>
-                                        <div style={{ fontSize: '0.875rem', color: '#333333', fontWeight: 500 }}>Quyền Đình</div>
+                                        <div style={{ fontSize: '0.875rem', color: '#333333', fontWeight: 500 }}>{userDisplayName}</div>
                                     </div>
                                     <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1rem', alignItems: 'center' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Giới thiệu</div>
@@ -431,7 +772,33 @@ export function AuthorStoryManagement({ onBack }) {
                             </div>
 
                             {/* Stories List */}
-                            {stories.length === 0 ? (
+                            {storiesLoading ? (
+                                <div style={{
+                                    backgroundColor: '#ffffff',
+                                    borderRadius: '8px',
+                                    padding: '3rem',
+                                    textAlign: 'center',
+                                    border: '1px solid #e0e0e0'
+                                }}>
+                                    <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>Đang tải danh sách truyện...</p>
+                                </div>
+                            ) : storiesError ? (
+                                <div style={{
+                                    backgroundColor: '#ffffff',
+                                    borderRadius: '8px',
+                                    padding: '3rem',
+                                    textAlign: 'center',
+                                    border: '1px solid #e0e0e0'
+                                }}>
+                                    <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '1rem' }}>{storiesError}</p>
+                                    <button
+                                        onClick={() => loadStories()}
+                                        style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer' }}
+                                    >
+                                        Thử lại
+                                    </button>
+                                </div>
+                            ) : stories.length === 0 ? (
                                 <div style={{
                                     backgroundColor: '#ffffff',
                                     borderRadius: '8px',
@@ -478,7 +845,7 @@ export function AuthorStoryManagement({ onBack }) {
                                         >
                                             {/* Cover */}
                                             <img
-                                                src={story.cover}
+                                                src={story.cover || 'https://via.placeholder.com/80x107?text=No+Cover'}
                                                 alt={story.title}
                                                 style={{
                                                     width: '80px',
@@ -510,10 +877,10 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </div>
                                                     <div style={{
                                                         padding: '0.25rem 0.75rem',
-                                                        backgroundColor: story.status === 'published' ? '#d1fae5' : '#fef3c7',
+                                                        backgroundColor: ['published', 'completed'].includes(story.status) ? '#d1fae5' : '#fef3c7',
                                                         borderRadius: '4px',
                                                         fontSize: '0.75rem',
-                                                        color: story.status === 'published' ? '#065f46' : '#92400e',
+                                                        color: ['published', 'completed'].includes(story.status) ? '#065f46' : '#92400e',
                                                         marginLeft: '1rem',
                                                         flexShrink: 0
                                                     }}>
@@ -579,12 +946,12 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </div>
                                                     <div style={{
                                                         padding: '0.25rem 0.75rem',
-                                                        backgroundColor: story.status === 'draft' ? '#fef3c7' : '#d1fae5',
+                                                        backgroundColor: (story.status === 'published' || story.status === 'completed') ? '#d1fae5' : '#fef3c7',
                                                         borderRadius: '4px',
                                                         fontSize: '0.75rem',
-                                                        color: story.status === 'draft' ? '#92400e' : '#065f46'
+                                                        color: (story.status === 'published' || story.status === 'completed') ? '#065f46' : '#92400e'
                                                     }}>
-                                                        {story.status === 'draft' ? 'Lưu tạm' : 'Xuất bản'}
+                                                        {story.publishStatus}
                                                     </div>
                                                     {story.status === 'draft' && (
                                                         <div style={{ fontSize: '0.75rem', color: '#ef4444' }}>

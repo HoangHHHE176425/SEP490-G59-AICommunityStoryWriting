@@ -5,6 +5,8 @@ import { ChapterSidebar } from '../../components/chapter-detail/ChapterSidebar';
 import { ChapterContent } from '../../components/chapter-detail/ChapterContent';
 import { ChapterNavigation } from '../../components/chapter-detail/ChapterNavigation';
 import { ChapterComments } from '../../components/chapter-detail/ChapterComments';
+import { Header } from '../../components/homepage/Header';
+import { Footer } from '../../components/homepage/Footer';
 
 export function ChapterReader({ onBack, onNavigateToStory }) {
     const [fontSize, setFontSize] = useState(18);
@@ -152,6 +154,9 @@ Với quyết tâm bất diệt, Phương Viễn bay về phía chân trời xa 
 
     return (
         <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
+            {/* Header */}
+            <Header />
+
             {/* Top Navigation Bar */}
             <ChapterNavBar
                 story={story}
@@ -214,6 +219,9 @@ Với quyết tâm bất diệt, Phương Viễn bay về phía chân trời xa 
                 comments={comments}
                 onReportComment={(id) => console.log('Report comment:', id)}
             />
+
+            {/* Footer */}
+            <Footer />
         </div>
     );
 }
