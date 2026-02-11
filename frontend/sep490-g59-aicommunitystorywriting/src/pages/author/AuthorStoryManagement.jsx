@@ -8,7 +8,7 @@ import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
 import { createStory, updateStory, getStories, getStoryById } from '../../api/story/storyApi';
-import { createChapter } from '../../api/chapter/chapterApi';
+import { createChapter, updateChapter } from '../../api/chapter/chapterApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -170,11 +170,69 @@ export function AuthorStoryManagement({ onBack }) {
         setActiveView('editChapter');
     };
 
-    const handleSaveChapter = (chapterData) => {
-        // TODO: Save chapter to backend
-        console.log('Saving chapter:', chapterData);
-        setActiveView('chapterList');
-        setCurrentChapter(null);
+    const handleSaveChapter = async (chapterData) => {
+        const storyId = currentStory?.id ?? currentStory?.Id;
+        if (!storyId) {
+            alert('Không tìm thấy truyện');
+            return;
+        }
+
+        try {
+            // Map status: 'draft' -> 'DRAFT', 'published' -> 'PENDING_REVIEW'
+            const apiStatus = chapterData.status === 'published' ? 'PENDING_REVIEW' : 'DRAFT';
+            
+            // Map accessType: 'public' -> 'FREE', 'paid' -> 'PAID'
+            const apiAccessType = chapterData.accessType === 'paid' ? 'PAID' : 'FREE';
+            
+            if (!currentChapter) {
+                // Thêm chương mới
+                const orderIndex = (chapterData.number || 1) - 1; // number bắt đầu từ 1, orderIndex từ 0
+                
+                await createChapter({
+                    storyId,
+                    title: chapterData.title,
+                    content: chapterData.content || '',
+                    orderIndex,
+                    status: apiStatus,
+                    accessType: apiAccessType,
+                    coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
+                });
+                
+                showToast(
+                    apiStatus === 'DRAFT' ? 'Đã lưu nháp chương mới' : 'Đã xuất bản chương mới',
+                    'success'
+                );
+            } else {
+                // Cập nhật chương hiện có
+                const chapterId = currentChapter.id ?? currentChapter.Id;
+                if (!chapterId) {
+                    alert('Không tìm thấy ID chương');
+                    return;
+                }
+                
+                await updateChapter(chapterId, {
+                    title: chapterData.title,
+                    content: chapterData.content || '',
+                    orderIndex: (chapterData.number || 1) - 1,
+                    status: apiStatus,
+                    accessType: apiAccessType,
+                    coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
+                });
+                
+                showToast(
+                    apiStatus === 'DRAFT' ? 'Đã cập nhật chương (lưu nháp)' : 'Đã cập nhật chương (xuất bản)',
+                    'success'
+                );
+            }
+            
+            // Quay về danh sách chương
+            setActiveView('chapterList');
+            setCurrentChapter(null);
+        } catch (error) {
+            const errorMessage = error?.response?.data?.message || error?.message || 'Không thể lưu chương';
+            showToast(errorMessage, 'error');
+            console.error('Error saving chapter:', error);
+        }
     };
 
     const handleDeleteStory = (storyId) => {
@@ -316,7 +374,7 @@ export function AuthorStoryManagement({ onBack }) {
         return (
             <ChapterEditorPage
                 story={currentStory}
-                chapter={currentChapter}
+                chapter={activeView === 'editChapter' ? currentChapter : null}
                 onSave={handleSaveChapter}
                 onCancel={() => {
                     setActiveView('chapterList');

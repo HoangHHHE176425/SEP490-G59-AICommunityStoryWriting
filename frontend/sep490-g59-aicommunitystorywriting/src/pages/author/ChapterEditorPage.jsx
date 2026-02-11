@@ -85,15 +85,18 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
         }
 
         setIsSaving(true);
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        onSave({
-            ...chapterData,
-            status: saveStatus,
-            updatedAt: new Date().toLocaleString('vi-VN'),
-        });
-        setIsSaving(false);
+        try {
+            await onSave({
+                ...chapterData,
+                status: saveStatus,
+                updatedAt: new Date().toLocaleString('vi-VN'),
+            });
+        } catch (error) {
+            // Error handling is done in parent component
+            console.error('Error saving chapter:', error);
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     return (

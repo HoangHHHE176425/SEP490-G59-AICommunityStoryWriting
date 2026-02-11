@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Eye, MessageSquare, Heart, Book } from 'lucide-react';
+import { Plus, Eye, MessageSquare, Book } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getChaptersByStoryId } from '../../api/chapter/chapterApi';
@@ -20,6 +20,9 @@ function mapChapterFromApi(item) {
         : '';
     const status = (item.status ?? item.Status ?? 'DRAFT').toUpperCase();
     const statusDisplay = CHAPTER_STATUS_MAP[status] ?? status;
+    const accessTypeApi = (item.accessType ?? item.AccessType ?? 'FREE').toUpperCase();
+    const accessType = accessTypeApi === 'PAID' ? 'paid' : 'public';
+    const price = item.coinPrice ?? item.CoinPrice ?? 0;
     return {
         id: item.id ?? item.Id,
         number: (item.orderIndex ?? item.OrderIndex ?? 0) + 1,
@@ -27,6 +30,8 @@ function mapChapterFromApi(item) {
         content: '',
         status: status.toLowerCase(),
         statusDisplay,
+        accessType,
+        price,
         views: 0,
         comments: 0,
         likes: 0,
@@ -38,6 +43,23 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     const [chapters, setChapters] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+
+    const loadChapters = () => {
+        const storyId = story?.id ?? story?.Id;
+        if (!storyId) return;
+        setLoading(true);
+        setError(null);
+        getChaptersByStoryId(storyId)
+            .then((res) => {
+                const items = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
+                setChapters(items.map((item) => ({ ...mapChapterFromApi(item), content: item.content ?? item.Content ?? '' })));
+            })
+            .catch((err) => {
+                setError(err?.message ?? 'Không tải được danh sách chương');
+                setChapters([]);
+            })
+            .finally(() => setLoading(false));
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -53,7 +75,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
             getChaptersByStoryId(storyId)
                 .then((res) => {
                     const items = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
-                    if (!cancelled) setChapters(items.map(mapChapterFromApi));
+                    if (!cancelled) setChapters(items.map((item) => ({ ...mapChapterFromApi(item), content: item.content ?? item.Content ?? '' })));
                 })
                 .catch((err) => {
                     if (!cancelled) {
@@ -79,276 +101,265 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
             <Header />
             <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5', padding: '2rem' }}>
                 <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-                    {/* Header */}
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        marginBottom: '2rem'
-                    }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                            <Book style={{ width: '24px', height: '24px', color: '#13ec5b' }} />
-                            <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>
-                                Danh sách chương - Truyện "{story?.title || 'Untitled'}"
-                            </h2>
-                        </div>
-                        <button
-                            onClick={onAddChapter}
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                padding: '0.625rem 1.5rem',
-                                backgroundColor: '#13ec5b',
-                                border: 'none',
-                                borderRadius: '9999px',
-                                fontSize: '0.875rem',
-                                fontWeight: 700,
-                                color: '#ffffff',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s'
-                            }}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.backgroundColor = '#10d452';
-                                e.currentTarget.style.transform = 'translateY(-2px)';
-                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.3)';
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.backgroundColor = '#13ec5b';
-                                e.currentTarget.style.transform = 'translateY(0)';
-                                e.currentTarget.style.boxShadow = 'none';
-                            }}
-                        >
-                            <Plus style={{ width: '16px', height: '16px' }} />
-                            Thêm chương mới
-                        </button>
-                    </div>
-
-                    {/* Chapter Table */}
-                    <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e0e0e0', overflow: 'hidden' }}>
-                        {/* Table Header */}
+                    <>
+                        {/* Header */}
                         <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: '100px 1fr 200px',
-                            padding: '1rem 1.5rem',
-                            backgroundColor: '#f9fafb',
-                            borderBottom: '1px solid #e0e0e0',
-                            fontWeight: 600,
-                            fontSize: '0.875rem',
-                            color: '#6b7280'
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            marginBottom: '2rem'
                         }}>
-                            <div>Thứ tự</div>
-                            <div>Tên chương</div>
-                            <div style={{ textAlign: 'center' }}>Hành động</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <Book style={{ width: '24px', height: '24px', color: '#13ec5b' }} />
+                                <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>
+                                    Danh sách chương - Truyện "{story?.title || 'Untitled'}"
+                                </h2>
+                            </div>
+                            <button
+                                onClick={() => onAddChapter?.(story)}
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    padding: '0.625rem 1.5rem',
+                                    backgroundColor: '#13ec5b',
+                                    border: 'none',
+                                    borderRadius: '9999px',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 700,
+                                    color: '#ffffff',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#10d452';
+                                    e.currentTarget.style.transform = 'translateY(-2px)';
+                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.3)';
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#13ec5b';
+                                    e.currentTarget.style.transform = 'translateY(0)';
+                                    e.currentTarget.style.boxShadow = 'none';
+                                }}
+                            >
+                                <Plus style={{ width: '16px', height: '16px' }} />
+                                Thêm chương mới
+                            </button>
                         </div>
 
-                        {/* Table Body */}
-                        {loading ? (
-                            <div style={{ padding: '3rem', textAlign: 'center' }}>
-                                <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>Đang tải danh sách chương...</p>
-                            </div>
-                        ) : error ? (
-                            <div style={{ padding: '3rem', textAlign: 'center' }}>
-                                <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '1rem' }}>{error}</p>
-                                <button
-                                    onClick={() => {
-                                        const sid = story?.id ?? story?.Id;
-                                        if (sid) {
-                                            setLoading(true);
-                                            setError(null);
-                                            getChaptersByStoryId(sid)
-                                                .then((res) => {
-                                                    const items = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
-                                                    setChapters(items.map(mapChapterFromApi));
-                                                })
-                                                .catch((e) => setError(e?.message ?? 'Lỗi tải danh sách'))
-                                                .finally(() => setLoading(false));
-                                        }
-                                    }}
-                                    style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer' }}
-                                >
-                                    Thử lại
-                                </button>
-                            </div>
-                        ) : chapters.length === 0 ? (
+                        {/* Chapter Table */}
+                        <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', border: '1px solid #e0e0e0', overflow: 'hidden' }}>
+                            {/* Table Header */}
                             <div style={{
-                                padding: '3rem',
-                                textAlign: 'center'
-                            }}>
-                                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📖</div>
-                                <h3 style={{ fontSize: '1.125rem', color: '#6b7280', marginBottom: '0.5rem' }}>
-                                    Chưa có chương nào
-                                </h3>
-                                <p style={{ fontSize: '0.875rem', color: '#9ca3af', marginBottom: '1.5rem' }}>
-                                    Bắt đầu viết chương đầu tiên cho truyện của bạn
-                                </p>
-                                <button
-                                    onClick={onAddChapter}
-                                    style={{
-                                        padding: '0.75rem 1.5rem',
-                                        backgroundColor: '#13ec5b',
-                                        border: 'none',
-                                        borderRadius: '9999px',
-                                        fontSize: '0.875rem',
-                                        fontWeight: 700,
-                                        color: '#ffffff',
-                                        cursor: 'pointer'
-                                    }}
-                                >
-                                    Thêm chương mới
-                                </button>
-                            </div>
-                        ) : (
-                            chapters.map((chapter, index) => (
-                                <div
-                                    key={chapter.id}
-                                    style={{
-                                        display: 'grid',
-                                        gridTemplateColumns: '100px 1fr 200px',
-                                        padding: '1.5rem',
-                                        borderBottom: index < chapters.length - 1 ? '1px solid #f3f4f6' : 'none',
-                                        transition: 'background-color 0.2s'
-                                    }}
-                                    onMouseEnter={(e) => {
-                                        e.currentTarget.style.backgroundColor = '#fafafa';
-                                    }}
-                                    onMouseLeave={(e) => {
-                                        e.currentTarget.style.backgroundColor = '#ffffff';
-                                    }}
-                                >
-                                    {/* Order */}
-                                    <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-                                        <span style={{ fontSize: '1rem', fontWeight: 600, color: '#333333' }}>
-                                            Chương {chapter.number}
-                                        </span>
-                                    </div>
-
-                                    {/* Title and Info */}
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                        <div style={{ fontSize: '1rem', fontWeight: 500, color: '#333333' }}>
-                                            {chapter.title}
-                                        </div>
-
-                                        {/* Status Badge and Time */}
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                            <span style={{
-                                                padding: '0.25rem 0.75rem',
-                                                backgroundColor: chapter.status === 'published' ? '#d1fae5' : '#fef3c7',
-                                                borderRadius: '4px',
-                                                fontSize: '0.75rem',
-                                                fontWeight: 600,
-                                                color: chapter.status === 'published' ? '#065f46' : '#92400e'
-                                            }}>
-                                                {chapter.statusDisplay}
-                                            </span>
-                                            <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
-                                                Cập nhật {chapter.updatedAt}
-                                            </span>
-                                        </div>
-
-                                        {/* Stats */}
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                                                <Eye style={{ width: '14px', height: '14px', color: '#6b7280' }} />
-                                                <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.views}</span>
-                                            </div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                                                <MessageSquare style={{ width: '14px', height: '14px', color: '#6b7280' }} />
-                                                <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.comments}</span>
-                                            </div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                                                <span style={{ fontSize: '0.875rem' }}>👍</span>
-                                                <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.likes}</span>
-                                            </div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                                                <Book style={{ width: '14px', height: '14px', color: '#6b7280' }} />
-                                                <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.views}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Actions */}
-                                    <div style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: '0.75rem'
-                                    }}>
-                                        <button
-                                            onClick={() => onEditChapter(chapter)}
-                                            style={{
-                                                padding: '0.5rem 1.25rem',
-                                                backgroundColor: '#e6fff0',
-                                                border: '1px solid #13ec5b',
-                                                borderRadius: '9999px',
-                                                fontSize: '0.875rem',
-                                                fontWeight: 600,
-                                                color: '#13ec5b',
-                                                cursor: 'pointer',
-                                                transition: 'all 0.2s'
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.backgroundColor = '#d1fae5';
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.backgroundColor = '#e6fff0';
-                                            }}
-                                        >
-                                            Chỉnh sửa
-                                        </button>
-                                        <button
-                                            onClick={() => handleDeleteChapter(chapter.id)}
-                                            style={{
-                                                padding: '0.5rem 1.25rem',
-                                                backgroundColor: '#fef2f2',
-                                                border: '1px solid #ef4444',
-                                                borderRadius: '9999px',
-                                                fontSize: '0.875rem',
-                                                fontWeight: 600,
-                                                color: '#ef4444',
-                                                cursor: 'pointer',
-                                                transition: 'all 0.2s'
-                                            }}
-                                            onMouseEnter={(e) => {
-                                                e.currentTarget.style.backgroundColor = '#fee2e2';
-                                            }}
-                                            onMouseLeave={(e) => {
-                                                e.currentTarget.style.backgroundColor = '#fef2f2';
-                                            }}
-                                        >
-                                            Xóa
-                                        </button>
-                                    </div>
-                                </div>
-                            ))
-                        )}
-                    </div>
-
-                    {/* Back Button */}
-                    <div style={{ marginTop: '2rem' }}>
-                        <button
-                            onClick={onBack}
-                            style={{
-                                padding: '0.75rem 2rem',
-                                backgroundColor: '#f1f5f9',
-                                border: 'none',
-                                borderRadius: '9999px',
-                                fontSize: '0.875rem',
+                                display: 'grid',
+                                gridTemplateColumns: '100px 1fr 200px',
+                                padding: '1rem 1.5rem',
+                                backgroundColor: '#f9fafb',
+                                borderBottom: '1px solid #e0e0e0',
                                 fontWeight: 600,
-                                color: '#333333',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s'
-                            }}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.backgroundColor = '#e2e8f0';
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.backgroundColor = '#f1f5f9';
-                            }}
-                        >
-                            Quay lại
-                        </button>
-                    </div>
+                                fontSize: '0.875rem',
+                                color: '#6b7280'
+                            }}>
+                                <div>Thứ tự</div>
+                                <div>Tên chương</div>
+                                <div style={{ textAlign: 'center' }}>Hành động</div>
+                            </div>
+
+                            {/* Table Body */}
+                            {loading ? (
+                                <div style={{ padding: '3rem', textAlign: 'center' }}>
+                                    <p style={{ fontSize: '0.875rem', color: '#6b7280' }}>Đang tải danh sách chương...</p>
+                                </div>
+                            ) : error ? (
+                                <div style={{ padding: '3rem', textAlign: 'center' }}>
+                                    <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '1rem' }}>{error}</p>
+                                    <button
+                                        onClick={() => loadChapters()}
+                                        style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer' }}
+                                    >
+                                        Thử lại
+                                    </button>
+                                </div>
+                            ) : chapters.length === 0 ? (
+                                <div style={{
+                                    padding: '3rem',
+                                    textAlign: 'center'
+                                }}>
+                                    <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📖</div>
+                                    <h3 style={{ fontSize: '1.125rem', color: '#6b7280', marginBottom: '0.5rem' }}>
+                                        Chưa có chương nào
+                                    </h3>
+                                    <p style={{ fontSize: '0.875rem', color: '#9ca3af', marginBottom: '1.5rem' }}>
+                                        Bắt đầu viết chương đầu tiên cho truyện của bạn
+                                    </p>
+                                    <button
+                                        onClick={() => onAddChapter?.(story)}
+                                        style={{
+                                            padding: '0.75rem 1.5rem',
+                                            backgroundColor: '#13ec5b',
+                                            border: 'none',
+                                            borderRadius: '9999px',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 700,
+                                            color: '#ffffff',
+                                            cursor: 'pointer'
+                                        }}
+                                    >
+                                        Thêm chương mới
+                                    </button>
+                                </div>
+                            ) : (
+                                chapters.map((chapter, index) => (
+                                    <div
+                                        key={chapter.id}
+                                        style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: '100px 1fr 200px',
+                                            padding: '1.5rem',
+                                            borderBottom: index < chapters.length - 1 ? '1px solid #f3f4f6' : 'none',
+                                            transition: 'background-color 0.2s'
+                                        }}
+                                        onMouseEnter={(e) => {
+                                            e.currentTarget.style.backgroundColor = '#fafafa';
+                                        }}
+                                        onMouseLeave={(e) => {
+                                            e.currentTarget.style.backgroundColor = '#ffffff';
+                                        }}
+                                    >
+                                        {/* Order */}
+                                        <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                                            <span style={{ fontSize: '1rem', fontWeight: 600, color: '#333333' }}>
+                                                Chương {chapter.number}
+                                            </span>
+                                        </div>
+
+                                        {/* Title and Info */}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                            <div style={{ fontSize: '1rem', fontWeight: 500, color: '#333333' }}>
+                                                {chapter.title}
+                                            </div>
+
+                                            {/* Status Badge and Time */}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                <span style={{
+                                                    padding: '0.25rem 0.75rem',
+                                                    backgroundColor: chapter.status === 'published' ? '#d1fae5' : '#fef3c7',
+                                                    borderRadius: '4px',
+                                                    fontSize: '0.75rem',
+                                                    fontWeight: 600,
+                                                    color: chapter.status === 'published' ? '#065f46' : '#92400e'
+                                                }}>
+                                                    {chapter.statusDisplay}
+                                                </span>
+                                                <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                                                    Cập nhật {chapter.updatedAt}
+                                                </span>
+                                            </div>
+
+                                            {/* Stats */}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                                                    <Eye style={{ width: '14px', height: '14px', color: '#6b7280' }} />
+                                                    <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.views}</span>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                                                    <MessageSquare style={{ width: '14px', height: '14px', color: '#6b7280' }} />
+                                                    <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.comments}</span>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                                                    <span style={{ fontSize: '0.875rem' }}>👍</span>
+                                                    <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.likes}</span>
+                                                </div>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                                                    <Book style={{ width: '14px', height: '14px', color: '#6b7280' }} />
+                                                    <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.views}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Actions */}
+                                        <div style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: '0.75rem'
+                                        }}>
+                                            <button
+                                                onClick={() => onEditChapter(chapter)}
+                                                style={{
+                                                    padding: '0.5rem 1.25rem',
+                                                    backgroundColor: '#e6fff0',
+                                                    border: '1px solid #13ec5b',
+                                                    borderRadius: '9999px',
+                                                    fontSize: '0.875rem',
+                                                    fontWeight: 600,
+                                                    color: '#13ec5b',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.2s'
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                    e.currentTarget.style.backgroundColor = '#d1fae5';
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    e.currentTarget.style.backgroundColor = '#e6fff0';
+                                                }}
+                                            >
+                                                Chỉnh sửa
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteChapter(chapter.id)}
+                                                style={{
+                                                    padding: '0.5rem 1.25rem',
+                                                    backgroundColor: '#fef2f2',
+                                                    border: '1px solid #ef4444',
+                                                    borderRadius: '9999px',
+                                                    fontSize: '0.875rem',
+                                                    fontWeight: 600,
+                                                    color: '#ef4444',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.2s'
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                    e.currentTarget.style.backgroundColor = '#fee2e2';
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    e.currentTarget.style.backgroundColor = '#fef2f2';
+                                                }}
+                                            >
+                                                Xóa
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        {/* Back Button */}
+                        <div style={{ marginTop: '2rem' }}>
+                            <button
+                                onClick={onBack}
+                                style={{
+                                    padding: '0.75rem 2rem',
+                                    backgroundColor: '#f1f5f9',
+                                    border: 'none',
+                                    borderRadius: '9999px',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#333333',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#e2e8f0';
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#f1f5f9';
+                                }}
+                            >
+                                Quay lại
+                            </button>
+                        </div>
+                    </>
                 </div>
             </div>
             <Footer />
