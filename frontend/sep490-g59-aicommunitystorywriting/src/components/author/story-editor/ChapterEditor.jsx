@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Sparkles, Settings, X } from 'lucide-react';
+import { Sparkles, Settings, X, Lock, Unlock, Coins } from 'lucide-react';
 
 export function ChapterEditor({ chapter, onChange }) {
     const [showSettings, setShowSettings] = useState(false);
@@ -55,6 +55,141 @@ export function ChapterEditor({ chapter, onChange }) {
                             outline: 'none'
                         }}
                     />
+                </div>
+
+                {/* Chế độ sáng tác (Public / Paid) */}
+                <div>
+                    <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.75rem' }}>
+                        Chế độ sáng tác <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <div style={{ display: 'grid', gridTemplateColumns: (chapter.accessType === 'paid' ? '1fr 1fr 200px' : '1fr 1fr'), gap: '1rem' }}>
+                        <button
+                            type="button"
+                            onClick={() => { onChange('accessType', 'public'); onChange('price', 0); }}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                padding: '1rem',
+                                border: `2px solid ${chapter.accessType === 'public' ? '#13ec5b' : '#e5e7eb'}`,
+                                borderRadius: '8px',
+                                backgroundColor: chapter.accessType === 'public' ? 'rgba(19, 236, 91, 0.05)' : '#ffffff',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                                textAlign: 'left',
+                            }}
+                        >
+                            <div style={{
+                                width: '40px',
+                                height: '40px',
+                                borderRadius: '50%',
+                                backgroundColor: chapter.accessType === 'public' ? '#13ec5b' : '#f3f4f6',
+                                color: chapter.accessType === 'public' ? '#ffffff' : '#6b7280',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                            }}>
+                                <Unlock style={{ width: '20px', height: '20px' }} />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '0.875rem', fontWeight: 600, color: chapter.accessType === 'public' ? '#13ec5b' : '#333333' }}>
+                                    Miễn phí (Public)
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                    Người đọc có thể đọc miễn phí
+                                </div>
+                            </div>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => onChange('accessType', 'paid')}
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                padding: '1rem',
+                                border: `2px solid ${chapter.accessType === 'paid' ? '#f59e0b' : '#e5e7eb'}`,
+                                borderRadius: '8px',
+                                backgroundColor: chapter.accessType === 'paid' ? '#fffbeb' : '#ffffff',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                                textAlign: 'left',
+                            }}
+                        >
+                            <div style={{
+                                width: '40px',
+                                height: '40px',
+                                borderRadius: '50%',
+                                backgroundColor: chapter.accessType === 'paid' ? '#f59e0b' : '#f3f4f6',
+                                color: chapter.accessType === 'paid' ? '#ffffff' : '#6b7280',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                            }}>
+                                <Lock style={{ width: '20px', height: '20px' }} />
+                            </div>
+                            <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: '0.875rem', fontWeight: 600, color: chapter.accessType === 'paid' ? '#f59e0b' : '#333333' }}>
+                                    Trả phí (Paid)
+                                </div>
+                                <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                    Yêu cầu người đọc trả phí
+                                </div>
+                            </div>
+                        </button>
+
+                        {chapter.accessType === 'paid' && (
+                            <div>
+                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                    Giá <span style={{ color: '#ef4444' }}>*</span>
+                                </label>
+                                <div style={{ position: 'relative' }}>
+                                    <input
+                                        type="number"
+                                        value={chapter.price || 0}
+                                        onChange={(e) => onChange('price', Number(e.target.value) || 0)}
+                                        min="1"
+                                        placeholder="0"
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem 0.75rem 0.75rem 2.5rem',
+                                            backgroundColor: '#fffbeb',
+                                            border: '1px solid #fbbf24',
+                                            borderRadius: '8px',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            color: '#92400e',
+                                            outline: 'none',
+                                        }}
+                                    />
+                                    <Coins style={{
+                                        position: 'absolute',
+                                        left: '0.75rem',
+                                        top: '50%',
+                                        transform: 'translateY(-50%)',
+                                        width: '16px',
+                                        height: '16px',
+                                        color: '#f59e0b',
+                                    }} />
+                                </div>
+                                <p style={{ fontSize: '0.625rem', color: '#92400e', marginTop: '0.25rem', margin: 0 }}>Đơn vị: Xu</p>
+                            </div>
+                        )}
+                    </div>
+                    {chapter.accessType === 'paid' && (
+                        <div style={{
+                            marginTop: '1rem',
+                            padding: '0.75rem 1rem',
+                            backgroundColor: '#fffbeb',
+                            border: '1px solid #fcd34d',
+                            borderRadius: '8px',
+                            fontSize: '0.75rem',
+                            color: '#92400e',
+                        }}>
+                            <strong>Lưu ý:</strong> Người đọc cần xu để mở khóa. Bạn nhận 70% số xu, nền tảng giữ 30%.
+                        </div>
+                    )}
                 </div>
 
                 {/* Toolbar */}

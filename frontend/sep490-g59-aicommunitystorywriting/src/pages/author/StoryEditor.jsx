@@ -27,7 +27,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
     });
 
     const [chapters, setChapters] = useState([
-        { id: 1, number: 1, title: '', content: '' }
+        { id: 1, number: 1, title: '', content: '', accessType: 'public', price: 0 }
     ]);
 
     const [currentChapterIndex, setCurrentChapterIndex] = useState(0);
@@ -80,12 +80,14 @@ export function StoryEditor({ story, onSave, onCancel }) {
     };
 
     const handleChapterChange = (field, value) => {
-        const updatedChapters = [...chapters];
-        updatedChapters[currentChapterIndex] = {
-            ...updatedChapters[currentChapterIndex],
-            [field]: value
-        };
-        setChapters(updatedChapters);
+        setChapters((prev) => {
+            const updated = [...prev];
+            updated[currentChapterIndex] = {
+                ...updated[currentChapterIndex],
+                [field]: value
+            };
+            return updated;
+        });
     };
 
     const handleAddChapter = () => {
@@ -93,7 +95,9 @@ export function StoryEditor({ story, onSave, onCancel }) {
             id: Date.now(),
             number: chapters.length + 1,
             title: '',
-            content: ''
+            content: '',
+            accessType: 'public',
+            price: 0
         };
         setChapters([...chapters, newChapter]);
         setCurrentChapterIndex(chapters.length);
@@ -169,6 +173,8 @@ export function StoryEditor({ story, onSave, onCancel }) {
                 title: ch.title,
                 content: ch.content || '',
                 orderIndex: i,
+                accessType: (ch.accessType === 'paid' ? 'PAID' : 'FREE'),
+                coinPrice: ch.accessType === 'paid' ? Number(ch.price) || 0 : 0,
             })),
             chaptersCount: chapters.length,
             lastUpdate: 'Vừa xong',
