@@ -15,14 +15,23 @@ import { useToast } from '../../components/author/story-editor/Toast';
 
 function mapStoryFromApi(item) {
     const status = item.status || item.Status || '';
+    const storyProgressStatus = item.storyProgressStatus ?? item.StoryProgressStatus ?? '';
     const publishStatusMap = {
-        DRAFT: 'Lưu tạm',
+        DRAFT: 'Lưu nháp',
         PENDING_REVIEW: 'Chờ duyệt',
-        PUBLISHED: 'Đang ra',
+        REJECTED: 'Bị từ chối',
+        PUBLISHED: 'Đã xuất bản',
+        HIDDEN: 'Đã ẩn',
+        COMPLETED: 'Hoàn thành',
+        CANCELLED: 'Đã hủy',
+    };
+    const progressStatusMap = {
+        ONGOING: 'Đang ra',
         COMPLETED: 'Hoàn thành',
         HIATUS: 'Tạm dừng',
     };
-    const publishStatus = publishStatusMap[status] || status;
+    const publishStatus = publishStatusMap[status.toUpperCase()] ?? status;
+    const progressStatusDisplay = progressStatusMap[storyProgressStatus.toUpperCase()] ?? progressStatusMap.ONGOING;
     // Lấy thể loại từ story_categories (CategoryIds + CategoryNames)
     const categoryIds = item.categoryIds ?? item.CategoryIds ?? [];
     const categoryNamesStr = item.categoryNames ?? item.CategoryNames ?? '';
@@ -55,6 +64,8 @@ function mapStoryFromApi(item) {
         rating: item.avgRating ?? item.AvgRating ?? 0,
         lastUpdate: lastUpdate || 'Chưa cập nhật',
         publishStatus,
+        storyProgressStatus: storyProgressStatus || 'ONGOING',
+        progressStatusDisplay,
     };
 }
 
@@ -656,10 +667,10 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </div>
                                                     <div style={{
                                                         padding: '0.25rem 0.75rem',
-                                                        backgroundColor: (story.status === 'published' || story.status === 'pending_review') ? '#d1fae5' : '#fef3c7',
+                                                        backgroundColor: ['published', 'completed'].includes(story.status) ? '#d1fae5' : '#fef3c7',
                                                         borderRadius: '4px',
                                                         fontSize: '0.75rem',
-                                                        color: (story.status === 'published' || story.status === 'pending_review') ? '#065f46' : '#92400e',
+                                                        color: ['published', 'completed'].includes(story.status) ? '#065f46' : '#92400e',
                                                         marginLeft: '1rem',
                                                         flexShrink: 0
                                                     }}>
@@ -725,12 +736,12 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </div>
                                                     <div style={{
                                                         padding: '0.25rem 0.75rem',
-                                                        backgroundColor: (story.status === 'draft' || story.status === 'pending_review') ? '#fef3c7' : '#d1fae5',
+                                                        backgroundColor: (story.status === 'published' || story.status === 'completed') ? '#d1fae5' : '#fef3c7',
                                                         borderRadius: '4px',
                                                         fontSize: '0.75rem',
-                                                        color: (story.status === 'draft' || story.status === 'pending_review') ? '#92400e' : '#065f46'
+                                                        color: (story.status === 'published' || story.status === 'completed') ? '#065f46' : '#92400e'
                                                     }}>
-                                                        {story.status === 'draft' ? 'Lưu tạm' : story.status === 'pending_review' ? 'Chờ duyệt' : 'Xuất bản'}
+                                                        {story.publishStatus}
                                                     </div>
                                                     {story.status === 'draft' && (
                                                         <div style={{ fontSize: '0.75rem', color: '#ef4444' }}>

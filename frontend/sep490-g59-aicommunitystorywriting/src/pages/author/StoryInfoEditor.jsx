@@ -28,7 +28,7 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
             const data = {
                 title: story.title || '',
                 author: story.author ?? authorName,
-                status: story.publishStatus || story.status || 'Đang ra',
+                status: story.progressStatusDisplay ?? story.publishStatus ?? 'Đang ra',
                 ageRating: story.ageRating ?? 'Phù hợp mọi lứa tuổi',
                 categories: normalized,
                 note: story.summary ?? story.note ?? '',

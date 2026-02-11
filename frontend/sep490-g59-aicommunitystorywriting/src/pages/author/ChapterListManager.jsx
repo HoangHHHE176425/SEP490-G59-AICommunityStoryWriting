@@ -4,18 +4,29 @@ import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getChaptersByStoryId } from '../../api/chapter/chapterApi';
 
+const CHAPTER_STATUS_MAP = {
+    DRAFT: 'Bản nháp',
+    PENDING_REVIEW: 'Chờ duyệt',
+    REJECTED: 'Bị từ chối',
+    PUBLISHED: 'Đã xuất bản',
+    HIDDEN: 'Đã ẩn',
+    ARCHIVED: 'Đã lưu trữ',
+};
+
 function mapChapterFromApi(item) {
     const createdAt = item.createdAt ?? item.CreatedAt ?? item.publishedAt ?? item.PublishedAt;
     const updatedAt = createdAt
         ? new Date(createdAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
         : '';
-    const status = (item.status ?? item.Status ?? 'DRAFT').toLowerCase();
+    const status = (item.status ?? item.Status ?? 'DRAFT').toUpperCase();
+    const statusDisplay = CHAPTER_STATUS_MAP[status] ?? status;
     return {
         id: item.id ?? item.Id,
         number: (item.orderIndex ?? item.OrderIndex ?? 0) + 1,
         title: item.title ?? item.Title ?? '',
         content: '',
-        status,
+        status: status.toLowerCase(),
+        statusDisplay,
         views: 0,
         comments: 0,
         likes: 0,
@@ -222,13 +233,13 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                                             <span style={{
                                                 padding: '0.25rem 0.75rem',
-                                                backgroundColor: chapter.status === 'published' ? '#fed7aa' : '#fef3c7',
+                                                backgroundColor: chapter.status === 'published' ? '#d1fae5' : '#fef3c7',
                                                 borderRadius: '4px',
                                                 fontSize: '0.75rem',
                                                 fontWeight: 600,
-                                                color: chapter.status === 'published' ? '#c2410c' : '#92400e'
+                                                color: chapter.status === 'published' ? '#065f46' : '#92400e'
                                             }}>
-                                                {chapter.status === 'published' ? 'Đã Xuất bản' : 'Bản nháp'}
+                                                {chapter.statusDisplay}
                                             </span>
                                             <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
                                                 Cập nhật {chapter.updatedAt}
