@@ -21,6 +21,12 @@ namespace AIStory.API
         {
             var builder = WebApplication.CreateBuilder(args);
 
+            // Load local-only config overrides (secrets) without committing them.
+            // Priority: Local files override appsettings.json/appsettings.Development.json.
+            builder.Configuration
+                .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true)
+                .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.Local.json", optional: true, reloadOnChange: true);
+
             // =======================
             // Add services
             // =======================
@@ -37,8 +43,7 @@ namespace AIStory.API
             {
                 options.AddPolicy("AllowClient", policy =>
                 {
-                    // Allow any localhost/127.0.0.1 origin (any port) for development.
-                    // This avoids CORS issues when Vite auto-picks 5174/5175... if 5173 is busy.
+
                     policy.SetIsOriginAllowed(origin =>
                     {
                         if (string.IsNullOrWhiteSpace(origin)) return false;
@@ -66,6 +71,11 @@ namespace AIStory.API
             builder.Services.AddScoped<ICategoryService, CategoryService>();
             builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
             builder.Services.AddScoped<IChapterService, ChapterService>();
+
+            // Policies
+            builder.Services.AddScoped<IPolicyRepository, PolicyRepository>();
+            builder.Services.AddScoped<IAuthorPolicyAcceptanceRepository, AuthorPolicyAcceptanceRepository>();
+            builder.Services.AddScoped<IPolicyService, PolicyService>();
 
 
             var jwtKey = builder.Configuration["Jwt:Key"];

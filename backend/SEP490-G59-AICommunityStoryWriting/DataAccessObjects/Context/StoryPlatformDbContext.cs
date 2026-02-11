@@ -34,6 +34,8 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<auth_tokens> auth_tokens { get; set; }
 
+    public virtual DbSet<author_policy_acceptances> author_policy_acceptances { get; set; }
+
     public virtual DbSet<author_bank_accounts> author_bank_accounts { get; set; }
 
     public virtual DbSet<author_income_logs> author_income_logs { get; set; }
@@ -106,7 +108,8 @@ public partial class StoryPlatformDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
-            optionsBuilder.UseSqlServer("Server=localhost;uid=sa;password=admin;database=story_platform_v14;Encrypt=True;TrustServerCertificate=True;");
+            optionsBuilder.UseSqlServer("Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;");
+
         }
     }
 
@@ -653,6 +656,33 @@ public partial class StoryPlatformDbContext : DbContext
                     {
                         j.HasKey("story_id", "category_id").HasName("PK__story_ca__3B6772CDF94EC1E0");
                     });
+        });
+
+        modelBuilder.Entity<author_policy_acceptances>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("PK_author_policy_acceptances");
+
+            entity.HasIndex(e => new { e.user_id, e.policy_id }, "UQ_author_policy_acceptances_user_policy").IsUnique();
+            entity.HasIndex(e => new { e.user_id, e.accepted_at }, "IX_author_policy_acceptances_user");
+            entity.HasIndex(e => new { e.policy_id, e.accepted_at }, "IX_author_policy_acceptances_policy");
+
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
+            entity.Property(e => e.accepted_at).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.accepted_for)
+                .HasMaxLength(20)
+                .HasDefaultValue("AUTHOR");
+            entity.Property(e => e.ip_address).HasMaxLength(45);
+            entity.Property(e => e.user_agent).HasMaxLength(256);
+
+            entity.HasOne(d => d.user).WithMany(p => p.author_policy_acceptances)
+                .HasForeignKey(d => d.user_id)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_author_policy_acceptances_user");
+
+            entity.HasOne(d => d.policy).WithMany(p => p.author_policy_acceptances)
+                .HasForeignKey(d => d.policy_id)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_author_policy_acceptances_policy");
         });
 
         modelBuilder.Entity<story_commitments>(entity =>

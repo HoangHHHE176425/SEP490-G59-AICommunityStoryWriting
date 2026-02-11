@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Mail, AlertCircle, CheckCircle, ArrowLeft, Lock, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 
 export default function ForgotPassword() {
+    const navigate = useNavigate();
     const { forgotPassword, resetPassword } = useAuth();
     const [email, setEmail] = useState('');
     const [error, setError] = useState('');
@@ -50,6 +51,41 @@ export default function ForgotPassword() {
                 setError(result.message || 'Đã xảy ra lỗi. Vui lòng thử lại.');
             }
         } catch (err) {
+            setError('Đã xảy ra lỗi. Vui lòng thử lại.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleResendOtp = async () => {
+        setError('');
+        setRequestSent(false);
+        setResetSuccess(false);
+
+        if (!email) {
+            setError('Vui lòng nhập email của bạn');
+            setStep('request');
+            return;
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            setError('Email không hợp lệ');
+            setStep('request');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const result = await forgotPassword(email);
+            if (result.success) {
+                setRequestSent(true);
+                setStep('reset');
+                setResetData((p) => ({ ...p, otpCode: '' }));
+            } else {
+                setError(result.message || 'Đã xảy ra lỗi. Vui lòng thử lại.');
+            }
+        } catch {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
         } finally {
             setLoading(false);
@@ -170,6 +206,8 @@ export default function ForgotPassword() {
                                 setError('');
                                 setResetSuccess(false);
 
+                                if (resetSuccess) return;
+
                                 if (!resetData.otpCode || !resetData.newPassword || !resetData.confirmPassword) {
                                     setError('Vui lòng điền đầy đủ thông tin');
                                     return;
@@ -193,6 +231,10 @@ export default function ForgotPassword() {
                                     );
                                     if (res.success) {
                                         setResetSuccess(true);
+                                        // Redirect to login after success
+                                        setTimeout(() => {
+                                            navigate('/login');
+                                        }, 1200);
                                     } else {
                                         setError(res.message || 'Đặt lại mật khẩu thất bại');
                                     }
@@ -230,6 +272,7 @@ export default function ForgotPassword() {
                                         className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
                                         placeholder="Nhập OTP"
                                         required
+                                        disabled={loading || resetSuccess}
                                     />
                                 </div>
                             </div>
@@ -249,11 +292,13 @@ export default function ForgotPassword() {
                                         className="block w-full pl-10 pr-12 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
                                         placeholder="Tối thiểu 6 ký tự"
                                         required
+                                        disabled={loading || resetSuccess}
                                     />
                                     <button
                                         type="button"
                                         onClick={() => setShowPassword(!showPassword)}
                                         className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                                        disabled={loading || resetSuccess}
                                     >
                                         {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                                     </button>
@@ -274,11 +319,13 @@ export default function ForgotPassword() {
                                         onChange={(e) => setResetData((p) => ({ ...p, confirmPassword: e.target.value }))}
                                         className="block w-full pl-10 pr-12 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
                                         required
+                                        disabled={loading || resetSuccess}
                                     />
                                     <button
                                         type="button"
                                         onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                                         className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                                        disabled={loading || resetSuccess}
                                     >
                                         {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                                     </button>
@@ -287,7 +334,7 @@ export default function ForgotPassword() {
 
                             <button
                                 type="submit"
-                                disabled={loading}
+                                disabled={loading || resetSuccess}
                                 className="w-full py-3 bg-primary text-white font-bold rounded-lg hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-primary/25"
                             >
                                 {loading ? 'Đang xử lý...' : 'Đặt lại mật khẩu'}
@@ -295,24 +342,16 @@ export default function ForgotPassword() {
 
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setStep('request');
-                                    setRequestSent(false);
-                                    setResetSuccess(false);
-                                    setResetData({ otpCode: '', newPassword: '', confirmPassword: '' });
-                                }}
+                                onClick={handleResendOtp}
+                                disabled={loading}
                                 className="w-full py-3 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-all"
                             >
-                                Gửi lại OTP
+                                {loading ? 'Đang gửi...' : 'Gửi lại OTP'}
                             </button>
 
                             {resetSuccess && (
                                 <div className="text-center text-sm text-green-600 dark:text-green-400 font-semibold">
-                                    Đặt lại mật khẩu thành công. Bạn có thể{' '}
-                                    <Link to="/login" className="text-primary hover:text-primary/80">
-                                        đăng nhập
-                                    </Link>
-                                    .
+                                    Đặt lại mật khẩu thành công! Đang chuyển về trang đăng nhập...
                                 </div>
                             )}
                         </form>

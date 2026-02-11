@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
@@ -20,4 +20,6 @@ public partial class system_policies
     public DateTime? created_at { get; set; }
 
     public DateTime? activated_at { get; set; }
+
+    public virtual ICollection<author_policy_acceptances> author_policy_acceptances { get; set; } = new List<author_policy_acceptances>();
 }
