@@ -81,21 +81,25 @@ export function StoryListItem({ story }) {
 
                 {/* Categories */}
                 <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-                    {story.categories.map(cat => (
-                        <span
-                            key={cat}
-                            style={{
-                                padding: '0.25rem 0.5rem',
-                                backgroundColor: '#f8fafc',
-                                color: '#475569',
-                                fontSize: '0.75rem',
-                                borderRadius: '0.25rem',
-                                border: '1px solid #e2e8f0'
-                            }}
-                        >
-                            {cat}
-                        </span>
-                    ))}
+                    {(story.categories || []).map((cat) => {
+                        const key = typeof cat === 'object' && cat?.id ? cat.id : cat;
+                        const label = typeof cat === 'object' && cat?.name ? cat.name : String(cat);
+                        return (
+                            <span
+                                key={key}
+                                style={{
+                                    padding: '0.25rem 0.5rem',
+                                    backgroundColor: '#f8fafc',
+                                    color: '#475569',
+                                    fontSize: '0.75rem',
+                                    borderRadius: '0.25rem',
+                                    border: '1px solid #e2e8f0'
+                                }}
+                            >
+                                {label}
+                            </span>
+                        );
+                    })}
                 </div>
 
                 {/* Stats */}

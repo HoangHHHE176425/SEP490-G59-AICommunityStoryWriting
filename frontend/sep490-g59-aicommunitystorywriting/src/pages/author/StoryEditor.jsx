@@ -14,7 +14,6 @@ export function StoryEditor({ story, onSave, onCancel }) {
     const [formData, setFormData] = useState({
         title: '',
         author: 'Quyền Đình',
-        storyType: 'long',
         status: 'Đang ra',
         ageRating: 'Phù hợp mọi lứa tuổi',
         categories: [],
@@ -38,14 +37,17 @@ export function StoryEditor({ story, onSave, onCancel }) {
 
     useEffect(() => {
         if (story) {
+            const cats = story.categories || [];
+            const normalized = Array.isArray(cats)
+                ? cats.map((c) => (typeof c === 'object' && c?.id ? { id: c.id, name: c.name || '' } : { id: c, name: String(c) }))
+                : [];
             // eslint-disable-next-line react-hooks/set-state-in-effect
             setFormData({
                 title: story.title || '',
                 author: 'Quyền Đình',
-                storyType: story.storyType || 'long',
                 status: story.publishStatus || 'Đang ra',
                 ageRating: 'Phù hợp mọi lứa tuổi',
-                categories: story.categories || [],
+                categories: normalized,
                 tags: [],
                 note: '',
                 cover: story.cover || '',
@@ -53,7 +55,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
         }
     }, [story]);
 
-    const minChapters = formData.storyType === 'short' ? 1 : 5;
+    const minChapters = 1;
 
     const handleFormDataChange = (field, value) => {
         setFormData({ ...formData, [field]: value });
@@ -148,8 +150,12 @@ export function StoryEditor({ story, onSave, onCancel }) {
             return;
         }
 
+        const getCategoryId = (c) => (typeof c === 'object' && c?.id ? c.id : c);
+        const categoryIds = (formData.categories || []).map(getCategoryId).filter(Boolean);
+
         const storyData = {
             ...formData,
+            categoryIds,
             status: isDraft ? 'draft' : 'published',
             chapters: chapters.length,
             lastUpdate: 'Vừa xong',
@@ -229,12 +235,10 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                         <div style={{ fontSize: '0.875rem', color: '#333333', fontWeight: 500 }}>{formData.title}</div>
                                     </div>
                                     <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
-                                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Loại truyện:</div>
-                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>{formData.storyType === 'long' ? 'Truyện dài' : 'Truyện ngắn'}</div>
-                                    </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Thể loại:</div>
-                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>{formData.categories.join(', ')}</div>
+                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>
+                                            {(formData.categories || []).map((c) => (typeof c === 'object' && c?.name ? c.name : String(c))).join(', ')}
+                                        </div>
                                     </div>
                                     <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Số chương:</div>
