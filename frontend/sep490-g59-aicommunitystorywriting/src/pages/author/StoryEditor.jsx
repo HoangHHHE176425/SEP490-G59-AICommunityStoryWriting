@@ -6,15 +6,24 @@ import { StepIndicator } from '../../components/author/story-editor/StepIndicato
 import { useToast } from '../../components/author/story-editor/Toast';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
+import { useAuth } from '../../contexts/AuthContext';
+
+// Helper function to count words
+const countWords = (text) => {
+    if (!text || !text.trim()) return 0;
+    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+};
 
 export function StoryEditor({ story, onSave, onCancel }) {
+    const { user } = useAuth();
+    const authorName = user?.displayName ?? user?.DisplayName ?? user?.fullName ?? user?.FullName ?? user?.nickname ?? user?.Nickname ?? '';
     const [currentStep, setCurrentStep] = useState(1);
+    const [saving, setSaving] = useState(false);
     const { showToast, ToastContainer } = useToast();
 
     const [formData, setFormData] = useState({
         title: '',
-        author: 'Quyền Đình',
-        storyType: 'long',
+        author: authorName,
         status: 'Đang ra',
         ageRating: 'Phù hợp mọi lứa tuổi',
         categories: [],
@@ -37,30 +46,31 @@ export function StoryEditor({ story, onSave, onCancel }) {
     ];
 
     useEffect(() => {
+        const name = user?.displayName ?? user?.DisplayName ?? user?.fullName ?? user?.FullName ?? user?.nickname ?? user?.Nickname ?? '';
         if (story) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect
+            const cats = story.categories || [];
+            const normalized = Array.isArray(cats)
+                ? cats.map((c) => (typeof c === 'object' && c?.id ? { id: c.id, name: c.name || '' } : { id: c, name: String(c) }))
+                : [];
             setFormData({
                 title: story.title || '',
-                author: 'Quyền Đình',
-                storyType: story.storyType || 'long',
+                author: story.author ?? name,
                 status: story.publishStatus || 'Đang ra',
-                ageRating: 'Phù hợp mọi lứa tuổi',
-                categories: story.categories || [],
+                ageRating: story.ageRating ?? 'Phù hợp mọi lứa tuổi',
+                categories: normalized,
                 tags: [],
-                note: '',
+                note: story.summary ?? story.note ?? '',
                 cover: story.cover || '',
             });
-        }
-    }, [story]);
-
-    const minChapters = formData.storyType === 'short' ? 1 : 5;
-
-    const handleFormDataChange = (fieldOrUpdates, value) => {
-        if (typeof fieldOrUpdates === 'object' && fieldOrUpdates !== null && value === undefined) {
-            setFormData(prev => ({ ...prev, ...fieldOrUpdates }));
         } else {
-            setFormData(prev => ({ ...prev, [fieldOrUpdates]: value }));
+            setFormData(prev => ({ ...prev, author: name }));
         }
+    }, [story, user]);
+
+    const minChapters = 1;
+
+    const handleFormDataChange = (field, value) => {
+        setFormData({ ...formData, [field]: value });
     };
 
     const handleImageUpload = (e) => {
@@ -75,15 +85,15 @@ export function StoryEditor({ story, onSave, onCancel }) {
         }
     };
 
-    const handleChapterChange = (fieldOrUpdates, value) => {
-        const updatedChapters = [...chapters];
-        const current = updatedChapters[currentChapterIndex];
-        if (typeof fieldOrUpdates === 'object' && fieldOrUpdates !== null && value === undefined) {
-            updatedChapters[currentChapterIndex] = { ...current, ...fieldOrUpdates };
-        } else {
-            updatedChapters[currentChapterIndex] = { ...current, [fieldOrUpdates]: value };
-        }
-        setChapters(updatedChapters);
+    const handleChapterChange = (field, value) => {
+        setChapters((prev) => {
+            const updated = [...prev];
+            updated[currentChapterIndex] = {
+                ...updated[currentChapterIndex],
+                [field]: value
+            };
+            return updated;
+        });
     };
 
     const handleAddChapter = () => {
@@ -129,6 +139,12 @@ export function StoryEditor({ story, onSave, onCancel }) {
             showToast(`Có ${invalidChapters.length} chương chưa hoàn thành`, 'error');
             return false;
         }
+        // Validate minimum 500 words per chapter
+        const chaptersWithInsufficientWords = chapters.filter(ch => countWords(ch.content) < 500);
+        if (chaptersWithInsufficientWords.length > 0) {
+            showToast(`Có ${chaptersWithInsufficientWords.length} chương chưa đủ 500 từ`, 'error');
+            return false;
+        }
         return true;
     };
 
@@ -150,22 +166,44 @@ export function StoryEditor({ story, onSave, onCancel }) {
         }
     };
 
-    const handleSubmit = (isDraft) => {
+    const handleSubmit = async (isDraft) => {
         if (!validateStep1() || !validateStep2()) {
             showToast('Vui lòng hoàn thành tất cả thông tin bắt buộc', 'error');
             return;
         }
 
+        const getCategoryId = (c) => (typeof c === 'object' && c?.id ? c.id : c);
+        const categoryIds = (formData.categories || []).map(getCategoryId).filter(Boolean);
+
         const storyData = {
             ...formData,
-            status: isDraft ? 'draft' : 'published',
-            chapters: chapters.length,
+            categoryIds,
+            isDraft,
+            status: isDraft ? 'DRAFT' : 'PENDING_REVIEW',
+            storyProgressStatus: formData.status,
+            chaptersData: chapters.map((ch, i) => ({
+                title: ch.title,
+                content: ch.content || '',
+                orderIndex: i,
+                status: isDraft ? 'DRAFT' : 'PENDING_REVIEW',
+                accessType: (ch.accessType === 'paid' ? 'PAID' : 'FREE'),
+                coinPrice: ch.accessType === 'paid' ? Number(ch.price) || 0 : 0,
+            })),
+            chaptersCount: chapters.length,
             lastUpdate: 'Vừa xong',
-            publishStatus: isDraft ? 'Lưu tạm' : 'Đang ra',
+            publishStatus: isDraft ? 'Lưu tạm' : 'Chờ duyệt',
         };
 
-        onSave(storyData);
-        showToast(isDraft ? 'Đã lưu bản nháp' : 'Đăng truyện thành công!', 'success');
+        setSaving(true);
+        try {
+            await onSave(storyData);
+            showToast(isDraft ? 'Đã lưu bản nháp' : 'Đăng truyện thành công! Đang chờ duyệt.', 'success');
+            if (!isDraft) setCurrentStep(4);
+        } catch (err) {
+            showToast(err?.message || 'Có lỗi xảy ra', 'error');
+        } finally {
+            setSaving(false);
+        }
     };
 
     return (
@@ -238,7 +276,9 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                     </div>
                                     <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Thể loại:</div>
-                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>{formData.categories?.join(', ') || '-'}</div>
+                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>
+                                            {(formData.categories || []).map((c) => (typeof c === 'object' && c?.name ? c.name : String(c))).join(', ')}
+                                        </div>
                                     </div>
                                     <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Số chương:</div>
@@ -290,7 +330,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                 <span style={{ color: '#6b7280' }}>{ch.title || '(Chưa có tiêu đề)'}</span>
                                             </div>
                                             <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
-                                                {ch.content.length} ký tự
+                                                {countWords(ch.content)} từ
                                             </span>
                                         </div>
                                     ))}
@@ -313,13 +353,20 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                 onClick={onCancel}
                                 style={{
                                     padding: '0.75rem 2rem',
-                                    backgroundColor: '#6ee7b7',
+                                    backgroundColor: '#13ec5b',
                                     border: 'none',
-                                    borderRadius: '4px',
+                                    borderRadius: '9999px',
                                     fontSize: '0.875rem',
-                                    fontWeight: 600,
+                                    fontWeight: 700,
                                     color: '#ffffff',
-                                    cursor: 'pointer'
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#10d452';
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#13ec5b';
                                 }}
                             >
                                 Về trang quản lý
@@ -341,95 +388,108 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                 style={{
                                     padding: '0.75rem 2rem',
                                     backgroundColor: '#ffffff',
-                                    border: '1px solid #e0e0e0',
-                                    borderRadius: '4px',
+                                    border: '2px solid #13ec5b',
+                                    borderRadius: '9999px',
                                     fontSize: '0.875rem',
-                                    fontWeight: 600,
-                                    color: '#333333',
+                                    fontWeight: 700,
+                                    color: '#13ec5b',
                                     cursor: 'pointer',
                                     transition: 'all 0.2s'
                                 }}
                                 onMouseEnter={(e) => {
-                                    e.currentTarget.style.backgroundColor = '#f9fafb';
+                                    e.currentTarget.style.backgroundColor = '#f0fdf4';
+                                    e.currentTarget.style.borderColor = '#10d452';
                                 }}
                                 onMouseLeave={(e) => {
                                     e.currentTarget.style.backgroundColor = '#ffffff';
+                                    e.currentTarget.style.borderColor = '#13ec5b';
                                 }}
                             >
                                 {currentStep === 1 ? 'Hủy' : 'Quay lại'}
                             </button>
 
                             <div style={{ display: 'flex', gap: '1rem' }}>
-                                {currentStep >= 3 && (
+                                {currentStep > 1 && currentStep !== 2 && (
                                     <button
+                                        disabled={saving}
                                         onClick={() => handleSubmit(true)}
                                         style={{
                                             padding: '0.75rem 2rem',
                                             backgroundColor: '#ffffff',
-                                            border: '1px solid #6ee7b7',
-                                            borderRadius: '4px',
+                                            border: '2px solid #13ec5b',
+                                            borderRadius: '9999px',
                                             fontSize: '0.875rem',
-                                            fontWeight: 600,
-                                            color: '#6ee7b7',
-                                            cursor: 'pointer',
-                                            transition: 'all 0.2s'
+                                            fontWeight: 700,
+                                            color: '#13ec5b',
+                                            cursor: saving ? 'not-allowed' : 'pointer',
+                                            transition: 'all 0.2s',
+                                            opacity: saving ? 0.6 : 1
                                         }}
                                         onMouseEnter={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#f0fdf4';
+                                            if (!saving) {
+                                                e.currentTarget.style.backgroundColor = '#f0fdf4';
+                                                e.currentTarget.style.borderColor = '#10d452';
+                                            }
                                         }}
                                         onMouseLeave={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#ffffff';
+                                            if (!saving) {
+                                                e.currentTarget.style.backgroundColor = '#ffffff';
+                                                e.currentTarget.style.borderColor = '#13ec5b';
+                                            }
                                         }}
                                     >
-                                        Lưu nháp
+                                        {saving ? 'Đang lưu...' : 'Lưu nháp'}
                                     </button>
                                 )}
 
                                 {currentStep === 3 ? (
                                     <button
-                                        onClick={() => {
-                                            handleSubmit(false);
-                                            setCurrentStep(4);
-                                        }}
+                                        disabled={saving}
+                                        onClick={() => handleSubmit(false)}
                                         style={{
                                             padding: '0.75rem 2rem',
-                                            backgroundColor: '#6ee7b7',
+                                            backgroundColor: '#13ec5b',
                                             border: 'none',
-                                            borderRadius: '4px',
+                                            borderRadius: '9999px',
                                             fontSize: '0.875rem',
-                                            fontWeight: 600,
+                                            fontWeight: 700,
                                             color: '#ffffff',
-                                            cursor: 'pointer',
-                                            transition: 'all 0.2s'
+                                            cursor: saving ? 'not-allowed' : 'pointer',
+                                            transition: 'all 0.2s',
+                                            opacity: saving ? 0.6 : 1
                                         }}
                                         onMouseEnter={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#5dd4a3';
+                                            if (!saving) {
+                                                e.currentTarget.style.backgroundColor = '#10d452';
+                                            }
                                         }}
                                         onMouseLeave={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#6ee7b7';
+                                            if (!saving) {
+                                                e.currentTarget.style.backgroundColor = '#13ec5b';
+                                            }
                                         }}
                                     >
-                                        Đăng bài
+                                        {saving ? 'Đang xuất bản...' : 'Xuất bản'}
                                     </button>
                                 ) : (
                                     <button
                                         onClick={handleNextStep}
                                         style={{
                                             padding: '0.75rem 2rem',
-                                            backgroundColor: '#6ee7b7',
+                                            backgroundColor: '#13ec5b',
                                             border: 'none',
-                                            borderRadius: '4px',
+                                            borderRadius: '9999px',
                                             fontSize: '0.875rem',
-                                            fontWeight: 600,
+                                            fontWeight: 700,
                                             color: '#ffffff',
                                             cursor: 'pointer',
                                             transition: 'all 0.2s'
                                         }}
                                         onMouseEnter={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#5dd4a3';
+                                            e.currentTarget.style.backgroundColor = '#10d452';
                                         }}
                                         onMouseLeave={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#6ee7b7';
+                                            e.currentTarget.style.backgroundColor = '#13ec5b';
                                         }}
                                     >
                                         Tiếp theo

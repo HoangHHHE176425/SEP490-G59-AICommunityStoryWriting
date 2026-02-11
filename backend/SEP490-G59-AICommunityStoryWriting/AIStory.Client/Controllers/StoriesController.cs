@@ -2,6 +2,8 @@
 
 namespace AIStory.Client.Controllers
 {
+    // Không dùng [Authorize] ở đây vì Client dùng JWT từ localStorage
+    // Frontend JavaScript sẽ kiểm tra authentication và role
     public class StoriesController : Controller
     {
         private readonly IConfiguration _configuration;

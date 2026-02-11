@@ -1,6 +1,12 @@
 import { useState } from 'react';
 import { Sparkles, Settings, X, Lock, Unlock, Coins } from 'lucide-react';
 
+// Helper function to count words
+const countWords = (text) => {
+    if (!text || !text.trim()) return 0;
+    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+};
+
 export function ChapterEditor({ chapter, onChange }) {
     const [showSettings, setShowSettings] = useState(false);
     const [editorSettings, setEditorSettings] = useState({
@@ -57,67 +63,48 @@ export function ChapterEditor({ chapter, onChange }) {
                     />
                 </div>
 
-                {/* Chế độ sáng tác */}
+                {/* Chế độ sáng tác (Public / Paid) */}
                 <div>
                     <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.75rem' }}>
                         Chế độ sáng tác <span style={{ color: '#ef4444' }}>*</span>
                     </label>
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: (chapter.accessType ?? 'public') === 'paid' ? '1fr 1fr 200px' : '1fr 1fr',
-                        gap: '1rem'
-                    }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: (chapter.accessType === 'paid' ? '1fr 1fr 200px' : '1fr 1fr'), gap: '1rem' }}>
                         <button
                             type="button"
-                            onClick={() => onChange({ accessType: 'public', price: 0 })}
+                            onClick={() => { onChange('accessType', 'public'); onChange('price', 0); }}
                             style={{
                                 display: 'flex',
                                 alignItems: 'center',
                                 gap: '0.75rem',
                                 padding: '1rem',
-                                border: (chapter.accessType ?? 'public') === 'public' ? '2px solid #13ec5b' : '2px solid #e5e7eb',
-                                borderRadius: '12px',
-                                backgroundColor: (chapter.accessType ?? 'public') === 'public' ? 'rgba(19, 236, 91, 0.05)' : '#ffffff',
+                                border: `2px solid ${chapter.accessType === 'public' ? '#13ec5b' : '#e5e7eb'}`,
+                                borderRadius: '8px',
+                                backgroundColor: chapter.accessType === 'public' ? 'rgba(19, 236, 91, 0.05)' : '#ffffff',
                                 cursor: 'pointer',
                                 transition: 'all 0.2s',
-                                textAlign: 'left'
-                            }}
-                            onMouseEnter={(e) => {
-                                if ((chapter.accessType ?? 'public') !== 'public') {
-                                    e.currentTarget.style.borderColor = '#cbd5e1';
-                                }
-                            }}
-                            onMouseLeave={(e) => {
-                                if ((chapter.accessType ?? 'public') !== 'public') {
-                                    e.currentTarget.style.borderColor = '#e5e7eb';
-                                }
+                                textAlign: 'left',
                             }}
                         >
                             <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
                                 width: '40px',
                                 height: '40px',
                                 borderRadius: '50%',
-                                backgroundColor: (chapter.accessType ?? 'public') === 'public' ? '#13ec5b' : '#f1f5f9',
-                                color: (chapter.accessType ?? 'public') === 'public' ? '#ffffff' : '#64748b'
+                                backgroundColor: chapter.accessType === 'public' ? '#13ec5b' : '#f3f4f6',
+                                color: chapter.accessType === 'public' ? '#ffffff' : '#6b7280',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                             }}>
                                 <Unlock style={{ width: '20px', height: '20px' }} />
                             </div>
                             <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: (chapter.accessType ?? 'public') === 'public' ? '#13ec5b' : '#333333' }}>
+                                <div style={{ fontSize: '0.875rem', fontWeight: 600, color: chapter.accessType === 'public' ? '#13ec5b' : '#333333' }}>
                                     Miễn phí (Public)
                                 </div>
                                 <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
                                     Người đọc có thể đọc miễn phí
                                 </div>
                             </div>
-                            {(chapter.accessType ?? 'public') === 'public' && (
-                                <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#13ec5b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
-                                </div>
-                            )}
                         </button>
 
                         <button
@@ -128,52 +115,37 @@ export function ChapterEditor({ chapter, onChange }) {
                                 alignItems: 'center',
                                 gap: '0.75rem',
                                 padding: '1rem',
-                                border: (chapter.accessType ?? 'public') === 'paid' ? '2px solid #f59e0b' : '2px solid #e5e7eb',
-                                borderRadius: '12px',
-                                backgroundColor: (chapter.accessType ?? 'public') === 'paid' ? 'rgba(245, 158, 11, 0.08)' : '#ffffff',
+                                border: `2px solid ${chapter.accessType === 'paid' ? '#f59e0b' : '#e5e7eb'}`,
+                                borderRadius: '8px',
+                                backgroundColor: chapter.accessType === 'paid' ? '#fffbeb' : '#ffffff',
                                 cursor: 'pointer',
                                 transition: 'all 0.2s',
-                                textAlign: 'left'
-                            }}
-                            onMouseEnter={(e) => {
-                                if ((chapter.accessType ?? 'public') !== 'paid') {
-                                    e.currentTarget.style.borderColor = '#cbd5e1';
-                                }
-                            }}
-                            onMouseLeave={(e) => {
-                                if ((chapter.accessType ?? 'public') !== 'paid') {
-                                    e.currentTarget.style.borderColor = '#e5e7eb';
-                                }
+                                textAlign: 'left',
                             }}
                         >
                             <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
                                 width: '40px',
                                 height: '40px',
                                 borderRadius: '50%',
-                                backgroundColor: (chapter.accessType ?? 'public') === 'paid' ? '#f59e0b' : '#f1f5f9',
-                                color: (chapter.accessType ?? 'public') === 'paid' ? '#ffffff' : '#64748b'
+                                backgroundColor: chapter.accessType === 'paid' ? '#f59e0b' : '#f3f4f6',
+                                color: chapter.accessType === 'paid' ? '#ffffff' : '#6b7280',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                             }}>
                                 <Lock style={{ width: '20px', height: '20px' }} />
                             </div>
                             <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: (chapter.accessType ?? 'public') === 'paid' ? '#f59e0b' : '#333333' }}>
+                                <div style={{ fontSize: '0.875rem', fontWeight: 600, color: chapter.accessType === 'paid' ? '#f59e0b' : '#333333' }}>
                                     Trả phí (Paid)
                                 </div>
                                 <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
                                     Yêu cầu người đọc trả phí
                                 </div>
                             </div>
-                            {(chapter.accessType ?? 'public') === 'paid' && (
-                                <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
-                                </div>
-                            )}
                         </button>
 
-                        {(chapter.accessType ?? 'public') === 'paid' && (
+                        {chapter.accessType === 'paid' && (
                             <div>
                                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
                                     Giá <span style={{ color: '#ef4444' }}>*</span>
@@ -181,9 +153,9 @@ export function ChapterEditor({ chapter, onChange }) {
                                 <div style={{ position: 'relative' }}>
                                     <input
                                         type="number"
-                                        value={chapter.price ?? 0}
+                                        value={chapter.price || 0}
                                         onChange={(e) => onChange('price', Number(e.target.value) || 0)}
-                                        min={1}
+                                        min="1"
                                         placeholder="0"
                                         style={{
                                             width: '100%',
@@ -192,9 +164,9 @@ export function ChapterEditor({ chapter, onChange }) {
                                             border: '1px solid #fbbf24',
                                             borderRadius: '8px',
                                             fontSize: '0.875rem',
-                                            fontWeight: 'bold',
+                                            fontWeight: 600,
                                             color: '#92400e',
-                                            outline: 'none'
+                                            outline: 'none',
                                         }}
                                     />
                                     <Coins style={{
@@ -204,17 +176,14 @@ export function ChapterEditor({ chapter, onChange }) {
                                         transform: 'translateY(-50%)',
                                         width: '16px',
                                         height: '16px',
-                                        color: '#f59e0b'
+                                        color: '#f59e0b',
                                     }} />
                                 </div>
-                                <p style={{ fontSize: '0.625rem', color: '#92400e', marginTop: '0.25rem', margin: '0.25rem 0 0 0' }}>
-                                    Đơn vị: Xu
-                                </p>
+                                <p style={{ fontSize: '0.625rem', color: '#92400e', marginTop: '0.25rem', margin: 0 }}>Đơn vị: Xu</p>
                             </div>
                         )}
                     </div>
-
-                    {(chapter.accessType ?? 'public') === 'paid' && (
+                    {chapter.accessType === 'paid' && (
                         <div style={{
                             marginTop: '1rem',
                             padding: '0.75rem 1rem',
@@ -223,19 +192,8 @@ export function ChapterEditor({ chapter, onChange }) {
                             borderRadius: '8px',
                             fontSize: '0.75rem',
                             color: '#92400e',
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: '0.5rem'
                         }}>
-                            <span style={{ fontSize: '1rem' }}>💰</span>
-                            <div>
-                                <strong>Lưu ý về chương trả phí:</strong>
-                                <ul style={{ margin: '0.25rem 0 0 1rem', paddingLeft: 0 }}>
-                                    <li>Người đọc cần có đủ xu để mở khóa chương</li>
-                                    <li>Sau khi mua, chương sẽ được lưu vĩnh viễn trong tài khoản</li>
-                                    <li>Bạn sẽ nhận 70% số xu, nền tảng giữ lại 30%</li>
-                                </ul>
-                            </div>
+                            <strong>Lưu ý:</strong> Người đọc cần xu để mở khóa. Bạn nhận 70% số xu, nền tảng giữ 30%.
                         </div>
                     )}
                 </div>
@@ -449,11 +407,11 @@ export function ChapterEditor({ chapter, onChange }) {
                         }}
                     />
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
-                        <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: 0 }}>
-                            Tối thiểu 500 ký tự
+                        <p style={{ fontSize: '0.75rem', color: countWords(chapter.content) < 500 ? '#ef4444' : '#9ca3af', margin: 0 }}>
+                            Tối thiểu 500 từ
                         </p>
                         <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: 0 }}>
-                            {chapter.content.length} ký tự
+                            {countWords(chapter.content).toLocaleString()} từ
                         </p>
                     </div>
                 </div>

@@ -1,5 +1,11 @@
 import { ChevronDown, Plus } from 'lucide-react';
 
+// Helper function to count words
+const countWords = (text) => {
+    if (!text || !text.trim()) return 0;
+    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+};
+
 export function ChapterList({
     chapters,
     currentChapterIndex,
@@ -76,22 +82,22 @@ export function ChapterList({
                             alignItems: 'center',
                             gap: '0.5rem',
                             padding: '0.75rem 1.5rem',
-                            backgroundColor: '#6ee7b7',
+                            backgroundColor: '#13ec5b',
                             border: 'none',
-                            borderRadius: '4px',
+                            borderRadius: '8px',
                             fontSize: '0.875rem',
-                            fontWeight: 600,
+                            fontWeight: 700,
                             color: '#ffffff',
                             cursor: 'pointer',
                             transition: 'all 0.2s',
                             whiteSpace: 'nowrap'
                         }}
                         onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = '#5dd4a3';
+                            e.currentTarget.style.backgroundColor = '#10d452';
                             e.currentTarget.style.transform = 'scale(1.05)';
                         }}
                         onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = '#6ee7b7';
+                            e.currentTarget.style.backgroundColor = '#13ec5b';
                             e.currentTarget.style.transform = 'scale(1)';
                         }}
                     >
@@ -123,8 +129,8 @@ export function ChapterList({
                             onClick={() => onChapterSelect(idx)}
                             style={{
                                 padding: '0.5rem 0.75rem',
-                                backgroundColor: idx === currentChapterIndex ? '#e0f2fe' : '#ffffff',
-                                border: `1px solid ${idx === currentChapterIndex ? '#6ee7b7' : '#e5e7eb'}`,
+                                backgroundColor: idx === currentChapterIndex ? '#f0fdf4' : '#ffffff',
+                                border: `1px solid ${idx === currentChapterIndex ? '#13ec5b' : '#e5e7eb'}`,
                                 borderRadius: '4px',
                                 cursor: 'pointer',
                                 transition: 'all 0.2s',
@@ -153,8 +159,8 @@ export function ChapterList({
                                     </span>
                                 )}
                             </div>
-                            <div style={{ fontSize: '0.75rem', color: ch.content.length > 0 ? '#10b981' : '#ef4444' }}>
-                                {ch.content.length > 0 ? `${ch.content.length} ký tự` : 'Chưa có nội dung'}
+                            <div style={{ fontSize: '0.75rem', color: countWords(ch.content) > 0 ? '#10b981' : '#ef4444' }}>
+                                {countWords(ch.content) > 0 ? `${countWords(ch.content)} từ` : 'Chưa có nội dung'}
                             </div>
                         </div>
                     ))}

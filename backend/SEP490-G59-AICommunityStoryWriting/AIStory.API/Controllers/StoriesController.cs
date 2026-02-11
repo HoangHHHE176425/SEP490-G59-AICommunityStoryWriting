@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Services.DTOs.Stories;
 
@@ -6,6 +8,7 @@ namespace AIStory.API.Controllers
 {
     [ApiController]
     [Route("api/stories")]
+    [Authorize] // Bắt buộc đăng nhập để xem
     public class StoriesController : ControllerBase
     {
         private readonly IStoryService _storyService;
@@ -17,9 +20,10 @@ namespace AIStory.API.Controllers
             _logger = logger;
         }
 
-        /// <summary>Tạo story mới</summary>
+        /// <summary>Tạo story mới - Chỉ AUTHOR</summary>
         [HttpPost]
         [Consumes("multipart/form-data")]
+        [Authorize(Roles = "AUTHOR")]
         public async Task<IActionResult> Create([FromForm] CreateStoryRequestDto request)
         {
             try
@@ -60,8 +64,9 @@ namespace AIStory.API.Controllers
                 }
 
                 Guid authorId;
-                var authorIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
-                if (!string.IsNullOrEmpty(authorIdClaim) && Guid.TryParse(authorIdClaim, out authorId))
+                // Tìm user ID từ JWT token (tương tự AccountController)
+                var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+                if (authorIdClaim != null && Guid.TryParse(authorIdClaim.Value, out authorId))
                 {
                     // Đã đăng nhập (JWT/cookie) → dùng ID từ claim
                 }
@@ -103,8 +108,9 @@ namespace AIStory.API.Controllers
             return ex;
         }
 
-        /// <summary>Lấy danh sách stories với pagination và filtering</summary>
+        /// <summary>Lấy danh sách stories với pagination và filtering (cho phép xem không cần đăng nhập)</summary>
         [HttpGet]
+        [AllowAnonymous]
         public IActionResult GetAll([FromQuery] StoryQueryDto query)
         {
             try
@@ -118,8 +124,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy story theo ID (Guid)</summary>
+        /// <summary>Lấy story theo ID (Guid) (cho phép xem không cần đăng nhập)</summary>
         [HttpGet("{id:guid}")]
+        [AllowAnonymous]
         public IActionResult GetById(Guid id)
         {
             try
@@ -133,8 +140,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy story theo slug</summary>
+        /// <summary>Lấy story theo slug (cho phép xem không cần đăng nhập)</summary>
         [HttpGet("slug/{slug}")]
+        [AllowAnonymous]
         public IActionResult GetBySlug(string slug)
         {
             try
@@ -148,8 +156,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy stories theo author (Guid) với pagination</summary>
+        /// <summary>Lấy stories theo author (Guid) với pagination (cho phép xem không cần đăng nhập)</summary>
         [HttpGet("author/{authorId:guid}")]
+        [AllowAnonymous]
         public IActionResult GetByAuthor(Guid authorId, [FromQuery] StoryQueryDto query)
         {
             try
@@ -163,9 +172,10 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Cập nhật story (với hỗ trợ upload ảnh)</summary>
+        /// <summary>Cập nhật story (với hỗ trợ upload ảnh) - Chỉ AUTHOR (chỉ được sửa story của chính mình)</summary>
         [HttpPut("{id:guid}")]
         [Consumes("multipart/form-data")]
+        [Authorize(Roles = "AUTHOR")]
         public async Task<IActionResult> Update(Guid id, [FromForm] UpdateStoryWithImageRequestDto request)
         {
             try
@@ -256,8 +266,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Xóa story</summary>
+        /// <summary>Xóa story - Chỉ AUTHOR (chỉ được xóa story của chính mình)</summary>
         [HttpDelete("{id:guid}")]
+        [Authorize(Roles = "AUTHOR")]
         public IActionResult Delete(Guid id)
         {
             try
@@ -275,8 +286,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Publish story</summary>
+        /// <summary>Publish story - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/publish")]
+        [Authorize(Roles = "AUTHOR")]
         public IActionResult Publish(Guid id)
         {
             try
@@ -314,8 +326,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Unpublish story</summary>
+        /// <summary>Unpublish story - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/unpublish")]
+        [Authorize(Roles = "AUTHOR")]
         public IActionResult Unpublish(Guid id)
         {
             try
