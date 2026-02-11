@@ -99,7 +99,25 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
                     }}>
                         <button
                             onClick={onCancel}
-                            className="px-6 py-2.5 bg-slate-100 text-slate-900 text-sm font-bold rounded-full hover:bg-slate-200 transition-all"
+                            style={{
+                                padding: '0.75rem 2rem',
+                                backgroundColor: '#ffffff',
+                                border: '2px solid #13ec5b',
+                                borderRadius: '9999px',
+                                fontSize: '0.875rem',
+                                fontWeight: 700,
+                                color: '#13ec5b',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = '#f0fdf4';
+                                e.currentTarget.style.borderColor = '#10d452';
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = '#ffffff';
+                                e.currentTarget.style.borderColor = '#13ec5b';
+                            }}
                         >
                             Hủy
                         </button>

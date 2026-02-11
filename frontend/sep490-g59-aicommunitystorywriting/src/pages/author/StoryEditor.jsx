@@ -8,6 +8,12 @@ import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useAuth } from '../../contexts/AuthContext';
 
+// Helper function to count words
+const countWords = (text) => {
+    if (!text || !text.trim()) return 0;
+    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+};
+
 export function StoryEditor({ story, onSave, onCancel }) {
     const { user } = useAuth();
     const authorName = user?.displayName ?? user?.DisplayName ?? user?.fullName ?? user?.FullName ?? user?.nickname ?? user?.Nickname ?? '';
@@ -131,6 +137,12 @@ export function StoryEditor({ story, onSave, onCancel }) {
         const invalidChapters = chapters.filter(ch => !ch.title.trim() || !ch.content.trim());
         if (invalidChapters.length > 0) {
             showToast(`Có ${invalidChapters.length} chương chưa hoàn thành`, 'error');
+            return false;
+        }
+        // Validate minimum 500 words per chapter
+        const chaptersWithInsufficientWords = chapters.filter(ch => countWords(ch.content) < 500);
+        if (chaptersWithInsufficientWords.length > 0) {
+            showToast(`Có ${chaptersWithInsufficientWords.length} chương chưa đủ 500 từ`, 'error');
             return false;
         }
         return true;
@@ -318,7 +330,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                 <span style={{ color: '#6b7280' }}>{ch.title || '(Chưa có tiêu đề)'}</span>
                                             </div>
                                             <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
-                                                {ch.content.length} ký tự
+                                                {countWords(ch.content)} từ
                                             </span>
                                         </div>
                                     ))}
@@ -343,7 +355,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                     padding: '0.75rem 2rem',
                                     backgroundColor: '#13ec5b',
                                     border: 'none',
-                                    borderRadius: '8px',
+                                    borderRadius: '9999px',
                                     fontSize: '0.875rem',
                                     fontWeight: 700,
                                     color: '#ffffff',
@@ -377,7 +389,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                     padding: '0.75rem 2rem',
                                     backgroundColor: '#ffffff',
                                     border: '2px solid #13ec5b',
-                                    borderRadius: '8px',
+                                    borderRadius: '9999px',
                                     fontSize: '0.875rem',
                                     fontWeight: 700,
                                     color: '#13ec5b',
@@ -405,7 +417,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                             padding: '0.75rem 2rem',
                                             backgroundColor: '#ffffff',
                                             border: '2px solid #13ec5b',
-                                            borderRadius: '8px',
+                                            borderRadius: '9999px',
                                             fontSize: '0.875rem',
                                             fontWeight: 700,
                                             color: '#13ec5b',
@@ -438,7 +450,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                             padding: '0.75rem 2rem',
                                             backgroundColor: '#13ec5b',
                                             border: 'none',
-                                            borderRadius: '8px',
+                                            borderRadius: '9999px',
                                             fontSize: '0.875rem',
                                             fontWeight: 700,
                                             color: '#ffffff',
@@ -466,7 +478,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                             padding: '0.75rem 2rem',
                                             backgroundColor: '#13ec5b',
                                             border: 'none',
-                                            borderRadius: '8px',
+                                            borderRadius: '9999px',
                                             fontSize: '0.875rem',
                                             fontWeight: 700,
                                             color: '#ffffff',

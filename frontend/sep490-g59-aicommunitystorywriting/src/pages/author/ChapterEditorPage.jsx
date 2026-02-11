@@ -2,8 +2,16 @@ import { useState, useEffect } from 'react';
 import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
+import { useToast } from '../../components/author/story-editor/Toast';
+
+// Helper function to count words
+const countWords = (text) => {
+    if (!text || !text.trim()) return 0;
+    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+};
 
 export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
+    const { showToast, ToastContainer } = useToast();
     const [chapterData, setChapterData] = useState({
         number: chapter?.number || (story?.chapters || 0) + 1,
         title: chapter?.title || '',
@@ -91,19 +99,20 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
 
     const handleSave = async (saveStatus) => {
         if (!chapterData.title.trim()) {
-            alert('Vui lòng nhập tên chương');
+            showToast('Vui lòng nhập tên chương', 'error');
             return;
         }
         if (!chapterData.content.trim()) {
-            alert('Vui lòng nhập nội dung chương');
+            showToast('Vui lòng nhập nội dung chương', 'error');
             return;
         }
-        if (chapterData.content.length < 500) {
-            alert('Nội dung chương cần ít nhất 500 ký tự');
+        const wordCount = countWords(chapterData.content);
+        if (wordCount < 500) {
+            showToast(`Nội dung chương cần ít nhất 500 từ (Hiện tại: ${wordCount} từ)`, 'error');
             return;
         }
         if (chapterData.accessType === 'paid' && (!chapterData.price || chapterData.price <= 0)) {
-            alert('Vui lòng nhập giá cho chương trả phí');
+            showToast('Vui lòng nhập giá cho chương trả phí', 'error');
             return;
         }
 
@@ -125,6 +134,7 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
     return (
         <div>
             <Header />
+            <ToastContainer />
             <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
                 {/* Header */}
                 <div style={{
@@ -524,11 +534,11 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
                                     }}
                                 />
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
-                                    <p style={{ fontSize: '0.75rem', color: chapterData.content.length < 500 ? '#ef4444' : '#9ca3af', margin: 0 }}>
-                                        Tối thiểu 500 ký tự
+                                    <p style={{ fontSize: '0.75rem', color: countWords(chapterData.content) < 500 ? '#ef4444' : '#9ca3af', margin: 0 }}>
+                                        Tối thiểu 500 từ
                                     </p>
                                     <p style={{ fontSize: '0.75rem', color: '#9ca3af', margin: 0 }}>
-                                        {chapterData.content.length.toLocaleString()} ký tự
+                                        {countWords(chapterData.content).toLocaleString()} từ
                                     </p>
                                 </div>
                             </div>
