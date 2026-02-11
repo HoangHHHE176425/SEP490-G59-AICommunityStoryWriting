@@ -3,24 +3,7 @@ import { User, Mail, Phone, CreditCard, Calendar, CheckCircle } from 'lucide-rea
 
 export default function ViewProfile() {
     const { user } = useAuth();
-
-    // Mock data - replace with actual data from API
-    const profileData = {
-        displayName: user?.name || 'S',
-        email: user?.email || 's@email.com',
-        phone: '0912 345 678',
-        idNumber: '001234567890',
-        joinDate: '15/01/2026',
-        isVerified: true,
-        tags: ['Tác giả sáng tạo', 'Đam mê văn học'],
-        bio: 'Tôi là một tác giả đam mê văn học, chuyên viết các thể loại võ hiệp và tu tiên. Với hơn 5 năm kinh nghiệm sáng tác, tôi luôn cố gắng mang đến những câu chuyện hấp dẫn và đầy cảm xúc cho độc giả.',
-        stats: {
-            storiesWritten: 5,
-            totalReads: 150,
-            currentCoins: 1250,
-            likes: 23,
-        },
-    };
+    const profileData = user;
 
     return (
         <div>
@@ -35,16 +18,16 @@ export default function ViewProfile() {
                     {/* Mini Profile Summary */}
                     <div className="flex items-start gap-4 mb-8 p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
                         <div className="size-12 bg-primary rounded-full flex items-center justify-center text-white text-lg font-bold">
-                            {profileData.displayName.charAt(0).toUpperCase()}
+                            {(profileData?.displayName || 'U').charAt(0).toUpperCase()}
                         </div>
                         <div className="flex-1">
                             <h4 className="font-bold text-slate-900 dark:text-white mb-1">
-                                {profileData.displayName}
+                                {profileData?.displayName || 'Chưa đăng nhập'}
                             </h4>
                             <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">
-                                {profileData.tags.join(' | ')}
+                                {(profileData?.tags || []).join(' | ')}
                             </p>
-                            {profileData.isVerified && (
+                            {profileData?.isVerified && (
                                 <div className="flex items-center gap-2">
                                     <CheckCircle className="w-4 h-4 text-green-500" />
                                     <span className="text-sm font-semibold text-green-600 dark:text-green-400">
@@ -66,7 +49,7 @@ export default function ViewProfile() {
                                     <User className="w-5 h-5 text-slate-400" />
                                 </div>
                                 <div className="pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white">
-                                    {profileData.displayName}
+                                    {profileData?.displayName || ''}
                                 </div>
                             </div>
                         </div>
@@ -80,7 +63,7 @@ export default function ViewProfile() {
                                     <Mail className="w-5 h-5 text-slate-400" />
                                 </div>
                                 <div className="pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white">
-                                    {profileData.email}
+                                    {profileData?.email || ''}
                                 </div>
                             </div>
                         </div>
@@ -94,7 +77,7 @@ export default function ViewProfile() {
                                     <Phone className="w-5 h-5 text-slate-400" />
                                 </div>
                                 <div className="pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white">
-                                    {profileData.phone}
+                                    {profileData?.phone || ''}
                                 </div>
                             </div>
                         </div>
@@ -108,7 +91,7 @@ export default function ViewProfile() {
                                     <CreditCard className="w-5 h-5 text-slate-400" />
                                 </div>
                                 <div className="pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white">
-                                    {profileData.idNumber}
+                                    {profileData?.idNumber || ''}
                                 </div>
                             </div>
                         </div>
@@ -122,7 +105,7 @@ export default function ViewProfile() {
                                     <Calendar className="w-5 h-5 text-slate-400" />
                                 </div>
                                 <div className="pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white">
-                                    {profileData.joinDate}
+                                    {profileData?.joinDate || ''}
                                 </div>
                             </div>
                         </div>
@@ -136,7 +119,7 @@ export default function ViewProfile() {
                                     <CheckCircle className="w-5 h-5 text-green-500" />
                                 </div>
                                 <div className="pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white">
-                                    {profileData.isVerified ? 'Đã xác thực' : 'Chưa xác thực'}
+                                    {profileData?.isVerified ? 'Đã xác thực' : 'Chưa xác thực'}
                                 </div>
                             </div>
                         </div>
@@ -148,7 +131,7 @@ export default function ViewProfile() {
                             GIỚI THIỆU BẢN THÂN
                         </label>
                         <div className="p-4 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 min-h-[100px]">
-                            {profileData.bio || 'Chưa có giới thiệu'}
+                            {profileData?.bio || profileData?.description || 'Chưa có giới thiệu'}
                         </div>
                     </div>
                 </div>
@@ -161,7 +144,7 @@ export default function ViewProfile() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
                         <div className="text-center">
                             <div className="text-4xl font-bold text-blue-600 dark:text-blue-400 mb-2">
-                                {profileData.stats.storiesWritten}
+                                {profileData?.stats?.storiesWritten ?? 0}
                             </div>
                             <div className="text-sm text-slate-600 dark:text-slate-400">
                                 Truyện đã viết
@@ -169,7 +152,7 @@ export default function ViewProfile() {
                         </div>
                         <div className="text-center">
                             <div className="text-4xl font-bold text-blue-600 dark:text-blue-400 mb-2">
-                                {profileData.stats.totalReads}
+                                {profileData?.stats?.totalReads ?? 0}
                             </div>
                             <div className="text-sm text-slate-600 dark:text-slate-400">
                                 Lượt đọc
@@ -177,7 +160,7 @@ export default function ViewProfile() {
                         </div>
                         <div className="text-center">
                             <div className="text-4xl font-bold text-amber-600 dark:text-amber-400 mb-2">
-                                {profileData.stats.currentCoins.toLocaleString()}
+                                {(profileData?.stats?.currentCoins ?? 0).toLocaleString()}
                             </div>
                             <div className="text-sm text-slate-600 dark:text-slate-400">
                                 Coins hiện có
@@ -185,7 +168,7 @@ export default function ViewProfile() {
                         </div>
                         <div className="text-center">
                             <div className="text-4xl font-bold text-red-600 dark:text-red-400 mb-2">
-                                {profileData.stats.likes}
+                                {profileData?.stats?.likes ?? 0}
                             </div>
                             <div className="text-sm text-slate-600 dark:text-slate-400">
                                 Yêu thích

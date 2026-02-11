@@ -38,6 +38,7 @@ export function CategoryManagement() {
             const queryParams = {
                 page: 1,
                 pageSize: 1000, // Get all categories for stats
+                excludeRoots: true, // Exclude root categories (parent_id = null)
                 includeInactive: true, // Include all statuses for stats
             };
 
@@ -90,6 +91,7 @@ export function CategoryManagement() {
                 page: page,
                 pageSize: pageSize,
                 search: searchTerm || null,
+                excludeRoots: true, // Exclude root categories (parent_id = null)
             };
 
             if (filterStatus === 'active') {
@@ -106,7 +108,8 @@ export function CategoryManagement() {
 
             const result = await getCategoriesWithPagination(queryParams);
 
-            // Use data directly from API
+            // Backend already filters out root categories (parent_id = null) when excludeRoots = true
+            // So we can use the data directly without client-side filtering
             const categoriesData = result.items || [];
             const backendTotalCount = result.totalCount || 0;
             const backendTotalPages = result.totalPages || 1;
@@ -189,7 +192,7 @@ export function CategoryManagement() {
         }
 
         // Get base URL (remove /api if present, as static files are served from root)
-        let baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+        let baseUrl = import.meta.env.VITE_API_URL || 'https://localhost:7117/api';
         // Remove /api suffix if present, as static files are served from root
         baseUrl = baseUrl.replace(/\/api\/?$/, '');
         // Ensure baseUrl doesn't end with /

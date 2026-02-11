@@ -5,7 +5,7 @@ import { Trash2, AlertTriangle, CheckCircle } from 'lucide-react';
 
 export default function DeleteAccount() {
     const navigate = useNavigate();
-    const { logout } = useAuth();
+    const { deleteMyAccount } = useAuth();
     const [confirmText, setConfirmText] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -21,11 +21,13 @@ export default function DeleteAccount() {
         setError('');
         setLoading(true);
 
-        // Mock API call - replace with actual API
         try {
-            await new Promise((resolve) => setTimeout(resolve, 2000));
-            logout();
-            navigate('/');
+            const res = await deleteMyAccount();
+            if (res.success) {
+                navigate('/');
+            } else {
+                setError(res.message || 'Đã xảy ra lỗi. Vui lòng thử lại.');
+            }
         } catch (err) {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
         } finally {

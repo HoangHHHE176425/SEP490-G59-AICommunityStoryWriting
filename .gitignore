@@ -20,5 +20,6 @@ Thumbs.db
 *.bak
 *.backup
 
-# Upload files
-**/wwwroot/uploads/
+# Local secrets (do NOT commit)
+**/appsettings.Local.json
+**/appsettings.*.Local.json

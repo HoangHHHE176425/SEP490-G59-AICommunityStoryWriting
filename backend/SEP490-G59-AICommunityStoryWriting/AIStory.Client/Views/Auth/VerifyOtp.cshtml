@@ -1,0 +1,100 @@
+﻿@{
+    ViewData["Title"] = "Xác thực OTP";
+}
+
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-5">
+            <div class="card shadow">
+                <div class="card-body p-5">
+                    <h2 class="card-title text-center mb-4">
+                        <i class="bi bi-shield-check"></i> Xác thực tài khoản
+                    </h2>
+
+                    <p class="text-center text-muted mb-4">
+                        Mã OTP đã được gửi đến email: <strong id="emailDisplay"></strong>
+                    </p>
+
+                    <form id="verifyOtpForm">
+                        <input type="hidden" id="email" value="@(Context.Request.Query["email"])">
+
+                        <div class="mb-3">
+                            <label for="otpCode" class="form-label">Mã OTP <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control text-center" id="otpCode" required
+                                   maxlength="6" pattern="[0-9]{6}" placeholder="000000"
+                                   style="font-size: 1.5rem; letter-spacing: 0.5rem;">
+                            <small class="text-muted">Nhập mã 6 số từ email</small>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary w-100 mb-3">
+                            <i class="bi bi-shield-check"></i> Xác thực
+                        </button>
+
+                        <div class="text-center">
+                            <a href="#" onclick="resendOtp()" class="text-decoration-none">Gửi lại mã OTP</a>
+                        </div>
+
+                        <hr class="my-4">
+
+                        <div class="text-center">
+                            <a asp-controller="Auth" asp-action="Login" class="text-decoration-none">Quay lại đăng nhập</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        // Hiển thị email
+        const emailParam = new URLSearchParams(window.location.search).get('email');
+        if (emailParam) {
+            document.getElementById('email').value = emailParam;
+            document.getElementById('emailDisplay').textContent = emailParam;
+        } else {
+            // Nếu không có email trong URL, chuyển về trang đăng ký
+            window.location.href = '/Auth/Register';
+        }
+
+        // Chỉ cho phép nhập số
+        document.getElementById('otpCode').addEventListener('input', function(e) {
+            this.value = this.value.replace(/[^0-9]/g, '');
+        });
+
+        document.getElementById('verifyOtpForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const otpCode = document.getElementById('otpCode').value;
+
+            if (otpCode.length !== 6) {
+                Utils.showAlert('Mã OTP phải có 6 số!', 'danger');
+                return;
+            }
+
+            try {
+                await ApiService.verifyOtp(email, otpCode);
+                Utils.showAlert('Xác thực thành công! Bạn có thể đăng nhập ngay.', 'success');
+
+                // Chuyển đến trang đăng nhập
+                setTimeout(() => {
+                    window.location.href = '/Auth/Login?email=' + encodeURIComponent(email);
+                }, 2000);
+            } catch (error) {
+                Utils.showAlert('Xác thực thất bại: ' + error.message, 'danger');
+            }
+        });
+
+        async function resendOtp() {
+            const email = document.getElementById('email').value;
+            try {
+                await ApiService.forgotPassword(email);
+                Utils.showAlert('Mã OTP mới đã được gửi đến email của bạn.', 'success');
+            } catch (error) {
+                Utils.showAlert('Lỗi: ' + error.message, 'danger');
+            }
+        }
+    </script>
+}

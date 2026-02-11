@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
@@ -68,6 +68,8 @@ public partial class users
     public virtual ICollection<stories> stories { get; set; } = new List<stories>();
 
     public virtual ICollection<story_commitments> story_commitments { get; set; } = new List<story_commitments>();
+
+    public virtual ICollection<author_policy_acceptances> author_policy_acceptances { get; set; } = new List<author_policy_acceptances>();
 
     public virtual ICollection<system_settings> system_settings { get; set; } = new List<system_settings>();
 

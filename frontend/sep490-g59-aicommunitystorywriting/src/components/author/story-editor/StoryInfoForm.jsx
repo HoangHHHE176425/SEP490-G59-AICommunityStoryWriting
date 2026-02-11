@@ -37,11 +37,13 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
         return () => { cancelled = true; };
     }, []);
 
+    const getCategoryId = (c) => (typeof c === 'object' && c?.id ? c.id : c);
     const handleCategoryToggle = (category) => {
-        const name = typeof category === 'string' ? category : category.name;
-        const newCategories = formData.categories.includes(name)
-            ? formData.categories.filter((c) => c !== name)
-            : [...formData.categories, name];
+        const id = typeof category === 'object' ? category.id : category;
+        const current = (formData.categories || []).map(getCategoryId);
+        const newCategories = current.includes(id)
+            ? formData.categories.filter((c) => getCategoryId(c) !== id)
+            : [...formData.categories, { id: category.id, name: category.name }];
         onChange('categories', newCategories);
     };
 
@@ -247,10 +249,10 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                         </div>
                     </div>
 
-                    {/* Thể loại - danh sách từ API */}
+                    {/* Thể loại chi tiết - từ API */}
                     <div>
                         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                            Thể loại <span style={{ color: '#ef4444' }}>*</span> (Chọn tối đa 3)
+                            Thể loại chi tiết <span style={{ color: '#ef4444' }}>*</span> (Chọn tối đa 3)
                         </label>
                         {categoriesLoading && (
                             <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.75rem' }}>Đang tải thể loại...</p>
@@ -261,7 +263,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                             {!categoriesLoading &&
                                 categories.map((cat) => {
-                                    const isSelected = formData.categories.includes(cat.name);
+                                    const isSelected = (formData.categories || []).map(getCategoryId).includes(cat.id);
                                     const isDisabled = formData.categories.length >= 3 && !isSelected;
                                     return (
                                         <button
@@ -298,15 +300,15 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                         </div>
                     </div>
 
-                    {/* Note */}
+                    {/* Mô tả truyện (summary) */}
                     <div>
                         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                            Ghi chú tác giả
+                            Mô tả truyện
                         </label>
                         <textarea
                             value={formData.note}
                             onChange={(e) => onChange('note', e.target.value)}
-                            placeholder="Nhập ghi chú"
+                            placeholder="Nhập mô tả truyện"
                             rows={4}
                             style={{
                                 width: '100%',

@@ -1,5 +1,8 @@
 import { useState } from 'react';
 import { Book, User, LogOut, ChevronRight, Heart, Star } from 'lucide-react';
+import { createStory, updateStory } from '../../api/story/storyApi';
+import { createChapter } from '../../api/chapter/chapterApi';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 // Stories components
 import { StoryList } from '../../components/author/stories/StoryList';
@@ -107,22 +110,65 @@ export function AuthorDashboard({ onBack }) {
         }
     };
 
-    const handleSaveStory = (storyData) => {
+    const handleSaveStory = async (storyData) => {
         if (currentStory) {
             setStories(stories.map(s => s.id === currentStory.id ? { ...s, ...storyData } : s));
-        } else {
-            const newStory = {
-                ...storyData,
-                id: Date.now(),
-                totalViews: 0,
-                follows: 0,
-                rating: 0,
-                lastUpdate: 'Vừa xong',
-            };
-            setStories([newStory, ...stories]);
+            setActiveView('stories');
+            setCurrentStory(null);
+            return;
         }
-        setActiveView('stories');
-        setCurrentStory(null);
+        const payload = {
+            title: storyData.title,
+            summary: storyData.note || '',
+            categoryIds: storyData.categoryIds || [],
+            ageRating: storyData.ageRating,
+            storyProgressStatus: storyData.storyProgressStatus || storyData.status,
+            coverImage: storyData.cover,
+        };
+        const created = await createStory(payload);
+        const storyId = created?.id ?? created?.Id;
+        const chaptersData = storyData.chaptersData || [];
+        for (let i = 0; i < chaptersData.length; i++) {
+            const ch = chaptersData[i];
+            await createChapter({
+                storyId,
+                title: ch.title,
+                content: ch.content || '',
+                orderIndex: i,
+                status: 'DRAFT',
+            });
+        }
+        if (!storyData.isDraft) {
+            await updateStory(storyId, {
+                title: storyData.title,
+                summary: storyData.note || '',
+                categoryIds: storyData.categoryIds || [],
+                status: 'PENDING_REVIEW',
+                ageRating: storyData.ageRating,
+                storyProgressStatus: storyData.storyProgressStatus,
+                coverImage: storyData.cover,
+            });
+        }
+        const coverPath = created?.coverImage ?? created?.cover_image ?? created?.CoverImage;
+        const coverUrl = coverPath ? resolveBackendUrl(coverPath) : storyData.cover;
+        const newStory = {
+            id: storyId,
+            title: created?.title ?? storyData.title,
+            cover: coverUrl,
+            categories: storyData.categories || [],
+            status: storyData.isDraft ? 'draft' : 'pending_review',
+            chapters: chaptersData.length,
+            totalViews: 0,
+            follows: 0,
+            rating: 0,
+            lastUpdate: 'Vừa xong',
+            publishStatus: storyData.publishStatus,
+        };
+        setStories(prev => [newStory, ...prev]);
+        if (storyData.isDraft) {
+            setActiveView('stories');
+            setCurrentStory(null);
+        }
     };
 
     const handleSaveInfo = (infoData) => {

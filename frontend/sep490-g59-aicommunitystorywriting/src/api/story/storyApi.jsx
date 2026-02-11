@@ -1,5 +1,37 @@
 import axiosInstance from "../axiosInstance";
 
+/** Chuyển base64 dataURL sang File (dùng cho ảnh bìa từ form). */
+function dataURLtoFile(dataUrl, filename = "cover.png") {
+    if (!dataUrl || typeof dataUrl !== "string") return null;
+    try {
+        const arr = dataUrl.split(",");
+        const mimeMatch = arr[0].match(/:(.*?);/);
+        const mime = mimeMatch ? mimeMatch[1] : "image/png";
+        const bstr = atob(arr[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) u8arr[n] = bstr.charCodeAt(n);
+        return new File([u8arr], filename, { type: mime });
+    } catch {
+        return null;
+    }
+}
+
+/** Map độ tuổi UI -> API. */
+const AGE_RATING_MAP = {
+    "Phù hợp mọi lứa tuổi": "ALL",
+    "Từ 13 tuổi": "13+",
+    "Từ 16 tuổi": "16+",
+    "Từ 18 tuổi": "18+",
+};
+
+/** Map trạng thái tiến độ UI -> API. */
+const STORY_PROGRESS_MAP = {
+    "Đang ra": "ONGOING",
+    "Hoàn thành": "COMPLETED",
+    "Tạm dừng": "HIATUS",
+};
+
 /**
  * Tạo truyện mới (multipart/form-data).
  * @param {Object} data - {
@@ -9,7 +41,7 @@ import axiosInstance from "../axiosInstance";
  *   ageRating?: string (ALL, 13+, 16+, 18+),
  *   storyProgressStatus?: string (ONGOING, COMPLETED, HIATUS),
  *   authorId?: string (Guid - dev mode khi chưa có auth),
- *   coverImage?: File
+ *   coverImage?: File | string (base64 dataURL)
  * }
  * @returns {Promise} - Created story từ server
  */
@@ -35,29 +67,43 @@ export async function createStory(data) {
         });
     }
 
-    formData.append("AgeRating", data.ageRating || "ALL");
-    formData.append("StoryProgressStatus", data.storyProgressStatus || "ONGOING");
+    const ageRating = AGE_RATING_MAP[data.ageRating] || data.ageRating || "ALL";
+    const rawProgress = data.storyProgressStatus || data.status || "";
+    const storyProgress =
+        STORY_PROGRESS_MAP[rawProgress] ||
+        (["ONGOING", "COMPLETED", "HIATUS"].includes(String(rawProgress).toUpperCase()) ? String(rawProgress).toUpperCase() : "ONGOING");
+    formData.append("AgeRating", ageRating);
+    formData.append("StoryProgressStatus", storyProgress);
 
     if (data.authorId) {
         formData.append("AuthorId", data.authorId);
     }
 
-    if (data.coverImage instanceof File) {
+    let coverFile = data.coverImage;
+    if (typeof coverFile === "string" && coverFile.startsWith("data:")) {
+        coverFile = dataURLtoFile(coverFile, "cover.png");
+    }
+    if (coverFile instanceof File) {
         const allowedExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
-        const ext = data.coverImage.name.toLowerCase().substring(data.coverImage.name.lastIndexOf("."));
-        if (!allowedExtensions.includes(ext)) {
+        const ext = coverFile.name.toLowerCase().substring(coverFile.name.lastIndexOf("."));
+        if (!allowedExtensions.includes(ext) && !coverFile.type?.startsWith("image/")) {
             throw new Error(`Ảnh bìa: chỉ chấp nhận ${allowedExtensions.join(", ").toUpperCase()}`);
         }
-        if (data.coverImage.size > 5 * 1024 * 1024) {
+        if (coverFile.size > 5 * 1024 * 1024) {
             throw new Error("Kích thước ảnh bìa không được vượt quá 5MB");
         }
-        formData.append("CoverImage", data.coverImage);
+        formData.append("CoverImage", coverFile);
     }
 
-    const response = await axiosInstance.post("/stories", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-    });
-    return response.data;
+    try {
+        const response = await axiosInstance.post("/stories", formData, {
+            headers: { "Content-Type": "multipart/form-data" },
+        });
+        return response.data;
+    } catch (err) {
+        const msg = err?.response?.data?.message ?? err?.response?.data?.error ?? err?.message;
+        throw new Error(typeof msg === "string" ? msg : "Không thể tạo truyện. Vui lòng thử lại.");
+    }
 }
 
 /**
@@ -139,26 +185,34 @@ export async function updateStory(id, data) {
     const formData = new FormData();
     formData.append("Title", title);
     formData.append("Summary", data.summary != null ? String(data.summary).trim() : "");
-    formData.append("Status", data.status || "DRAFT");
-    formData.append("AgeRating", data.ageRating || "ALL");
-    formData.append("StoryProgressStatus", data.storyProgressStatus || "ONGOING");
+    formData.append("Status", (data.status || "DRAFT").toUpperCase());
+    const ageRating = AGE_RATING_MAP[data.ageRating] || data.ageRating || "ALL";
+    const rawProgress = data.storyProgressStatus || data.publishStatus || data.status || "";
+    const storyProgress = STORY_PROGRESS_MAP[rawProgress] || (["ONGOING", "COMPLETED", "HIATUS"].includes(String(rawProgress).toUpperCase()) ? String(rawProgress).toUpperCase() : "ONGOING");
+    formData.append("AgeRating", ageRating);
+    formData.append("StoryProgressStatus", storyProgress);
 
     if (Array.isArray(data.categoryIds)) {
-        data.categoryIds.forEach((cid) => {
-            if (cid) formData.append("CategoryIds", cid);
-        });
+        const validGuids = data.categoryIds
+            .map((cid) => (typeof cid === "string" ? cid : String(cid || "")))
+            .filter((s) => /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(s));
+        validGuids.forEach((cid) => formData.append("CategoryIds", cid));
     }
 
-    if (data.coverImage instanceof File) {
+    let coverFile = data.coverImage;
+    if (typeof coverFile === "string" && coverFile.startsWith("data:")) {
+        coverFile = dataURLtoFile(coverFile, "cover.png");
+    }
+    if (coverFile instanceof File) {
         const allowedExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
-        const ext = data.coverImage.name.toLowerCase().substring(data.coverImage.name.lastIndexOf("."));
-        if (!allowedExtensions.includes(ext)) {
+        const ext = coverFile.name.toLowerCase().substring(coverFile.name.lastIndexOf("."));
+        if (!allowedExtensions.includes(ext) && !coverFile.type?.startsWith("image/")) {
             throw new Error(`Ảnh bìa: chỉ chấp nhận ${allowedExtensions.join(", ").toUpperCase()}`);
         }
-        if (data.coverImage.size > 5 * 1024 * 1024) {
+        if (coverFile.size > 5 * 1024 * 1024) {
             throw new Error("Kích thước ảnh bìa không được vượt quá 5MB");
         }
-        formData.append("CoverImage", data.coverImage);
+        formData.append("CoverImage", coverFile);
     }
 
     const response = await axiosInstance.put(`/stories/${id}`, formData, {
