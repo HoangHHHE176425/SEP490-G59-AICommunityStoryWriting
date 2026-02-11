@@ -1,4 +1,3 @@
-// eslint-disable-next-line no-unused-vars
 import { useState, useEffect } from 'react';
 import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
@@ -22,6 +21,30 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
     });
 
     const [isSaving, setIsSaving] = useState(false);
+
+    // Reload chapter data when chapter prop changes
+    useEffect(() => {
+        if (chapter) {
+            setChapterData({
+                number: chapter.number || (story?.chapters || 0) + 1,
+                title: chapter.title || '',
+                content: chapter.content || '',
+                status: chapter.status || 'draft',
+                accessType: chapter.accessType || 'public',
+                price: chapter.price || 0,
+            });
+        } else {
+            // Reset to default for new chapter
+            setChapterData({
+                number: (story?.chapters || 0) + 1,
+                title: '',
+                content: '',
+                status: 'draft',
+                accessType: 'public',
+                price: 0,
+            });
+        }
+    }, [chapter, story?.chapters]);
 
     const fontFamilies = [
         { name: 'Arial', value: 'Arial, sans-serif' },
