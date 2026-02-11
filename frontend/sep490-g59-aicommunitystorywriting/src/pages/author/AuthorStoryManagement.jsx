@@ -7,6 +7,9 @@ import { StoryCommentsViewer } from './StoryCommentsViewer';
 import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
+import { createStory, updateStory } from '../../api/story/storyApi';
+import { createChapter } from '../../api/chapter/chapterApi';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 export function AuthorStoryManagement({ onBack }) {
     const [activeView, setActiveView] = useState('stories'); // 'stories' | 'profile' | 'editInfo' | 'chapterList' | 'comments' | 'createStory' | 'editChapter' | 'addChapter'
@@ -116,22 +119,73 @@ export function AuthorStoryManagement({ onBack }) {
         }
     };
 
-    const handleSaveStory = (storyData) => {
+    const handleSaveStory = async (storyData) => {
         if (currentStory) {
             setStories(stories.map(s => s.id === currentStory.id ? { ...s, ...storyData } : s));
-        } else {
+            setActiveView('stories');
+            setCurrentStory(null);
+            return;
+        }
+
+        try {
+            const payload = {
+                title: storyData.title,
+                summary: storyData.note || '',
+                categoryIds: storyData.categoryIds || [],
+                ageRating: storyData.ageRating,
+                storyProgressStatus: storyData.storyProgressStatus || storyData.status,
+                coverImage: storyData.cover,
+            };
+            const created = await createStory(payload);
+            const storyId = created?.id ?? created?.Id;
+
+            const chaptersData = storyData.chaptersData || [];
+            for (let i = 0; i < chaptersData.length; i++) {
+                const ch = chaptersData[i];
+                await createChapter({
+                    storyId,
+                    title: ch.title,
+                    content: ch.content || '',
+                    orderIndex: i,
+                    status: 'DRAFT',
+                });
+            }
+
+            if (!storyData.isDraft) {
+                await updateStory(storyId, {
+                    title: storyData.title,
+                    summary: storyData.note || '',
+                    categoryIds: storyData.categoryIds || [],
+                    status: 'PENDING_REVIEW',
+                    ageRating: storyData.ageRating,
+                    storyProgressStatus: storyData.storyProgressStatus,
+                    coverImage: storyData.cover,
+                });
+            }
+
+            const coverPath = created?.coverImage ?? created?.cover_image ?? created?.CoverImage;
+            const coverUrl = coverPath ? resolveBackendUrl(coverPath) : storyData.cover;
             const newStory = {
-                ...storyData,
-                id: Date.now(),
+                id: storyId,
+                title: created?.title || storyData.title,
+                cover: coverUrl || storyData.cover,
+                categories: storyData.categories || [],
+                status: storyData.isDraft ? 'draft' : 'pending_review',
+                chapters: chaptersData.length,
                 totalViews: 0,
                 follows: 0,
                 rating: 0,
                 lastUpdate: 'Vừa xong',
+                publishStatus: storyData.publishStatus,
             };
-            setStories([newStory, ...stories]);
+            setStories(prev => [newStory, ...prev]);
+            if (storyData.isDraft) {
+                setActiveView('stories');
+                setCurrentStory(null);
+            }
+        } catch (err) {
+            throw err;
         }
-        setActiveView('stories');
-        setCurrentStory(null);
     };
 
     const handleSaveInfo = (infoData) => {

@@ -6,14 +6,18 @@ import { StepIndicator } from '../../components/author/story-editor/StepIndicato
 import { useToast } from '../../components/author/story-editor/Toast';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
+import { useAuth } from '../../contexts/AuthContext';
 
 export function StoryEditor({ story, onSave, onCancel }) {
+    const { user } = useAuth();
+    const authorName = user?.displayName ?? user?.DisplayName ?? user?.fullName ?? user?.FullName ?? user?.nickname ?? user?.Nickname ?? '';
     const [currentStep, setCurrentStep] = useState(1);
+    const [saving, setSaving] = useState(false);
     const { showToast, ToastContainer } = useToast();
 
     const [formData, setFormData] = useState({
         title: '',
-        author: 'Quyền Đình',
+        author: authorName,
         status: 'Đang ra',
         ageRating: 'Phù hợp mọi lứa tuổi',
         categories: [],
@@ -36,15 +40,15 @@ export function StoryEditor({ story, onSave, onCancel }) {
     ];
 
     useEffect(() => {
+        const name = user?.displayName ?? user?.DisplayName ?? user?.fullName ?? user?.FullName ?? user?.nickname ?? user?.Nickname ?? '';
         if (story) {
             const cats = story.categories || [];
             const normalized = Array.isArray(cats)
                 ? cats.map((c) => (typeof c === 'object' && c?.id ? { id: c.id, name: c.name || '' } : { id: c, name: String(c) }))
                 : [];
-            // eslint-disable-next-line react-hooks/set-state-in-effect
             setFormData({
                 title: story.title || '',
-                author: 'Quyền Đình',
+                author: story.author ?? name,
                 status: story.publishStatus || 'Đang ra',
                 ageRating: 'Phù hợp mọi lứa tuổi',
                 categories: normalized,
@@ -52,8 +56,10 @@ export function StoryEditor({ story, onSave, onCancel }) {
                 note: '',
                 cover: story.cover || '',
             });
+        } else {
+            setFormData(prev => ({ ...prev, author: name }));
         }
-    }, [story]);
+    }, [story, user]);
 
     const minChapters = 1;
 
@@ -144,7 +150,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
         }
     };
 
-    const handleSubmit = (isDraft) => {
+    const handleSubmit = async (isDraft) => {
         if (!validateStep1() || !validateStep2()) {
             showToast('Vui lòng hoàn thành tất cả thông tin bắt buộc', 'error');
             return;
@@ -156,14 +162,29 @@ export function StoryEditor({ story, onSave, onCancel }) {
         const storyData = {
             ...formData,
             categoryIds,
-            status: isDraft ? 'draft' : 'published',
-            chapters: chapters.length,
+            isDraft,
+            status: isDraft ? 'DRAFT' : 'PENDING_REVIEW',
+            storyProgressStatus: formData.status,
+            chaptersData: chapters.map((ch, i) => ({
+                title: ch.title,
+                content: ch.content || '',
+                orderIndex: i,
+            })),
+            chaptersCount: chapters.length,
             lastUpdate: 'Vừa xong',
-            publishStatus: isDraft ? 'Lưu tạm' : 'Đang ra',
+            publishStatus: isDraft ? 'Lưu tạm' : 'Chờ duyệt',
         };
 
-        onSave(storyData);
-        showToast(isDraft ? 'Đã lưu bản nháp' : 'Đăng truyện thành công!', 'success');
+        setSaving(true);
+        try {
+            await onSave(storyData);
+            showToast(isDraft ? 'Đã lưu bản nháp' : 'Đăng truyện thành công! Đang chờ duyệt.', 'success');
+            if (!isDraft) setCurrentStep(4);
+        } catch (err) {
+            showToast(err?.message || 'Có lỗi xảy ra', 'error');
+        } finally {
+            setSaving(false);
+        }
     };
 
     return (
@@ -362,6 +383,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                             <div style={{ display: 'flex', gap: '1rem' }}>
                                 {currentStep > 1 && (
                                     <button
+                                        disabled={saving}
                                         onClick={() => handleSubmit(true)}
                                         style={{
                                             padding: '0.75rem 2rem',
@@ -387,10 +409,8 @@ export function StoryEditor({ story, onSave, onCancel }) {
 
                                 {currentStep === 3 ? (
                                     <button
-                                        onClick={() => {
-                                            handleSubmit(false);
-                                            setCurrentStep(4);
-                                        }}
+                                        disabled={saving}
+                                        onClick={() => handleSubmit(false)}
                                         style={{
                                             padding: '0.75rem 2rem',
                                             backgroundColor: '#6ee7b7',
