@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { Mail, Lock, User, Eye, EyeOff, AlertCircle, CheckCircle, UserPlus } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
+import { PolicyModal } from '../../components/PolicyModal';
 
 export default function Register() {
     const navigate = useNavigate();
@@ -19,6 +20,7 @@ export default function Register() {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
+    const [policyModalOpen, setPolicyModalOpen] = useState(false);
 
     const handleChange = (e) => {
         setFormData({
@@ -53,17 +55,11 @@ export default function Register() {
         return true;
     };
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
+    const doSubmit = async () => {
         setError('');
         setSuccess(false);
-
-        if (!validateForm()) {
-            return;
-        }
-
+        if (!validateForm()) return;
         setLoading(true);
-
         try {
             const result = await register(formData.email, formData.password, formData.name);
             if (result.success) {
@@ -79,6 +75,15 @@ export default function Register() {
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        setPolicyModalOpen(true);
+    };
+
+    const handlePolicyConfirm = () => {
+        doSubmit();
     };
 
     const handleGoogleLogin = async () => {
@@ -331,25 +336,6 @@ export default function Register() {
                             </div>
                         </div>
 
-                        <div className="flex items-start">
-                            <input
-                                id="terms"
-                                type="checkbox"
-                                className="mt-1 w-4 h-4 text-primary border-slate-300 dark:border-slate-600 rounded focus:ring-primary/50"
-                                required
-                            />
-                            <label htmlFor="terms" className="ml-2 text-sm text-slate-600 dark:text-slate-400">
-                                Tôi đồng ý với{' '}
-                                <Link to="/terms" className="text-primary hover:text-primary/80 font-semibold">
-                                    Điều khoản sử dụng
-                                </Link>{' '}
-                                và{' '}
-                                <Link to="/privacy" className="text-primary hover:text-primary/80 font-semibold">
-                                    Chính sách bảo mật
-                                </Link>
-                            </label>
-                        </div>
-
                         <button
                             type="submit"
                             disabled={loading}
@@ -375,7 +361,12 @@ export default function Register() {
                 </div>
             </div>
             <Footer />
+            <PolicyModal
+                isOpen={policyModalOpen}
+                onClose={() => setPolicyModalOpen(false)}
+                onAccept={handlePolicyConfirm}
+                onDecline={() => setPolicyModalOpen(false)}
+            />
         </div>
-        
     );
 }

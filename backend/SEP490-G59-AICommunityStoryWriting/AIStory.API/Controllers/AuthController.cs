@@ -26,7 +26,13 @@ namespace AIStory.API.Controllers
             }
             catch (Exception ex)
             {
-                return BadRequest(new { message = ex.Message });
+                // Log inner exception for debugging
+                var errorMessage = ex.Message;
+                if (ex.InnerException != null)
+                {
+                    errorMessage += $" Inner: {ex.InnerException.Message}";
+                }
+                return BadRequest(new { message = errorMessage });
             }
         }
 
