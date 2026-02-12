@@ -58,8 +58,16 @@ export function Footer() {
                 <div>
                     <h4 className="font-bold mb-6 text-white text-sm uppercase tracking-wider">Hỗ trợ</h4>
                     <ul className="flex flex-col gap-3 text-sm text-slate-400">
-                        <li><a className="hover:text-primary transition-colors" href="#">Điều khoản dịch vụ</a></li>
-                        <li><a className="hover:text-primary transition-colors" href="#">Chính sách bảo mật</a></li>
+                        <li>
+                            <Link to="/policy" className="hover:text-primary transition-colors">
+                                Điều khoản dịch vụ
+                            </Link>
+                        </li>
+                        <li>
+                            <Link to="/policy" className="hover:text-primary transition-colors">
+                                Chính sách bảo mật
+                            </Link>
+                        </li>
                         <li><a className="hover:text-primary transition-colors" href="#">Câu hỏi thường gặp</a></li>
                         <li><Link to="/about-us" className="hover:text-primary transition-colors">Về chúng tôi</Link></li>
                         <li><a className="hover:text-primary transition-colors" href="#">Liên hệ bản quyền</a></li>

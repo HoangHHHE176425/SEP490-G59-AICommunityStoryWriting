@@ -2,6 +2,7 @@ using AIStory.Services.Helpers;
 using AIStory.Services.Implementations;
 using BusinessObjects;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Repositories;
@@ -37,7 +38,15 @@ namespace AIStory.API
                     options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
                     options.JsonSerializerOptions.WriteIndented = true;
                 });
-            builder.Services.AddDbContext<StoryPlatformDbContext>();
+            builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
+                options.UseSqlServer(
+                    builder.Configuration.GetConnectionString("DefaultConnection") 
+                    ?? "Server=(localdb)\\MSSQLLocalDB;uid=sa;password=123456;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                    sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(30),
+                        errorNumbersToAdd: null)
+                ));
             // CORS Configuration
             builder.Services.AddCors(options =>
             {
