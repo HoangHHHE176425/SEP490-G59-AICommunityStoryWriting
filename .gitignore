@@ -23,3 +23,4 @@ Thumbs.db
 # Local secrets (do NOT commit)
 **/appsettings.Local.json
 **/appsettings.*.Local.json
+backend/SEP490-G59-AICommunityStoryWriting/DataAccessObjects/Context/StoryPlatformDbContext.cs
