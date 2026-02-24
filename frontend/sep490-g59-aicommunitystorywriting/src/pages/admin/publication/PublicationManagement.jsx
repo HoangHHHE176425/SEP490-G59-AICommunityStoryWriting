@@ -328,6 +328,10 @@ export function PublicationManagement() {
                     onClose={handleCloseDetail}
                     onApprove={handleApprove}
                     onReject={handleReject}
+                    onRefresh={() => {
+                        loadPublications();
+                        loadStats();
+                    }}
                 />
             )}
         </div>

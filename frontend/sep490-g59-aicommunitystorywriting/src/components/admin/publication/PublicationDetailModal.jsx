@@ -17,7 +17,7 @@ function mapChapterItem(item) {
     };
 }
 
-export function PublicationDetailModal({ publication, onClose, onApprove, onReject }) {
+export function PublicationDetailModal({ publication, onClose, onApprove, onReject, onRefresh }) {
     const { showToast, ToastContainer } = useToast();
     const [chapters, setChapters] = useState([]);
     const [chaptersLoading, setChaptersLoading] = useState(true);
@@ -74,20 +74,32 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         return () => clearTimeout(id);
     }, [selectedChapter?.id, loadChapterContent]);
 
-    const openApproveConfirm = () => setShowApproveConfirm(true);
+    const openApproveConfirm = () => {
+        if (selectedChapter) setShowApproveConfirm(true);
+    };
 
     const handleApproveConfirm = async () => {
+        if (!selectedChapter) return;
         setShowApproveConfirm(false);
         setIsSubmitting(true);
         try {
             if (publication.status !== 'approved') {
                 await publishStory(storyId);
             }
-            for (const ch of chapters) {
-                await publishChapter(ch.id);
+            await publishChapter(selectedChapter.id);
+            showToast('Duyệt chương thành công!', 'success');
+            const remaining = chapters.filter(c => c.id !== selectedChapter.id);
+            setChapters(remaining);
+            setSelectedChapter(remaining[0] ?? null);
+            setChapterContents((prev) => {
+                const next = { ...prev };
+                delete next[selectedChapter.id];
+                return next;
+            });
+            onRefresh?.();
+            if (remaining.length === 0) {
+                onApprove(publication.id);
             }
-            showToast('Duyệt xuất bản thành công!', 'success');
-            onApprove(publication.id);
         } catch (err) {
             showToast(err?.message ?? 'Không thể duyệt xuất bản. Vui lòng thử lại.', 'error');
         } finally {
@@ -126,7 +138,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const getStatusColor = (status) => {
         const colors = {
             pending: '#ffc107',
-            approved: '#10b981',
+            approved: '#13ec5b',
             rejected: '#ef4444'
         };
         return colors[status] || '#64748b';
@@ -422,35 +434,35 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
 
                             <button
                                 onClick={openApproveConfirm}
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || !selectedChapter}
                                 style={{
                                     padding: '0.75rem 1.5rem',
-                                    backgroundColor: '#10b981',
+                                    backgroundColor: '#13ec5b',
                                     color: '#ffffff',
                                     fontSize: '0.875rem',
                                     fontWeight: 700,
                                     borderRadius: '8px',
                                     border: 'none',
-                                    cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                                    cursor: (isSubmitting || !selectedChapter) ? 'not-allowed' : 'pointer',
                                     transition: 'all 0.2s',
-                                    opacity: isSubmitting ? 0.5 : 1,
+                                    opacity: (isSubmitting || !selectedChapter) ? 0.5 : 1,
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.5rem'
                                 }}
                                 onMouseEnter={(e) => {
-                                    if (!isSubmitting) {
-                                        e.currentTarget.style.backgroundColor = '#059669';
+                                    if (!isSubmitting && selectedChapter) {
+                                        e.currentTarget.style.backgroundColor = '#10d954';
                                     }
                                 }}
                                 onMouseLeave={(e) => {
-                                    if (!isSubmitting) {
-                                        e.currentTarget.style.backgroundColor = '#10b981';
+                                    if (!isSubmitting && selectedChapter) {
+                                        e.currentTarget.style.backgroundColor = '#13ec5b';
                                     }
                                 }}
                             >
                                 <CheckCircle style={{ width: '18px', height: '18px' }} />
-                                {isSubmitting ? 'Đang xử lý...' : 'Duyệt xuất bản'}
+                                {isSubmitting ? 'Đang xử lý...' : 'Duyệt chương'}
                             </button>
                         </div>
                     )}
@@ -634,10 +646,10 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         onClick={(e) => e.stopPropagation()}
                     >
                         <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#1e293b', margin: '0 0 1rem 0' }}>
-                            Xác nhận duyệt xuất bản
+                            Xác nhận duyệt chương
                         </h3>
                         <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
-                            Bạn có chắc chắn muốn duyệt xuất bản truyện "{publication?.storyTitle}"?
+                            Bạn có chắc chắn muốn duyệt xuất bản chương "{selectedChapter?.title}"?
                         </p>
                         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                             <button
@@ -662,7 +674,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
                                     color: '#ffffff',
-                                    backgroundColor: '#10b981',
+                                    backgroundColor: '#13ec5b',
                                     border: 'none',
                                     borderRadius: '8px',
                                     cursor: 'pointer'
