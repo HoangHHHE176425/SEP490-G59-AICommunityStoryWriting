@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Plus, Eye, MessageSquare, Book } from 'lucide-react';
+import { Plus, Eye, MessageSquare, Book, Send, Undo2, Pencil, Trash2 } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { getChaptersByStoryId } from '../../api/chapter/chapterApi';
+import { getChaptersByStoryId, publishChapter, unpublishChapter } from '../../api/chapter/chapterApi';
 
 const CHAPTER_STATUS_MAP = {
     DRAFT: 'Bản nháp',
@@ -90,10 +90,32 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
         return () => { cancelled = true; };
     }, [story?.id ?? story?.Id]);
 
+    const [actioningChapterId, setActioningChapterId] = useState(null); // id khi đang gọi publish/unpublish
+
     const handleDeleteChapter = (chapterId) => {
         if (window.confirm('Bạn có chắc chắn muốn xóa chương này?')) {
             setChapters((prev) => prev.filter((ch) => ch.id !== chapterId));
         }
+    };
+
+    const handlePublishChapter = (chapterId) => {
+        setActioningChapterId(chapterId);
+        publishChapter(chapterId)
+            .then(() => loadChapters())
+            .catch((err) => {
+                alert(err?.message ?? 'Xuất bản thất bại');
+            })
+            .finally(() => setActioningChapterId(null));
+    };
+
+    const handleUnpublishChapter = (chapterId) => {
+        setActioningChapterId(chapterId);
+        unpublishChapter(chapterId)
+            .then(() => loadChapters())
+            .catch((err) => {
+                alert(err?.message ?? 'Hủy xuất bản thất bại');
+            })
+            .finally(() => setActioningChapterId(null));
     };
 
     return (
@@ -171,7 +193,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                             {/* Table Header */}
                             <div style={{
                                 display: 'grid',
-                                gridTemplateColumns: '100px 1fr 200px',
+                                gridTemplateColumns: '90px 1fr 320px',
                                 padding: '1rem 1.5rem',
                                 backgroundColor: '#f9fafb',
                                 borderBottom: '1px solid #e0e0e0',
@@ -233,8 +255,9 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                         key={chapter.id}
                                         style={{
                                             display: 'grid',
-                                            gridTemplateColumns: '100px 1fr 200px',
-                                            padding: '1.5rem',
+                                            gridTemplateColumns: '90px 1fr 320px',
+                                            padding: '1rem 1.5rem',
+                                            alignItems: 'center',
                                             borderBottom: index < chapters.length - 1 ? '1px solid #f3f4f6' : 'none',
                                             transition: 'background-color 0.2s'
                                         }}
@@ -246,107 +269,155 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                         }}
                                     >
                                         {/* Order */}
-                                        <div style={{ display: 'flex', alignItems: 'flex-start' }}>
-                                            <span style={{ fontSize: '1rem', fontWeight: 600, color: '#333333' }}>
+                                        <div>
+                                            <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#334155' }}>
                                                 Chương {chapter.number}
                                             </span>
                                         </div>
 
                                         {/* Title and Info */}
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                            <div style={{ fontSize: '1rem', fontWeight: 500, color: '#333333' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', minWidth: 0 }}>
+                                            <div style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                 {chapter.title}
                                             </div>
-
-                                            {/* Status Badge and Time */}
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                                                 <span style={{
-                                                    padding: '0.25rem 0.75rem',
-                                                    backgroundColor: chapter.status === 'published' ? '#d1fae5' : '#fef3c7',
-                                                    borderRadius: '4px',
-                                                    fontSize: '0.75rem',
+                                                    padding: '0.15rem 0.5rem',
+                                                    borderRadius: '9999px',
+                                                    fontSize: '0.6875rem',
                                                     fontWeight: 600,
-                                                    color: chapter.status === 'published' ? '#065f46' : '#92400e'
+                                                    backgroundColor: chapter.status === 'published' ? '#dcfce7' : chapter.status === 'pending_review' ? '#fef9c3' : '#f3f4f6',
+                                                    color: chapter.status === 'published' ? '#166534' : chapter.status === 'pending_review' ? '#a16207' : '#6b7280'
                                                 }}>
                                                     {chapter.statusDisplay}
                                                 </span>
-                                                <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
-                                                    Cập nhật {chapter.updatedAt}
+                                                <span style={{ fontSize: '0.6875rem', color: '#94a3b8' }}>{chapter.updatedAt}</span>
+                                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.6875rem', color: '#64748b' }}>
+                                                    <Eye size={11} /> {chapter.views}
+                                                    <MessageSquare size={11} /> {chapter.comments}
+                                                    👍 {chapter.likes}
                                                 </span>
-                                            </div>
-
-                                            {/* Stats */}
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                                                    <Eye style={{ width: '14px', height: '14px', color: '#6b7280' }} />
-                                                    <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.views}</span>
-                                                </div>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                                                    <MessageSquare style={{ width: '14px', height: '14px', color: '#6b7280' }} />
-                                                    <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.comments}</span>
-                                                </div>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                                                    <span style={{ fontSize: '0.875rem' }}>👍</span>
-                                                    <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.likes}</span>
-                                                </div>
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                                                    <Book style={{ width: '14px', height: '14px', color: '#6b7280' }} />
-                                                    <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>{chapter.views}</span>
-                                                </div>
                                             </div>
                                         </div>
 
-                                        {/* Actions */}
+                                        {/* Actions: hàng 1 = Chỉnh sửa, Xóa; hàng 2 = Xuất bản/Hủy xuất bản = tổng width + gap của hàng 1 */}
                                         <div style={{
                                             display: 'flex',
-                                            alignItems: 'center',
+                                            flexDirection: 'column',
+                                            alignItems: 'stretch',
                                             justifyContent: 'center',
-                                            gap: '0.75rem'
+                                            gap: '0.5rem',
+                                            width: 'fit-content',
+                                            margin: '0 auto'
                                         }}>
-                                            <button
-                                                onClick={() => onEditChapter(chapter)}
-                                                style={{
-                                                    padding: '0.5rem 1.25rem',
-                                                    backgroundColor: '#e6fff0',
-                                                    border: '1px solid #13ec5b',
-                                                    borderRadius: '9999px',
-                                                    fontSize: '0.875rem',
-                                                    fontWeight: 600,
-                                                    color: '#13ec5b',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.2s'
-                                                }}
-                                                onMouseEnter={(e) => {
-                                                    e.currentTarget.style.backgroundColor = '#d1fae5';
-                                                }}
-                                                onMouseLeave={(e) => {
-                                                    e.currentTarget.style.backgroundColor = '#e6fff0';
-                                                }}
-                                            >
-                                                Chỉnh sửa
-                                            </button>
-                                            <button
-                                                onClick={() => handleDeleteChapter(chapter.id)}
-                                                style={{
-                                                    padding: '0.5rem 1.25rem',
-                                                    backgroundColor: '#fef2f2',
-                                                    border: '1px solid #ef4444',
-                                                    borderRadius: '9999px',
-                                                    fontSize: '0.875rem',
-                                                    fontWeight: 600,
-                                                    color: '#ef4444',
-                                                    cursor: 'pointer',
-                                                    transition: 'all 0.2s'
-                                                }}
-                                                onMouseEnter={(e) => {
-                                                    e.currentTarget.style.backgroundColor = '#fee2e2';
-                                                }}
-                                                onMouseLeave={(e) => {
-                                                    e.currentTarget.style.backgroundColor = '#fef2f2';
-                                                }}
-                                            >
-                                                Xóa
-                                            </button>
+                                            {/* Hàng 1: Chỉnh sửa, Xóa — độ rộng hàng 2 = độ rộng hàng này */}
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                <button
+                                                    onClick={() => onEditChapter(chapter)}
+                                                    style={{
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '0.25rem',
+                                                        padding: '0.4rem 0.75rem',
+                                                        backgroundColor: '#f0fdf4',
+                                                        border: '1px solid #86efac',
+                                                        borderRadius: '9999px',
+                                                        fontSize: '0.75rem',
+                                                        fontWeight: 600,
+                                                        color: '#15803d',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.2s',
+                                                        whiteSpace: 'nowrap'
+                                                    }}
+                                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#dcfce7'; }}
+                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f0fdf4'; }}
+                                                >
+                                                    <Pencil size={12} />
+                                                    Chỉnh sửa
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteChapter(chapter.id)}
+                                                    style={{
+                                                        display: 'inline-flex',
+                                                        alignItems: 'center',
+                                                        gap: '0.25rem',
+                                                        padding: '0.4rem 0.75rem',
+                                                        backgroundColor: '#fff',
+                                                        border: '1px solid #fecaca',
+                                                        borderRadius: '9999px',
+                                                        fontSize: '0.75rem',
+                                                        fontWeight: 600,
+                                                        color: '#dc2626',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.2s',
+                                                        whiteSpace: 'nowrap'
+                                                    }}
+                                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#fef2f2'; }}
+                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#fff'; }}
+                                                >
+                                                    <Trash2 size={12} />
+                                                    Xóa
+                                                </button>
+                                            </div>
+                                            {/* Hàng 2: Xuất bản hoặc Hủy xuất bản (cùng độ rộng với hàng 1) */}
+                                            {(chapter.status === 'draft' || chapter.status === 'pending_review') && (
+                                                <div style={{ display: 'flex', width: '100%' }}>
+                                                    {chapter.status === 'draft' && (
+                                                        <button
+                                                            onClick={() => handlePublishChapter(chapter.id)}
+                                                            disabled={actioningChapterId === chapter.id}
+                                                            style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                gap: '0.25rem',
+                                                                width: '100%',
+                                                                padding: '0.4rem 0.75rem',
+                                                                backgroundColor: '#13ec5b',
+                                                                border: 'none',
+                                                                borderRadius: '9999px',
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 600,
+                                                                color: '#fff',
+                                                                cursor: actioningChapterId === chapter.id ? 'not-allowed' : 'pointer',
+                                                                opacity: actioningChapterId === chapter.id ? 0.7 : 1,
+                                                                transition: 'all 0.2s',
+                                                                whiteSpace: 'nowrap'
+                                                            }}
+                                                        >
+                                                            <Send size={12} />
+                                                            {actioningChapterId === chapter.id ? '...' : 'Xuất bản'}
+                                                        </button>
+                                                    )}
+                                                    {chapter.status === 'pending_review' && (
+                                                        <button
+                                                            onClick={() => handleUnpublishChapter(chapter.id)}
+                                                            disabled={actioningChapterId === chapter.id}
+                                                            style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                                gap: '0.25rem',
+                                                                width: '100%',
+                                                                padding: '0.4rem 0.75rem',
+                                                                backgroundColor: '#fff',
+                                                                border: '1px solid #f59e0b',
+                                                                borderRadius: '9999px',
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 600,
+                                                                color: '#b45309',
+                                                                cursor: actioningChapterId === chapter.id ? 'not-allowed' : 'pointer',
+                                                                opacity: actioningChapterId === chapter.id ? 0.7 : 1,
+                                                                transition: 'all 0.2s',
+                                                                whiteSpace: 'nowrap'
+                                                            }}
+                                                        >
+                                                            <Undo2 size={12} />
+                                                            {actioningChapterId === chapter.id ? '...' : 'Hủy xuất bản'}
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 ))
