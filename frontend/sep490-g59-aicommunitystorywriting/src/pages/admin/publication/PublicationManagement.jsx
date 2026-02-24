@@ -1,140 +1,170 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { PublicationList } from '../../../components/admin/publication/PublicationList';
 import { PublicationDetailModal } from '../../../components/admin/publication/PublicationDetailModal';
+import { Pagination } from '../../../components/pagination/Pagination';
+import { getStories } from '../../../api/story/storyApi';
+import { getChapters } from '../../../api/chapter/chapterApi';
+import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
+
+/** Map API story item sang format publication cho PublicationList / PublicationDetailModal */
+function mapStoryToPublication(item) {
+    const statusApi = (item.status ?? item.Status ?? '').toUpperCase();
+    const statusMap = {
+        PENDING_REVIEW: 'pending',
+        PUBLISHED: 'approved',
+        REJECTED: 'rejected',
+    };
+    const status = statusMap[statusApi] ?? 'pending';
+    const categoryNamesStr = item.categoryNames ?? item.CategoryNames ?? '';
+    const categoryNamesArr = categoryNamesStr
+        ? String(categoryNamesStr).split(',').map((s) => s.trim()).filter(Boolean)
+        : [];
+    const coverPath = item.coverImage ?? item.CoverImage;
+    const storyId = item.id ?? item.Id;
+    return {
+        id: storyId,
+        storyId,
+        storyTitle: item.title ?? item.Title ?? '',
+        storyCover: coverPath ? resolveBackendUrl(coverPath) : '',
+        author: item.authorName ?? item.AuthorName ?? 'N/A',
+        authorId: item.authorId ?? item.AuthorId ?? null,
+        type: 'new_story',
+        status,
+        submittedAt: item.createdAt ?? item.CreatedAt ?? item.updatedAt ?? item.UpdatedAt ?? null,
+        reviewedAt: null,
+        reviewedBy: null,
+        rejectionReason: item.rejectionReason ?? item.RejectionReason ?? null,
+        chapters: [],
+        totalChapters: item.totalChapters ?? item.TotalChapters ?? 0,
+        totalWords: 0,
+        categories: categoryNamesArr,
+        description: item.summary ?? item.Summary ?? '',
+    };
+}
+
+const STATUS_PARAM_MAP = {
+    pending: 'PENDING_REVIEW',
+    approved: 'PUBLISHED',
+    rejected: 'REJECTED',
+    all: null,
+};
+
+const PAGE_SIZE = 10;
 
 export function PublicationManagement() {
     const [selectedPublication, setSelectedPublication] = useState(null);
     const [filterStatus, setFilterStatus] = useState('pending'); // 'pending' | 'approved' | 'rejected' | 'all'
+    const [publications, setPublications] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [statsData, setStatsData] = useState({ pending: 0, approved: 0, rejected: 0, total: 0 });
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalCount, setTotalCount] = useState(0);
 
-    // Mock data - Danh sách truyện chờ xuất bản
-    const publications = [
-        {
-            id: 1,
-            storyId: 101,
-            storyTitle: 'Tu Tiên Chi Lộ: Hành Trình Vạn Năm',
-            storyCover: 'https://images.unsplash.com/photo-1589998059171-988d887df646?w=300&h=400&fit=crop',
-            author: 'Quyền Đình',
-            authorId: 501,
-            type: 'new_story', // 'new_story' | 'new_chapter'
-            status: 'pending', // 'pending' | 'approved' | 'rejected'
-            submittedAt: '2026-02-03T10:30:00',
-            reviewedAt: null,
-            reviewedBy: null,
-            rejectionReason: null,
-            chapters: [
-                {
-                    id: 1001,
-                    chapterNumber: 1,
-                    title: 'Khởi đầu hành trình',
-                    content: 'Trên đỉnh núi Tu Tiên, một thiếu niên đang ngồi thiền định. Tên của cậu là Trần Vũ, một người bình thường đến từ làng nhỏ dưới chân núi.\n\nHôm nay, cậu đã quyết định bước vào con đường tu tiên đầy gian nan. Không ai biết trước được những gì đang chờ đợi cậu phía trước...\n\n"Ta phải trở nên mạnh mẽ hơn!" Trần Vũ thầm nghĩ trong lòng.\n\nGió núi thổi qua, mang theo hơi lạnh của mùa đông. Nhưng trong lòng cậu, ngọn lửa quyết tâm đang bùng cháy mãnh liệt.',
-                    wordCount: 125,
-                    status: 'pending'
-                },
-                {
-                    id: 1002,
-                    chapterNumber: 2,
-                    title: 'Gặp sư phụ',
-                    content: 'Sáng sớm hôm sau, Trần Vũ được gọi đến gặp trưởng môn. Đó là một lão nhân với bộ râu dài và đôi mắt sâu thẳm.\n\n"Ngươi có thực sự muốn tu tiên?" Lão nhân hỏi.\n\n"Đệ tử quyết tâm!" Trần Vũ quỳ xuống đáp.\n\nLão nhân gật đầu, "Tốt lắm. Ta nhận ngươi làm đệ tử."',
-                    wordCount: 89,
-                    status: 'pending'
-                }
-            ],
-            totalChapters: 2,
-            totalWords: 214,
-            categories: ['Tiên hiệp', 'Huyền huyễn'],
-            description: 'Một thiếu niên bình thường bước vào con đường tu tiên đầy gian nan. Liệu cậu có thể vượt qua những thử thách và đạt được đỉnh cao của tu tiên?'
-        },
-        {
-            id: 2,
-            storyId: 102,
-            storyTitle: 'Kiếm Đạo Độc Tôn',
-            storyCover: 'https://images.unsplash.com/photo-1612036801632-8e4cf4e2e1b7?w=300&h=400&fit=crop',
-            author: 'Phong Hỏa',
-            authorId: 502,
-            type: 'new_chapter',
-            status: 'pending',
-            submittedAt: '2026-02-03T09:15:00',
-            reviewedAt: null,
-            reviewedBy: null,
-            rejectionReason: null,
-            chapters: [
-                {
-                    id: 2001,
-                    chapterNumber: 524,
-                    title: 'Đại chiến',
-                    content: 'Thanh kiếm trong tay Dương Huyền phát ra ánh sáng rực rỡ. Trước mặt là kẻ thù hùng mạnh nhất từ trước đến nay.\n\n"Kiếm Đạo Độc Tôn!" Dương Huyền gầm lên.\n\nMột đạo kiếm khí khổng lồ tách đôi bầu trời...',
-                    wordCount: 67,
-                    status: 'pending'
-                }
-            ],
-            totalChapters: 1,
-            totalWords: 67,
-            categories: ['Kiếm hiệp'],
-            description: 'Chương mới của series Kiếm Đạo Độc Tôn'
-        },
-        {
-            id: 3,
-            storyId: 103,
-            storyTitle: 'Ngôn Tình Mùa Hè',
-            storyCover: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?w=300&h=400&fit=crop',
-            author: 'Minh Nguyệt',
-            authorId: 503,
-            type: 'new_story',
-            status: 'approved',
-            submittedAt: '2026-02-02T14:20:00',
-            reviewedAt: '2026-02-02T16:45:00',
-            reviewedBy: 'Admin User',
-            rejectionReason: null,
-            chapters: [
-                {
-                    id: 3001,
-                    chapterNumber: 1,
-                    title: 'Buổi sáng đầu tiên',
-                    content: 'Ánh nắng mùa hè chiếu qua cửa sổ...',
-                    wordCount: 45,
-                    status: 'approved'
-                }
-            ],
-            totalChapters: 1,
-            totalWords: 45,
-            categories: ['Ngôn tình', 'Teen'],
-            description: 'Câu chuyện tình yêu ngọt ngào'
-        },
-        {
-            id: 4,
-            storyId: 104,
-            storyTitle: 'Bí Ẩn Biệt Thự Cổ',
-            storyCover: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=300&h=400&fit=crop',
-            author: 'Hắc Ảnh',
-            authorId: 504,
-            type: 'new_chapter',
-            status: 'rejected',
-            submittedAt: '2026-02-01T11:30:00',
-            reviewedAt: '2026-02-01T15:20:00',
-            reviewedBy: 'Admin User',
-            rejectionReason: 'Nội dung chứa yếu tố bạo lực quá mức. Vui lòng chỉnh sửa theo hướng dẫn cộng đồng.',
-            chapters: [
-                {
-                    id: 4001,
-                    chapterNumber: 29,
-                    title: 'Hành lang tối',
-                    content: 'Máu chảy ròng ròng...',
-                    wordCount: 23,
-                    status: 'rejected'
-                }
-            ],
-            totalChapters: 1,
-            totalWords: 23,
-            categories: ['Kinh dị'],
-            description: 'Chương bị từ chối do vi phạm quy định'
+    const loadPublications = useCallback((page = 1) => {
+        setLoading(true);
+        setError(null);
+
+        if (filterStatus === 'pending') {
+            getChapters({ status: 'PENDING_REVIEW', pageSize: 500 })
+                .then((chaptersRes) => {
+                    const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
+                    const storyIds = [...new Set(chapterItems.map(c => c.storyId ?? c.StoryId).filter(Boolean))];
+                    if (storyIds.length === 0) {
+                        setPublications([]);
+                        setTotalCount(0);
+                        setTotalPages(1);
+                        setCurrentPage(1);
+                        return;
+                    }
+                    return getStories({ pageSize: 500 }).then((storiesRes) => {
+                        const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
+                        const storyIdSet = new Set(storyIds.map(String));
+                        const filtered = storyItems.filter(s => storyIdSet.has(String(s.id ?? s.Id)));
+                        const list = filtered.map(mapStoryToPublication);
+                        setPublications(list);
+                        const total = list.length;
+                        setTotalCount(total);
+                        setTotalPages(Math.max(1, Math.ceil(total / PAGE_SIZE)));
+                        setCurrentPage(Math.min(page, Math.max(1, Math.ceil(total / PAGE_SIZE))));
+                    });
+                })
+                .catch((err) => {
+                    setError(err?.message ?? 'Không tải được danh sách truyện');
+                    setPublications([]);
+                    setTotalCount(0);
+                    setTotalPages(1);
+                })
+                .finally(() => setLoading(false));
+            return;
         }
-    ];
 
-    // Filter publications
-    const filteredPublications = publications.filter(pub => {
-        if (filterStatus === 'all') return true;
-        return pub.status === filterStatus;
-    });
+        const statusParam = STATUS_PARAM_MAP[filterStatus];
+        const params = { page, pageSize: PAGE_SIZE };
+        if (statusParam) params.status = statusParam;
+
+        getStories(params)
+            .then((res) => {
+                const items = res?.items ?? res?.Items ?? [];
+                const total = res?.totalCount ?? res?.totalItems ?? res?.total ?? items.length;
+                const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
+                setPublications(items.map(mapStoryToPublication));
+                setTotalCount(total);
+                setTotalPages(pages);
+                setCurrentPage(res?.page ?? page);
+            })
+            .catch((err) => {
+                setError(err?.message ?? 'Không tải được danh sách truyện');
+                setPublications([]);
+                setTotalCount(0);
+                setTotalPages(1);
+            })
+            .finally(() => setLoading(false));
+    }, [filterStatus]);
+
+    const handlePageChange = (page) => {
+        setCurrentPage(page);
+        if (filterStatus !== 'pending') loadPublications(page);
+    };
+
+    const loadStats = useCallback(() => {
+        Promise.all([
+            getStories({ pageSize: 500 }),
+            getChapters({ status: 'PENDING_REVIEW', pageSize: 500 })
+        ])
+            .then(([storiesRes, chaptersRes]) => {
+                const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
+                const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
+                const storyIdsWithPendingChapters = new Set(chapterItems.map(c => String(c.storyId ?? c.StoryId)).filter(Boolean));
+                const mapped = storyItems.map(mapStoryToPublication);
+                const pendingCount = mapped.filter(p => storyIdsWithPendingChapters.has(String(p.storyId ?? p.id))).length;
+                setStatsData({
+                    pending: pendingCount,
+                    approved: mapped.filter(p => p.status === 'approved').length,
+                    rejected: mapped.filter(p => p.status === 'rejected').length,
+                    total: mapped.length
+                });
+            })
+            .catch(() => setStatsData({ pending: 0, approved: 0, rejected: 0, total: 0 }));
+    }, []);
+
+    useEffect(() => {
+        const id = setTimeout(() => {
+            setCurrentPage(1);
+            loadPublications(1);
+        }, 0);
+        return () => clearTimeout(id);
+    }, [loadPublications]);
+
+    useEffect(() => {
+        const id = setTimeout(() => loadStats(), 0);
+        return () => clearTimeout(id);
+    }, [loadStats]);
+
+    const filteredPublications = filterStatus === 'pending'
+        ? publications.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+        : publications;
 
     const handleViewDetail = (publication) => {
         setSelectedPublication(publication);
@@ -148,23 +178,19 @@ export function PublicationManagement() {
         // TODO: API call to approve
         console.log('Approved publication:', publicationId);
         setSelectedPublication(null);
-        // Refresh list
+        loadPublications();
+        loadStats();
     };
 
     const handleReject = (publicationId, reason) => {
         // TODO: API call to reject
         console.log('Rejected publication:', publicationId, 'Reason:', reason);
         setSelectedPublication(null);
-        // Refresh list
+        loadPublications();
+        loadStats();
     };
 
-    // Statistics
-    const stats = {
-        pending: publications.filter(p => p.status === 'pending').length,
-        approved: publications.filter(p => p.status === 'approved').length,
-        rejected: publications.filter(p => p.status === 'rejected').length,
-        total: publications.length
-    };
+    const stats = statsData;
 
     return (
         <div style={{ padding: '2rem' }}>
@@ -301,10 +327,46 @@ export function PublicationManagement() {
             </div>
 
             {/* Publications List */}
-            <PublicationList
-                publications={filteredPublications}
-                onViewDetail={handleViewDetail}
-            />
+            {loading ? (
+                <div style={{
+                    backgroundColor: '#ffffff',
+                    borderRadius: '12px',
+                    padding: '4rem 2rem',
+                    textAlign: 'center',
+                    border: '1px solid #e2e8f0'
+                }}>
+                    <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>⏳</div>
+                    <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Đang tải danh sách truyện...</p>
+                </div>
+            ) : error ? (
+                <div style={{
+                    backgroundColor: '#fee2e2',
+                    borderRadius: '12px',
+                    padding: '1.5rem',
+                    border: '1px solid #ef4444'
+                }}>
+                    <p style={{ fontSize: '0.875rem', color: '#991b1b', margin: 0 }}>{error}</p>
+                </div>
+            ) : (
+                <>
+                    <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+                        <PublicationList
+                            publications={filteredPublications}
+                            onViewDetail={handleViewDetail}
+                        />
+                        {totalPages > 1 && (
+                            <Pagination
+                                currentPage={currentPage}
+                                totalPages={totalPages}
+                                totalItems={totalCount}
+                                itemsPerPage={PAGE_SIZE}
+                                onPageChange={handlePageChange}
+                                itemLabel="truyện"
+                            />
+                        )}
+                    </div>
+                </>
+            )}
 
             {/* Detail Modal */}
             {selectedPublication && (
@@ -313,6 +375,10 @@ export function PublicationManagement() {
                     onClose={handleCloseDetail}
                     onApprove={handleApprove}
                     onReject={handleReject}
+                    onRefresh={() => {
+                        loadPublications();
+                        loadStats();
+                    }}
                 />
             )}
         </div>

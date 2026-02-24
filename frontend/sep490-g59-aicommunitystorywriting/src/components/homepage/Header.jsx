@@ -115,10 +115,13 @@ export function Header() {
                                     <span className="absolute top-2 right-2 size-2 bg-primary border-2 border-slate-900 rounded-full"></span>
                                 </button>
 
-                                <button className="hidden sm:flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all">
+                                <Link
+                                    to="/author"
+                                    className="hidden sm:flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all"
+                                >
                                     <Edit className="w-4 h-4" />
                                     Viết truyện
-                                </button>
+                                </Link>
 
                                 {/* User Avatar - click to Homepage; Chevron for user menu */}
                                 <div className="relative flex items-center gap-0.5">
@@ -261,7 +264,14 @@ export function Header() {
                             {isAuthenticated ? (
                                 <>
                                     <div className="border-t border-slate-700 my-2"></div>
-
+                                    <Link
+                                        to="/author"
+                                        className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold"
+                                        onClick={() => setIsMenuOpen(false)}
+                                    >
+                                        <Edit className="w-4 h-4" />
+                                        Viết truyện
+                                    </Link>
                                     {/* User Menu Mobile */}
                                     <Link
                                         to="/profile"
