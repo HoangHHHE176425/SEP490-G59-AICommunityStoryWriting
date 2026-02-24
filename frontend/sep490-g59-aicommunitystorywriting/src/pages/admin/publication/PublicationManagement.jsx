@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { PublicationList } from '../../../components/admin/publication/PublicationList';
 import { PublicationDetailModal } from '../../../components/admin/publication/PublicationDetailModal';
 import { getStories } from '../../../api/story/storyApi';
+import { getChapters } from '../../../api/chapter/chapterApi';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 
 /** Map API story item sang format publication cho PublicationList / PublicationDetailModal */
@@ -58,6 +59,31 @@ export function PublicationManagement() {
     const loadPublications = useCallback(() => {
         setLoading(true);
         setError(null);
+
+        if (filterStatus === 'pending') {
+            getChapters({ status: 'PENDING_REVIEW', pageSize: 500 })
+                .then((chaptersRes) => {
+                    const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
+                    const storyIds = [...new Set(chapterItems.map(c => c.storyId ?? c.StoryId).filter(Boolean))];
+                    if (storyIds.length === 0) {
+                        setPublications([]);
+                        return;
+                    }
+                    return getStories({ pageSize: 500 }).then((storiesRes) => {
+                        const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
+                        const storyIdSet = new Set(storyIds.map(String));
+                        const filtered = storyItems.filter(s => storyIdSet.has(String(s.id ?? s.Id)));
+                        setPublications(filtered.map(mapStoryToPublication));
+                    });
+                })
+                .catch((err) => {
+                    setError(err?.message ?? 'Không tải được danh sách truyện');
+                    setPublications([]);
+                })
+                .finally(() => setLoading(false));
+            return;
+        }
+
         const statusParam = STATUS_PARAM_MAP[filterStatus];
         const params = { page: 1, pageSize: 100 };
         if (statusParam) params.status = statusParam;
@@ -75,12 +101,18 @@ export function PublicationManagement() {
     }, [filterStatus]);
 
     const loadStats = useCallback(() => {
-        getStories({ page: 1, pageSize: 500 })
-            .then((res) => {
-                const items = res?.items ?? res?.Items ?? [];
-                const mapped = items.map(mapStoryToPublication);
+        Promise.all([
+            getStories({ pageSize: 500 }),
+            getChapters({ status: 'PENDING_REVIEW', pageSize: 500 })
+        ])
+            .then(([storiesRes, chaptersRes]) => {
+                const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
+                const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
+                const storyIdsWithPendingChapters = new Set(chapterItems.map(c => String(c.storyId ?? c.StoryId)).filter(Boolean));
+                const mapped = storyItems.map(mapStoryToPublication);
+                const pendingCount = mapped.filter(p => storyIdsWithPendingChapters.has(String(p.storyId ?? p.id))).length;
                 setStatsData({
-                    pending: mapped.filter(p => p.status === 'pending').length,
+                    pending: pendingCount,
                     approved: mapped.filter(p => p.status === 'approved').length,
                     rejected: mapped.filter(p => p.status === 'rejected').length,
                     total: mapped.length
