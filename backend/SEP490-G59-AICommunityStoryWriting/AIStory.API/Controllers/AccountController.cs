@@ -97,6 +97,22 @@ namespace AIStory.API.Controllers
             }
         }
 
+        [HttpGet("profile/{userId:guid}")]
+        public async Task<IActionResult> GetProfileByUserId(Guid userId)
+        {
+            try
+            {
+                var profile = await _accountService.GetProfileAsync(userId);
+                if (profile == null)
+                    return NotFound(new { message = "User not found." });
+                return Ok(profile);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpPost("avatar")]
         [Consumes("multipart/form-data")]
         public async Task<IActionResult> UploadAvatar([FromForm] IFormFile avatar)

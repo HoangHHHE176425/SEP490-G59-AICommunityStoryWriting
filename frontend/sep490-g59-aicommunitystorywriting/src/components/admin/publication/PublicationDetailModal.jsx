@@ -1,11 +1,74 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar } from 'lucide-react';
+import { getChapters, getChapterById } from '../../../api/chapter/chapterApi';
+
+/** Map API chapter list item sang format modal cần */
+function mapChapterItem(item) {
+    const orderIndex = item.orderIndex ?? item.OrderIndex ?? 0;
+    return {
+        id: item.id ?? item.Id,
+        chapterNumber: orderIndex + 1,
+        title: item.title ?? item.Title ?? '',
+        content: null,
+        wordCount: item.wordCount ?? item.WordCount ?? 0,
+        status: (item.status ?? item.Status ?? '').toLowerCase(),
+    };
+}
 
 export function PublicationDetailModal({ publication, onClose, onApprove, onReject }) {
-    const [selectedChapter, setSelectedChapter] = useState(publication.chapters[0]);
+    const [chapters, setChapters] = useState([]);
+    const [chaptersLoading, setChaptersLoading] = useState(true);
+    const [chapterContents, setChapterContents] = useState({});
+    const [selectedChapter, setSelectedChapter] = useState(null);
     const [showRejectForm, setShowRejectForm] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const storyId = publication?.storyId ?? publication?.story_id;
+
+    useEffect(() => {
+        const id = setTimeout(() => {
+            if (!storyId) {
+                setChapters([]);
+                setChaptersLoading(false);
+                setSelectedChapter(null);
+                return;
+            }
+            setChaptersLoading(true);
+            setChapters([]);
+            setSelectedChapter(null);
+            setChapterContents({});
+            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 100 })
+                .then((res) => {
+                    const items = res?.items ?? res?.Items ?? [];
+                    const mapped = items.map(mapChapterItem);
+                    setChapters(mapped);
+                    if (mapped.length > 0) setSelectedChapter(mapped[0]);
+                })
+                .catch(() => setChapters([]))
+                .finally(() => setChaptersLoading(false));
+        }, 0);
+        return () => clearTimeout(id);
+    }, [storyId]);
+
+    const loadChapterContent = useCallback(async (chapterId) => {
+        try {
+            const data = await getChapterById(chapterId);
+            setChapterContents((prev) => ({
+                ...prev,
+                [chapterId]: data?.content ?? data?.Content ?? '',
+            }));
+        } catch {
+            setChapterContents((prev) => ({ ...prev, [chapterId]: '(Không tải được nội dung)' }));
+        }
+    }, []);
+
+    useEffect(() => {
+        const id = setTimeout(() => {
+            if (selectedChapter?.id) loadChapterContent(selectedChapter.id);
+        }, 0);
+        return () => clearTimeout(id);
+    }, [selectedChapter?.id, loadChapterContent]);
 
     const handleApprove = () => {
         if (window.confirm('Bạn có chắc chắn muốn duyệt xuất bản này?')) {
@@ -151,7 +214,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 <span>{formatDate(publication.submittedAt)}</span>
                             </div>
                             <div>
-                                {publication.totalChapters} chương • {publication.totalWords.toLocaleString()} từ
+                                {publication.totalChapters} chương
                             </div>
                         </div>
                     </div>
@@ -181,107 +244,121 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                     minHeight: 0,
                     overflow: 'hidden'
                 }}>
-                    {/* Sidebar - Chapter List */}
-                    {publication.chapters.length > 1 && (
-                        <div style={{
-                            width: '280px',
-                            borderRight: '1px solid #e2e8f0',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            backgroundColor: '#f8fafc'
-                        }}>
-                            <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0' }}>
-                                <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#64748b', margin: 0, textTransform: 'uppercase' }}>
-                                    Danh sách chương
-                                </h3>
-                            </div>
-                            <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
-                                {publication.chapters.map(chapter => (
-                                    <button
-                                        key={chapter.id}
-                                        onClick={() => setSelectedChapter(chapter)}
-                                        style={{
-                                            width: '100%',
-                                            padding: '0.75rem',
-                                            marginBottom: '0.5rem',
-                                            textAlign: 'left',
-                                            backgroundColor: selectedChapter.id === chapter.id ? '#ffffff' : 'transparent',
-                                            border: selectedChapter.id === chapter.id ? '2px solid #13ec5b' : '1px solid #e2e8f0',
-                                            borderRadius: '8px',
-                                            cursor: 'pointer',
-                                            transition: 'all 0.2s'
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            if (selectedChapter.id !== chapter.id) {
-                                                e.currentTarget.style.backgroundColor = '#ffffff';
-                                            }
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            if (selectedChapter.id !== chapter.id) {
-                                                e.currentTarget.style.backgroundColor = 'transparent';
-                                            }
-                                        }}
-                                    >
-                                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
-                                            Chương {chapter.chapterNumber}
-                                        </div>
+                    {chaptersLoading ? (
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
+                            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Đang tải danh sách chương chờ duyệt...</p>
+                        </div>
+                    ) : chapters.length === 0 ? (
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
+                            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Không có chương nào đang chờ kiểm duyệt</p>
+                        </div>
+                    ) : (
+                        <>
+                            {/* Sidebar - Chapter List */}
+                            {chapters.length >= 1 && (
+                                <div style={{
+                                    width: '280px',
+                                    borderRight: '1px solid #e2e8f0',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    backgroundColor: '#f8fafc'
+                                }}>
+                                    <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0' }}>
+                                        <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#64748b', margin: 0, textTransform: 'uppercase' }}>
+                                            Chương chờ duyệt
+                                        </h3>
+                                    </div>
+                                    <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
+                                        {chapters.map(chapter => (
+                                            <button
+                                                key={chapter.id}
+                                                onClick={() => setSelectedChapter(chapter)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '0.75rem',
+                                                    marginBottom: '0.5rem',
+                                                    textAlign: 'left',
+                                                    backgroundColor: selectedChapter?.id === chapter.id ? '#ffffff' : 'transparent',
+                                                    border: selectedChapter?.id === chapter.id ? '2px solid #13ec5b' : '1px solid #e2e8f0',
+                                                    borderRadius: '8px',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.2s'
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                    if (selectedChapter?.id !== chapter.id) {
+                                                        e.currentTarget.style.backgroundColor = '#ffffff';
+                                                    }
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    if (selectedChapter?.id !== chapter.id) {
+                                                        e.currentTarget.style.backgroundColor = 'transparent';
+                                                    }
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                                                    Chương {chapter.chapterNumber}
+                                                </div>
+                                                <div style={{
+                                                    fontSize: '0.875rem',
+                                                    fontWeight: 600,
+                                                    color: '#1e293b',
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                    whiteSpace: 'nowrap'
+                                                }}>
+                                                    {chapter.title}
+                                                </div>
+                                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+                                                    {chapter.wordCount} từ
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Main Content */}
+                            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                {selectedChapter ? (
+                                    <>
                                         <div style={{
-                                            fontSize: '0.875rem',
-                                            fontWeight: 600,
-                                            color: '#1e293b',
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap'
+                                            padding: '1.5rem',
+                                            borderBottom: '1px solid #e2e8f0',
+                                            backgroundColor: '#f8fafc'
                                         }}>
-                                            {chapter.title}
+                                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                                                CHƯƠNG {selectedChapter.chapterNumber}
+                                            </div>
+                                            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b', margin: 0, marginBottom: '0.5rem' }}>
+                                                {selectedChapter.title}
+                                            </h3>
+                                            <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                                                {selectedChapter.wordCount} từ
+                                            </div>
                                         </div>
-                                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                                            {chapter.wordCount} từ
+
+                                        <div style={{
+                                            flex: 1,
+                                            overflowY: 'auto',
+                                            padding: '2rem',
+                                            backgroundColor: '#ffffff'
+                                        }}>
+                                            <div style={{
+                                                maxWidth: '800px',
+                                                margin: '0 auto',
+                                                fontSize: '1rem',
+                                                lineHeight: 1.8,
+                                                color: '#1e293b',
+                                                whiteSpace: 'pre-wrap'
+                                            }}>
+                                                {chapterContents[selectedChapter.id] ?? 'Đang tải nội dung...'}
+                                            </div>
                                         </div>
-                                    </button>
-                                ))}
+                                    </>
+                                ) : null}
                             </div>
-                        </div>
+                        </>
                     )}
-
-                    {/* Main Content */}
-                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                        {/* Chapter Header */}
-                        <div style={{
-                            padding: '1.5rem',
-                            borderBottom: '1px solid #e2e8f0',
-                            backgroundColor: '#f8fafc'
-                        }}>
-                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
-                                CHƯƠNG {selectedChapter.chapterNumber}
-                            </div>
-                            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b', margin: 0, marginBottom: '0.5rem' }}>
-                                {selectedChapter.title}
-                            </h3>
-                            <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
-                                {selectedChapter.wordCount} từ
-                            </div>
-                        </div>
-
-                        {/* Chapter Content */}
-                        <div style={{
-                            flex: 1,
-                            overflowY: 'auto',
-                            padding: '2rem',
-                            backgroundColor: '#ffffff'
-                        }}>
-                            <div style={{
-                                maxWidth: '800px',
-                                margin: '0 auto',
-                                fontSize: '1rem',
-                                lineHeight: 1.8,
-                                color: '#1e293b',
-                                whiteSpace: 'pre-wrap'
-                            }}>
-                                {selectedChapter.content}
-                            </div>
-                        </div>
-                    </div>
                 </div>
 
                 {/* Footer - Actions */}
