@@ -986,11 +986,6 @@ export function AuthorStoryManagement({ onBack }) {
                                                         }}>
                                                             {story.publishStatus}
                                                         </div>
-                                                        {story.status === 'draft' && (
-                                                            <div style={{ fontSize: '0.75rem', color: '#ef4444' }}>
-                                                                Cần thêm 1 chương để có thể xuất bản
-                                                            </div>
-                                                        )}
                                                     </div>
                                                 </div>
 
