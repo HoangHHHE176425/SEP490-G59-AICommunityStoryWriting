@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Eye, MessageSquare, Book, Send, Undo2, Pencil, Trash2 } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { getChaptersByStoryId, publishChapter, unpublishChapter } from '../../api/chapter/chapterApi';
+import { getChaptersByStoryId, getChapterById, updateChapter, unpublishChapter } from '../../api/chapter/chapterApi';
 
 const CHAPTER_STATUS_MAP = {
     DRAFT: 'Bản nháp',
@@ -12,6 +12,15 @@ const CHAPTER_STATUS_MAP = {
     HIDDEN: 'Đã ẩn',
     ARCHIVED: 'Đã lưu trữ',
 };
+
+/** Màu trạng thái đồng bộ với màn Truyện của tôi: draft/pending = vàng, published = xanh lá */
+function getChapterStatusStyle(status) {
+    const s = (status || '').toLowerCase();
+    if (s === 'published') return { backgroundColor: '#d1fae5', color: '#065f46' };
+    if (s === 'draft' || s === 'pending_review') return { backgroundColor: '#fef3c7', color: '#92400e' };
+    if (s === 'rejected') return { backgroundColor: '#fef2f2', color: '#b91c1c' };
+    return { backgroundColor: '#f3f4f6', color: '#6b7280' };
+}
 
 function mapChapterFromApi(item) {
     const createdAt = item.createdAt ?? item.CreatedAt ?? item.publishedAt ?? item.PublishedAt;
@@ -90,7 +99,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
         return () => { cancelled = true; };
     }, [story?.id ?? story?.Id]);
 
-    const [actioningChapterId, setActioningChapterId] = useState(null); // id khi đang gọi publish/unpublish
+    const [actioningChapterId, setActioningChapterId] = useState(null);
+    const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, chapterId: null });
 
     const handleDeleteChapter = (chapterId) => {
         if (window.confirm('Bạn có chắc chắn muốn xóa chương này?')) {
@@ -98,24 +108,59 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
         }
     };
 
-    const handlePublishChapter = (chapterId) => {
-        setActioningChapterId(chapterId);
-        publishChapter(chapterId)
-            .then(() => loadChapters())
-            .catch((err) => {
-                alert(err?.message ?? 'Xuất bản thất bại');
-            })
-            .finally(() => setActioningChapterId(null));
+    const openPublishConfirm = (chapterId) => {
+        setConfirmDialog({ open: true, action: 'publish', chapterId });
+    };
+    const openUnpublishConfirm = (chapterId) => {
+        setConfirmDialog({ open: true, action: 'unpublish', chapterId });
+    };
+    const closeConfirmDialog = () => {
+        if (!actioningChapterId) setConfirmDialog({ open: false, action: null, chapterId: null });
     };
 
-    const handleUnpublishChapter = (chapterId) => {
+    const handleConfirmAction = () => {
+        const { action, chapterId } = confirmDialog;
+        if (!chapterId) return;
+        const chapterFromList = chapters.find((c) => c.id === chapterId);
         setActioningChapterId(chapterId);
-        unpublishChapter(chapterId)
-            .then(() => loadChapters())
-            .catch((err) => {
-                alert(err?.message ?? 'Hủy xuất bản thất bại');
-            })
-            .finally(() => setActioningChapterId(null));
+        setConfirmDialog({ open: false, action: null, chapterId: null });
+        if (action === 'publish') {
+            const doUpdate = (title, content) =>
+                updateChapter(chapterId, { title, content, status: 'PENDING_REVIEW' })
+                    .then(() => loadChapters())
+                    .catch((err) => {
+                        alert(err?.message ?? 'Xuất bản thất bại');
+                    })
+                    .finally(() => setActioningChapterId(null));
+            getChapterById(chapterId)
+                .then((fullCh) => {
+                    const title = (fullCh?.title ?? fullCh?.Title ?? chapterFromList?.title ?? '').trim();
+                    const content = fullCh?.content ?? fullCh?.Content ?? chapterFromList?.content ?? '';
+                    if (!title) throw new Error('Không lấy được tiêu đề chương');
+                    return doUpdate(title, content);
+                })
+                .catch((err) => {
+                    if (chapterFromList?.title) {
+                        return doUpdate(chapterFromList.title, chapterFromList.content ?? '');
+                    }
+                    alert(err?.message ?? 'Xuất bản thất bại');
+                    setActioningChapterId(null);
+                });
+        } else if (action === 'unpublish') {
+            unpublishChapter(chapterId)
+                .then(() => loadChapters())
+                .catch((err) => {
+                    alert(err?.message ?? 'Hủy xuất bản thất bại');
+                })
+                .finally(() => setActioningChapterId(null));
+        }
+    };
+
+    const handlePublishChapter = (chapterId) => {
+        openPublishConfirm(chapterId);
+    };
+    const handleUnpublishChapter = (chapterId) => {
+        openUnpublishConfirm(chapterId);
     };
 
     return (
@@ -286,8 +331,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                                     borderRadius: '9999px',
                                                     fontSize: '0.6875rem',
                                                     fontWeight: 600,
-                                                    backgroundColor: chapter.status === 'published' ? '#dcfce7' : chapter.status === 'pending_review' ? '#fef9c3' : '#f3f4f6',
-                                                    color: chapter.status === 'published' ? '#166534' : chapter.status === 'pending_review' ? '#a16207' : '#6b7280'
+                                                    ...getChapterStatusStyle(chapter.status)
                                                 }}>
                                                     {chapter.statusDisplay}
                                                 </span>
@@ -455,6 +499,78 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                 </div>
             </div>
             <Footer />
+
+            {/* Dialog xác nhận Xuất bản / Hủy xuất bản (cùng format với dialog duyệt chương) */}
+            {confirmDialog.open && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10000
+                    }}
+                    onClick={closeConfirmDialog}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '400px',
+                            width: '90%',
+                            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#1e293b', margin: '0 0 1rem 0' }}>
+                            {confirmDialog.action === 'publish' ? 'Xác nhận xuất bản' : 'Xác nhận hủy xuất bản'}
+                        </h3>
+                        <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
+                            {confirmDialog.action === 'publish'
+                                ? 'Bạn có chắc chắn muốn gửi chương này lên để duyệt xuất bản?'
+                                : 'Bạn có chắc chắn muốn hủy xuất bản và đưa chương về bản nháp?'}
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={closeConfirmDialog}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#64748b',
+                                    backgroundColor: '#f1f5f9',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                onClick={handleConfirmAction}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#ffffff',
+                                    backgroundColor: '#13ec5b',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Xác nhận
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
