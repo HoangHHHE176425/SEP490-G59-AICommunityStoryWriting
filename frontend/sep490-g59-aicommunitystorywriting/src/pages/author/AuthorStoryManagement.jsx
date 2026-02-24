@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut } from 'lucide-react';
+import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List } from 'lucide-react';
 import { StoryEditor } from './StoryEditor';
 import { StoryInfoEditor } from './StoryInfoEditor';
 import { ChapterListManager } from '../author/ChapterListManager';
@@ -12,12 +12,13 @@ import { createChapter, updateChapter, getChapterById } from '../../api/chapter/
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
+import { Pagination } from '../../components/pagination/Pagination';
 
 function mapStoryFromApi(item) {
     const status = item.status || item.Status || '';
     const storyProgressStatus = item.storyProgressStatus ?? item.StoryProgressStatus ?? '';
     const publishStatusMap = {
-        DRAFT: 'Lưu nháp',
+        DRAFT: 'Bản nháp',
         PENDING_REVIEW: 'Chờ duyệt',
         REJECTED: 'Bị từ chối',
         PUBLISHED: 'Đã xuất bản',
@@ -86,10 +87,14 @@ export function AuthorStoryManagement({ onBack }) {
     const [stories, setStories] = useState([]);
     const [storiesLoading, setStoriesLoading] = useState(true);
     const [storiesError, setStoriesError] = useState(null);
+    const [storiesCurrentPage, setStoriesCurrentPage] = useState(1);
+    const [storiesTotalPages, setStoriesTotalPages] = useState(1);
+    const [storiesTotalCount, setStoriesTotalCount] = useState(0);
 
+    const STORIES_PAGE_SIZE = 10;
     const authorId = user?.id ?? user?.Id;
 
-    const loadStories = useCallback(() => {
+    const loadStories = useCallback((page = 1) => {
         if (!authorId) {
             setStories([]);
             setStoriesLoading(false);
@@ -97,20 +102,32 @@ export function AuthorStoryManagement({ onBack }) {
         }
         setStoriesLoading(true);
         setStoriesError(null);
-        getStories({ authorId, page: 1, pageSize: 100 })
+        getStories({ authorId, page, pageSize: STORIES_PAGE_SIZE })
             .then((res) => {
                 const items = res?.items ?? res?.Items ?? [];
+                const total = res?.totalCount ?? res?.totalItems ?? res?.total ?? items.length;
+                const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / STORIES_PAGE_SIZE));
                 setStories(items.map(mapStoryFromApi));
+                setStoriesTotalCount(total);
+                setStoriesTotalPages(pages);
+                setStoriesCurrentPage(res?.page ?? page);
             })
             .catch((err) => {
                 setStoriesError(err?.message ?? 'Không tải được danh sách truyện');
                 setStories([]);
+                setStoriesTotalCount(0);
+                setStoriesTotalPages(1);
             })
             .finally(() => setStoriesLoading(false));
     }, [authorId]);
 
+    const handleStoriesPageChange = (page) => {
+        setStoriesCurrentPage(page);
+        loadStories(page);
+    };
+
     useEffect(() => {
-        queueMicrotask(() => loadStories());
+        queueMicrotask(() => loadStories(1));
     }, [loadStories]);
 
     // Mock comments data
@@ -326,7 +343,7 @@ export function AuthorStoryManagement({ onBack }) {
             });
         }
 
-        loadStories();
+        loadStories(storiesCurrentPage);
         if (storyData.isDraft) {
             setActiveView('stories');
             setCurrentStory(null);
@@ -526,6 +543,9 @@ export function AuthorStoryManagement({ onBack }) {
                                 backgroundColor: activeMenu === 'profile' ? '#f0fdf4' : 'transparent',
                                 border: 'none',
                                 borderLeft: activeMenu === 'profile' ? '3px solid #13ec5b' : '3px solid transparent',
+                                borderRadius: '9999px',
+                                marginLeft: '0.5rem',
+                                marginRight: '0.5rem',
                                 textAlign: 'left',
                                 fontSize: '0.875rem',
                                 fontWeight: activeMenu === 'profile' ? 600 : 500,
@@ -562,6 +582,9 @@ export function AuthorStoryManagement({ onBack }) {
                                 backgroundColor: activeMenu === 'stories' ? '#f0fdf4' : 'transparent',
                                 border: 'none',
                                 borderLeft: activeMenu === 'stories' ? '3px solid #13ec5b' : '3px solid transparent',
+                                borderRadius: '9999px',
+                                marginLeft: '0.5rem',
+                                marginRight: '0.5rem',
                                 textAlign: 'left',
                                 fontSize: '0.875rem',
                                 fontWeight: activeMenu === 'stories' ? 600 : 500,
@@ -609,7 +632,7 @@ export function AuthorStoryManagement({ onBack }) {
                                 padding: '0.875rem 1.5rem',
                                 backgroundColor: 'transparent',
                                 border: '2px solid #ef4444',
-                                borderRadius: '8px',
+                                borderRadius: '9999px',
                                 textAlign: 'center',
                                 fontSize: '0.875rem',
                                 fontWeight: 600,
@@ -710,7 +733,7 @@ export function AuthorStoryManagement({ onBack }) {
                                             padding: '0.5rem 1.25rem',
                                             backgroundColor: '#13ec5b',
                                             border: 'none',
-                                            borderRadius: '4px',
+                                            borderRadius: '9999px',
                                             fontSize: '0.875rem',
                                             fontWeight: 600,
                                             color: '#ffffff',
@@ -792,8 +815,17 @@ export function AuthorStoryManagement({ onBack }) {
                                 }}>
                                     <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '1rem' }}>{storiesError}</p>
                                     <button
-                                        onClick={() => loadStories()}
-                                        style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer' }}
+                                        onClick={() => loadStories(storiesCurrentPage)}
+                                        style={{
+                                            padding: '0.625rem 1.25rem',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            borderRadius: '9999px',
+                                            border: '1px solid #e0e0e0',
+                                            backgroundColor: '#ffffff',
+                                            color: '#333333',
+                                            cursor: 'pointer'
+                                        }}
                                     >
                                         Thử lại
                                     </button>
@@ -830,219 +862,282 @@ export function AuthorStoryManagement({ onBack }) {
                                     </button>
                                 </div>
                             ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                    {stories.map((story) => (
-                                        <div
-                                            key={story.id}
-                                            style={{
-                                                backgroundColor: '#ffffff',
-                                                borderRadius: '8px',
-                                                padding: '1.25rem',
-                                                border: '1px solid #e0e0e0',
-                                                display: 'flex',
-                                                gap: '1.25rem'
-                                            }}
-                                        >
-                                            {/* Cover */}
-                                            <img
-                                                src={story.cover || 'https://via.placeholder.com/80x107?text=No+Cover'}
-                                                alt={story.title}
+                                <>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                        {stories.map((story) => (
+                                            <div
+                                                key={story.id}
                                                 style={{
-                                                    width: '80px',
-                                                    height: '107px',
-                                                    objectFit: 'cover',
-                                                    borderRadius: '4px',
-                                                    flexShrink: 0
+                                                    backgroundColor: '#ffffff',
+                                                    borderRadius: '8px',
+                                                    padding: '1.25rem',
+                                                    border: '1px solid #e0e0e0',
+                                                    display: 'flex',
+                                                    gap: '1.25rem'
                                                 }}
-                                            />
-
-                                            {/* Info */}
-                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
-                                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <h3 style={{
-                                                            fontSize: '1rem',
-                                                            fontWeight: 'bold',
-                                                            color: '#333333',
-                                                            margin: '0 0 0.5rem 0',
-                                                            overflow: 'hidden',
-                                                            textOverflow: 'ellipsis',
-                                                            whiteSpace: 'nowrap'
-                                                        }}>
-                                                            {story.title}
-                                                        </h3>
-                                                        <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
-                                                            {story.lastUpdate}
-                                                        </div>
-                                                    </div>
-                                                    <div style={{
-                                                        padding: '0.25rem 0.75rem',
-                                                        backgroundColor: ['published', 'completed'].includes(story.status) ? '#d1fae5' : '#fef3c7',
+                                            >
+                                                {/* Cover */}
+                                                <img
+                                                    src={story.cover || 'https://via.placeholder.com/80x107?text=No+Cover'}
+                                                    alt={story.title}
+                                                    style={{
+                                                        width: '80px',
+                                                        height: '107px',
+                                                        objectFit: 'cover',
                                                         borderRadius: '4px',
-                                                        fontSize: '0.75rem',
-                                                        color: ['published', 'completed'].includes(story.status) ? '#065f46' : '#92400e',
-                                                        marginLeft: '1rem',
                                                         flexShrink: 0
-                                                    }}>
-                                                        {story.publishStatus}
-                                                    </div>
-                                                </div>
+                                                    }}
+                                                />
 
-                                                {/* Stats */}
-                                                <div style={{
-                                                    display: 'grid',
-                                                    gridTemplateColumns: 'repeat(4, 1fr)',
-                                                    gap: '1rem',
-                                                    padding: '0.75rem 0',
-                                                    borderTop: '1px solid #f3f4f6',
-                                                    borderBottom: '1px solid #f3f4f6',
-                                                    marginBottom: '1rem'
-                                                }}>
-                                                    <div>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
-                                                            <Book style={{ width: '14px', height: '14px', color: '#6b7280' }} />
-                                                            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Chương</span>
+                                                {/* Info */}
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                                            <h3 style={{
+                                                                fontSize: '1rem',
+                                                                fontWeight: 'bold',
+                                                                color: '#333333',
+                                                                margin: '0 0 0.5rem 0',
+                                                                overflow: 'hidden',
+                                                                textOverflow: 'ellipsis',
+                                                                whiteSpace: 'nowrap'
+                                                            }}>
+                                                                {story.title}
+                                                            </h3>
+                                                            <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                                                                {story.lastUpdate}
+                                                            </div>
                                                         </div>
-                                                        <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
-                                                            {story.chapters}
-                                                        </div>
-                                                    </div>
-
-                                                    <div>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
-                                                            <Eye style={{ width: '14px', height: '14px', color: '#6b7280' }} />
-                                                            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Lượt đọc</span>
-                                                        </div>
-                                                        <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
-                                                            {story.totalViews.toLocaleString()}
-                                                        </div>
-                                                    </div>
-
-                                                    <div>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
-                                                            <Heart style={{ width: '14px', height: '14px', color: '#6b7280' }} />
-                                                            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Theo dõi</span>
-                                                        </div>
-                                                        <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
-                                                            {story.follows}
+                                                        <div style={{
+                                                            padding: '0.25rem 0.75rem',
+                                                            backgroundColor: ['published', 'completed'].includes(story.status) ? '#d1fae5' : '#fef3c7',
+                                                            borderRadius: '4px',
+                                                            fontSize: '0.75rem',
+                                                            color: ['published', 'completed'].includes(story.status) ? '#065f46' : '#92400e',
+                                                            marginLeft: '1rem',
+                                                            flexShrink: 0
+                                                        }}>
+                                                            {story.publishStatus}
                                                         </div>
                                                     </div>
 
-                                                    <div>
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
-                                                            <Star style={{ width: '14px', height: '14px', color: '#6b7280' }} />
-                                                            <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Đề cử</span>
-                                                        </div>
-                                                        <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
-                                                            0
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                {/* Status */}
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                                        Trạng thái xuất bản
-                                                    </div>
+                                                    {/* Stats */}
                                                     <div style={{
-                                                        padding: '0.25rem 0.75rem',
-                                                        backgroundColor: (story.status === 'published' || story.status === 'completed') ? '#d1fae5' : '#fef3c7',
-                                                        borderRadius: '4px',
-                                                        fontSize: '0.75rem',
-                                                        color: (story.status === 'published' || story.status === 'completed') ? '#065f46' : '#92400e'
+                                                        display: 'grid',
+                                                        gridTemplateColumns: 'repeat(4, 1fr)',
+                                                        gap: '1rem',
+                                                        padding: '0.75rem 0',
+                                                        borderTop: '1px solid #f3f4f6',
+                                                        borderBottom: '1px solid #f3f4f6',
+                                                        marginBottom: '1rem'
                                                     }}>
-                                                        {story.publishStatus}
-                                                    </div>
-                                                    {story.status === 'draft' && (
-                                                        <div style={{ fontSize: '0.75rem', color: '#ef4444' }}>
-                                                            Cần thêm 1 chương để có thể xuất bản
+                                                        <div>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
+                                                                <Book style={{ width: '14px', height: '14px', color: '#6b7280' }} />
+                                                                <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Chương</span>
+                                                            </div>
+                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
+                                                                {story.chapters}
+                                                            </div>
                                                         </div>
-                                                    )}
+
+                                                        <div>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
+                                                                <Eye style={{ width: '14px', height: '14px', color: '#6b7280' }} />
+                                                                <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Lượt đọc</span>
+                                                            </div>
+                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
+                                                                {story.totalViews.toLocaleString()}
+                                                            </div>
+                                                        </div>
+
+                                                        <div>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
+                                                                <Heart style={{ width: '14px', height: '14px', color: '#6b7280' }} />
+                                                                <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Theo dõi</span>
+                                                            </div>
+                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
+                                                                {story.follows}
+                                                            </div>
+                                                        </div>
+
+                                                        <div>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.25rem' }}>
+                                                                <Star style={{ width: '14px', height: '14px', color: '#6b7280' }} />
+                                                                <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Đề cử</span>
+                                                            </div>
+                                                            <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
+                                                                0
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Status */}
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                                            Trạng thái xuất bản
+                                                        </div>
+                                                        <div style={{
+                                                            padding: '0.25rem 0.75rem',
+                                                            backgroundColor: (story.status === 'published' || story.status === 'completed') ? '#d1fae5' : '#fef3c7',
+                                                            borderRadius: '4px',
+                                                            fontSize: '0.75rem',
+                                                            color: (story.status === 'published' || story.status === 'completed') ? '#065f46' : '#92400e'
+                                                        }}>
+                                                            {story.publishStatus}
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                {/* Action Buttons */}
+                                                <div style={{
+                                                    display: 'flex',
+                                                    flexDirection: 'column',
+                                                    gap: '0.5rem',
+                                                    flexShrink: 0,
+                                                    minWidth: '140px'
+                                                }}>
+                                                    <button
+                                                        onClick={() => handleViewChapters(story)}
+                                                        style={{
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            gap: '0.375rem',
+                                                            padding: '0.5rem 1rem',
+                                                            backgroundColor: '#f8fafc',
+                                                            border: '1px solid #e2e8f0',
+                                                            borderRadius: '9999px',
+                                                            fontSize: '0.8125rem',
+                                                            fontWeight: 500,
+                                                            color: '#475569',
+                                                            cursor: 'pointer',
+                                                            whiteSpace: 'nowrap',
+                                                            transition: 'all 0.2s'
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            e.currentTarget.style.backgroundColor = '#f1f5f9';
+                                                            e.currentTarget.style.borderColor = '#13ec5b';
+                                                            e.currentTarget.style.color = '#13ec5b';
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            e.currentTarget.style.backgroundColor = '#f8fafc';
+                                                            e.currentTarget.style.borderColor = '#e2e8f0';
+                                                            e.currentTarget.style.color = '#475569';
+                                                        }}
+                                                    >
+                                                        <List style={{ width: '14px', height: '14px' }} />
+                                                        Danh sách chương
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleEditStory(story)}
+                                                        style={{
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            gap: '0.375rem',
+                                                            padding: '0.5rem 1rem',
+                                                            backgroundColor: '#f8fafc',
+                                                            border: '1px solid #e2e8f0',
+                                                            borderRadius: '9999px',
+                                                            fontSize: '0.8125rem',
+                                                            fontWeight: 500,
+                                                            color: '#475569',
+                                                            cursor: 'pointer',
+                                                            whiteSpace: 'nowrap',
+                                                            transition: 'all 0.2s'
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            e.currentTarget.style.backgroundColor = '#f1f5f9';
+                                                            e.currentTarget.style.borderColor = '#13ec5b';
+                                                            e.currentTarget.style.color = '#13ec5b';
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            e.currentTarget.style.backgroundColor = '#f8fafc';
+                                                            e.currentTarget.style.borderColor = '#e2e8f0';
+                                                            e.currentTarget.style.color = '#475569';
+                                                        }}
+                                                    >
+                                                        <Edit style={{ width: '14px', height: '14px' }} />
+                                                        Chỉnh sửa
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleViewComments(story)}
+                                                        style={{
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            gap: '0.375rem',
+                                                            padding: '0.5rem 1rem',
+                                                            backgroundColor: '#f8fafc',
+                                                            border: '1px solid #e2e8f0',
+                                                            borderRadius: '9999px',
+                                                            fontSize: '0.8125rem',
+                                                            fontWeight: 500,
+                                                            color: '#475569',
+                                                            cursor: 'pointer',
+                                                            whiteSpace: 'nowrap',
+                                                            transition: 'all 0.2s'
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            e.currentTarget.style.backgroundColor = '#f1f5f9';
+                                                            e.currentTarget.style.borderColor = '#13ec5b';
+                                                            e.currentTarget.style.color = '#13ec5b';
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            e.currentTarget.style.backgroundColor = '#f8fafc';
+                                                            e.currentTarget.style.borderColor = '#e2e8f0';
+                                                            e.currentTarget.style.color = '#475569';
+                                                        }}
+                                                    >
+                                                        <MessageSquare style={{ width: '14px', height: '14px' }} />
+                                                        Bình luận
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteStory(story.id)}
+                                                        style={{
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            gap: '0.375rem',
+                                                            padding: '0.5rem 1rem',
+                                                            backgroundColor: '#fff',
+                                                            border: '1px solid #fecaca',
+                                                            borderRadius: '9999px',
+                                                            fontSize: '0.8125rem',
+                                                            fontWeight: 500,
+                                                            color: '#dc2626',
+                                                            cursor: 'pointer',
+                                                            whiteSpace: 'nowrap',
+                                                            transition: 'all 0.2s'
+                                                        }}
+                                                        onMouseEnter={(e) => {
+                                                            e.currentTarget.style.backgroundColor = '#fef2f2';
+                                                            e.currentTarget.style.borderColor = '#ef4444';
+                                                        }}
+                                                        onMouseLeave={(e) => {
+                                                            e.currentTarget.style.backgroundColor = '#fff';
+                                                            e.currentTarget.style.borderColor = '#fecaca';
+                                                        }}
+                                                    >
+                                                        <Trash2 style={{ width: '14px', height: '14px' }} />
+                                                        Xóa
+                                                    </button>
                                                 </div>
                                             </div>
-
-                                            {/* Action Buttons */}
-                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flexShrink: 0 }}>
-                                                <button
-                                                    onClick={() => handleViewComments(story)}
-                                                    style={{
-                                                        padding: '0.5rem 1rem',
-                                                        backgroundColor: 'transparent',
-                                                        border: '1px solid #e0e0e0',
-                                                        borderRadius: '4px',
-                                                        fontSize: '0.75rem',
-                                                        color: '#333333',
-                                                        cursor: 'pointer',
-                                                        whiteSpace: 'nowrap'
-                                                    }}
-                                                >
-                                                    Danh sách bình luận
-                                                </button>
-                                                <button
-                                                    onClick={() => handleEditStory(story)}
-                                                    style={{
-                                                        padding: '0.5rem 1rem',
-                                                        backgroundColor: 'transparent',
-                                                        border: '1px solid #e0e0e0',
-                                                        borderRadius: '4px',
-                                                        fontSize: '0.75rem',
-                                                        color: '#333333',
-                                                        cursor: 'pointer',
-                                                        whiteSpace: 'nowrap'
-                                                    }}
-                                                >
-                                                    Chỉnh sửa
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteStory(story.id)}
-                                                    style={{
-                                                        padding: '0.5rem 1rem',
-                                                        backgroundColor: 'transparent',
-                                                        border: '1px solid #e0e0e0',
-                                                        borderRadius: '4px',
-                                                        fontSize: '0.75rem',
-                                                        color: '#333333',
-                                                        cursor: 'pointer',
-                                                        whiteSpace: 'nowrap'
-                                                    }}
-                                                >
-                                                    Xóa
-                                                </button>
-                                                <button
-                                                    onClick={() => handleViewChapters(story)}
-                                                    style={{
-                                                        padding: '0.5rem 1rem',
-                                                        backgroundColor: '#13ec5b',
-                                                        border: 'none',
-                                                        borderRadius: '4px',
-                                                        fontSize: '0.75rem',
-                                                        fontWeight: 600,
-                                                        color: '#ffffff',
-                                                        cursor: 'pointer',
-                                                        whiteSpace: 'nowrap'
-                                                    }}
-                                                >
-                                                    + Thêm chương
-                                                </button>
-                                                <button
-                                                    onClick={() => handleViewChapters(story)}
-                                                    style={{
-                                                        padding: '0.5rem 1rem',
-                                                        backgroundColor: 'transparent',
-                                                        border: '1px solid #e0e0e0',
-                                                        borderRadius: '4px',
-                                                        fontSize: '0.75rem',
-                                                        color: '#333333',
-                                                        cursor: 'pointer',
-                                                        whiteSpace: 'nowrap'
-                                                    }}
-                                                >
-                                                    Danh sách chương
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
+                                        ))}
+                                    </div>
+                                    {!storiesLoading && !storiesError && storiesTotalPages > 1 && (
+                                        <Pagination
+                                            currentPage={storiesCurrentPage}
+                                            totalPages={storiesTotalPages}
+                                            totalItems={storiesTotalCount}
+                                            itemsPerPage={STORIES_PAGE_SIZE}
+                                            onPageChange={handleStoriesPageChange}
+                                            itemLabel="truyện"
+                                        />
+                                    )}
+                                </>
                             )}
                         </div>
                     )}
