@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { PublicationList } from '../../../components/admin/publication/PublicationList';
 import { PublicationDetailModal } from '../../../components/admin/publication/PublicationDetailModal';
+import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories } from '../../../api/story/storyApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
@@ -48,6 +49,8 @@ const STATUS_PARAM_MAP = {
     all: null,
 };
 
+const PAGE_SIZE = 10;
+
 export function PublicationManagement() {
     const [selectedPublication, setSelectedPublication] = useState(null);
     const [filterStatus, setFilterStatus] = useState('pending'); // 'pending' | 'approved' | 'rejected' | 'all'
@@ -55,8 +58,11 @@ export function PublicationManagement() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [statsData, setStatsData] = useState({ pending: 0, approved: 0, rejected: 0, total: 0 });
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalCount, setTotalCount] = useState(0);
 
-    const loadPublications = useCallback(() => {
+    const loadPublications = useCallback((page = 1) => {
         setLoading(true);
         setError(null);
 
@@ -67,38 +73,60 @@ export function PublicationManagement() {
                     const storyIds = [...new Set(chapterItems.map(c => c.storyId ?? c.StoryId).filter(Boolean))];
                     if (storyIds.length === 0) {
                         setPublications([]);
+                        setTotalCount(0);
+                        setTotalPages(1);
+                        setCurrentPage(1);
                         return;
                     }
                     return getStories({ pageSize: 500 }).then((storiesRes) => {
                         const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
                         const storyIdSet = new Set(storyIds.map(String));
                         const filtered = storyItems.filter(s => storyIdSet.has(String(s.id ?? s.Id)));
-                        setPublications(filtered.map(mapStoryToPublication));
+                        const list = filtered.map(mapStoryToPublication);
+                        setPublications(list);
+                        const total = list.length;
+                        setTotalCount(total);
+                        setTotalPages(Math.max(1, Math.ceil(total / PAGE_SIZE)));
+                        setCurrentPage(Math.min(page, Math.max(1, Math.ceil(total / PAGE_SIZE))));
                     });
                 })
                 .catch((err) => {
                     setError(err?.message ?? 'Không tải được danh sách truyện');
                     setPublications([]);
+                    setTotalCount(0);
+                    setTotalPages(1);
                 })
                 .finally(() => setLoading(false));
             return;
         }
 
         const statusParam = STATUS_PARAM_MAP[filterStatus];
-        const params = { page: 1, pageSize: 100 };
+        const params = { page, pageSize: PAGE_SIZE };
         if (statusParam) params.status = statusParam;
 
         getStories(params)
             .then((res) => {
                 const items = res?.items ?? res?.Items ?? [];
+                const total = res?.totalCount ?? res?.totalItems ?? res?.total ?? items.length;
+                const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
                 setPublications(items.map(mapStoryToPublication));
+                setTotalCount(total);
+                setTotalPages(pages);
+                setCurrentPage(res?.page ?? page);
             })
             .catch((err) => {
                 setError(err?.message ?? 'Không tải được danh sách truyện');
                 setPublications([]);
+                setTotalCount(0);
+                setTotalPages(1);
             })
             .finally(() => setLoading(false));
     }, [filterStatus]);
+
+    const handlePageChange = (page) => {
+        setCurrentPage(page);
+        if (filterStatus !== 'pending') loadPublications(page);
+    };
 
     const loadStats = useCallback(() => {
         Promise.all([
@@ -122,7 +150,10 @@ export function PublicationManagement() {
     }, []);
 
     useEffect(() => {
-        const id = setTimeout(() => loadPublications(), 0);
+        const id = setTimeout(() => {
+            setCurrentPage(1);
+            loadPublications(1);
+        }, 0);
         return () => clearTimeout(id);
     }, [loadPublications]);
 
@@ -131,7 +162,9 @@ export function PublicationManagement() {
         return () => clearTimeout(id);
     }, [loadStats]);
 
-    const filteredPublications = publications;
+    const filteredPublications = filterStatus === 'pending'
+        ? publications.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+        : publications;
 
     const handleViewDetail = (publication) => {
         setSelectedPublication(publication);
@@ -315,10 +348,24 @@ export function PublicationManagement() {
                     <p style={{ fontSize: '0.875rem', color: '#991b1b', margin: 0 }}>{error}</p>
                 </div>
             ) : (
-                <PublicationList
-                    publications={filteredPublications}
-                    onViewDetail={handleViewDetail}
-                />
+                <>
+                    <div style={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+                        <PublicationList
+                            publications={filteredPublications}
+                            onViewDetail={handleViewDetail}
+                        />
+                        {totalPages > 1 && (
+                            <Pagination
+                                currentPage={currentPage}
+                                totalPages={totalPages}
+                                totalItems={totalCount}
+                                itemsPerPage={PAGE_SIZE}
+                                onPageChange={handlePageChange}
+                                itemLabel="truyện"
+                            />
+                        )}
+                    </div>
+                </>
             )}
 
             {/* Detail Modal */}

@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { Plus, Eye, MessageSquare, Book, Send, Undo2, Pencil, Trash2 } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { getChaptersByStoryId, getChapterById, updateChapter, unpublishChapter } from '../../api/chapter/chapterApi';
+import { getChapters, getChapterById, updateChapter, unpublishChapter } from '../../api/chapter/chapterApi';
+import { Pagination } from '../../components/pagination/Pagination';
 
 const CHAPTER_STATUS_MAP = {
     DRAFT: 'Bản nháp',
@@ -48,56 +49,87 @@ function mapChapterFromApi(item) {
     };
 }
 
+const CHAPTERS_PAGE_SIZE = 10;
+
 export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter }) {
     const [chapters, setChapters] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalCount, setTotalCount] = useState(0);
 
-    const loadChapters = () => {
+    const loadChapters = (page = 1) => {
         const storyId = story?.id ?? story?.Id;
         if (!storyId) return;
         setLoading(true);
         setError(null);
-        getChaptersByStoryId(storyId)
+        getChapters({ storyId, page, pageSize: CHAPTERS_PAGE_SIZE })
             .then((res) => {
-                const items = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
-                setChapters(items.map((item) => ({ ...mapChapterFromApi(item), content: item.content ?? item.Content ?? '' })));
+                const rawItems = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
+                const total = res?.totalCount ?? res?.totalItems ?? res?.total ?? rawItems.length;
+                const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / CHAPTERS_PAGE_SIZE));
+                setChapters(rawItems.map((item) => ({ ...mapChapterFromApi(item), content: item.content ?? item.Content ?? '' })));
+                setTotalCount(total);
+                setTotalPages(pages);
+                setCurrentPage(res?.page ?? page);
             })
             .catch((err) => {
                 setError(err?.message ?? 'Không tải được danh sách chương');
                 setChapters([]);
+                setTotalCount(0);
+                setTotalPages(1);
             })
             .finally(() => setLoading(false));
     };
 
     useEffect(() => {
         let cancelled = false;
-        queueMicrotask(() => {
-            const storyId = story?.id ?? story?.Id;
+        const storyId = story?.id ?? story?.Id;
+        const id = setTimeout(() => {
             if (!storyId) {
                 setChapters([]);
                 setLoading(false);
+                setTotalCount(0);
+                setTotalPages(1);
                 return;
             }
             setLoading(true);
             setError(null);
-            getChaptersByStoryId(storyId)
+            getChapters({ storyId, page: 1, pageSize: CHAPTERS_PAGE_SIZE })
                 .then((res) => {
-                    const items = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
-                    if (!cancelled) setChapters(items.map((item) => ({ ...mapChapterFromApi(item), content: item.content ?? item.Content ?? '' })));
+                    const rawItems = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
+                    const total = res?.totalCount ?? res?.totalItems ?? res?.total ?? rawItems.length;
+                    const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / CHAPTERS_PAGE_SIZE));
+                    if (!cancelled) {
+                        setChapters(rawItems.map((item) => ({ ...mapChapterFromApi(item), content: item.content ?? item.Content ?? '' })));
+                        setTotalCount(total);
+                        setTotalPages(pages);
+                        setCurrentPage(res?.page ?? 1);
+                    }
                 })
                 .catch((err) => {
                     if (!cancelled) {
                         setError(err?.message ?? 'Không tải được danh sách chương');
                         setChapters([]);
+                        setTotalCount(0);
+                        setTotalPages(1);
                     }
                 })
                 .finally(() => {
                     if (!cancelled) setLoading(false);
                 });
-        });
-        return () => { cancelled = true; };
+        }, 0);
+        return () => {
+            cancelled = true;
+            clearTimeout(id);
+        };
     }, [story?.id ?? story?.Id]);
+
+    const handlePageChange = (page) => {
+        setCurrentPage(page);
+        loadChapters(page);
+    };
 
     const [actioningChapterId, setActioningChapterId] = useState(null);
     const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, chapterId: null });
@@ -127,7 +159,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
         if (action === 'publish') {
             const doUpdate = (title, content) =>
                 updateChapter(chapterId, { title, content, status: 'PENDING_REVIEW' })
-                    .then(() => loadChapters())
+                    .then(() => loadChapters(currentPage))
                     .catch((err) => {
                         alert(err?.message ?? 'Xuất bản thất bại');
                     })
@@ -148,7 +180,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                 });
         } else if (action === 'unpublish') {
             unpublishChapter(chapterId)
-                .then(() => loadChapters())
+                .then(() => loadChapters(currentPage))
                 .catch((err) => {
                     alert(err?.message ?? 'Hủy xuất bản thất bại');
                 })
@@ -260,7 +292,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                 <div style={{ padding: '3rem', textAlign: 'center' }}>
                                     <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '1rem' }}>{error}</p>
                                     <button
-                                        onClick={() => loadChapters()}
+                                        onClick={() => loadChapters(1)}
                                         style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer' }}
                                     >
                                         Thử lại
@@ -467,6 +499,18 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                 ))
                             )}
                         </div>
+
+                        {/* Pagination */}
+                        {!loading && !error && totalPages > 1 && (
+                            <Pagination
+                                currentPage={currentPage}
+                                totalPages={totalPages}
+                                totalItems={totalCount}
+                                itemsPerPage={CHAPTERS_PAGE_SIZE}
+                                onPageChange={handlePageChange}
+                                itemLabel="chương"
+                            />
+                        )}
 
                         {/* Back Button */}
                         <div style={{ marginTop: '2rem' }}>
