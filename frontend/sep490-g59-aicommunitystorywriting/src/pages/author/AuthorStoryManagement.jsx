@@ -17,7 +17,7 @@ function mapStoryFromApi(item) {
     const status = item.status || item.Status || '';
     const storyProgressStatus = item.storyProgressStatus ?? item.StoryProgressStatus ?? '';
     const publishStatusMap = {
-        DRAFT: 'Lưu nháp',
+        DRAFT: 'Bản nháp',
         PENDING_REVIEW: 'Chờ duyệt',
         REJECTED: 'Bị từ chối',
         PUBLISHED: 'Đã xuất bản',
