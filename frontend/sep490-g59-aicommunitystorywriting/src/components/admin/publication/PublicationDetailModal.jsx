@@ -196,17 +196,17 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     alignItems: 'center',
                                     gap: '0.375rem',
                                     padding: '0.375rem 0.75rem',
-                                    backgroundColor: `${getStatusColor(publication.status)}20`,
-                                    color: getStatusColor(publication.status),
+                                    backgroundColor: `${getStatusColor(chapters.length > 0 ? 'pending' : publication.status)}20`,
+                                    color: getStatusColor(chapters.length > 0 ? 'pending' : publication.status),
                                     fontSize: '0.75rem',
                                     fontWeight: 600,
                                     borderRadius: '9999px',
-                                    border: `2px solid ${getStatusColor(publication.status)}`
+                                    border: `2px solid ${getStatusColor(chapters.length > 0 ? 'pending' : publication.status)}`
                                 }}>
-                                    {publication.status === 'pending' && <Clock style={{ width: '14px', height: '14px' }} />}
-                                    {publication.status === 'approved' && <CheckCircle style={{ width: '14px', height: '14px' }} />}
-                                    {publication.status === 'rejected' && <XCircle style={{ width: '14px', height: '14px' }} />}
-                                    {publication.status === 'pending' ? 'Chờ duyệt' : publication.status === 'approved' ? 'Đã duyệt' : 'Từ chối'}
+                                    {(chapters.length > 0 || publication.status === 'pending') && <Clock style={{ width: '14px', height: '14px' }} />}
+                                    {chapters.length === 0 && publication.status === 'approved' && <CheckCircle style={{ width: '14px', height: '14px' }} />}
+                                    {chapters.length === 0 && publication.status === 'rejected' && <XCircle style={{ width: '14px', height: '14px' }} />}
+                                    {chapters.length > 0 ? 'Chờ duyệt' : publication.status === 'pending' ? 'Chờ duyệt' : publication.status === 'approved' ? 'Đã duyệt' : 'Từ chối'}
                                 </div>
                             </div>
 
@@ -377,8 +377,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         )}
                     </div>
 
-                    {/* Footer - Actions */}
-                    {publication.status === 'pending' && !showRejectForm && (
+                    {/* Footer - Actions - Hiển thị khi có chương chờ duyệt */}
+                    {chapters.length > 0 && !showRejectForm && (
                         <div style={{
                             padding: '1.5rem',
                             borderTop: '1px solid #e2e8f0',
@@ -556,8 +556,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         </div>
                     )}
 
-                    {/* Already Reviewed Info */}
-                    {publication.status !== 'pending' && (
+                    {/* Already Reviewed Info - Chỉ hiển thị khi không còn chương chờ duyệt */}
+                    {chapters.length === 0 && publication.status !== 'pending' && (
                         <div style={{
                             padding: '1.5rem',
                             borderTop: '1px solid #e2e8f0',
