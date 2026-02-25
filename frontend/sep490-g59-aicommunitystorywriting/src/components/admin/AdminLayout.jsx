@@ -11,7 +11,8 @@ import {
     Bell,
     Search,
     X,
-    CheckSquare
+    CheckSquare,
+    Shield
 } from 'lucide-react';
 
 export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) {
@@ -25,6 +26,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
         { id: 'stories', label: 'Quản lý truyện', icon: FileText },
         { id: 'users', label: 'Quản lý người dùng', icon: Users },
         { id: 'comments', label: 'Quản lý bình luận', icon: MessageSquare },
+        { id: 'policies', label: 'Quản lý Policy', icon: Shield },
         { id: 'settings', label: 'Cài đặt', icon: Settings },
     ];
 

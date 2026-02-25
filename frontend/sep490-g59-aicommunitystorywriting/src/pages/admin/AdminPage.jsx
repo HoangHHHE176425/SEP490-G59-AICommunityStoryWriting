@@ -4,6 +4,7 @@ import { AdminDashboard } from '../../components/admin/AdminDashboard';
 import { CategoryManagement } from './category/CategoryManagement';
 import { PublicationManagement } from './publication/PublicationManagement';
 import { UserManagement } from './user/UserManagement';
+import { PolicyManagement } from './policy/PolicyManagement';
 
 export function AdminPage() {
     // eslint-disable-next-line no-unused-vars
@@ -30,6 +31,8 @@ export function AdminPage() {
                 );
             case 'users':
                 return <UserManagement />;
+            case 'policies':
+                return <PolicyManagement />;
             case 'comments':
                 return (
                     <div className="text-center py-12">
