@@ -200,15 +200,6 @@ export function PublicationList({ publications, onViewDetail }) {
 
                                 <div>
                                     <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
-                                        Tổng số từ
-                                    </div>
-                                    <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
-                                        {pub.totalWords.toLocaleString()} từ
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
                                         Nộp lúc
                                     </div>
                                     <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
