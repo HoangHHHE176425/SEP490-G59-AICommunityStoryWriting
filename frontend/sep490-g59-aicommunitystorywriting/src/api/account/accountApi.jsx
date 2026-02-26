@@ -14,6 +14,39 @@ export async function getMyProfile() {
     return res.data;
 }
 
+/**
+ * Lấy thông tin hồ sơ người dùng theo userId (dùng để hiển thị tác giả, v.v.).
+ * Backend: GET /Account/profile/{userId}
+ * @param {string} userId - Guid
+ * @returns {Promise<{ id, displayName, email, avatarUrl, bio, stats, ... }>}
+ */
+export async function getProfileByUserId(userId) {
+    if (!userId) throw new Error("userId là bắt buộc");
+    const res = await axiosInstance.get(`/Account/profile/${userId}`);
+    const d = res.data;
+    return {
+        id: d.id ?? d.Id,
+        displayName: d.displayName ?? d.DisplayName ?? d.email?.split?.('@')?.[0] ?? 'Ẩn danh',
+        email: d.email ?? d.Email ?? '',
+        phone: d.phone ?? d.Phone ?? '',
+        avatarUrl: d.avatarUrl ?? d.AvatarUrl ?? '',
+        bio: d.bio ?? d.Bio ?? '',
+        description: d.description ?? d.Description ?? '',
+        joinDate: d.joinDate ?? d.JoinDate ?? '',
+        isVerified: d.isVerified ?? d.IsVerified ?? false,
+        tags: d.tags ?? d.Tags ?? [],
+        stats: (() => {
+            const s = d.stats ?? d.Stats ?? {};
+            return {
+                storiesWritten: s.storiesWritten ?? s.StoriesWritten ?? 0,
+                totalReads: s.totalReads ?? s.TotalReads ?? 0,
+                likes: s.likes ?? s.Likes ?? 0,
+                currentCoins: s.currentCoins ?? s.CurrentCoins ?? 0,
+            };
+        })(),
+    };
+}
+
 export async function updateProfile(payload) {
     try {
         const res = await axiosInstance.put("/Account/profile", payload);
