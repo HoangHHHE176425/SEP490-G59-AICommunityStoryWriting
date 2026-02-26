@@ -21,15 +21,29 @@ function formatDate(value) {
 
 export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignModerator }) {
     const [categories, setCategories] = useState([]);
+    const [categoriesLoading, setCategoriesLoading] = useState(true);
+    const [categoriesError, setCategoriesError] = useState('');
     const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
     const [moderatorCategoryIds, setModeratorCategoryIds] = useState([]);
     const [savingModerator, setSavingModerator] = useState(false);
 
     useEffect(() => {
-        getAllCategories({ includeInactive: false }).then((data) => {
-            const list = Array.isArray(data) ? data : (data?.items ?? data?.Items ?? []);
-            setCategories(list);
-        }).catch(() => setCategories([]));
+        setCategoriesLoading(true);
+        setCategoriesError('');
+        getAllCategories({ includeInactive: false })
+            .then((data) => {
+                const list = Array.isArray(data) ? data : (data?.items ?? data?.Items ?? []);
+                setCategories(Array.isArray(list) ? list : []);
+            })
+            .catch((err) => {
+                const msg =
+                    err?.response?.data?.message ||
+                    err?.message ||
+                    'Không tải được danh sách thể loại';
+                setCategories([]);
+                setCategoriesError(msg);
+            })
+            .finally(() => setCategoriesLoading(false));
     }, []);
 
     useEffect(() => {
@@ -204,7 +218,13 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                                     </label>
                                 );
                             })}
-                            {categories.length === 0 && <span className="text-sm text-slate-500">Đang tải thể loại...</span>}
+                            {categoriesLoading && <span className="text-sm text-slate-500">Đang tải thể loại...</span>}
+                            {!categoriesLoading && categoriesError && (
+                                <span className="text-sm text-red-600">{categoriesError}</span>
+                            )}
+                            {!categoriesLoading && !categoriesError && categories.length === 0 && (
+                                <span className="text-sm text-slate-500">Chưa có thể loại nào trong hệ thống.</span>
+                            )}
                         </div>
                         <div className="flex gap-2">
                             <button
