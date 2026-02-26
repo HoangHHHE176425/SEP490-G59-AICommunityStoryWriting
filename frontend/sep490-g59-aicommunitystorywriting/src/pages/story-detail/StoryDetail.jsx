@@ -1,6 +1,6 @@
 import { ChevronRight, Star } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { StoryHeader } from '../../components/story-detail/StoryHeader';
 import { ChapterList } from '../../components/story-detail/ChapterList';
 import { CommentSection } from '../../components/story-detail/CommentSection';
@@ -31,6 +31,7 @@ function formatTimeAgo(dateStr) {
 
 export function StoryDetail() {
     const { storyId } = useParams();
+    const navigate = useNavigate();
     const [story, setStory] = useState(null);
     const [chapters, setChapters] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -318,6 +319,14 @@ export function StoryDetail() {
                             onToggleFollow={() => setIsFollowing(!isFollowing)}
                             onOpenRating={() => setIsRatingModalOpen(true)}
                             onOpenReport={() => setIsReportStoryModalOpen(true)}
+                            onReadStory={() => {
+                                const first = chapters[0];
+                                if (first?.chapterId && storyId) {
+                                    navigate(`/chapter?storyId=${storyId}&chapterId=${first.chapterId}`);
+                                } else if (storyId) {
+                                    navigate(`/chapter?storyId=${storyId}`);
+                                }
+                            }}
                         />
 
                         {/* Tabs */}
