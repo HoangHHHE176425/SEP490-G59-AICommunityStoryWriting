@@ -149,13 +149,29 @@ namespace Services.Implementations
         public StoryResponseDto? GetById(Guid id)
         {
             var story = _storyRepository.GetById(id);
-            return story == null ? null : MapToResponseDto(story);
+            if (story == null) return null;
+            var dto = MapToResponseDto(story);
+            if (story.status == "REJECTED")
+            {
+                var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("STORY", id);
+                dto.RejectionReason = reason;
+                dto.RejectedAt = rejectedAt;
+            }
+            return dto;
         }
 
         public StoryResponseDto? GetBySlug(string slug)
         {
             var story = _storyRepository.GetBySlug(slug);
-            return story == null ? null : MapToResponseDto(story);
+            if (story == null) return null;
+            var dto = MapToResponseDto(story);
+            if (story.status == "REJECTED")
+            {
+                var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("STORY", story.id);
+                dto.RejectionReason = reason;
+                dto.RejectedAt = rejectedAt;
+            }
+            return dto;
         }
 
         public PagedResultDto<StoryListItemDto> GetByAuthor(Guid authorId, StoryQueryDto query)
@@ -296,16 +312,15 @@ namespace Services.Implementations
                 _logger?.LogInformation("StoryService.Publish: Found story '{Title}' (ID: {StoryId}), current status: {Status}",
                     story.title, id, story.status);
 
-                // Publish story independently - no check for chapters
-                story.status = "PUBLISHED";
-                story.published_at = DateTime.Now;
-                story.last_published_at = DateTime.Now;
+                // Author "Publish" = gửi chờ duyệt. Chỉ moderator approve mới chuyển sang PUBLISHED.
+                story.status = "PENDING_REVIEW";
                 story.updated_at = DateTime.Now;
+                // published_at, last_published_at chỉ set khi moderator approve (ModerationService.ApproveStory)
 
-                _logger?.LogInformation("StoryService.Publish: Updating story status to PUBLISHED for ID: {StoryId}", id);
+                _logger?.LogInformation("StoryService.Publish: Updating story status to PENDING_REVIEW for ID: {StoryId}", id);
                 _storyRepository.Update(story);
 
-                _logger?.LogInformation("StoryService.Publish: Successfully published story ID: {StoryId}", id);
+                _logger?.LogInformation("StoryService.Publish: Successfully submitted story for review (PENDING_REVIEW) ID: {StoryId}", id);
                 return true;
             }
             catch (Exception ex)

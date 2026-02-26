@@ -341,5 +341,28 @@ namespace AIStory.API.Controllers
                 return StatusCode(500, new { message = "An error occurred while unpublishing the story", error = ex.Message });
             }
         }
+
+        /// <summary>Xem lý do từ chối truyện - Chỉ AUTHOR (chỉ truyện của mình).</summary>
+        [HttpGet("{id:guid}/rejection-reason")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult GetRejectionReason(Guid id)
+        {
+            try
+            {
+                var story = _storyService.GetById(id);
+                if (story == null)
+                    return NotFound(new { message = "Truyện không tồn tại." });
+                var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+                if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
+                    return Forbid();
+                if (story.Status != "REJECTED")
+                    return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
+                return Ok(new { reason = story.RejectionReason, rejectedAt = story.RejectedAt });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Lỗi lấy lý do từ chối", error = ex.Message });
+            }
+        }
     }
 }

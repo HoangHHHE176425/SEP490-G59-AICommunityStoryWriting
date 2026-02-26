@@ -4,6 +4,8 @@
     {
         public Guid Id { get; set; }
         public Guid? StoryId { get; set; }
+        /// <summary>Tiêu đề truyện (để hiển thị trên moderator dashboard).</summary>
+        public string? StoryTitle { get; set; }
         public string Title { get; set; } = null!;
         public int OrderIndex { get; set; }
         public string? Status { get; set; }

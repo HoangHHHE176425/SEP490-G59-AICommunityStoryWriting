@@ -28,5 +28,10 @@
         public DateTime? UpdatedAt { get; set; }
         public DateTime? PublishedAt { get; set; }
         public DateTime? LastPublishedAt { get; set; }
+
+        /// <summary>Lý do từ chối (có khi status = REJECTED).</summary>
+        public string? RejectionReason { get; set; }
+        /// <summary>Thời điểm moderator từ chối.</summary>
+        public DateTime? RejectedAt { get; set; }
     }
 }

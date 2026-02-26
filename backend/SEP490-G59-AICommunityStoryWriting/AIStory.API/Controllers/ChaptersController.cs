@@ -1,8 +1,9 @@
-
-﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Chapters;
+using Services.Interfaces;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 
 namespace AIStory.API.Controllers
 {
@@ -11,10 +12,12 @@ namespace AIStory.API.Controllers
     public class ChaptersController : ControllerBase
     {
         private readonly IChapterService _chapterService;
+        private readonly IStoryService _storyService;
 
-        public ChaptersController(IChapterService chapterService)
+        public ChaptersController(IChapterService chapterService, IStoryService storyService)
         {
             _chapterService = chapterService;
+            _storyService = storyService;
         }
 
         /// <summary>Tạo chapter mới - Chỉ AUTHOR</summary>
@@ -194,6 +197,34 @@ namespace AIStory.API.Controllers
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while reordering the chapter", error = ex.Message });
+            }
+        }
+
+        /// <summary>Xem lý do từ chối chapter - Chỉ AUTHOR (chỉ chapter thuộc truyện của mình).</summary>
+        [HttpGet("{id:guid}/rejection-reason")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult GetRejectionReason(Guid id)
+        {
+            try
+            {
+                var chapter = _chapterService.GetById(id);
+                if (chapter == null)
+                    return NotFound(new { message = "Chapter không tồn tại." });
+                if (!chapter.StoryId.HasValue)
+                    return Forbid();
+                var story = _storyService.GetById(chapter.StoryId.Value);
+                if (story == null)
+                    return Forbid();
+                var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+                if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
+                    return Forbid();
+                if (chapter.Status != "REJECTED")
+                    return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
+                return Ok(new { reason = chapter.RejectionReason, rejectedAt = chapter.RejectedAt });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Lỗi lấy lý do từ chối", error = ex.Message });
             }
         }
     }
