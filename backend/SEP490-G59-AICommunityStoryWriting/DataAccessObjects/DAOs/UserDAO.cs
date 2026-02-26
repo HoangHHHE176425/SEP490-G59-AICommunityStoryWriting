@@ -2,6 +2,7 @@ using BusinessObjects;
 using BusinessObjects.Entities;
 using DataAccessObjects.Queries;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
 
 namespace DataAccessObjects.DAOs
 {
@@ -151,6 +152,23 @@ namespace DataAccessObjects.DAOs
                 .ToListAsync();
 
             return (items, total);
+        }
+
+        public async Task<(int Total, int Active, int Inactive, int Banned, int Pending, int Authors, int Moderators)> GetStatsAsync(StoryPlatformDbContext context)
+        {
+            // Normalize to upper-case comparisons.
+            IQueryable<users> q = context.users.AsNoTracking();
+
+            var total = await q.CountAsync();
+            var active = await q.CountAsync(u => (u.status ?? "").ToUpper() == "ACTIVE");
+            var inactive = await q.CountAsync(u => (u.status ?? "").ToUpper() == "INACTIVE");
+            var banned = await q.CountAsync(u => (u.status ?? "").ToUpper() == "BANNED");
+            var pending = await q.CountAsync(u => (u.status ?? "").ToUpper() == "PENDING");
+
+            var authors = await q.CountAsync(u => (u.role ?? "").ToUpper() == "AUTHOR");
+            var moderators = await q.CountAsync(u => (u.role ?? "").ToUpper() == "MODERATOR");
+
+            return (total, active, inactive, banned, pending, authors, moderators);
         }
     }
 }

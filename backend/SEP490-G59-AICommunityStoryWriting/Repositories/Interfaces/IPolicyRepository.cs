@@ -1,5 +1,6 @@
 using BusinessObjects.Entities;
 using DataAccessObjects.Queries;
+using System.Collections.Generic;
 
 namespace Repositories.Interfaces
 {
@@ -13,6 +14,8 @@ namespace Repositories.Interfaces
         Task UpdatePolicyAsync(system_policies policy);
         Task DeletePolicyAsync(system_policies policy);
         Task DeactivateOtherPoliciesOfTypeAsync(string type, Guid keepActiveId);
+
+        Task<(int Total, int Active, Dictionary<string, int> ByType)> GetStatsAsync();
     }
 }
 

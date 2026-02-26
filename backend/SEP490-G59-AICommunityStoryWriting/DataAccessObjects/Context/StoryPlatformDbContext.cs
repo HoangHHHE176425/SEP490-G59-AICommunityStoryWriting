@@ -66,6 +66,8 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<moderation_logs> moderation_logs { get; set; }
 
+    public virtual DbSet<moderator_category_assignments> moderator_category_assignments { get; set; }
+
     public virtual DbSet<notifications> notifications { get; set; }
 
     public virtual DbSet<otp_verifications> otp_verifications { get; set; }
@@ -108,7 +110,7 @@ public partial class StoryPlatformDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
-            optionsBuilder.UseSqlServer("Server= localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;");
+            optionsBuilder.UseSqlServer("Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;");
 
         }
     }
@@ -286,6 +288,26 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.is_active).HasDefaultValue(true);
             entity.Property(e => e.name).HasMaxLength(100);
             entity.Property(e => e.slug).HasMaxLength(100);
+        });
+
+        modelBuilder.Entity<moderator_category_assignments>(entity =>
+        {
+            entity.HasKey(e => new { e.moderator_id, e.category_id })
+                .HasName("PK_moderator_category_assignments");
+
+            entity.Property(e => e.assigned_at).HasDefaultValueSql("(getdate())");
+
+            entity.HasOne(d => d.moderator)
+                .WithMany()
+                .HasForeignKey(d => d.moderator_id)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_modcat_user");
+
+            entity.HasOne(d => d.category)
+                .WithMany()
+                .HasForeignKey(d => d.category_id)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_modcat_category");
         });
 
         modelBuilder.Entity<chapter_versions>(entity =>

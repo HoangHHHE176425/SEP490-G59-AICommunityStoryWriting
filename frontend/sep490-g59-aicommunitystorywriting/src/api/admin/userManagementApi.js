@@ -11,15 +11,6 @@
 
 import axiosInstance from '../axiosInstance';
 
-// ========== Mock data (xóa khi ghép API thật) ==========
-const MOCK_USERS = [
-    { id: '1', email: 'user1@example.com', role: 'USER', status: 'ACTIVE', email_verified_at: '2025-01-16T00:00:00Z', created_at: '2025-01-15T10:00:00Z', updated_at: '2025-02-20T08:30:00Z', profile: { nickname: 'Nguyễn Văn A', phone: '0901234567', id_number: null, avatar_url: null, bio: 'Xin chào', description: null } },
-    { id: '2', email: 'author1@example.com', role: 'AUTHOR', status: 'ACTIVE', email_verified_at: '2025-01-11T00:00:00Z', created_at: '2025-01-10T12:00:00Z', updated_at: '2025-02-19T14:00:00Z', profile: { nickname: 'Trần Thị B', phone: null, id_number: '001234567890', avatar_url: 'uploads/avatar/2.jpg', bio: null, description: null } },
-    { id: '3', email: 'mod@example.com', role: 'MODERATOR', status: 'ACTIVE', email_verified_at: '2025-02-01T00:00:00Z', created_at: '2025-02-01T09:00:00Z', updated_at: '2025-02-20T00:00:00Z', profile: { nickname: 'Mod Kiểm Duyệt', phone: '0904895575', id_number: null, avatar_url: null, bio: null, description: null }, moderatorCategoryIds: ['cat-1', 'cat-2'] },
-    { id: '4', email: 'user3@example.com', role: 'USER', status: 'PENDING', email_verified_at: null, created_at: '2025-02-10T11:00:00Z', updated_at: '2025-02-10T11:00:00Z', profile: { nickname: 'Phạm Thị D', phone: null, id_number: null, avatar_url: null, bio: null, description: null } },
-    { id: '5', email: 'banned@example.com', role: 'USER', status: 'BANNED', email_verified_at: '2024-12-02T00:00:00Z', created_at: '2024-12-01T00:00:00Z', updated_at: '2025-01-05T00:00:00Z', profile: { nickname: 'Hoàng Văn E', phone: null, id_number: null, avatar_url: null, bio: null, description: null } },
-];
-
 /**
  * Chuẩn hóa 1 user từ API (users + user_profiles).
  * BE có thể trả user kèm profile hoặc tách; đều map về format thống nhất.
@@ -69,33 +60,24 @@ export function getUserDisplayName(user) {
 export async function getUsers(params = {}) {
     const { page = 1, pageSize = 10, search = '', status = '', role = '' } = params;
 
-    // --- Khi ghép BE: bỏ comment block dưới, xóa phần mock ---
-    /*
-    const res = await axiosInstance.get('/Admin/users', {
-        params: { page, pageSize, search: search || undefined, status: status || undefined, role: role || undefined },
+    const res = await axiosInstance.get('/admin/users', {
+        params: {
+            page,
+            pageSize,
+            search: search || undefined,
+            status: status || undefined,
+            role: role || undefined,
+        },
     });
-    const data = res.data;
+    const data = res.data ?? {};
+    const totalCount = data.totalCount ?? data.total ?? 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
     return {
         items: (data.items ?? data.data ?? []).map(normalizeUser),
-        totalCount: data.totalCount ?? data.total ?? 0,
+        totalCount,
         page: data.page ?? page,
-        totalPages: data.totalPages ?? 1,
+        totalPages,
     };
-    */
-
-    // Mock: lọc theo search/status/role rồi phân trang
-    let list = [...MOCK_USERS].map(normalizeUser);
-    if (search) {
-        const q = search.toLowerCase();
-        list = list.filter(u => (u.email + ' ' + (u.nickname || '')).toLowerCase().includes(q));
-    }
-    if (status) list = list.filter(u => u.status === status);
-    if (role) list = list.filter(u => u.role === role);
-    const totalCount = list.length;
-    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-    const start = (page - 1) * pageSize;
-    const items = list.slice(start, start + pageSize);
-    return { items, totalCount, page, totalPages };
 }
 
 /**
@@ -103,22 +85,8 @@ export async function getUsers(params = {}) {
  * @returns {Promise<{ total: number, active: number, inactive: number, banned: number, authors: number }>}
  */
 export async function getStats() {
-    // --- Khi ghép BE: gọi GET /Admin/users/stats hoặc tương đương ---
-    /*
-    const res = await axiosInstance.get('/Admin/users/stats');
+    const res = await axiosInstance.get('/admin/users/stats');
     return res.data;
-    */
-
-    const list = MOCK_USERS.map(normalizeUser);
-    return {
-        total: list.length,
-        active: list.filter(u => u.status === 'ACTIVE').length,
-        inactive: list.filter(u => u.status === 'INACTIVE').length,
-        banned: list.filter(u => u.status === 'BANNED').length,
-        pending: list.filter(u => u.status === 'PENDING').length,
-        authors: list.filter(u => u.role === 'AUTHOR').length,
-        moderators: list.filter(u => u.role === 'MODERATOR').length,
-    };
 }
 
 /**
@@ -127,14 +95,16 @@ export async function getStats() {
  * @param {string} status
  */
 export async function updateUserStatus(userId, status) {
-    // --- Khi ghép BE: gọi PATCH/PUT /Admin/users/:id/status ---
-    /*
-    await axiosInstance.patch(`/Admin/users/${userId}/status`, { status });
-    return { success: true };
-    */
-
-    console.log('updateUserStatus (mock):', userId, status);
-    return { success: true };
+    const s = String(status ?? '').trim().toUpperCase();
+    if (s === 'BANNED') {
+        await axiosInstance.post(`/admin/users/${userId}/lock`);
+        return { success: true };
+    }
+    if (s === 'ACTIVE') {
+        await axiosInstance.post(`/admin/users/${userId}/unlock`);
+        return { success: true };
+    }
+    throw new Error('Status not supported by backend endpoint. Use ACTIVE or BANNED.');
 }
 
 /**
@@ -143,11 +113,7 @@ export async function updateUserStatus(userId, status) {
  * @param {string} role - USER | AUTHOR | ADMIN
  */
 export async function updateUserRole(userId, role) {
-    /*
-    await axiosInstance.patch(`/Admin/users/${userId}/role`, { role });
-    return { success: true };
-    */
-    console.log('updateUserRole (mock):', userId, role);
+    await axiosInstance.post(`/admin/users/${userId}/role`, { role });
     return { success: true };
 }
 
@@ -157,11 +123,7 @@ export async function updateUserRole(userId, role) {
  * @param {string[]} categoryIds - Mảng id thể loại (categories) user được quyền kiểm duyệt
  */
 export async function assignModeratorCategories(userId, categoryIds) {
-    /*
-    await axiosInstance.put(`/Admin/users/${userId}/moderator-categories`, { categoryIds });
-    return { success: true };
-    */
-    console.log('assignModeratorCategories (mock):', userId, categoryIds);
+    await axiosInstance.put(`/admin/users/${userId}/moderator-categories`, { categoryIds });
     return { success: true };
 }
 
@@ -171,10 +133,6 @@ export async function assignModeratorCategories(userId, categoryIds) {
  * @returns {Promise<{ categoryIds: string[] }>}
  */
 export async function getModeratorCategories(userId) {
-    /*
-    const res = await axiosInstance.get(`/Admin/users/${userId}/moderator-categories`);
+    const res = await axiosInstance.get(`/admin/users/${userId}/moderator-categories`);
     return { categoryIds: res.data?.categoryIds ?? res.data?.category_ids ?? [] };
-    */
-    const mockUser = MOCK_USERS.find(u => (u.id ?? u.Id) === userId);
-    return { categoryIds: mockUser?.moderatorCategoryIds ?? [] };
 }

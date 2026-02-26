@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import {
     LayoutDashboard,
     Bookmark,
@@ -16,8 +18,19 @@ import {
 } from 'lucide-react';
 
 export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) {
+    const navigate = useNavigate();
+    const { logout } = useAuth();
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+    const handleLogout = async () => {
+        try {
+            await logout();
+        } finally {
+            setIsMobileSidebarOpen(false);
+            navigate('/login');
+        }
+    };
 
     const menuItems = [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -223,6 +236,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
 
                 <div style={{ position: 'absolute', bottom: '1rem', left: '1rem', right: '1rem' }}>
                     <button
+                        onClick={handleLogout}
                         style={{
                             width: '100%',
                             display: 'flex',
@@ -353,6 +367,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
 
                     <div style={{ padding: '1rem', borderTop: '1px solid #e2e8f0' }}>
                         <button
+                            onClick={handleLogout}
                             style={{
                                 width: '100%',
                                 display: 'flex',

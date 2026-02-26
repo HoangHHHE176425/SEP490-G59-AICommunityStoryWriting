@@ -46,5 +46,8 @@ namespace Repositories.Implementations
 
         public Task<(IEnumerable<users> Items, int TotalCount)> GetUsersAsync(AdminUserQuery query)
             => UserDAO.Instance.GetUsersAsync(_context, query);
+
+        public Task<(int Total, int Active, int Inactive, int Banned, int Pending, int Authors, int Moderators)> GetStatsAsync()
+            => UserDAO.Instance.GetStatsAsync(_context);
     }
 }

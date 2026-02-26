@@ -18,5 +18,6 @@ namespace Repositories.Interfaces
 
         // Admin
         Task<(IEnumerable<users> Items, int TotalCount)> GetUsersAsync(AdminUserQuery query);
+        Task<(int Total, int Active, int Inactive, int Banned, int Pending, int Authors, int Moderators)> GetStatsAsync();
     }
 }

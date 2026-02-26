@@ -2,6 +2,7 @@ using BusinessObjects;
 using BusinessObjects.Entities;
 using DataAccessObjects.Queries;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
 
 namespace DataAccessObjects.DAOs
 {
@@ -117,6 +118,26 @@ namespace DataAccessObjects.DAOs
             }
 
             await context.SaveChangesAsync();
+        }
+
+        public async Task<(int Total, int Active, Dictionary<string, int> ByType)> GetStatsAsync(StoryPlatformDbContext context)
+        {
+            var total = await context.system_policies.CountAsync();
+            var active = await context.system_policies.CountAsync(p => p.is_active == true);
+
+            var rows = await context.system_policies
+                .GroupBy(p => p.type)
+                .Select(g => new { Type = g.Key, Count = g.Count() })
+                .ToListAsync();
+
+            var byType = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var r in rows)
+            {
+                var key = string.IsNullOrWhiteSpace(r.Type) ? "UNKNOWN" : r.Type.Trim().ToUpperInvariant();
+                byType[key] = r.Count;
+            }
+
+            return (total, active, byType);
         }
     }
 }
