@@ -226,6 +226,14 @@ class ApiService {
         });
     }
 
+    static async getStoryRejectionReason(id) {
+        return this.request(`/stories/${id}/rejection-reason`);
+    }
+
+    static async getChapterRejectionReason(id) {
+        return this.request(`/chapters/${id}/rejection-reason`);
+    }
+
     // Chapters API
     static async getChapters(query = {}) {
         const params = new URLSearchParams();
@@ -287,6 +295,70 @@ class ApiService {
             method: 'POST',
             body: JSON.stringify(newOrderIndex)
         });
+    }
+
+    // Moderator API (kiểm duyệt - cần role MODERATOR hoặc ADMIN)
+    static async getPendingStories(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        return this.request(`/moderator/stories/pending?${params.toString()}`);
+    }
+
+    static async getPendingChapters(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.storyId) params.append('storyId', options.storyId);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        return this.request(`/moderator/chapters/pending?${params.toString()}`);
+    }
+
+    static async moderatorApproveStory(id) {
+        return this.request(`/moderator/stories/${id}/approve`, { method: 'POST' });
+    }
+
+    static async moderatorRejectStory(id, reason) {
+        return this.request(`/moderator/stories/${id}/reject`, {
+            method: 'POST',
+            body: JSON.stringify({ reason: reason })
+        });
+    }
+
+    static async moderatorApproveChapter(id) {
+        return this.request(`/moderator/chapters/${id}/approve`, { method: 'POST' });
+    }
+
+    static async moderatorRejectChapter(id, reason) {
+        return this.request(`/moderator/chapters/${id}/reject`, {
+            method: 'POST',
+            body: JSON.stringify({ reason: reason })
+        });
+    }
+
+    // Notifications API
+    static async getNotifications(options = {}) {
+        const params = new URLSearchParams();
+        if (options.limit != null) params.append('limit', options.limit);
+        if (options.onlyUnread) params.append('onlyUnread', 'true');
+        return this.request(`/notifications?${params.toString()}`);
+    }
+
+    static async getUnreadNotificationCount() {
+        return this.request('/notifications/unread-count');
+    }
+
+    static async markNotificationRead(id) {
+        return this.request(`/notifications/${id}/read`, { method: 'PATCH' });
+    }
+
+    static async markAllNotificationsRead() {
+        return this.request('/notifications/mark-all-read', { method: 'POST' });
     }
 
     // Authentication API
