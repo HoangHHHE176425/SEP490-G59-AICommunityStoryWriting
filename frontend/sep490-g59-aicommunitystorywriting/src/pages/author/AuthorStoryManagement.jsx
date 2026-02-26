@@ -819,13 +819,56 @@ export function AuthorStoryManagement({ onBack }) {
                         </div>
                     ) : (
                         <div style={{ maxWidth: '1200px' }}>
-                            {/* Header */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <div style={{ width: '20px', height: '20px', color: '#6b7280' }}>📚</div>
-                                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>
-                                        Truyện của tôi
-                                    </h2>
+                            {/* Header - format đồng bộ với hệ thống */}
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                flexWrap: 'wrap',
+                                gap: '1rem',
+                                marginBottom: '1.75rem',
+                                padding: '1.25rem 1.5rem',
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                    <div style={{
+                                        width: '48px',
+                                        height: '48px',
+                                        borderRadius: '12px',
+                                        background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 4px 12px rgba(19, 236, 91, 0.25)',
+                                        flexShrink: 0
+                                    }}>
+                                        <Book style={{ width: '26px', height: '26px', color: '#ffffff' }} />
+                                    </div>
+                                    <div>
+                                        <h2 style={{
+                                            fontFamily: "'Plus Jakarta Sans', sans-serif",
+                                            fontSize: '1.5rem',
+                                            fontWeight: 700,
+                                            color: '#1A2332',
+                                            margin: 0,
+                                            letterSpacing: '-0.02em',
+                                            lineHeight: 1.3
+                                        }}>
+                                            Truyện của tôi
+                                        </h2>
+                                        <p style={{
+                                            fontFamily: "'Plus Jakarta Sans', sans-serif",
+                                            fontSize: '0.875rem',
+                                            color: '#90A1B9',
+                                            margin: '4px 0 0 0',
+                                            fontWeight: 400
+                                        }}>
+                                            Quản lý và sáng tác truyện của bạn
+                                        </p>
+                                    </div>
                                 </div>
                                 <button
                                     onClick={handleCreateStory}
@@ -833,7 +876,7 @@ export function AuthorStoryManagement({ onBack }) {
                                         display: 'flex',
                                         alignItems: 'center',
                                         gap: '0.5rem',
-                                        padding: '0.625rem 1.25rem',
+                                        padding: '0.75rem 1.5rem',
                                         backgroundColor: '#13ec5b',
                                         border: 'none',
                                         borderRadius: '9999px',
@@ -841,17 +884,23 @@ export function AuthorStoryManagement({ onBack }) {
                                         fontWeight: 700,
                                         color: '#ffffff',
                                         cursor: 'pointer',
-                                        transition: 'background-color 0.2s'
+                                        transition: 'all 0.2s',
+                                        boxShadow: '0 2px 8px rgba(19, 236, 91, 0.3)',
+                                        fontFamily: "'Plus Jakarta Sans', sans-serif"
                                     }}
                                     onMouseEnter={(e) => {
                                         e.currentTarget.style.backgroundColor = '#10d452';
+                                        e.currentTarget.style.transform = 'translateY(-1px)';
+                                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.35)';
                                     }}
                                     onMouseLeave={(e) => {
                                         e.currentTarget.style.backgroundColor = '#13ec5b';
+                                        e.currentTarget.style.transform = 'translateY(0)';
+                                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(19, 236, 91, 0.3)';
                                     }}
                                 >
-                                    <Plus style={{ width: '16px', height: '16px' }} />
-                                    THÊM TRUYỆN MỚI
+                                    <Plus style={{ width: '18px', height: '18px' }} />
+                                    Thêm truyện mới
                                 </button>
                             </div>
 
