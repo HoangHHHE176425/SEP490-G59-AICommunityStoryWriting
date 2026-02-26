@@ -255,44 +255,77 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
             <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5', padding: '2rem' }}>
                 <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
                     <>
-                        {/* Header */}
+                        {/* Header - format đồng bộ với hệ thống */}
                         <div style={{
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
+                            flexWrap: 'wrap',
                             gap: '1rem',
-                            marginBottom: '2rem'
+                            marginBottom: '1.75rem',
+                            padding: '1.25rem 1.5rem',
+                            backgroundColor: '#ffffff',
+                            borderRadius: '16px',
+                            border: '1px solid #e5e7eb',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
                         }}>
                             <div style={{
                                 display: 'flex',
                                 alignItems: 'center',
-                                gap: '0.75rem',
+                                gap: '1rem',
                                 flex: '1 1 0',
                                 minWidth: 0,
                                 overflow: 'hidden'
                             }}>
-                                <Book style={{ width: '24px', height: '24px', color: '#13ec5b', flexShrink: 0 }} />
+                                <div style={{
+                                    width: '48px',
+                                    height: '48px',
+                                    borderRadius: '12px',
+                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    boxShadow: '0 4px 12px rgba(19, 236, 91, 0.25)',
+                                    flexShrink: 0
+                                }}>
+                                    <Book style={{ width: '26px', height: '26px', color: '#ffffff' }} />
+                                </div>
                                 <div style={{ minWidth: 0 }}>
                                     <h2 style={{
+                                        fontFamily: "'Plus Jakarta Sans', sans-serif",
                                         fontSize: '1.5rem',
-                                        fontWeight: 'bold',
-                                        color: '#333333',
+                                        fontWeight: 700,
+                                        color: '#1A2332',
                                         margin: 0,
+                                        letterSpacing: '-0.02em',
+                                        lineHeight: 1.3,
                                         overflow: 'hidden',
                                         textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap',
-                                        maxWidth: '100%'
+                                        whiteSpace: 'nowrap'
                                     }}>
-                                        Danh sách chương - Truyện "{story?.title || 'Untitled'}"
+                                        Danh sách chương
                                     </h2>
-                                    <span style={{
+                                    <p style={{
+                                        fontFamily: "'Plus Jakarta Sans', sans-serif",
                                         fontSize: '0.875rem',
-                                        fontWeight: 500,
+                                        color: '#90A1B9',
+                                        margin: '4px 0 0 0',
+                                        fontWeight: 400,
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap'
+                                    }}>
+                                        {story?.title || 'Chưa có tiêu đề'}
+                                    </p>
+                                    <span style={{
+                                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                                        fontSize: '0.75rem',
+                                        fontWeight: 600,
                                         color: derivedStatusKind === 'published' ? '#065f46' : '#92400e',
                                         backgroundColor: derivedStatusKind === 'published' ? '#d1fae5' : '#fef3c7',
-                                        padding: '2px 8px',
-                                        borderRadius: '6px',
-                                        marginTop: '4px',
+                                        padding: '4px 10px',
+                                        borderRadius: '8px',
+                                        marginTop: '8px',
                                         display: 'inline-block'
                                     }}>
                                         Trạng thái truyện: {derivedStoryStatusDisplay}
@@ -305,7 +338,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.5rem',
-                                    padding: '0.625rem 1.5rem',
+                                    padding: '0.75rem 1.5rem',
                                     backgroundColor: '#13ec5b',
                                     border: 'none',
                                     borderRadius: '9999px',
@@ -315,20 +348,22 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                     cursor: 'pointer',
                                     transition: 'all 0.2s',
                                     flexShrink: 0,
-                                    whiteSpace: 'nowrap'
+                                    whiteSpace: 'nowrap',
+                                    boxShadow: '0 2px 8px rgba(19, 236, 91, 0.3)',
+                                    fontFamily: "'Plus Jakarta Sans', sans-serif"
                                 }}
                                 onMouseEnter={(e) => {
                                     e.currentTarget.style.backgroundColor = '#10d452';
-                                    e.currentTarget.style.transform = 'translateY(-2px)';
-                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.3)';
+                                    e.currentTarget.style.transform = 'translateY(-1px)';
+                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.35)';
                                 }}
                                 onMouseLeave={(e) => {
                                     e.currentTarget.style.backgroundColor = '#13ec5b';
                                     e.currentTarget.style.transform = 'translateY(0)';
-                                    e.currentTarget.style.boxShadow = 'none';
+                                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(19, 236, 91, 0.3)';
                                 }}
                             >
-                                <Plus style={{ width: '16px', height: '16px' }} />
+                                <Plus style={{ width: '18px', height: '18px' }} />
                                 Thêm chương mới
                             </button>
                         </div>
