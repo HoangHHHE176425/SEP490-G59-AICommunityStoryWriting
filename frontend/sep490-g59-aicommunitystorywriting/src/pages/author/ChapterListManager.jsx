@@ -386,50 +386,56 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                             width: 'fit-content',
                                             margin: '0 auto'
                                         }}>
-                                            {/* Hàng 1: Chỉnh sửa, Xóa — độ rộng hàng 2 = độ rộng hàng này */}
+                                            {/* Hàng 1: Chỉnh sửa, Xóa — không cho phép khi chương đang Chờ duyệt (PENDING_REVIEW) */}
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                 <button
-                                                    onClick={() => onEditChapter(chapter)}
+                                                    onClick={() => chapter.status !== 'pending_review' && onEditChapter(chapter)}
+                                                    disabled={chapter.status === 'pending_review'}
+                                                    title={chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể chỉnh sửa' : ''}
                                                     style={{
                                                         display: 'inline-flex',
                                                         alignItems: 'center',
                                                         gap: '0.25rem',
                                                         padding: '0.4rem 0.75rem',
-                                                        backgroundColor: '#f0fdf4',
-                                                        border: '1px solid #86efac',
+                                                        backgroundColor: chapter.status === 'pending_review' ? '#f1f5f9' : '#f0fdf4',
+                                                        border: `1px solid ${chapter.status === 'pending_review' ? '#e2e8f0' : '#86efac'}`,
                                                         borderRadius: '9999px',
                                                         fontSize: '0.75rem',
                                                         fontWeight: 600,
-                                                        color: '#15803d',
-                                                        cursor: 'pointer',
+                                                        color: chapter.status === 'pending_review' ? '#94a3b8' : '#15803d',
+                                                        cursor: chapter.status === 'pending_review' ? 'not-allowed' : 'pointer',
                                                         transition: 'all 0.2s',
-                                                        whiteSpace: 'nowrap'
+                                                        whiteSpace: 'nowrap',
+                                                        opacity: chapter.status === 'pending_review' ? 0.8 : 1
                                                     }}
-                                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#dcfce7'; }}
-                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f0fdf4'; }}
+                                                    onMouseEnter={(e) => { if (chapter.status !== 'pending_review') e.currentTarget.style.backgroundColor = '#dcfce7'; }}
+                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'pending_review' ? '#f1f5f9' : '#f0fdf4'; }}
                                                 >
                                                     <Pencil size={12} />
                                                     Chỉnh sửa
                                                 </button>
                                                 <button
-                                                    onClick={() => handleDeleteChapter(chapter.id)}
+                                                    onClick={() => chapter.status !== 'pending_review' && handleDeleteChapter(chapter.id)}
+                                                    disabled={chapter.status === 'pending_review'}
+                                                    title={chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể xóa' : ''}
                                                     style={{
                                                         display: 'inline-flex',
                                                         alignItems: 'center',
                                                         gap: '0.25rem',
                                                         padding: '0.4rem 0.75rem',
-                                                        backgroundColor: '#fff',
-                                                        border: '1px solid #fecaca',
+                                                        backgroundColor: chapter.status === 'pending_review' ? '#f1f5f9' : '#fff',
+                                                        border: `1px solid ${chapter.status === 'pending_review' ? '#e2e8f0' : '#fecaca'}`,
                                                         borderRadius: '9999px',
                                                         fontSize: '0.75rem',
                                                         fontWeight: 600,
-                                                        color: '#dc2626',
-                                                        cursor: 'pointer',
+                                                        color: chapter.status === 'pending_review' ? '#94a3b8' : '#dc2626',
+                                                        cursor: chapter.status === 'pending_review' ? 'not-allowed' : 'pointer',
                                                         transition: 'all 0.2s',
-                                                        whiteSpace: 'nowrap'
+                                                        whiteSpace: 'nowrap',
+                                                        opacity: chapter.status === 'pending_review' ? 0.8 : 1
                                                     }}
-                                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#fef2f2'; }}
-                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#fff'; }}
+                                                    onMouseEnter={(e) => { if (chapter.status !== 'pending_review') e.currentTarget.style.backgroundColor = '#fef2f2'; }}
+                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'pending_review' ? '#f1f5f9' : '#fff'; }}
                                                 >
                                                     <Trash2 size={12} />
                                                     Xóa
