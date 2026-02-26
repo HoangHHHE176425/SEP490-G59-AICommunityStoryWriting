@@ -1,8 +1,9 @@
 import { Search, Bell, Edit, BookOpen, Menu, X, ChevronDown, Coins, User, Library, LogOut, FileText, List } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { getAllCategories } from '../../api/category/categoryApi';
 
 export function Header() {
     const navigate = useNavigate();
@@ -10,6 +11,8 @@ export function Header() {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isGenreOpen, setIsGenreOpen] = useState(false);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+    const [categories, setCategories] = useState([]);
+    const [categoriesLoading, setCategoriesLoading] = useState(true);
 
     const userCoins = user?.stats?.currentCoins ?? 0;
 
@@ -19,20 +22,31 @@ export function Header() {
         navigate('/');
     };
 
-    const genres = [
-        'Tiên hiệp',
-        'Kiếm hiệp',
-        'Ngôn tình',
-        'Đô thị',
-        'Huyền huyễn',
-        'Khoa học viễn tưởng',
-        'Trinh thám',
-        'Kinh dị',
-        'Lịch sử',
-        'Đam mỹ',
-        'Trọng sinh',
-        'Xuyên không',
-    ];
+    useEffect(() => {
+        let cancelled = false;
+        getAllCategories({ includeInactive: false })
+            .then((data) => {
+                if (cancelled) return;
+                const items = Array.isArray(data) ? data : (data?.items ?? data?.Items ?? []);
+                const categoryNames = items
+                    .map((cat) => cat.name ?? cat.Name ?? '')
+                    .filter((name) => name && name.trim())
+                    .sort();
+                setCategories(categoryNames);
+            })
+            .catch((err) => {
+                if (!cancelled) {
+                    console.error('Failed to load categories:', err);
+                    setCategories([]);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setCategoriesLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     return (
         <header className="sticky top-0 z-50 w-full bg-slate-900/95 backdrop-blur-md border-b border-slate-700/50">
@@ -80,15 +94,21 @@ export function Header() {
                                     onMouseDown={(e) => e.preventDefault()}
                                 >
                                     <div className="grid grid-cols-1 py-2">
-                                        {genres.map((genre) => (
-                                            <a
-                                                key={genre}
-                                                href="#"
-                                                className="px-4 py-2 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
-                                            >
-                                                {genre}
-                                            </a>
-                                        ))}
+                                        {categoriesLoading ? (
+                                            <div className="px-4 py-2 text-sm text-slate-400">Đang tải...</div>
+                                        ) : categories.length === 0 ? (
+                                            <div className="px-4 py-2 text-sm text-slate-400">Chưa có thể loại</div>
+                                        ) : (
+                                            categories.map((categoryName) => (
+                                                <a
+                                                    key={categoryName}
+                                                    href="#"
+                                                    className="px-4 py-2 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
+                                                >
+                                                    {categoryName}
+                                                </a>
+                                            ))
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -245,15 +265,21 @@ export function Header() {
                                     <ChevronDown className="w-4 h-4 group-open:rotate-180 transition-transform" />
                                 </summary>
                                 <div className="mt-2 ml-4 flex flex-col gap-2">
-                                    {genres.map((genre) => (
-                                        <a
-                                            key={genre}
-                                            href="#"
-                                            className="text-sm text-slate-400 hover:text-primary transition-colors"
-                                        >
-                                            {genre}
-                                        </a>
-                                    ))}
+                                    {categoriesLoading ? (
+                                        <div className="text-sm text-slate-400">Đang tải...</div>
+                                    ) : categories.length === 0 ? (
+                                        <div className="text-sm text-slate-400">Chưa có thể loại</div>
+                                    ) : (
+                                        categories.map((categoryName) => (
+                                            <a
+                                                key={categoryName}
+                                                href="#"
+                                                className="text-sm text-slate-400 hover:text-primary transition-colors"
+                                            >
+                                                {categoryName}
+                                            </a>
+                                        ))
+                                    )}
                                 </div>
                             </details>
 
