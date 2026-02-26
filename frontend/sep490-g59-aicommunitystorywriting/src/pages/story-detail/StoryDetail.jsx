@@ -12,6 +12,7 @@ import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
 import { getStoryById } from '../../api/story/storyApi';
 import { getChapters } from '../../api/chapter/chapterApi';
+import { getProfileByUserId } from '../../api/account/accountApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 function formatTimeAgo(dateStr) {
@@ -65,7 +66,8 @@ export function StoryDetail() {
                     const coverPath = storyRes?.coverImage ?? storyRes?.CoverImage;
                     const totalViews = Number(storyRes?.totalViews ?? storyRes?.TotalViews ?? 0);
                     const totalChapters = rawItems.length;
-                    setStory({
+                    const authorId = storyRes?.authorId ?? storyRes?.AuthorId;
+                    const storyPayload = {
                         id: storyRes?.id ?? storyRes?.Id,
                         title: storyRes?.title ?? storyRes?.Title ?? 'Không có tiêu đề',
                         author: {
@@ -85,7 +87,7 @@ export function StoryDetail() {
                         words: 0,
                         lastUpdate: storyRes?.updatedAt ? formatTimeAgo(storyRes.updatedAt) : 'Chưa cập nhật',
                         description: storyRes?.summary ?? storyRes?.Summary ?? 'Chưa có giới thiệu.'
-                    });
+                    };
                     setChapters(rawItems.map((ch, idx) => {
                         const orderIndex = ch.orderIndex ?? ch.OrderIndex ?? idx;
                         const num = orderIndex + 1;
@@ -100,6 +102,23 @@ export function StoryDetail() {
                             isLocked: false
                         };
                     }));
+                    if (!authorId) {
+                        setStory(storyPayload);
+                        return;
+                    }
+                    return getProfileByUserId(authorId)
+                        .then((profile) => {
+                            if (cancelled) return;
+                            storyPayload.author = {
+                                name: profile.displayName ?? storyPayload.author.name,
+                                avatar: profile.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '',
+                                followers: Number(profile.stats?.totalReads ?? profile.stats?.TotalReads ?? 0) || 0
+                            };
+                            setStory(storyPayload);
+                        })
+                        .catch(() => {
+                            if (!cancelled) setStory(storyPayload);
+                        });
                 })
                 .catch((err) => {
                     if (!cancelled) {
