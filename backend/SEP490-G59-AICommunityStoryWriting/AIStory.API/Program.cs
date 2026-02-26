@@ -38,15 +38,16 @@ namespace AIStory.API
                     options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
                     options.JsonSerializerOptions.WriteIndented = true;
                 });
-            builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
-                options.UseSqlServer(
-                    builder.Configuration.GetConnectionString("DefaultConnection") 
-                    ?? "Server=localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
-                    sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
-                        maxRetryCount: 5,
-                        maxRetryDelay: TimeSpan.FromSeconds(30),
-                        errorNumbersToAdd: null)
-                ));
+            builder.Services.AddDbContext<StoryPlatformDbContext>();
+            //builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
+            //    options.UseSqlServer(
+            //        builder.Configuration.GetConnectionString("DefaultConnection") 
+            //        ?? "Server=localhost;uid=sa;password=a123;database=story_platform_v14;Encrypt=True;TrustServerCertificate=True;",
+            //        sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
+            //            maxRetryCount: 5,
+            //            maxRetryDelay: TimeSpan.FromSeconds(30),
+            //            errorNumbersToAdd: null)
+            //    ));
             // CORS Configuration
             builder.Services.AddCors(options =>
             {
@@ -80,6 +81,7 @@ namespace AIStory.API
             builder.Services.AddScoped<ICategoryService, CategoryService>();
             builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
             builder.Services.AddScoped<IChapterService, ChapterService>();
+            builder.Services.AddScoped<IModerationService, ModerationService>();
 
             // Policies
             builder.Services.AddScoped<IPolicyRepository, PolicyRepository>();
