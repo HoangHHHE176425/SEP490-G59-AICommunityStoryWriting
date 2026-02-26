@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Eye, MessageSquare, Book, Send, Undo2, Pencil, Trash2, ArrowLeft } from 'lucide-react';
+import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getChapters, getChapterById, updateChapter, unpublishChapter } from '../../api/chapter/chapterApi';
@@ -281,14 +281,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                     width: '48px',
                                     height: '48px',
                                     borderRadius: '12px',
-                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
-                                    boxShadow: '0 4px 12px rgba(19, 236, 91, 0.25)',
+                                    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)',
                                     flexShrink: 0
                                 }}>
-                                    <Book style={{ width: '26px', height: '26px', color: '#ffffff' }} />
+                                    <ListOrdered style={{ width: '26px', height: '26px', color: '#ffffff' }} />
                                 </div>
                                 <div style={{ minWidth: 0 }}>
                                     <h2 style={{
