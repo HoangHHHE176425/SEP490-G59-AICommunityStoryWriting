@@ -300,8 +300,8 @@
                     <td><span class="badge bg-secondary">${chapter.orderIndex}</span></td>
                     <td>${Utils.formatNumber(chapter.wordCount || 0)}</td>
                     <td>
-                        <span class="badge ${chapter.status === 'PUBLISHED' ? 'bg-success' : 'bg-secondary'}">
-                            ${chapter.status || 'DRAFT'}
+                        <span class="badge ${chapter.status === 'PUBLISHED' ? 'bg-success' : chapter.status === 'PENDING_REVIEW' ? 'bg-warning text-dark' : chapter.status === 'REJECTED' ? 'bg-danger' : 'bg-secondary'}">
+                            ${chapter.status === 'PENDING_REVIEW' ? 'Chờ duyệt' : chapter.status === 'REJECTED' ? 'Bị từ chối' : chapter.status === 'PUBLISHED' ? 'Đã xuất bản' : (chapter.status || 'DRAFT')}
                         </span>
                     </td>
                     <td>
@@ -312,6 +312,7 @@
                     <td>${chapter.coinPrice > 0 ? `${chapter.coinPrice} coin` : '-'}</td>
                     <td>${Utils.formatDate(chapter.createdAt)}</td>
                     <td>
+                        ${chapter.status === 'REJECTED' ? `<button class="btn btn-sm btn-outline-danger" onclick="showChapterRejectionReason('${chapter.id}')" title="Xem lý do từ chối"><i class="bi bi-chat-left-quote"></i> Lý do</button> ` : ''}
                         <button class="btn btn-sm btn-info" onclick="viewChapter('${chapter.id}')" title="Xem">
                             <i class="bi bi-eye"></i>
                         </button>

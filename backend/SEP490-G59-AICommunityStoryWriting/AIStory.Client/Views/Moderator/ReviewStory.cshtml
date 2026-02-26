@@ -1,0 +1,160 @@
+﻿@{
+    ViewData["Title"] = "Review truyện";
+    var storyId = ViewBag.StoryId as Guid? ?? Guid.Empty;
+}
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a asp-controller="Moderator" asp-action="Index">Kiểm duyệt</a></li>
+                    <li class="breadcrumb-item active">Review truyện</li>
+                </ol>
+            </nav>
+            <h2 class="mb-4"><i class="bi bi-book"></i> Review truyện</h2>
+
+            <div id="loadingStory" class="text-center py-5">
+                <div class="spinner-border text-primary"></div>
+                <p class="mt-2 text-muted">Đang tải...</p>
+            </div>
+            <div id="storyContent" style="display: none;">
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <div id="storyCoverWrap"></div>
+                            </div>
+                            <div class="col-md-9">
+                                <h3 id="storyTitle" class="card-title"></h3>
+                                <p id="storySummary" class="text-muted"></p>
+                                <div class="mb-3">
+                                    <span id="storyBadges"></span>
+                                </div>
+                                <div class="row small text-muted">
+                                    <div class="col-md-6">
+                                        <p class="mb-1"><strong>Độ tuổi:</strong> <span id="storyAgeRating"></span></p>
+                                        <p class="mb-1"><strong>Tiến độ:</strong> <span id="storyProgress"></span></p>
+                                        <p class="mb-1"><strong>Ngày tạo:</strong> <span id="storyCreatedAt"></span></p>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <p class="mb-1"><strong>Số chương:</strong> <span id="storyTotalChapters"></span></p>
+                                        <p class="mb-1"><strong>Số từ:</strong> <span id="storyWordCount"></span></p>
+                                        <p class="mb-1"><strong>Cập nhật:</strong> <span id="storyUpdatedAt"></span></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Quyết định</h5>
+                        <a asp-controller="Moderator" asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Quay lại danh sách</a>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button type="button" class="btn btn-success btn-lg" id="btnApproveStory">
+                                <i class="bi bi-check-circle"></i> Duyệt truyện
+                            </button>
+                            <button type="button" class="btn btn-danger btn-lg" id="btnRejectStory">
+                                <i class="bi bi-x-circle"></i> Từ chối (kèm lý do)
+                            </button>
+                        </div>
+                        <div id="rejectFormStory" class="mt-4" style="display: none;">
+                            <label class="form-label">Lý do từ chối <span class="text-danger">*</span></label>
+                            <textarea class="form-control" id="rejectReasonStory" rows="4" placeholder="Nhập lý do từ chối..."></textarea>
+                            <button type="button" class="btn btn-danger mt-2" id="btnConfirmRejectStory">Xác nhận từ chối</button>
+                            <button type="button" class="btn btn-secondary mt-2 ms-2" id="btnCancelRejectStory">Hủy</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="errorStory" class="alert alert-danger" style="display: none;"></div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const storyId = '@(storyId)';
+        const apiBase = 'http://localhost:5000';
+
+        document.addEventListener('DOMContentLoaded', function () {
+            if (!AuthHelper.isAuthenticated() || !AuthHelper.hasAnyRole('MODERATOR', 'ADMIN')) {
+                window.location.href = '/Moderator';
+                return;
+            }
+            loadStory();
+            document.getElementById('btnApproveStory').addEventListener('click', approveStory);
+            document.getElementById('btnRejectStory').addEventListener('click', function () {
+                document.getElementById('rejectFormStory').style.display = 'block';
+            });
+            document.getElementById('btnConfirmRejectStory').addEventListener('click', confirmRejectStory);
+            document.getElementById('btnCancelRejectStory').addEventListener('click', function () {
+                document.getElementById('rejectFormStory').style.display = 'none';
+                document.getElementById('rejectReasonStory').value = '';
+            });
+        });
+
+        async function loadStory() {
+            try {
+                const s = await ApiService.getStoryById(storyId);
+                document.getElementById('loadingStory').style.display = 'none';
+                document.getElementById('storyContent').style.display = 'block';
+
+                document.getElementById('storyTitle').textContent = s.title || 'N/A';
+                document.getElementById('storySummary').textContent = s.summary || 'Chưa có mô tả';
+                document.getElementById('storyAgeRating').textContent = s.ageRating || 'ALL';
+                document.getElementById('storyProgress').textContent = ({ ONGOING: 'Đang ra', COMPLETED: 'Hoàn thành', HIATUS: 'Tạm dừng' })[s.storyProgressStatus] || s.storyProgressStatus || 'Đang ra';
+                document.getElementById('storyCreatedAt').textContent = Utils.formatDate(s.createdAt);
+                document.getElementById('storyUpdatedAt').textContent = Utils.formatDate(s.updatedAt);
+                document.getElementById('storyTotalChapters').textContent = (s.totalChapters ?? 0);
+                document.getElementById('storyWordCount').textContent = Utils.formatNumber(s.wordCount || 0);
+
+                const coverWrap = document.getElementById('storyCoverWrap');
+                if (s.coverImage) {
+                    coverWrap.innerHTML = `<img src="${apiBase}${s.coverImage}" class="img-fluid rounded" alt="${s.title}" style="max-height: 320px; object-fit: cover;">`;
+                } else {
+                    coverWrap.innerHTML = '<div class="bg-secondary d-flex align-items-center justify-content-center rounded" style="height: 280px;"><i class="bi bi-image text-white" style="font-size: 4rem;"></i></div>';
+                }
+
+                const badges = document.getElementById('storyBadges');
+                badges.innerHTML = `
+                    <span class="badge bg-secondary me-1">${s.categoryNames || 'N/A'}</span>
+                    <span class="badge bg-warning text-dark me-1">${s.status || 'PENDING_REVIEW'}</span>
+                `;
+            } catch (e) {
+                document.getElementById('loadingStory').style.display = 'none';
+                document.getElementById('errorStory').style.display = 'block';
+                document.getElementById('errorStory').textContent = e.message || 'Không tải được truyện.';
+            }
+        }
+
+        async function approveStory() {
+            try {
+                await ApiService.moderatorApproveStory(storyId);
+                Utils.showAlert('Đã duyệt truyện.', 'success');
+                setTimeout(() => { window.location.href = '/Moderator'; }, 1000);
+            } catch (e) {
+                Utils.showAlert(e.message || 'Lỗi duyệt truyện.', 'danger');
+            }
+        }
+
+        async function confirmRejectStory() {
+            const reason = document.getElementById('rejectReasonStory').value.trim();
+            if (!reason) {
+                Utils.showAlert('Vui lòng nhập lý do từ chối.', 'warning');
+                return;
+            }
+            try {
+                await ApiService.moderatorRejectStory(storyId, reason);
+                Utils.showAlert('Đã từ chối truyện.', 'success');
+                setTimeout(() => { window.location.href = '/Moderator'; }, 1000);
+            } catch (e) {
+                Utils.showAlert(e.message || 'Lỗi từ chối.', 'danger');
+            }
+        }
+    </script>
+}

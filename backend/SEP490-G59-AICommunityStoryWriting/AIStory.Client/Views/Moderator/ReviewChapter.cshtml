@@ -1,0 +1,159 @@
+﻿@{
+    ViewData["Title"] = "Review chapter";
+    var chapterId = ViewBag.ChapterId as Guid? ?? Guid.Empty;
+}
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a asp-controller="Moderator" asp-action="Index">Kiểm duyệt</a></li>
+                    <li class="breadcrumb-item active">Review chapter</li>
+                </ol>
+            </nav>
+            <h2 class="mb-4"><i class="bi bi-journal-text"></i> Review chapter</h2>
+
+            <div id="loadingChapter" class="text-center py-5">
+                <div class="spinner-border text-primary"></div>
+                <p class="mt-2 text-muted">Đang tải...</p>
+            </div>
+            <div id="chapterContent" style="display: none;">
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0" id="chapterTitle"></h5>
+                        <div>
+                            <span id="chapterBadges"></span>
+                            <a id="linkStory" href="#" class="btn btn-sm btn-outline-primary ms-2" target="_blank"><i class="bi bi-book"></i> Xem truyện</a>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="row small text-muted mb-3">
+                            <div class="col-md-6">
+                                <span><strong>Chương số:</strong> <span id="chapterOrderIndex"></span></span>
+                                <span class="ms-3"><strong>Số từ:</strong> <span id="chapterWordCount"></span></span>
+                            </div>
+                            <div class="col-md-6">
+                                <span><strong>Ngày tạo:</strong> <span id="chapterCreatedAt"></span></span>
+                                <span class="ms-3"><strong>Loại:</strong> <span id="chapterAccessType"></span></span>
+                                <span id="chapterCoinSpan" class="ms-2"></span>
+                            </div>
+                        </div>
+                        <hr>
+                        <div id="chapterBody" class="chapter-body" style="white-space: pre-wrap; font-family: inherit;"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Quyết định</h5>
+                        <a asp-controller="Moderator" asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Quay lại danh sách</a>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button type="button" class="btn btn-success btn-lg" id="btnApproveChapter">
+                                <i class="bi bi-check-circle"></i> Duyệt chapter
+                            </button>
+                            <button type="button" class="btn btn-danger btn-lg" id="btnRejectChapter">
+                                <i class="bi bi-x-circle"></i> Từ chối (kèm lý do)
+                            </button>
+                        </div>
+                        <div id="rejectFormChapter" class="mt-4" style="display: none;">
+                            <label class="form-label">Lý do từ chối <span class="text-danger">*</span></label>
+                            <textarea class="form-control" id="rejectReasonChapter" rows="4" placeholder="Nhập lý do từ chối..."></textarea>
+                            <button type="button" class="btn btn-danger mt-2" id="btnConfirmRejectChapter">Xác nhận từ chối</button>
+                            <button type="button" class="btn btn-secondary mt-2 ms-2" id="btnCancelRejectChapter">Hủy</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div id="errorChapter" class="alert alert-danger" style="display: none;"></div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const chapterId = '@(chapterId)';
+
+        document.addEventListener('DOMContentLoaded', function () {
+            if (!AuthHelper.isAuthenticated() || !AuthHelper.hasAnyRole('MODERATOR', 'ADMIN')) {
+                window.location.href = '/Moderator';
+                return;
+            }
+            loadChapter();
+            document.getElementById('btnApproveChapter').addEventListener('click', approveChapter);
+            document.getElementById('btnRejectChapter').addEventListener('click', function () {
+                document.getElementById('rejectFormChapter').style.display = 'block';
+            });
+            document.getElementById('btnConfirmRejectChapter').addEventListener('click', confirmRejectChapter);
+            document.getElementById('btnCancelRejectChapter').addEventListener('click', function () {
+                document.getElementById('rejectFormChapter').style.display = 'none';
+                document.getElementById('rejectReasonChapter').value = '';
+            });
+        });
+
+        async function loadChapter() {
+            try {
+                const c = await ApiService.getChapterById(chapterId);
+                document.getElementById('loadingChapter').style.display = 'none';
+                document.getElementById('chapterContent').style.display = 'block';
+
+                document.getElementById('chapterTitle').textContent = c.title || 'N/A';
+                document.getElementById('chapterOrderIndex').textContent = c.orderIndex ?? '';
+                document.getElementById('chapterWordCount').textContent = Utils.formatNumber(c.wordCount || 0);
+                document.getElementById('chapterCreatedAt').textContent = Utils.formatDate(c.createdAt);
+                document.getElementById('chapterAccessType').textContent = c.accessType === 'PAID' ? 'Trả phí' : 'Miễn phí';
+                if (c.coinPrice > 0) {
+                    document.getElementById('chapterCoinSpan').innerHTML = `<strong>Giá:</strong> ${c.coinPrice} coin`;
+                } else {
+                    document.getElementById('chapterCoinSpan').textContent = '';
+                }
+                document.getElementById('chapterBody').textContent = c.content || '(Chưa có nội dung)';
+
+                const badges = document.getElementById('chapterBadges');
+                badges.innerHTML = `
+                    <span class="badge bg-warning text-dark me-1">${c.status || 'PENDING_REVIEW'}</span>
+                    <span class="badge ${c.accessType === 'PAID' ? 'bg-warning' : 'bg-info'} me-1">${c.accessType || 'FREE'}</span>
+                `;
+
+                if (c.storyId) {
+                    const link = document.getElementById('linkStory');
+                    link.href = '/Stories/Details/' + c.storyId;
+                    link.style.display = 'inline-block';
+                } else {
+                    document.getElementById('linkStory').style.display = 'none';
+                }
+            } catch (e) {
+                document.getElementById('loadingChapter').style.display = 'none';
+                document.getElementById('errorChapter').style.display = 'block';
+                document.getElementById('errorChapter').textContent = e.message || 'Không tải được chapter.';
+            }
+        }
+
+        async function approveChapter() {
+            try {
+                await ApiService.moderatorApproveChapter(chapterId);
+                Utils.showAlert('Đã duyệt chapter.', 'success');
+                setTimeout(() => { window.location.href = '/Moderator'; }, 1000);
+            } catch (e) {
+                Utils.showAlert(e.message || 'Lỗi duyệt chapter.', 'danger');
+            }
+        }
+
+        async function confirmRejectChapter() {
+            const reason = document.getElementById('rejectReasonChapter').value.trim();
+            if (!reason) {
+                Utils.showAlert('Vui lòng nhập lý do từ chối.', 'warning');
+                return;
+            }
+            try {
+                await ApiService.moderatorRejectChapter(chapterId, reason);
+                Utils.showAlert('Đã từ chối chapter.', 'success');
+                setTimeout(() => { window.location.href = '/Moderator'; }, 1000);
+            } catch (e) {
+                Utils.showAlert(e.message || 'Lỗi từ chối.', 'danger');
+            }
+        }
+    </script>
+}

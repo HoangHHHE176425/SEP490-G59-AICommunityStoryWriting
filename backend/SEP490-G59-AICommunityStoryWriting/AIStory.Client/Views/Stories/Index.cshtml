@@ -302,7 +302,7 @@
                                         <p class="card-text"><small class="text-muted">${story.summary || 'Chưa có mô tả'}</small></p>
                                         <div class="mt-2">
                                             <span class="badge bg-primary">${story.categoryNames || 'N/A'}</span>
-                                            <span class="badge ${story.status === 'PUBLISHED' ? 'bg-success' : 'bg-secondary'}">${story.status || 'DRAFT'}</span>
+                                            <span class="badge ${story.status === 'PUBLISHED' ? 'bg-success' : story.status === 'PENDING_REVIEW' ? 'bg-warning text-dark' : story.status === 'REJECTED' ? 'bg-danger' : 'bg-secondary'}">${story.status === 'PENDING_REVIEW' ? 'Chờ duyệt' : story.status === 'REJECTED' ? 'Bị từ chối' : story.status === 'PUBLISHED' ? 'Đã xuất bản' : (story.status || 'DRAFT')}</span>
                                             <span class="badge ${({ ONGOING: 'bg-info', COMPLETED: 'bg-success', HIATUS: 'bg-warning' })[story.storyProgressStatus] || 'bg-secondary'}">${({ ONGOING: 'Đang ra', COMPLETED: 'Hoàn thành', HIATUS: 'Tạm dừng' })[story.storyProgressStatus] || story.storyProgressStatus || 'Đang ra'}</span>
                                         </div>
                                         <div class="mt-2">
@@ -321,14 +321,15 @@
                                         </div>
                                     </div>
                                     <div class="ms-3">
+                                        ${story.status === 'REJECTED' ? `<button class="btn btn-sm btn-outline-danger" onclick="showStoryRejectionReason('${story.id}')" title="Xem lý do từ chối"><i class="bi bi-chat-left-quote"></i> Lý do từ chối</button>` : ''}
                                         <button class="btn btn-sm btn-info" onclick="viewStoryDetails('${story.id}')" title="Xem chi tiết">
                                             <i class="bi bi-eye"></i>
                                         </button>
                                         <button class="btn btn-sm btn-primary" onclick="editStory('${story.id}')" title="Sửa">
                                             <i class="bi bi-pencil"></i>
                                         </button>
-                                        <button class="btn btn-sm btn-success" onclick="publishStory('${story.id}')" title="Publish" ${story.status === 'PUBLISHED' ? 'disabled' : ''}>
-                                            <i class="bi bi-check-circle"></i>
+                                        <button class="btn btn-sm btn-success" onclick="publishStory('${story.id}')" title="Gửi duyệt" ${(story.status === 'PUBLISHED' || story.status === 'PENDING_REVIEW') ? 'disabled' : ''}>
+                                            <i class="bi bi-send-check"></i> Gửi duyệt
                                         </button>
                                         <button class="btn btn-sm btn-danger" onclick="deleteStory('${story.id}')" title="Xóa">
                                             <i class="bi bi-trash"></i>
@@ -532,7 +533,7 @@
         async function publishStory(id) {
             try {
                 await ApiService.publishStory(id);
-                Utils.showAlert('Publish truyện thành công!', 'success');
+                Utils.showAlert('Đã gửi truyện chờ duyệt. Moderator sẽ xem xét và duyệt khi đạt yêu cầu.', 'success');
                 loadStories(currentPage);
             } catch (error) {
                 Utils.showAlert('Lỗi: ' + error.message, 'danger');
