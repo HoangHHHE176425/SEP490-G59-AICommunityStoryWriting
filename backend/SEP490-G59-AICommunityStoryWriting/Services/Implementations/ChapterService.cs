@@ -112,6 +112,13 @@ namespace Services.Implementations
                 chaptersQuery = chaptersQuery.Where(c => c.story_id == query.StoryId.Value);
             }
 
+            if (!string.IsNullOrWhiteSpace(query.Search))
+            {
+                var searchLower = query.Search.Trim().ToLower();
+                chaptersQuery = chaptersQuery.Where(c =>
+                    (c.title != null && c.title.ToLower().Contains(searchLower)));
+            }
+
             if (!string.IsNullOrWhiteSpace(query.Status))
             {
                 chaptersQuery = chaptersQuery.Where(c => c.status == query.Status);
@@ -130,6 +137,9 @@ namespace Services.Implementations
                 "published_at" => query.SortOrder == "asc"
                     ? chaptersQuery.OrderBy(c => c.published_at)
                     : chaptersQuery.OrderByDescending(c => c.published_at),
+                "title" => query.SortOrder == "asc"
+                    ? chaptersQuery.OrderBy(c => c.title ?? "")
+                    : chaptersQuery.OrderByDescending(c => c.title ?? ""),
                 _ => query.SortOrder == "asc"
                     ? chaptersQuery.OrderBy(c => c.order_index)
                     : chaptersQuery.OrderByDescending(c => c.order_index)
@@ -142,9 +152,18 @@ namespace Services.Implementations
                 .Take(query.PageSize)
                 .ToList();
 
+            var storyIds = chapterList.Where(c => c.story_id.HasValue).Select(c => c.story_id!.Value).Distinct().ToList();
+            var storyTitles = new Dictionary<Guid, string>();
+            foreach (var sid in storyIds)
+            {
+                var story = StoryDAO.GetById(sid);
+                if (story != null)
+                    storyTitles[sid] = story.title ?? "";
+            }
+
             return new PagedResultDto<ChapterListItemDto>
             {
-                Items = chapterList.Select(MapToListItemDto),
+                Items = chapterList.Select(c => MapToListItemDto(c, c.story_id.HasValue ? storyTitles.GetValueOrDefault(c.story_id.Value) : null)),
                 TotalCount = totalCount,
                 Page = query.Page,
                 PageSize = query.PageSize
@@ -154,7 +173,15 @@ namespace Services.Implementations
         public ChapterResponseDto? GetById(Guid id)
         {
             var chapter = _chapterRepository.GetById(id);
-            return chapter == null ? null : MapToResponseDto(chapter);
+            if (chapter == null) return null;
+            var dto = MapToResponseDto(chapter);
+            if (chapter.status == "REJECTED")
+            {
+                var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", id);
+                dto.RejectionReason = reason;
+                dto.RejectedAt = rejectedAt;
+            }
+            return dto;
         }
 
         public IEnumerable<ChapterListItemDto> GetByStoryId(Guid storyId)
@@ -163,13 +190,21 @@ namespace Services.Implementations
                 .OrderBy(c => c.order_index)
                 .ToList();
 
-            return chapterList.Select(MapToListItemDto);
+            return chapterList.Select(c => MapToListItemDto(c));
         }
 
         public ChapterResponseDto? GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex)
         {
             var chapter = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, orderIndex);
-            return chapter == null ? null : MapToResponseDto(chapter);
+            if (chapter == null) return null;
+            var dto = MapToResponseDto(chapter);
+            if (chapter.status == "REJECTED")
+            {
+                var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", chapter.id);
+                dto.RejectionReason = reason;
+                dto.RejectedAt = rejectedAt;
+            }
+            return dto;
         }
 
         public bool Update(Guid id, UpdateChapterRequestDto request)
@@ -334,30 +369,12 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
 
-            chapter.status = "PUBLISHED";
-            chapter.published_at = DateTime.Now;
+            // Author "Publish" = gửi chờ duyệt. Chỉ moderator approve mới chuyển sang PUBLISHED và set published_at.
+            chapter.status = "PENDING_REVIEW";
             chapter.updated_at = DateTime.Now;
+            // published_at và story.last_published_at chỉ set khi moderator approve (ModerationService.ApproveChapter)
 
             _chapterRepository.Update(chapter);
-
-            if (chapter.story_id.HasValue)
-            {
-                try
-                {
-                    var story = StoryDAO.GetById(chapter.story_id.Value);
-                    if (story != null)
-                    {
-                        story.last_published_at = DateTime.Now;
-                        StoryDAO.Update(story);
-                    }
-                }
-                catch (Exception)
-                {
-                    // Log error but don't fail the publish operation
-                    // The chapter was already published successfully
-                }
-            }
-
             return true;
         }
 
@@ -451,12 +468,13 @@ namespace Services.Implementations
             };
         }
 
-        private ChapterListItemDto MapToListItemDto(chapters chapter)
+        private ChapterListItemDto MapToListItemDto(chapters chapter, string? storyTitle = null)
         {
             return new ChapterListItemDto
             {
                 Id = chapter.id,
                 StoryId = chapter.story_id,
+                StoryTitle = storyTitle,
                 Title = chapter.title,
                 OrderIndex = chapter.order_index,
                 Status = chapter.status,
