@@ -85,6 +85,8 @@ namespace AIStory.API
             builder.Services.AddScoped<IPolicyRepository, PolicyRepository>();
             builder.Services.AddScoped<IAuthorPolicyAcceptanceRepository, AuthorPolicyAcceptanceRepository>();
             builder.Services.AddScoped<IPolicyService, PolicyService>();
+            builder.Services.AddScoped<IAdminPolicyService, AdminPolicyService>();
+            builder.Services.AddScoped<IAdminUserService, AdminUserService>();
 
 
             var jwtKey = builder.Configuration["Jwt:Key"];
@@ -107,10 +109,25 @@ namespace AIStory.API
                             ValidAudience = jwtAudience,
                             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
                             ClockSkew = TimeSpan.Zero,
-                            RoleClaimType = ClaimTypes.Role // Đảm bảo role claim được nhận diện đúng
+                            // JwtHelper issues claim type "role", so map it here for [Authorize(Roles=...)] and policies.
+                            RoleClaimType = "role"
                         };
                     });
             }
+            builder.Services.AddAuthorization(options =>
+            {
+                options.AddPolicy("UserOnly", policy =>
+                    policy.RequireAuthenticatedUser()
+                          .RequireRole("USER", "AUTHOR", "ADMIN"));
+
+                options.AddPolicy("AuthorOnly", policy =>
+                    policy.RequireAuthenticatedUser()
+                          .RequireRole("AUTHOR", "ADMIN"));
+
+                options.AddPolicy("AdminOnly", policy =>
+                    policy.RequireAuthenticatedUser()
+                          .RequireRole("ADMIN"));
+            });
             // Swagger
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(options =>

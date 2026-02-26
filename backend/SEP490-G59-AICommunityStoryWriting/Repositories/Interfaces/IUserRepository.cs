@@ -1,4 +1,5 @@
 using BusinessObjects.Entities;
+using DataAccessObjects.Queries;
 
 namespace Repositories.Interfaces
 {
@@ -14,5 +15,8 @@ namespace Repositories.Interfaces
         Task AddRefreshToken(auth_tokens token);
         Task<auth_tokens?> GetRefreshToken(string refreshToken);
         Task DeleteRefreshToken(string refreshToken);
+
+        // Admin
+        Task<(IEnumerable<users> Items, int TotalCount)> GetUsersAsync(AdminUserQuery query);
     }
 }

@@ -25,6 +25,11 @@ namespace DataAccessObjects.DAOs
             context.author_policy_acceptances.Add(row);
             await context.SaveChangesAsync();
         }
+
+        public async Task<int> CountByPolicyAsync(StoryPlatformDbContext context, Guid policyId)
+        {
+            return await context.author_policy_acceptances.CountAsync(x => x.policy_id == policyId);
+        }
     }
 }
 
