@@ -3,6 +3,7 @@ import { Plus, Eye, MessageSquare, Book, Send, Undo2, Pencil, Trash2, ArrowLeft 
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getChapters, getChapterById, updateChapter, unpublishChapter } from '../../api/chapter/chapterApi';
+import { updateStory } from '../../api/story/storyApi';
 import { Pagination } from '../../components/pagination/Pagination';
 
 const CHAPTER_STATUS_MAP = {
@@ -52,15 +53,17 @@ function mapChapterFromApi(item) {
 const CHAPTERS_PAGE_SIZE = 10;
 
 export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter }) {
+    const storyId = story?.id ?? story?.Id;
     const [chapters, setChapters] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [totalCount, setTotalCount] = useState(0);
+    const [hasPublishedChapter, setHasPublishedChapter] = useState(false);
+    const [hasPendingReviewChapter, setHasPendingReviewChapter] = useState(false);
 
     const loadChapters = (page = 1) => {
-        const storyId = story?.id ?? story?.Id;
         if (!storyId) return;
         setLoading(true);
         setError(null);
@@ -85,27 +88,36 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
 
     useEffect(() => {
         let cancelled = false;
-        const storyId = story?.id ?? story?.Id;
         const id = setTimeout(() => {
             if (!storyId) {
                 setChapters([]);
                 setLoading(false);
                 setTotalCount(0);
                 setTotalPages(1);
+                setHasPublishedChapter(false);
+                setHasPendingReviewChapter(false);
                 return;
             }
             setLoading(true);
             setError(null);
-            getChapters({ storyId, page: 1, pageSize: CHAPTERS_PAGE_SIZE })
-                .then((res) => {
+            Promise.all([
+                getChapters({ storyId, page: 1, pageSize: CHAPTERS_PAGE_SIZE }),
+                getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+            ])
+                .then(([res, publishedRes, pendingRes]) => {
                     const rawItems = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
                     const total = res?.totalCount ?? res?.totalItems ?? res?.total ?? rawItems.length;
                     const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / CHAPTERS_PAGE_SIZE));
+                    const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
+                    const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
                     if (!cancelled) {
                         setChapters(rawItems.map((item) => ({ ...mapChapterFromApi(item), content: item.content ?? item.Content ?? '' })));
                         setTotalCount(total);
                         setTotalPages(pages);
                         setCurrentPage(res?.page ?? 1);
+                        setHasPublishedChapter(publishedList.length > 0);
+                        setHasPendingReviewChapter(pendingList.length > 0);
                     }
                 })
                 .catch((err) => {
@@ -114,6 +126,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                         setChapters([]);
                         setTotalCount(0);
                         setTotalPages(1);
+                        setHasPublishedChapter(false);
+                        setHasPendingReviewChapter(false);
                     }
                 })
                 .finally(() => {
@@ -124,7 +138,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
             cancelled = true;
             clearTimeout(id);
         };
-    }, [story?.id ?? story?.Id]);
+    }, [storyId]);
 
     const handlePageChange = (page) => {
         setCurrentPage(page);
@@ -160,6 +174,30 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
             const doUpdate = (title, content) =>
                 updateChapter(chapterId, { title, content, status: 'PENDING_REVIEW' })
                     .then(() => loadChapters(currentPage))
+                    .then(() => {
+                        if (!storyId) return;
+                        return Promise.all([
+                            getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                        ]).then(([rPub, rPend]) => {
+                            const pubList = Array.isArray(rPub) ? rPub : (rPub?.items ?? rPub?.Items ?? []);
+                            const pendList = Array.isArray(rPend) ? rPend : (rPend?.items ?? rPend?.Items ?? []);
+                            setHasPublishedChapter(pubList.length > 0);
+                            setHasPendingReviewChapter(pendList.length > 0);
+                        });
+                    })
+                    .then(() => {
+                        if (!storyId || !story) return;
+                        const categoryIds = (story.categories || []).map((c) => (typeof c === 'object' && c != null ? c.id : c)).filter((id) => id && /^[0-9a-fA-F-]{36}$/.test(String(id)));
+                        return updateStory(storyId, {
+                            title: story.title || 'Untitled',
+                            summary: story.summary ?? '',
+                            categoryIds,
+                            status: 'PENDING_REVIEW',
+                            ageRating: story.ageRating ?? 'Phù hợp mọi lứa tuổi',
+                            storyProgressStatus: story.progressStatusDisplay ?? story.storyProgressStatus ?? 'Đang ra'
+                        });
+                    })
                     .catch((err) => {
                         alert(err?.message ?? 'Xuất bản thất bại');
                     })
@@ -181,6 +219,18 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
         } else if (action === 'unpublish') {
             unpublishChapter(chapterId)
                 .then(() => loadChapters(currentPage))
+                .then(() => {
+                    if (!storyId) return;
+                    return Promise.all([
+                        getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                        getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                    ]).then(([rPub, rPend]) => {
+                        const pubList = Array.isArray(rPub) ? rPub : (rPub?.items ?? rPub?.Items ?? []);
+                        const pendList = Array.isArray(rPend) ? rPend : (rPend?.items ?? rPend?.Items ?? []);
+                        setHasPublishedChapter(pubList.length > 0);
+                        setHasPendingReviewChapter(pendList.length > 0);
+                    });
+                })
                 .catch((err) => {
                     alert(err?.message ?? 'Hủy xuất bản thất bại');
                 })
@@ -194,6 +244,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     const handleUnpublishChapter = (chapterId) => {
         openUnpublishConfirm(chapterId);
     };
+
+    // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp
+    const derivedStoryStatusDisplay = hasPublishedChapter ? 'Đã xuất bản' : hasPendingReviewChapter ? 'Chờ duyệt' : 'Bản nháp';
+    const derivedStatusKind = hasPublishedChapter ? 'published' : hasPendingReviewChapter ? 'pending_review' : 'draft';
 
     return (
         <div>
@@ -218,18 +272,32 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                 overflow: 'hidden'
                             }}>
                                 <Book style={{ width: '24px', height: '24px', color: '#13ec5b', flexShrink: 0 }} />
-                                <h2 style={{
-                                    fontSize: '1.5rem',
-                                    fontWeight: 'bold',
-                                    color: '#333333',
-                                    margin: 0,
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                    maxWidth: '100%'
-                                }}>
-                                    Danh sách chương - Truyện "{story?.title || 'Untitled'}"
-                                </h2>
+                                <div style={{ minWidth: 0 }}>
+                                    <h2 style={{
+                                        fontSize: '1.5rem',
+                                        fontWeight: 'bold',
+                                        color: '#333333',
+                                        margin: 0,
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                        maxWidth: '100%'
+                                    }}>
+                                        Danh sách chương - Truyện "{story?.title || 'Untitled'}"
+                                    </h2>
+                                    <span style={{
+                                        fontSize: '0.875rem',
+                                        fontWeight: 500,
+                                        color: derivedStatusKind === 'published' ? '#065f46' : '#92400e',
+                                        backgroundColor: derivedStatusKind === 'published' ? '#d1fae5' : '#fef3c7',
+                                        padding: '2px 8px',
+                                        borderRadius: '6px',
+                                        marginTop: '4px',
+                                        display: 'inline-block'
+                                    }}>
+                                        Trạng thái truyện: {derivedStoryStatusDisplay}
+                                    </span>
+                                </div>
                             </div>
                             <button
                                 onClick={() => onAddChapter?.(story)}
