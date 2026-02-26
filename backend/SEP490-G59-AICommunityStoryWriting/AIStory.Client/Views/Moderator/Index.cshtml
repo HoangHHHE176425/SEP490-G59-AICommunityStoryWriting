@@ -1,0 +1,636 @@
+﻿@{
+    ViewData["Title"] = "Kiểm duyệt";
+}
+
+<style>
+    .mod-dashboard .stat-card {
+        border-radius: 12px;
+        border: none;
+        box-shadow: 0 2px 8px rgba(0,0,0,.06);
+        transition: transform .15s ease, box-shadow .15s ease;
+    }
+
+        .mod-dashboard .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,.08);
+        }
+
+        .mod-dashboard .stat-card .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+
+    .mod-dashboard .nav-pills .nav-link {
+        border-radius: 10px;
+        font-weight: 500;
+        padding: 0.6rem 1.2rem;
+    }
+
+        .mod-dashboard .nav-pills .nav-link:not(.active) {
+            color: #495057;
+            background: #f8f9fa;
+        }
+
+        .mod-dashboard .nav-pills .nav-link.active {
+            background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%);
+            color: #fff;
+        }
+
+    .mod-dashboard .filter-panel {
+        background: #f8f9fa;
+        border-radius: 10px;
+        border: 1px solid #e9ecef;
+    }
+
+    .mod-dashboard .story-card-mod {
+        border-radius: 12px;
+        border: 1px solid #e9ecef;
+        overflow: hidden;
+        transition: box-shadow .2s ease;
+    }
+
+        .mod-dashboard .story-card-mod:hover {
+            box-shadow: 0 4px 14px rgba(0,0,0,.08);
+        }
+
+        .mod-dashboard .story-card-mod .cover-wrap {
+            width: 120px;
+            min-height: 100px;
+            object-fit: cover;
+            background: #e9ecef;
+        }
+
+    .mod-dashboard .chapter-row-mod:hover {
+        background-color: #f8f9fa;
+    }
+
+    .mod-dashboard .badge-status {
+        font-size: 0.7rem;
+        font-weight: 500;
+    }
+
+    .mod-dashboard .btn-action-group .btn {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.8rem;
+    }
+</style>
+
+<div class="container-fluid mt-4 mod-dashboard">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2 class="mb-1"><i class="bi bi-shield-check text-primary"></i> Bảng điều khiển kiểm duyệt</h2>
+            <p class="text-muted small mb-0">Duyệt và từ chối truyện, chapter một cách nhanh chóng.</p>
+            <p class="text-muted small mb-0 mt-1">
+                <i class="bi bi-arrow-repeat"></i> Tự động cập nhật mỗi <span id="autoRefreshSeconds">30</span>s
+                <span class="ms-2">• Lần cuối: <span id="lastRefreshTime">--:--:--</span></span>
+            </p>
+        </div>
+    </div>
+
+    <!-- Thống kê nhanh -->
+    <div class="row g-3 mb-4">
+        <div class="col-sm-6 col-lg-3">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-warning bg-opacity-25 text-warning">
+                        <i class="bi bi-book"></i>
+                    </div>
+                    <div>
+                        <div class="text-muted small">Truyện chờ duyệt</div>
+                        <div class="h4 mb-0 fw-bold" id="statStoriesCount">–</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+            <div class="card stat-card h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="stat-icon bg-info bg-opacity-25 text-info">
+                        <i class="bi bi-journal-text"></i>
+                    </div>
+                    <div>
+                        <div class="text-muted small">Chapter chờ duyệt</div>
+                        <div class="h4 mb-0 fw-bold" id="statChaptersCount">–</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tab Truyện / Chapter -->
+    <ul class="nav nav-pills mb-3" id="moderationTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="stories-tab" data-bs-toggle="tab" data-bs-target="#stories-panel" type="button" role="tab">
+                <i class="bi bi-book me-1"></i> Truyện chờ duyệt
+                <span class="badge bg-warning text-dark ms-2" id="pendingStoriesCount">0</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="chapters-tab" data-bs-toggle="tab" data-bs-target="#chapters-panel" type="button" role="tab">
+                <i class="bi bi-journal-text me-1"></i> Chapter chờ duyệt
+                <span class="badge bg-warning text-dark ms-2" id="pendingChaptersCount">0</span>
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content" id="moderationTabContent">
+        <!-- Panel Truyện chờ duyệt -->
+        <div class="tab-pane fade show active" id="stories-panel" role="tabpanel">
+            <div class="filter-panel p-3 mb-3">
+                <button class="btn btn-link btn-sm text-dark text-decoration-none p-0 d-flex align-items-center gap-2" type="button" data-bs-toggle="collapse" data-bs-target="#storyFilterCollapse" aria-expanded="true">
+                    <i class="bi bi-funnel"></i> Bộ lọc & tìm kiếm
+                </button>
+                <div class="collapse show mt-2" id="storyFilterCollapse">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label small mb-0">Tìm kiếm (tiêu đề, tóm tắt)</label>
+                            <input type="text" class="form-control form-control-sm" id="storySearch" placeholder="Nhập từ khóa...">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small mb-0">Sắp xếp</label>
+                            <select class="form-select form-select-sm" id="storySortBy">
+                                <option value="updated_at">Ngày cập nhật</option>
+                                <option value="created_at">Ngày tạo</option>
+                                <option value="title">Tiêu đề</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small mb-0">Thứ tự</label>
+                            <select class="form-select form-select-sm" id="storySortOrder">
+                                <option value="desc">Mới nhất / Z→A</option>
+                                <option value="asc">Cũ nhất / A→Z</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small mb-0">Số dòng/trang</label>
+                            <select class="form-select form-select-sm" id="storyPageSize">
+                                <option value="5">5</option>
+                                <option value="10" selected>10</option>
+                                <option value="20">20</option>
+                                <option value="50">50</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3 d-flex flex-wrap gap-1">
+                            <button type="button" class="btn btn-primary btn-sm" onclick="applyStoryFilters()"><i class="bi bi-search"></i> Áp dụng</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetStoryFilters()">Đặt lại</button>
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="loadPendingStories(1)"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                        <span class="text-muted small" id="storiesSummary">Đang tải...</span>
+                        <span class="text-muted small">Trang <strong id="storiesPage">1</strong> / <strong id="storiesTotalPages">1</strong></span>
+                    </div>
+                    <div id="pendingStoriesContainer">
+                        <div class="text-center py-5">
+                            <div class="spinner-border text-primary" role="status"></div>
+                            <p class="mt-2 text-muted mb-0">Đang tải danh sách truyện...</p>
+                        </div>
+                    </div>
+                    <nav id="storiesPagination" class="mt-3 d-flex justify-content-center"></nav>
+                </div>
+            </div>
+        </div>
+
+        <!-- Panel Chapter chờ duyệt -->
+        <div class="tab-pane fade" id="chapters-panel" role="tabpanel">
+            <div class="filter-panel p-3 mb-3">
+                <button class="btn btn-link btn-sm text-dark text-decoration-none p-0 d-flex align-items-center gap-2" type="button" data-bs-toggle="collapse" data-bs-target="#chapterFilterCollapse" aria-expanded="true">
+                    <i class="bi bi-funnel"></i> Bộ lọc & tìm kiếm
+                </button>
+                <div class="collapse show mt-2" id="chapterFilterCollapse">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-2">
+                            <label class="form-label small mb-0">Story ID (lọc truyện)</label>
+                            <input type="text" class="form-control form-control-sm" id="chapterStoryIdFilter" placeholder="Guid hoặc để trống">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small mb-0">Tìm theo tiêu đề chapter</label>
+                            <input type="text" class="form-control form-control-sm" id="chapterSearch" placeholder="Từ khóa...">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small mb-0">Sắp xếp</label>
+                            <select class="form-select form-select-sm" id="chapterSortBy">
+                                <option value="created_at">Ngày tạo</option>
+                                <option value="order_index">Thứ tự chương</option>
+                                <option value="title">Tiêu đề</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small mb-0">Thứ tự</label>
+                            <select class="form-select form-select-sm" id="chapterSortOrder">
+                                <option value="desc">Mới nhất / Z→A</option>
+                                <option value="asc">Cũ nhất / A→Z</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small mb-0">Số dòng/trang</label>
+                            <select class="form-select form-select-sm" id="chapterPageSize">
+                                <option value="5">5</option>
+                                <option value="10" selected>10</option>
+                                <option value="20">20</option>
+                                <option value="50">50</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 d-flex flex-wrap gap-1">
+                            <button type="button" class="btn btn-primary btn-sm" onclick="applyChapterFilters()"><i class="bi bi-search"></i> Áp dụng</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetChapterFilters()">Đặt lại</button>
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="loadPendingChapters(1)"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                        <span class="text-muted small" id="chaptersSummary">Đang tải...</span>
+                        <span class="text-muted small">Trang <strong id="chaptersPage">1</strong> / <strong id="chaptersTotalPages">1</strong></span>
+                    </div>
+                    <div id="pendingChaptersContainer">
+                        <div class="text-center py-5">
+                            <div class="spinner-border text-primary" role="status"></div>
+                            <p class="mt-2 text-muted mb-0">Đang tải danh sách chapter...</p>
+                        </div>
+                    </div>
+                    <nav id="chaptersPagination" class="mt-3 d-flex justify-content-center"></nav>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal từ chối (dùng chung Story & Chapter) -->
+<div class="modal fade" id="rejectModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title" id="rejectModalTitle"><i class="bi bi-x-circle text-danger me-2"></i> Từ chối – Nhập lý do</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+            </div>
+            <div class="modal-body pt-2">
+                <input type="hidden" id="rejectTargetType" value="">
+                <input type="hidden" id="rejectTargetId" value="">
+                <div class="mb-2">
+                    <label class="form-label small text-muted">Lý do nhanh (tùy chọn)</label>
+                    <select class="form-select form-select-sm" id="rejectQuickReason">
+                        <option value="">-- Chọn lý do nhanh --</option>
+                        <option value="Nội dung không phù hợp">Nội dung không phù hợp</option>
+                        <option value="Vi phạm bản quyền">Vi phạm bản quyền</option>
+                        <option value="Chất lượng chưa đạt">Chất lượng chưa đạt</option>
+                        <option value="Spam / quảng cáo">Spam / quảng cáo</option>
+                        <option value="">Khác (ghi rõ bên dưới)</option>
+                    </select>
+                </div>
+                <div class="mb-0">
+                    <label for="rejectReason" class="form-label">Lý do từ chối <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="rejectReason" rows="4" placeholder="Nhập lý do từ chối (bắt buộc)..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-danger" id="confirmRejectBtn" onclick="confirmReject()"><i class="bi bi-x-circle me-1"></i> Từ chối</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        let pendingStories = [];
+        let pendingChapters = [];
+        let storiesCurrentPage = 1;
+        let chaptersCurrentPage = 1;
+        let storiesTotalCount = 0;
+        let chaptersTotalCount = 0;
+        let storiesPageSize = 10;
+        let chaptersPageSize = 10;
+        const apiBaseForImages = (typeof API_BASE_URL !== 'undefined' ? (API_BASE_URL || '').replace(/\/api\/?$/, '') : '') || 'http://localhost:5000';
+        const AUTO_REFRESH_INTERVAL_MS = 30000;
+        var autoRefreshTimerId = null;
+
+        function updateLastRefreshTime() {
+            var el = document.getElementById('lastRefreshTime');
+            if (el) {
+                var d = new Date();
+                el.textContent = d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0') + ':' + d.getSeconds().toString().padStart(2, '0');
+            }
+        }
+
+        function startAutoRefresh() {
+            if (autoRefreshTimerId) return;
+            autoRefreshTimerId = setInterval(function () {
+                if (document.hidden) return;
+                if (document.querySelector('#rejectModal.show')) return;
+                loadPendingStories(storiesCurrentPage, true);
+                loadPendingChapters(chaptersCurrentPage, true);
+            }, AUTO_REFRESH_INTERVAL_MS);
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshTimerId) {
+                clearInterval(autoRefreshTimerId);
+                autoRefreshTimerId = null;
+            }
+        }
+
+        function updateStatCards() {
+            var sEl = document.getElementById('statStoriesCount');
+            var cEl = document.getElementById('statChaptersCount');
+            if (sEl) sEl.textContent = typeof storiesTotalCount === 'number' && document.getElementById('stories-panel').classList.contains('active') ? storiesTotalCount : (document.getElementById('pendingStoriesCount').textContent || '–');
+            if (cEl) cEl.textContent = typeof chaptersTotalCount === 'number' && document.getElementById('chapters-panel').classList.contains('active') ? chaptersTotalCount : (document.getElementById('pendingChaptersCount').textContent || '–');
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để truy cập trang kiểm duyệt.', 'warning');
+                setTimeout(function () { window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname); }, 1500);
+                return;
+            }
+            if (!AuthHelper.hasAnyRole('MODERATOR', 'ADMIN')) {
+                Utils.showAlert('Bạn không có quyền truy cập trang kiểm duyệt. Chỉ MODERATOR hoặc ADMIN.', 'danger');
+                setTimeout(function () { window.location.href = '/'; }, 2000);
+                return;
+            }
+            loadPendingStories(1);
+            loadPendingChapters(1, true);
+            document.getElementById('chapters-tab').addEventListener('shown.bs.tab', function () {
+                if (pendingChapters.length === 0 && document.getElementById('pendingChaptersContainer').querySelector('.spinner-border')) {
+                    loadPendingChapters(1);
+                }
+                updateStatCards();
+            });
+            document.getElementById('stories-tab').addEventListener('shown.bs.tab', updateStatCards);
+            document.getElementById('storySearch').addEventListener('keypress', function (e) { if (e.key === 'Enter') applyStoryFilters(); });
+            document.getElementById('chapterSearch').addEventListener('keypress', function (e) { if (e.key === 'Enter') applyChapterFilters(); });
+            document.getElementById('chapterStoryIdFilter').addEventListener('keypress', function (e) { if (e.key === 'Enter') applyChapterFilters(); });
+            document.getElementById('rejectQuickReason').addEventListener('change', function () {
+                var q = this.value;
+                if (q) document.getElementById('rejectReason').value = q;
+            });
+            startAutoRefresh();
+            document.addEventListener('visibilitychange', function () {
+                if (document.hidden) stopAutoRefresh();
+                else startAutoRefresh();
+            });
+            window.addEventListener('beforeunload', stopAutoRefresh);
+        });
+
+        function getStoryFilterOptions(page) {
+            var p = page ?? storiesCurrentPage;
+            var pageSizeEl = document.getElementById('storyPageSize');
+            storiesPageSize = parseInt(pageSizeEl ? pageSizeEl.value : 10, 10);
+            return {
+                page: p,
+                pageSize: storiesPageSize,
+                search: (document.getElementById('storySearch') || {}).value?.trim() || null,
+                sortBy: (document.getElementById('storySortBy') || {}).value || 'updated_at',
+                sortOrder: (document.getElementById('storySortOrder') || {}).value || 'desc'
+            };
+        }
+
+        function getChapterFilterOptions(page) {
+            var p = page ?? chaptersCurrentPage;
+            var pageSizeEl = document.getElementById('chapterPageSize');
+            chaptersPageSize = parseInt(pageSizeEl ? pageSizeEl.value : 10, 10);
+            var storyIdRaw = (document.getElementById('chapterStoryIdFilter') || {}).value?.trim();
+            return {
+                page: p,
+                pageSize: chaptersPageSize,
+                storyId: storyIdRaw || null,
+                search: (document.getElementById('chapterSearch') || {}).value?.trim() || null,
+                sortBy: (document.getElementById('chapterSortBy') || {}).value || 'created_at',
+                sortOrder: (document.getElementById('chapterSortOrder') || {}).value || 'desc'
+            };
+        }
+
+        function applyStoryFilters() { loadPendingStories(1); }
+        function resetStoryFilters() {
+            document.getElementById('storySearch').value = '';
+            document.getElementById('storySortBy').value = 'updated_at';
+            document.getElementById('storySortOrder').value = 'desc';
+            document.getElementById('storyPageSize').value = '10';
+            loadPendingStories(1);
+        }
+        function applyChapterFilters() { loadPendingChapters(1); }
+        function resetChapterFilters() {
+            document.getElementById('chapterStoryIdFilter').value = '';
+            document.getElementById('chapterSearch').value = '';
+            document.getElementById('chapterSortBy').value = 'created_at';
+            document.getElementById('chapterSortOrder').value = 'desc';
+            document.getElementById('chapterPageSize').value = '10';
+            loadPendingChapters(1);
+        }
+
+        async function loadPendingStories(page, silent) {
+            storiesCurrentPage = page;
+            var container = document.getElementById('pendingStoriesContainer');
+            if (!silent)
+                container.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary"></div><p class="mt-2 text-muted mb-0">Đang tải...</p></div>';
+            var options = getStoryFilterOptions(page);
+            try {
+                var result = await ApiService.getPendingStories(options);
+                pendingStories = result.items || [];
+                storiesTotalCount = result.totalCount || 0;
+                var totalPages = result.totalPages || 1;
+                document.getElementById('pendingStoriesCount').textContent = storiesTotalCount;
+                document.getElementById('statStoriesCount').textContent = storiesTotalCount;
+                document.getElementById('storiesPage').textContent = page;
+                document.getElementById('storiesTotalPages').textContent = totalPages;
+                var from = storiesTotalCount === 0 ? 0 : (page - 1) * options.pageSize + 1;
+                var to = Math.min(page * options.pageSize, storiesTotalCount);
+                document.getElementById('storiesSummary').textContent = 'Hiển thị ' + from + '–' + to + ' trong tổng ' + storiesTotalCount + ' truyện';
+                renderPendingStories();
+                renderStoriesPagination(totalPages, page);
+                updateLastRefreshTime();
+            } catch (e) {
+                if (!silent) {
+                    container.innerHTML = '<div class="alert alert-danger mb-0">' + (e.message || 'Lỗi tải danh sách truyện chờ duyệt.') + '</div>';
+                    document.getElementById('storiesSummary').textContent = 'Lỗi tải dữ liệu';
+                }
+            }
+        }
+
+        function renderPendingStories() {
+            var container = document.getElementById('pendingStoriesContainer');
+            if (!pendingStories.length) {
+                container.innerHTML = '<div class="text-center py-5"><i class="bi bi-inbox text-muted" style="font-size:3rem;"></i><p class="text-muted mt-2 mb-0">Không có truyện nào chờ duyệt.</p></div>';
+                return;
+            }
+            var html = pendingStories.map(function (s) {
+                var cover = s.coverImage ? '<img src="' + apiBaseForImages + (s.coverImage.indexOf('/') === 0 ? '' : '/') + s.coverImage + '" class="cover-wrap img-fluid" alt="" style="width:120px;height:100px;object-fit:cover;">' : '<div class="cover-wrap d-flex align-items-center justify-content-center bg-secondary bg-opacity-25" style="width:120px;height:100px;"><i class="bi bi-image text-muted" style="font-size:2rem;"></i></div>';
+                var summary = (s.summary || '').substring(0, 180);
+                if ((s.summary || '').length > 180) summary += '...';
+                return '<div class="card story-card-mod mb-3">' +
+                    '<div class="card-body p-3">' +
+                    '<div class="d-flex gap-3 flex-wrap">' +
+                    '<div class="flex-shrink-0">' + cover + '</div>' +
+                    '<div class="flex-grow-1 min-w-0">' +
+                    '<h6 class="card-title mb-1">' + (s.title || 'N/A') + '</h6>' +
+                    '<p class="card-text small text-muted mb-2">' + summary + '</p>' +
+                    '<div class="d-flex flex-wrap align-items-center gap-2 mb-2">' +
+                    (s.categoryNames ? '<span class="badge bg-secondary badge-status">' + s.categoryNames + '</span>' : '') +
+                    '<span class="badge bg-warning text-dark badge-status">' + (s.status || 'PENDING_REVIEW') + '</span>' +
+                    (s.authorName ? '<span class="small text-muted">' + s.authorName + '</span>' : '') +
+                    '<span class="small text-muted">Cập nhật: ' + Utils.formatDate(s.updatedAt) + '</span>' +
+                    '</div>' +
+                    '<div class="btn-action-group d-flex flex-wrap gap-1">' +
+                    '<a href="/Moderator/ReviewStory/' + s.id + '" class="btn btn-primary btn-sm"><i class="bi bi-eye"></i> Xem & duyệt</a>' +
+                    '<a href="/Stories/Details/' + s.id + '" class="btn btn-outline-secondary btn-sm" target="_blank">Chi tiết</a>' +
+                    '<button type="button" class="btn btn-success btn-sm" onclick="approveStory(\'' + s.id + '\')"><i class="bi bi-check-circle"></i> Duyệt</button>' +
+                    '<button type="button" class="btn btn-danger btn-sm" onclick="showRejectModal(\'STORY\',\'' + s.id + '\')"><i class="bi bi-x-circle"></i> Từ chối</button>' +
+                    '</div>' +
+                    '</div></div></div>';
+            }).join('');
+            container.innerHTML = html;
+        }
+
+        function renderStoriesPagination(totalPages, currentPage) {
+            var nav = document.getElementById('storiesPagination');
+            if (totalPages <= 1) { nav.innerHTML = ''; return; }
+            var html = '<ul class="pagination pagination-sm mb-0">';
+            html += '<li class="page-item ' + (currentPage === 1 ? 'disabled' : '') + '"><a class="page-link" href="#" onclick="loadPendingStories(' + (currentPage - 1) + '); return false;">Trước</a></li>';
+            for (var i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2))
+                    html += '<li class="page-item ' + (i === currentPage ? 'active' : '') + '"><a class="page-link" href="#" onclick="loadPendingStories(' + i + '); return false;">' + i + '</a></li>';
+            }
+            html += '<li class="page-item ' + (currentPage === totalPages ? 'disabled' : '') + '"><a class="page-link" href="#" onclick="loadPendingStories(' + (currentPage + 1) + '); return false;">Sau</a></li>';
+            html += '</ul>';
+            nav.innerHTML = html;
+        }
+
+        async function approveStory(id) {
+            try {
+                await ApiService.moderatorApproveStory(id);
+                Utils.showAlert('Đã duyệt truyện.', 'success');
+                loadPendingStories(storiesCurrentPage);
+            } catch (e) {
+                Utils.showAlert(e.message || 'Lỗi duyệt truyện.', 'danger');
+            }
+        }
+
+        async function loadPendingChapters(page, silent) {
+            chaptersCurrentPage = page;
+            var container = document.getElementById('pendingChaptersContainer');
+            if (!silent)
+                container.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary"></div><p class="mt-2 text-muted mb-0">Đang tải...</p></div>';
+            var options = getChapterFilterOptions(page);
+            try {
+                var result = await ApiService.getPendingChapters(options);
+                pendingChapters = result.items || [];
+                chaptersTotalCount = result.totalCount || 0;
+                var totalPages = result.totalPages || 1;
+                document.getElementById('pendingChaptersCount').textContent = chaptersTotalCount;
+                document.getElementById('statChaptersCount').textContent = chaptersTotalCount;
+                document.getElementById('chaptersPage').textContent = page;
+                document.getElementById('chaptersTotalPages').textContent = totalPages;
+                var from = chaptersTotalCount === 0 ? 0 : (page - 1) * options.pageSize + 1;
+                var to = Math.min(page * options.pageSize, chaptersTotalCount);
+                document.getElementById('chaptersSummary').textContent = 'Hiển thị ' + from + '–' + to + ' trong tổng ' + chaptersTotalCount + ' chapter';
+                renderPendingChapters();
+                renderChaptersPagination(totalPages, page);
+                updateLastRefreshTime();
+            } catch (e) {
+                if (!silent) {
+                    container.innerHTML = '<div class="alert alert-danger mb-0">' + (e.message || 'Lỗi tải danh sách chapter chờ duyệt.') + '</div>';
+                    document.getElementById('chaptersSummary').textContent = 'Lỗi tải dữ liệu';
+                }
+            }
+        }
+
+        function renderPendingChapters() {
+            var container = document.getElementById('pendingChaptersContainer');
+            if (!pendingChapters.length) {
+                container.innerHTML = '<div class="text-center py-5"><i class="bi bi-journal-x text-muted" style="font-size:3rem;"></i><p class="text-muted mt-2 mb-0">Không có chapter nào chờ duyệt.</p></div>';
+                return;
+            }
+            var tableRows = pendingChapters.map(function (c) {
+                var storyTitle = (c.storyTitle || '').trim() || ('ID: ' + (c.storyId || '').toString().substring(0, 8) + '…');
+                return '<tr class="chapter-row-mod">' +
+                    '<td class="align-middle"><span class="text-dark fw-medium">' + (c.title || 'N/A') + '</span></td>' +
+                    '<td class="align-middle small"><a href="/Stories/Details/' + (c.storyId || '') + '" class="text-decoration-none" target="_blank">' + storyTitle + '</a></td>' +
+                    '<td class="align-middle">' + (c.orderIndex != null ? c.orderIndex : '–') + '</td>' +
+                    '<td class="align-middle">' + (c.wordCount != null ? c.wordCount.toLocaleString() : '–') + '</td>' +
+                    '<td class="align-middle small text-muted">' + Utils.formatDate(c.createdAt) + '</td>' +
+                    '<td class="align-middle"><span class="badge bg-warning text-dark badge-status">' + (c.status || 'PENDING_REVIEW') + '</span></td>' +
+                    '<td class="align-middle">' +
+                    '<div class="btn-action-group d-flex flex-wrap gap-1">' +
+                    '<a href="/Moderator/ReviewChapter/' + c.id + '" class="btn btn-primary btn-sm"><i class="bi bi-eye"></i> Xem & duyệt</a>' +
+                    '<a href="/Chapters/Index?storyId=' + (c.storyId || '') + '" class="btn btn-outline-secondary btn-sm" target="_blank">Chi tiết</a>' +
+                    '<button type="button" class="btn btn-success btn-sm" onclick="approveChapter(\'' + c.id + '\')"><i class="bi bi-check-circle"></i> Duyệt</button>' +
+                    '<button type="button" class="btn btn-danger btn-sm" onclick="showRejectModal(\'CHAPTER\',\'' + c.id + '\')"><i class="bi bi-x-circle"></i> Từ chối</button>' +
+                    '</div></td></tr>';
+            }).join('');
+            container.innerHTML = '<div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead class="table-light"><tr><th>Chapter</th><th>Truyện</th><th>Thứ tự</th><th>Số từ</th><th>Ngày tạo</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>' + tableRows + '</tbody></table></div>';
+        }
+
+        function renderChaptersPagination(totalPages, currentPage) {
+            var nav = document.getElementById('chaptersPagination');
+            if (totalPages <= 1) { nav.innerHTML = ''; return; }
+            var html = '<ul class="pagination pagination-sm mb-0">';
+            html += '<li class="page-item ' + (currentPage === 1 ? 'disabled' : '') + '"><a class="page-link" href="#" onclick="loadPendingChapters(' + (currentPage - 1) + '); return false;">Trước</a></li>';
+            for (var i = 1; i <= totalPages; i++) {
+                if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2))
+                    html += '<li class="page-item ' + (i === currentPage ? 'active' : '') + '"><a class="page-link" href="#" onclick="loadPendingChapters(' + i + '); return false;">' + i + '</a></li>';
+            }
+            html += '<li class="page-item ' + (currentPage === totalPages ? 'disabled' : '') + '"><a class="page-link" href="#" onclick="loadPendingChapters(' + (currentPage + 1) + '); return false;">Sau</a></li>';
+            html += '</ul>';
+            nav.innerHTML = html;
+        }
+
+        async function approveChapter(id) {
+            try {
+                await ApiService.moderatorApproveChapter(id);
+                Utils.showAlert('Đã duyệt chapter.', 'success');
+                loadPendingChapters(chaptersCurrentPage);
+            } catch (e) {
+                Utils.showAlert(e.message || 'Lỗi duyệt chapter.', 'danger');
+            }
+        }
+
+        function showRejectModal(targetType, targetId) {
+            document.getElementById('rejectTargetType').value = targetType;
+            document.getElementById('rejectTargetId').value = targetId;
+            document.getElementById('rejectReason').value = '';
+            document.getElementById('rejectQuickReason').value = '';
+            document.getElementById('rejectModalTitle').innerHTML = '<i class="bi bi-x-circle text-danger me-2"></i>' + (targetType === 'STORY' ? 'Từ chối truyện' : 'Từ chối chapter') + ' – Nhập lý do';
+            new bootstrap.Modal(document.getElementById('rejectModal')).show();
+        }
+
+        async function confirmReject() {
+            var reason = document.getElementById('rejectReason').value.trim();
+            var quick = document.getElementById('rejectQuickReason').value;
+            if (quick) reason = reason || quick;
+            if (!reason) {
+                Utils.showAlert('Vui lòng nhập lý do từ chối.', 'warning');
+                return;
+            }
+            var targetType = document.getElementById('rejectTargetType').value;
+            var targetId = document.getElementById('rejectTargetId').value;
+            try {
+                if (targetType === 'STORY') {
+                    await ApiService.moderatorRejectStory(targetId, reason);
+                    Utils.showAlert('Đã từ chối truyện.', 'success');
+                    bootstrap.Modal.getInstance(document.getElementById('rejectModal')).hide();
+                    loadPendingStories(storiesCurrentPage);
+                } else {
+                    await ApiService.moderatorRejectChapter(targetId, reason);
+                    Utils.showAlert('Đã từ chối chapter.', 'success');
+                    bootstrap.Modal.getInstance(document.getElementById('rejectModal')).hide();
+                    loadPendingChapters(chaptersCurrentPage);
+                }
+            } catch (e) {
+                Utils.showAlert(e.message || 'Lỗi từ chối.', 'danger');
+            }
+        }
+    </script>
+}
