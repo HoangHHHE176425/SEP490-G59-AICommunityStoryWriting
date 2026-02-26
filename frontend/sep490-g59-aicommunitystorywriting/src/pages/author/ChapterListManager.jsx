@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Eye, MessageSquare, Book, Send, Undo2, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Eye, MessageSquare, Book, Send, Undo2, Pencil, Trash2, ArrowLeft } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getChapters, getChapterById, updateChapter, unpublishChapter } from '../../api/chapter/chapterApi';
@@ -518,30 +518,34 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                             />
                         )}
 
-                        {/* Back Button */}
+                        {/* Back Button - rõ ràng, có viền và màu nền nhìn thấy ngay */}
                         <div style={{ marginTop: '2rem' }}>
                             <button
                                 onClick={onBack}
                                 style={{
-                                    padding: '0.75rem 2rem',
-                                    backgroundColor: '#ffffff',
-                                    border: '2px solid #13ec5b',
-                                    borderRadius: '9999px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    padding: '0.5rem 1rem',
+                                    backgroundColor: '#e2e8f0',
+                                    color: '#0f172a',
                                     fontSize: '0.875rem',
-                                    fontWeight: 700,
-                                    color: '#13ec5b',
+                                    fontWeight: 600,
+                                    borderRadius: '9999px',
+                                    border: '1px solid #cbd5e1',
                                     cursor: 'pointer',
                                     transition: 'all 0.2s'
                                 }}
                                 onMouseEnter={(e) => {
-                                    e.currentTarget.style.backgroundColor = '#f0fdf4';
-                                    e.currentTarget.style.borderColor = '#10d452';
+                                    e.currentTarget.style.backgroundColor = '#cbd5e1';
+                                    e.currentTarget.style.borderColor = '#94a3b8';
                                 }}
                                 onMouseLeave={(e) => {
-                                    e.currentTarget.style.backgroundColor = '#ffffff';
-                                    e.currentTarget.style.borderColor = '#13ec5b';
+                                    e.currentTarget.style.backgroundColor = '#e2e8f0';
+                                    e.currentTarget.style.borderColor = '#cbd5e1';
                                 }}
                             >
+                                <ArrowLeft style={{ width: '16px', height: '16px' }} />
                                 Quay lại
                             </button>
                         </div>
