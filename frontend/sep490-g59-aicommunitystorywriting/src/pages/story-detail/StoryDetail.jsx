@@ -336,7 +336,7 @@ export function StoryDetail() {
                             </div>
 
                             <div className="p-6">
-                                {activeTab === 'chapters' && <ChapterList chapters={chapters} />}
+                                {activeTab === 'chapters' && <ChapterList chapters={chapters} storyId={storyId} />}
 
                                 {activeTab === 'comments' && (
                                     <CommentSection comments={comments} onReportComment={handleReportComment} />

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { ChapterNavBar } from '../../components/chapter-detail/ChapterNavBar';
 import { ChapterSettings } from '../../components/chapter-detail/ChapterSettings';
 import { ChapterSidebar } from '../../components/chapter-detail/ChapterSidebar';
@@ -7,8 +8,29 @@ import { ChapterNavigation } from '../../components/chapter-detail/ChapterNaviga
 import { ChapterComments } from '../../components/chapter-detail/ChapterComments';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
+import { getStoryById } from '../../api/story/storyApi';
+import { getChapterById, getChapters } from '../../api/chapter/chapterApi';
+
+function formatTimeAgo(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffMins < 60) return `${diffMins} phút trước`;
+    if (diffHours < 24) return `${diffHours} giờ trước`;
+    if (diffDays < 7) return `${diffDays} ngày trước`;
+    return date.toLocaleDateString('vi-VN');
+}
 
 export function ChapterReader({ onBack, onNavigateToStory }) {
+    const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
+    const urlStoryId = searchParams.get('storyId');
+    const urlChapterId = searchParams.get('chapterId');
+
     const [fontSize, setFontSize] = useState(18);
     const [fontFamily, setFontFamily] = useState('serif');
     const [backgroundColor, setBackgroundColor] = useState('#ffffff');
@@ -18,78 +40,90 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
     const [showChapterList, setShowChapterList] = useState(false);
     const [isBookmarked, setIsBookmarked] = useState(false);
 
-    // Mock data
-    const story = {
-        title: 'Tu Tiên Chi Lộ: Hành Trình Vạn Năm',
-        author: 'Thiên Tằm Thổ Đậu',
+    const [story, setStory] = useState(null);
+    const [chapter, setChapter] = useState(null);
+    const [allChapters, setAllChapters] = useState([]);
+    const [loading, setLoading] = useState(!!(urlStoryId && urlChapterId));
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        const id = setTimeout(() => {
+            if (!urlStoryId || !urlChapterId) {
+                setStory(null);
+                setChapter(null);
+                setAllChapters([]);
+                setLoading(false);
+                return;
+            }
+            setLoading(true);
+            setError(null);
+            Promise.all([
+                getStoryById(urlStoryId),
+                getChapterById(urlChapterId),
+                getChapters({ storyId: urlStoryId, status: 'PUBLISHED', pageSize: 500 })
+            ])
+                .then(([storyRes, chapterRes, chaptersRes]) => {
+                    if (cancelled) return;
+                    const rawChapters = Array.isArray(chaptersRes) ? chaptersRes : (chaptersRes?.items ?? chaptersRes?.Items ?? []);
+                    setStory({
+                        title: storyRes?.title ?? storyRes?.Title ?? '',
+                        author: storyRes?.authorName ?? storyRes?.AuthorName ?? 'Ẩn danh',
+                    });
+                    const orderIndex = chapterRes?.orderIndex ?? chapterRes?.OrderIndex ?? 0;
+                    const content = chapterRes?.content ?? chapterRes?.Content ?? '';
+                    const wordCount = (content.trim().split(/\s+/).filter(Boolean).length) || 0;
+                    setChapter({
+                        number: orderIndex + 1,
+                        title: chapterRes?.title ?? chapterRes?.Title ?? 'Không có tiêu đề',
+                        content: content || 'Chưa có nội dung.',
+                        publishedAt: chapterRes?.publishedAt ?? chapterRes?.PublishedAt ?? chapterRes?.updatedAt ? formatTimeAgo(chapterRes.updatedAt ?? chapterRes.UpdatedAt) : '',
+                        views: Number(chapterRes?.viewCount ?? chapterRes?.ViewCount ?? 0) || 0,
+                        words: wordCount,
+                    });
+                    setAllChapters(rawChapters.map((ch, idx) => ({
+                        number: (ch.orderIndex ?? ch.OrderIndex ?? idx) + 1,
+                        title: ch.title ?? ch.Title ?? `Chương ${idx + 1}`,
+                        chapterId: ch.id ?? ch.Id,
+                        isLocked: false,
+                    })));
+                })
+                .catch((err) => {
+                    if (!cancelled) {
+                        setError(err?.message ?? 'Không tải được chương');
+                        setStory(null);
+                        setChapter(null);
+                        setAllChapters([]);
+                    }
+                })
+                .finally(() => {
+                    if (!cancelled) setLoading(false);
+                });
+        }, 0);
+        return () => {
+            cancelled = true;
+            clearTimeout(id);
+        };
+    }, [urlStoryId, urlChapterId]);
+
+    const storyForNav = story || { title: '', author: '' };
+    const chapterForNav = chapter || {
+        number: 0,
+        title: '',
+        content: '',
+        publishedAt: '',
+        views: 0,
+        words: 0,
     };
 
-    const chapter = {
-        number: 450,
-        title: 'Đại chiến với Ma Đế',
-        content: `Phương Viễn đứng giữa hư không, ánh mắt lạnh lùng nhìn về phía Ma Đế đang từ từ hiện hình.
-
-Hắn đã chờ đợi khoảnh khắc này suốt vạn năm tu luyện. Kiếp trước, hắn chết trong tay Ma Đế một cách oan uổng. Kiếp này, với tu vi đỉnh phong và vô số bảo bối, hắn quyết tâm thay đổi vận mệnh!
-
-"Ma Đế, ta đã trở lại!"
-
-Thanh âm của Phương Viễn vang vọng khắp chín tầng trời, khiến không gian rung chuyển. Vô số tu sĩ từ các tông môn xa xôi đều ngước nhìn về phía chiến trường, trong lòng đầy lo âu.
-
-Ma Đế cười khẩy, toàn thân tràn ngập ma khí đen kịt: "Tiểu tử, ta nhớ ngươi. Kiếp trước ngươi chỉ là một con kiến nhỏ nhoi, giờ đây dám đứng trước mặt ta?"
-
-"Ngươi sẽ phải trả giá cho những gì đã làm!"
-
-Phương Viễn không còn nói thêm, tay nhấc lên, Trấn Thiên Kiếm bỗng nhiên xuất hiện. Thanh kiếm long lanh ánh sáng vàng rực, trên thân khắc đầy đủ thất thập nhị thiên cương.
-
-"Nhất kiếm khai thiên!"
-
-Một đao quang khổng lồ chém xuống, chia cắt không gian thành hai. Ma Đế tái mặt, vội vàng triển khai ma khí phòng thủ.
-
-BOOOMMMM!!!
-
-Tiếng nổ chấn động chín tầng trời. Các núi non trong vòng nghìn dặm đều rung chuyển, sông hồ sôi sục.
-
-"Ngươi... tu vi của ngươi đã đến mức này sao?" Ma Đế kinh ngạc.
-
-Phương Viễn lạnh lùng cười: "Ta còn nhiều điều muốn cho ngươi biết đấy!"
-
-Trận chiến giữa hai đại cao thủ bắt đầu. Mỗi đòn đều có thể hủy diệt một phương trời đất. Vô số tu sĩ xem chiến đều phải lùi xa hàng vạn dặm, không dám lại gần.
-
-Ba ngày ba đêm liên tục chiến đấu, cuối cùng Phương Viễn tìm được khe hở. Hắn kết hợp cả ba đại thần thông, triển khai chiêu thức cực mạnh nhất.
-
-"Vạn kiếm quy tông!"
-
-Vô số thanh kiếm xuất hiện trên không, tất cả đều bay về phía Ma Đế với tốc độ kinh hoàng.
-
-"Không... Ta là Ma Đế bất tử! Ngươi không thể giết ta!"
-
-Nhưng mọi chống cự đều vô nghĩa. Dưới sức mạnh tuyệt đối, Ma Đế chỉ còn biết hét lên trong tuyệt vọng.
-
-Khi ánh sáng tan biến, Ma Đế đã biến thành tro bụi, bay khắp hư không.
-
-Phương Viễn đứng giữa không trung, áo choàng phất phới trong gió. Hắn đã hoàn thành mục tiêu của kiếp này - tiêu diệt Ma Đế!
-
-Nhưng đây chỉ mới là bắt đầu. Con đường tu tiên còn dài, còn nhiều kẻ địch mạnh hơn đang chờ đợi.
-
-"Ta sẽ tiếp tục tiến lên, cho đến khi đứng trên đỉnh cao của vũ trụ này!"
-
-Với quyết tâm bất diệt, Phương Viễn bay về phía chân trời xa xôi, bắt đầu chương mới trong hành trình tu tiên của mình...`,
-        publishedAt: '2 giờ trước',
-        views: 15420,
-        words: 1250,
+    const chapterForContent = chapter || {
+        number: 0,
+        title: 'Không có tiêu đề',
+        content: 'Chưa có nội dung.',
+        publishedAt: '',
+        views: 0,
+        words: 0,
     };
-
-    const allChapters = Array.from({ length: 450 }, (_, i) => ({
-        number: i + 1,
-        title: i === 449
-            ? 'Đại chiến với Ma Đế'
-            : i === 448
-                ? 'Đột phá Nguyên Anh kỳ'
-                : i === 447
-                    ? 'Bí mật của Thái Cổ Thần Thạch'
-                    : `Chương ${i + 1}`,
-        isLocked: i < 440,
-    })).reverse();
 
     const comments = [
         {
@@ -126,24 +160,43 @@ Với quyết tâm bất diệt, Phương Viễn bay về phía chân trời xa 
     const handleHomeClick = () => {
         if (onNavigateToStory) {
             onNavigateToStory();
+        } else if (urlStoryId) {
+            navigate(`/story/${urlStoryId}`);
+        } else {
+            navigate('/home');
         }
     };
 
+    const currentIndex = allChapters.findIndex((ch) => ch.chapterId === urlChapterId);
+    const prevChapter = currentIndex > 0 ? allChapters[currentIndex - 1] : null;
+    const nextChapter = currentIndex >= 0 && currentIndex < allChapters.length - 1 ? allChapters[currentIndex + 1] : null;
+
     const handlePrevChapter = () => {
-        console.log('Navigate to previous chapter');
+        if (prevChapter && urlStoryId) {
+            navigate(`/chapter?storyId=${encodeURIComponent(urlStoryId)}&chapterId=${encodeURIComponent(prevChapter.chapterId)}`);
+        }
     };
 
     const handleNextChapter = () => {
-        console.log('Navigate to next chapter');
+        if (nextChapter && urlStoryId) {
+            navigate(`/chapter?storyId=${encodeURIComponent(urlStoryId)}&chapterId=${encodeURIComponent(nextChapter.chapterId)}`);
+        }
     };
 
     const handleShare = () => {
         if (navigator.share) {
             navigator.share({
-                title: `${story.title} - Chương ${chapter.number}`,
-                text: chapter.title,
+                title: `${storyForNav.title} - Chương ${chapterForNav.number}`,
+                text: chapterForNav.title,
                 url: window.location.href,
             });
+        }
+    };
+
+    const handleChapterSelect = (ch) => {
+        setShowChapterList(false);
+        if (ch.chapterId && urlStoryId) {
+            navigate(`/chapter?storyId=${encodeURIComponent(urlStoryId)}&chapterId=${encodeURIComponent(ch.chapterId)}`);
         }
     };
 
@@ -152,6 +205,36 @@ Với quyết tâm bất diệt, Phương Viễn bay về phía chân trời xa 
         setTextColor(text);
     };
 
+    if (urlStoryId && urlChapterId && loading) {
+        return (
+            <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
+                <Header />
+                <div className="max-w-3xl mx-auto px-4 py-12 text-center text-slate-500">Đang tải nội dung chương...</div>
+                <Footer />
+            </div>
+        );
+    }
+    if (urlStoryId && urlChapterId && error) {
+        return (
+            <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
+                <Header />
+                <div className="max-w-3xl mx-auto px-4 py-12 text-center text-red-500">{error}</div>
+                <Footer />
+            </div>
+        );
+    }
+    if (!urlStoryId || !urlChapterId) {
+        return (
+            <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
+                <Header />
+                <div className="max-w-3xl mx-auto px-4 py-12 text-center text-slate-500">
+                    Vui lòng chọn chương từ trang chi tiết truyện.
+                </div>
+                <Footer />
+            </div>
+        );
+    }
+
     return (
         <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
             {/* Header */}
@@ -159,8 +242,8 @@ Với quyết tâm bất diệt, Phương Viễn bay về phía chân trời xa 
 
             {/* Top Navigation Bar */}
             <ChapterNavBar
-                story={story}
-                chapter={chapter}
+                story={storyForNav}
+                chapter={chapterForNav}
                 isBookmarked={isBookmarked}
                 onBack={handleBackClick}
                 onHome={handleHomeClick}
@@ -188,17 +271,14 @@ Với quyết tâm bất diệt, Phương Viễn bay về phía chân trời xa 
             <ChapterSidebar
                 show={showChapterList}
                 chapters={allChapters}
-                currentChapter={chapter.number}
+                currentChapter={chapterForNav.number}
                 onClose={() => setShowChapterList(false)}
-                onChapterSelect={(ch) => {
-                    console.log('Selected chapter:', ch);
-                    setShowChapterList(false);
-                }}
+                onChapterSelect={handleChapterSelect}
             />
 
             {/* Chapter Content */}
             <ChapterContent
-                chapter={chapter}
+                chapter={chapterForContent}
                 fontSize={fontSize}
                 fontFamily={fontFamily}
                 backgroundColor={backgroundColor}
@@ -208,8 +288,8 @@ Với quyết tâm bất diệt, Phương Viễn bay về phía chân trời xa 
 
             {/* Navigation Buttons */}
             <ChapterNavigation
-                currentChapter={chapter.number}
-                totalChapters={450}
+                currentChapter={chapterForNav.number}
+                totalChapters={allChapters.length}
                 onPrevChapter={handlePrevChapter}
                 onNextChapter={handleNextChapter}
             />
