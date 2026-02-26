@@ -8,7 +8,7 @@ import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
 import { createStory, updateStory, getStories, getStoryById } from '../../api/story/storyApi';
-import { createChapter, updateChapter, getChapterById } from '../../api/chapter/chapterApi';
+import { createChapter, updateChapter, getChapterById, getChapters } from '../../api/chapter/chapterApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -107,10 +107,70 @@ export function AuthorStoryManagement({ onBack }) {
                 const items = res?.items ?? res?.Items ?? [];
                 const total = res?.totalCount ?? res?.totalItems ?? res?.total ?? items.length;
                 const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / STORIES_PAGE_SIZE));
-                setStories(items.map(mapStoryFromApi));
-                setStoriesTotalCount(total);
-                setStoriesTotalPages(pages);
-                setStoriesCurrentPage(res?.page ?? page);
+                if (items.length === 0) {
+                    setStories([]);
+                    setStoriesTotalCount(0);
+                    setStoriesTotalPages(1);
+                    setStoriesCurrentPage(res?.page ?? page);
+                    return;
+                }
+                // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp
+                return Promise.all(
+                    items.map((s) => {
+                        const storyId = s.id ?? s.Id;
+                        return Promise.all([
+                            getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                        ])
+                            .then(([pubRes, pendRes]) => {
+                                const pubList = Array.isArray(pubRes) ? pubRes : (pubRes?.items ?? pubRes?.Items ?? []);
+                                const pendList = Array.isArray(pendRes) ? pendRes : (pendRes?.items ?? pendRes?.Items ?? []);
+                                return {
+                                    ...s,
+                                    _hasPublishedChapter: pubList.length > 0,
+                                    _hasPendingReviewChapter: pendList.length > 0
+                                };
+                            })
+                            .catch(() => ({ ...s, _hasPublishedChapter: false, _hasPendingReviewChapter: false }));
+                    })
+                ).then((itemsWithFlag) => {
+                    setStories(
+                        itemsWithFlag.map((item) => {
+                            const mapped = mapStoryFromApi(item);
+                            const hasPublished = item._hasPublishedChapter === true;
+                            const hasPendingReview = item._hasPendingReviewChapter === true;
+                            if (hasPublished) {
+                                mapped.status = 'published';
+                                mapped.publishStatus = 'Đã xuất bản';
+                            } else if (hasPendingReview) {
+                                mapped.status = 'pending_review';
+                                mapped.publishStatus = 'Chờ duyệt';
+                                // Gọi API lưu trạng thái truyện PENDING_REVIEW (chỉ khi backend chưa đúng)
+                                const currentStatus = (item.status ?? item.Status ?? '').toUpperCase();
+                                if (currentStatus !== 'PENDING_REVIEW') {
+                                    const id = item.id ?? item.Id;
+                                    const categoryIds = item.categoryIds ?? item.CategoryIds ?? [];
+                                    const ids = Array.isArray(categoryIds) ? categoryIds : [];
+                                    updateStory(id, {
+                                        title: item.title ?? item.Title ?? 'Untitled',
+                                        summary: item.summary ?? item.Summary ?? '',
+                                        categoryIds: ids,
+                                        status: 'PENDING_REVIEW',
+                                        ageRating: item.ageRating ?? item.AgeRating ?? 'ALL',
+                                        storyProgressStatus: item.storyProgressStatus ?? item.StoryProgressStatus ?? 'ONGOING'
+                                    }).catch(() => { });
+                                }
+                            } else {
+                                mapped.status = 'draft';
+                                mapped.publishStatus = 'Bản nháp';
+                            }
+                            return mapped;
+                        })
+                    );
+                    setStoriesTotalCount(total);
+                    setStoriesTotalPages(pages);
+                    setStoriesCurrentPage(res?.page ?? page);
+                });
             })
             .catch((err) => {
                 setStoriesError(err?.message ?? 'Không tải được danh sách truyện');
@@ -422,6 +482,7 @@ export function AuthorStoryManagement({ onBack }) {
                 onBack={() => {
                     setActiveView('stories');
                     setCurrentStory(null);
+                    loadStories(storiesCurrentPage);
                 }}
                 onAddChapter={() => handleAddChapter(currentStory)}
                 onEditChapter={(chapter) => handleEditChapter(chapter)}
