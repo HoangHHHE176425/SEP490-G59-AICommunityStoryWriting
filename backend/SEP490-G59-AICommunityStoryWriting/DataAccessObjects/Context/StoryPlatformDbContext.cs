@@ -108,8 +108,15 @@ public partial class StoryPlatformDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
-            optionsBuilder.UseSqlServer("Server= localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;");
-
+            optionsBuilder.UseSqlServer(
+                "Server=localhost;User Id=sa;Password=a123;Database=story_platform_v14;Encrypt=True;TrustServerCertificate=True;",
+                sqlOptions =>
+                {
+                    sqlOptions.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(30),
+                        errorNumbersToAdd: null);
+                });
         }
     }
 
