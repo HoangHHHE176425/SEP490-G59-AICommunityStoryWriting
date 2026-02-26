@@ -160,11 +160,14 @@ namespace AIStory.API.Controllers
 
         private void SetRefreshTokenCookie(string refreshToken)
         {
+            // Dev: allow running over plain HTTP on localhost:5000.
+            // If request is HTTP, using SameSite=None + Secure=true will prevent the cookie from being set.
+            var isHttps = Request.IsHttps;
             var options = new CookieOptions
             {
                 HttpOnly = true,
-                Secure = true, // required for SameSite=None in modern browsers
-                SameSite = SameSiteMode.None,
+                Secure = isHttps,
+                SameSite = isHttps ? SameSiteMode.None : SameSiteMode.Lax,
                 Expires = DateTimeOffset.UtcNow.AddDays(30),
                 Path = "/"
             };
@@ -174,10 +177,11 @@ namespace AIStory.API.Controllers
 
         private void DeleteRefreshTokenCookie()
         {
+            var isHttps = Request.IsHttps;
             var options = new CookieOptions
             {
-                Secure = true,
-                SameSite = SameSiteMode.None,
+                Secure = isHttps,
+                SameSite = isHttps ? SameSiteMode.None : SameSiteMode.Lax,
                 Path = "/"
             };
             Response.Cookies.Delete("refreshToken", options);

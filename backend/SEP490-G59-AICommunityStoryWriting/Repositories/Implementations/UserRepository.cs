@@ -1,6 +1,7 @@
 using BusinessObjects;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
+using DataAccessObjects.Queries;
 using Repositories.Interfaces;
 
 namespace Repositories.Implementations
@@ -42,5 +43,11 @@ namespace Repositories.Implementations
 
         public async Task DeleteRefreshToken(string refreshToken)
             => await UserDAO.Instance.DeleteRefreshToken(_context, refreshToken);
+
+        public Task<(IEnumerable<users> Items, int TotalCount)> GetUsersAsync(AdminUserQuery query)
+            => UserDAO.Instance.GetUsersAsync(_context, query);
+
+        public Task<(int Total, int Active, int Inactive, int Banned, int Pending, int Authors, int Moderators)> GetStatsAsync()
+            => UserDAO.Instance.GetStatsAsync(_context);
     }
 }

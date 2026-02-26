@@ -39,13 +39,14 @@ namespace AIStory.Services.Helpers
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
 
+            var role = (user.role ?? "USER").Trim().ToUpperInvariant();
             var claims = new List<Claim>
             {
                 new Claim(JwtRegisteredClaimNames.Sub, user.id.ToString()), // Guid -> String (JWT standard)
                 new Claim(ClaimTypes.NameIdentifier, user.id.ToString()), // ASP.NET Core standard
                 new Claim(JwtRegisteredClaimNames.Email, user.email),
-                new Claim(ClaimTypes.Role, user.role ?? "USER"), // ASP.NET Core role claim
-                new Claim("role", user.role ?? "USER") // Custom claim (backup)
+                new Claim(ClaimTypes.Role, role), // ASP.NET Core role claim
+                new Claim("role", role) // Mapped by JwtBearer RoleClaimType="role"
             };
 
             var token = new JwtSecurityToken(

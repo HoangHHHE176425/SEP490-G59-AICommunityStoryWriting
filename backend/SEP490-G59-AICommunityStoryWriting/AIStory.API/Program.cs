@@ -1,6 +1,7 @@
 using AIStory.Services.Helpers;
 using AIStory.Services.Implementations;
 using BusinessObjects;
+using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -41,7 +42,7 @@ namespace AIStory.API
             builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
                 options.UseSqlServer(
                     builder.Configuration.GetConnectionString("DefaultConnection") 
-                    ?? "Server=localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                    ?? "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                     sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                         maxRetryCount: 5,
                         maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -85,6 +86,9 @@ namespace AIStory.API
             builder.Services.AddScoped<IPolicyRepository, PolicyRepository>();
             builder.Services.AddScoped<IAuthorPolicyAcceptanceRepository, AuthorPolicyAcceptanceRepository>();
             builder.Services.AddScoped<IPolicyService, PolicyService>();
+            builder.Services.AddScoped<IAdminPolicyService, AdminPolicyService>();
+            builder.Services.AddScoped<IAdminUserService, AdminUserService>();
+            builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
 
 
             var jwtKey = builder.Configuration["Jwt:Key"];
@@ -107,10 +111,26 @@ namespace AIStory.API
                             ValidAudience = jwtAudience,
                             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
                             ClockSkew = TimeSpan.Zero,
-                            RoleClaimType = ClaimTypes.Role // Đảm bảo role claim được nhận diện đúng
+                            // Use the standard ASP.NET Core role claim type.
+                            // JwtHelper also emits ClaimTypes.Role, so [Authorize(Roles=...)] works reliably.
+                            RoleClaimType = ClaimTypes.Role
                         };
                     });
             }
+            builder.Services.AddAuthorization(options =>
+            {
+                options.AddPolicy("UserOnly", policy =>
+                    policy.RequireAuthenticatedUser()
+                          .RequireRole("USER", "AUTHOR", "ADMIN"));
+
+                options.AddPolicy("AuthorOnly", policy =>
+                    policy.RequireAuthenticatedUser()
+                          .RequireRole("AUTHOR", "ADMIN"));
+
+                options.AddPolicy("AdminOnly", policy =>
+                    policy.RequireAuthenticatedUser()
+                          .RequireRole("ADMIN"));
+            });
             // Swagger
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(options =>
@@ -166,7 +186,12 @@ namespace AIStory.API
                 });
             }
 
-            app.UseHttpsRedirection();
+            // In Development we often run on http://localhost:5000 (no HTTPS).
+            // Enabling HTTPS redirection there breaks CORS preflight (OPTIONS) due to redirects.
+            if (!app.Environment.IsDevelopment())
+            {
+                app.UseHttpsRedirection();
+            }
 
             app.UseStaticFiles();
 
@@ -176,7 +201,6 @@ namespace AIStory.API
             app.UseAuthorization();
 
             app.MapControllers();
-
             app.Run();
         }
     }

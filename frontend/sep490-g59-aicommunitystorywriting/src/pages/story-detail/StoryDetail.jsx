@@ -1,5 +1,6 @@
 import { ChevronRight, Star } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { StoryHeader } from '../../components/story-detail/StoryHeader';
 import { ChapterList } from '../../components/story-detail/ChapterList';
 import { CommentSection } from '../../components/story-detail/CommentSection';
@@ -9,8 +10,32 @@ import { RatingModal } from '../../components/story-detail/RatingModal';
 import { ReportModal } from '../../components/story-detail/ReportModal';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
+import { getStoryById } from '../../api/story/storyApi';
+import { getChapters } from '../../api/chapter/chapterApi';
+import { getProfileByUserId } from '../../api/account/accountApi';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+
+function formatTimeAgo(dateStr) {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffMins < 60) return `${diffMins} phút trước`;
+    if (diffHours < 24) return `${diffHours} giờ trước`;
+    if (diffDays < 7) return `${diffDays} ngày trước`;
+    return date.toLocaleDateString('vi-VN');
+}
 
 export function StoryDetail() {
+    const { storyId } = useParams();
+    const navigate = useNavigate();
+    const [story, setStory] = useState(null);
+    const [chapters, setChapters] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const [isFollowing, setIsFollowing] = useState(false);
     const [activeTab, setActiveTab] = useState('chapters');
     const [isRatingModalOpen, setIsRatingModalOpen] = useState(false);
@@ -18,52 +43,100 @@ export function StoryDetail() {
     const [isReportStoryModalOpen, setIsReportStoryModalOpen] = useState(false);
     const [reportingCommentId, setReportingCommentId] = useState(null);
 
-    // Mock data
-    const story = {
-        id: '1',
-        title: 'Tu Tiên Chi Lộ: Hành Trình Vạn Năm',
-        author: {
-            name: 'Thiên Tằm Thổ Đậu',
-            avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop',
-            followers: 125000
-        },
-        cover: 'https://images.unsplash.com/photo-1589998059171-988d887df646?w=800&h=1200&fit=crop',
-        genre: ['Tiên hiệp', 'Huyền huyễn', 'Trọng sinh'],
-        status: 'Đang cập nhật',
-        rating: 4.8,
-        totalRatings: 15420,
-        views: 2450000,
-        totalViews: 5200000,
-        comments: 8900,
-        chapters: 450,
-        words: 2800000,
-        lastUpdate: '2 giờ trước',
-        description: `Tái sinh trở về thời kỳ mới bắt đầu tu tiên, Phương Viễn quyết tâm thay đổi vận mệnh.
-
-Kiếp trước, hắn chỉ là một tản tu bình thường, sống trong nỗi khổ đau và oán hận, cuối cùng chết trong tay yêu ma.
-
-Kiếp này, hắn biết trước mọi cơ duyên, biết rõ mọi nguy hiểm. Với kiến thức và kinh nghiệm từ tiền kiếp, hắn sẽ bước lên con đường mạnh nhất!
-
-"Ta muốn trở thành người mạnh nhất trong vũ trụ này, không ai có thể ngăn cản ta!"
-
-Một hành trình tu tiên đầy máu và lửa, một câu chuyện về ý chí và nghị lực. Hãy theo dõi Phương Viễn trên con đường chinh phục đỉnh cao tu tiên!`,
-    };
-
-    const chapters = Array.from({ length: 15 }, (_, i) => ({
-        id: 450 - i,
-        title: i === 0
-            ? 'Đại chiến với Ma Đế'
-            : i === 1
-                ? 'Đột phá Nguyên Anh kỳ'
-                : i === 2
-                    ? 'Bí mật của Thái Cổ Thần Thạch'
-                    : `${['Khám phá hang động bí mật', 'Gặp gỡ kỳ nhân', 'Đột phá cảnh giới', 'Đấu với cao thủ', 'Tìm kiếm linh dược'][i % 5]}`,
-        time: i === 0 ? '2 giờ trước' : i === 1 ? '1 ngày trước' : `${i + 1} ngày trước`,
-        // views: Math.floor(Math.random() * 50000) + 10000,
-        views: 10000,
-        isNew: i < 3,
-        isLocked: i > 10,
-    }));
+    useEffect(() => {
+        let cancelled = false;
+        const id = setTimeout(() => {
+            if (!storyId) {
+                setLoading(false);
+                setError('Thiếu ID truyện');
+                return;
+            }
+            setLoading(true);
+            setError(null);
+            Promise.all([
+                getStoryById(storyId),
+                getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 })
+            ])
+                .then(([storyRes, chaptersRes]) => {
+                    if (cancelled) return;
+                    const rawItems = Array.isArray(chaptersRes) ? chaptersRes : (chaptersRes?.items ?? chaptersRes?.Items ?? []);
+                    const categoryNamesStr = storyRes?.categoryNames ?? storyRes?.CategoryNames ?? '';
+                    const genreArr = categoryNamesStr
+                        ? String(categoryNamesStr).split(',').map((s) => s.trim()).filter(Boolean)
+                        : [];
+                    const coverPath = storyRes?.coverImage ?? storyRes?.CoverImage;
+                    const totalViews = Number(storyRes?.totalViews ?? storyRes?.TotalViews ?? 0);
+                    const totalChapters = rawItems.length;
+                    const authorId = storyRes?.authorId ?? storyRes?.AuthorId;
+                    const storyPayload = {
+                        id: storyRes?.id ?? storyRes?.Id,
+                        title: storyRes?.title ?? storyRes?.Title ?? 'Không có tiêu đề',
+                        author: {
+                            name: storyRes?.authorName ?? storyRes?.AuthorName ?? 'Ẩn danh',
+                            avatar: '',
+                            followers: 0
+                        },
+                        cover: coverPath ? resolveBackendUrl(coverPath) : '',
+                        genre: genreArr.length ? genreArr : ['Chưa phân loại'],
+                        status: 'Đang cập nhật',
+                        rating: Number(storyRes?.avgRating ?? storyRes?.AvgRating ?? 0) || 0,
+                        totalRatings: Number(storyRes?.totalRatings ?? 0) || 0,
+                        views: totalViews,
+                        totalViews,
+                        comments: 0,
+                        chapters: totalChapters,
+                        words: 0,
+                        lastUpdate: storyRes?.updatedAt ? formatTimeAgo(storyRes.updatedAt) : 'Chưa cập nhật',
+                        description: storyRes?.summary ?? storyRes?.Summary ?? 'Chưa có giới thiệu.'
+                    };
+                    setChapters(rawItems.map((ch, idx) => {
+                        const orderIndex = ch.orderIndex ?? ch.OrderIndex ?? idx;
+                        const num = orderIndex + 1;
+                        const updatedAt = ch.updatedAt ?? ch.UpdatedAt ?? ch.publishedAt ?? ch.PublishedAt;
+                        return {
+                            id: num,
+                            chapterId: ch.id ?? ch.Id,
+                            title: ch.title ?? ch.Title ?? `Chương ${num}`,
+                            time: updatedAt ? formatTimeAgo(updatedAt) : '',
+                            views: Number(ch.viewCount ?? ch.ViewCount ?? ch.views ?? 0) || 0,
+                            isNew: idx < 3,
+                            isLocked: false
+                        };
+                    }));
+                    if (!authorId) {
+                        setStory(storyPayload);
+                        return;
+                    }
+                    return getProfileByUserId(authorId)
+                        .then((profile) => {
+                            if (cancelled) return;
+                            storyPayload.author = {
+                                name: profile.displayName ?? storyPayload.author.name,
+                                avatar: profile.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '',
+                                followers: Number(profile.stats?.totalReads ?? profile.stats?.TotalReads ?? 0) || 0
+                            };
+                            setStory(storyPayload);
+                        })
+                        .catch(() => {
+                            if (!cancelled) setStory(storyPayload);
+                        });
+                })
+                .catch((err) => {
+                    if (!cancelled) {
+                        setError(err?.message ?? 'Không tải được truyện');
+                        setStory(null);
+                        setChapters([]);
+                    }
+                })
+                .finally(() => {
+                    if (!cancelled) setLoading(false);
+                });
+        }, 0);
+        return () => {
+            cancelled = true;
+            clearTimeout(id);
+        };
+    }, [storyId]);
 
     const relatedStories = Array.from({ length: 5 }, (_, i) => ({
         id: i + 2,
@@ -202,6 +275,25 @@ Một hành trình tu tiên đầy máu và lửa, một câu chuyện về ý c
         // Handle story report submission
     };
 
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-slate-50 dark:bg-background-dark">
+                <Header />
+                <div className="max-w-[1280px] mx-auto px-4 py-12 text-center text-slate-500">Đang tải...</div>
+                <Footer />
+            </div>
+        );
+    }
+    if (error || !story) {
+        return (
+            <div className="min-h-screen bg-slate-50 dark:bg-background-dark">
+                <Header />
+                <div className="max-w-[1280px] mx-auto px-4 py-12 text-center text-red-500">{error || 'Không tìm thấy truyện'}</div>
+                <Footer />
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-background-dark">
             <Header />
@@ -209,11 +301,7 @@ Một hành trình tu tiên đầy máu và lửa, một câu chuyện về ý c
             <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
                 <div className="max-w-[1280px] mx-auto px-4 py-3">
                     <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
-                        <a href="#" className="hover:text-primary transition-colors">Trang chủ</a>
-                        <ChevronRight className="w-4 h-4" />
-                        <a href="#" className="hover:text-primary transition-colors">Truyện dài</a>
-                        <ChevronRight className="w-4 h-4" />
-                        <a href="#" className="hover:text-primary transition-colors">Tiên hiệp</a>
+                        <a href="/home" className="hover:text-primary transition-colors">Trang chủ</a>
                         <ChevronRight className="w-4 h-4" />
                         <span className="text-slate-900 dark:text-white font-medium line-clamp-1">{story.title}</span>
                     </div>
@@ -231,6 +319,14 @@ Một hành trình tu tiên đầy máu và lửa, một câu chuyện về ý c
                             onToggleFollow={() => setIsFollowing(!isFollowing)}
                             onOpenRating={() => setIsRatingModalOpen(true)}
                             onOpenReport={() => setIsReportStoryModalOpen(true)}
+                            onReadStory={() => {
+                                const first = chapters[0];
+                                if (first?.chapterId && storyId) {
+                                    navigate(`/chapter?storyId=${storyId}&chapterId=${first.chapterId}`);
+                                } else if (storyId) {
+                                    navigate(`/chapter?storyId=${storyId}`);
+                                }
+                            }}
                         />
 
                         {/* Tabs */}
@@ -268,7 +364,7 @@ Một hành trình tu tiên đầy máu và lửa, một câu chuyện về ý c
                             </div>
 
                             <div className="p-6">
-                                {activeTab === 'chapters' && <ChapterList chapters={chapters} />}
+                                {activeTab === 'chapters' && <ChapterList chapters={chapters} storyId={storyId} />}
 
                                 {activeTab === 'comments' && (
                                     <CommentSection comments={comments} onReportComment={handleReportComment} />

@@ -1,6 +1,8 @@
 using BusinessObjects;
 using BusinessObjects.Entities;
+using DataAccessObjects.Queries;
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Generic;
 
 namespace DataAccessObjects.DAOs
 {
@@ -96,6 +98,77 @@ namespace DataAccessObjects.DAOs
         {
             using var context = new StoryPlatformDbContext();
             return context.users.Any(u => u.id == id);
+        }
+
+        public async Task<(IEnumerable<users> Items, int TotalCount)> GetUsersAsync(
+            StoryPlatformDbContext context,
+            AdminUserQuery query)
+        {
+            var q = context.users
+                .Include(u => u.user_profiles)
+                .AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(query.Search))
+            {
+                var s = query.Search.Trim().ToLowerInvariant();
+                q = q.Where(u =>
+                    u.email.ToLower().Contains(s) ||
+                    (u.user_profiles != null && u.user_profiles.nickname != null && u.user_profiles.nickname.ToLower().Contains(s)) ||
+                    (u.user_profiles != null && u.user_profiles.Phone != null && u.user_profiles.Phone.ToLower().Contains(s)) ||
+                    (u.user_profiles != null && u.user_profiles.IdNumber != null && u.user_profiles.IdNumber.ToLower().Contains(s)));
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.Role))
+            {
+                var r = query.Role.Trim().ToUpperInvariant();
+                q = q.Where(u => (u.role ?? "").ToUpper() == r);
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.Status))
+            {
+                var st = query.Status.Trim().ToUpperInvariant();
+                q = q.Where(u => (u.status ?? "").ToUpper() == st);
+            }
+
+            var total = await q.CountAsync();
+
+            var sortBy = (query.SortBy ?? "").Trim().ToLowerInvariant();
+            var asc = (query.SortOrder ?? "desc").Trim().ToLowerInvariant() == "asc";
+
+            q = sortBy switch
+            {
+                "email" => asc ? q.OrderBy(u => u.email) : q.OrderByDescending(u => u.email),
+                "role" => asc ? q.OrderBy(u => u.role) : q.OrderByDescending(u => u.role),
+                "status" => asc ? q.OrderBy(u => u.status) : q.OrderByDescending(u => u.status),
+                _ => asc ? q.OrderBy(u => u.created_at) : q.OrderByDescending(u => u.created_at)
+            };
+
+            var page = query.Page < 1 ? 1 : query.Page;
+            var pageSize = query.PageSize is < 1 or > 200 ? 20 : query.PageSize;
+
+            var items = await q.AsNoTracking()
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return (items, total);
+        }
+
+        public async Task<(int Total, int Active, int Inactive, int Banned, int Pending, int Authors, int Moderators)> GetStatsAsync(StoryPlatformDbContext context)
+        {
+            // Normalize to upper-case comparisons.
+            IQueryable<users> q = context.users.AsNoTracking();
+
+            var total = await q.CountAsync();
+            var active = await q.CountAsync(u => (u.status ?? "").ToUpper() == "ACTIVE");
+            var inactive = await q.CountAsync(u => (u.status ?? "").ToUpper() == "INACTIVE");
+            var banned = await q.CountAsync(u => (u.status ?? "").ToUpper() == "BANNED");
+            var pending = await q.CountAsync(u => (u.status ?? "").ToUpper() == "PENDING");
+
+            var authors = await q.CountAsync(u => (u.role ?? "").ToUpper() == "AUTHOR");
+            var moderators = await q.CountAsync(u => (u.role ?? "").ToUpper() == "MODERATOR");
+
+            return (total, active, inactive, banned, pending, authors, moderators);
         }
     }
 }

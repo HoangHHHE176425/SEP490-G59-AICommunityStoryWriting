@@ -24,9 +24,22 @@ namespace AIStory.API.Controllers
         [HttpGet("active")]
         public async Task<IActionResult> GetActive([FromQuery] string type)
         {
-            var policy = await _policyService.GetActivePolicyAsync(type);
-            if (policy == null) return NotFound(new { message = $"No active policy for type '{type}'." });
-            return Ok(policy);
+            try
+            {
+                var policy = await _policyService.GetActivePolicyAsync(type);
+                if (policy == null) return NotFound(new { message = $"No active policy for type '{type}'." });
+                return Ok(policy);
+            }
+            catch (Exception ex)
+            {
+                // Return a useful error payload for debugging (especially DB/schema/config issues).
+                return StatusCode(500, new
+                {
+                    message = "Failed to load active policy.",
+                    detail = ex.Message,
+                    inner = ex.InnerException?.Message
+                });
+            }
         }
 
         /// <summary>
