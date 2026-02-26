@@ -1,6 +1,6 @@
 import { Star, Play, Bookmark, Flag } from 'lucide-react';
 
-export function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, onOpenReport }) {
+export function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, onOpenReport, onReadStory }) {
     return (
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="p-6">
@@ -99,7 +99,10 @@ export function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, 
 
                         {/* Action Buttons */}
                         <div className="flex flex-wrap gap-3">
-                            <button className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all">
+                            <button
+                                onClick={onReadStory}
+                                className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all"
+                            >
                                 <Play className="w-4 h-4" />
                                 Đọc truyện
                             </button>
