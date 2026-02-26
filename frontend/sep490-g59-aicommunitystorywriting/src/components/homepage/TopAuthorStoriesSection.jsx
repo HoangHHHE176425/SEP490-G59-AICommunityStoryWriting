@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { Flame, CheckCircle, Eye, Star } from 'lucide-react';
 import { getStories } from '../../api/story/storyApi';
+import { getProfileByUserId } from '../../api/account/accountApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 function formatViews(num) {
@@ -13,7 +14,7 @@ function formatViews(num) {
   return String(n);
 }
 
-function mapStoryToCard(item) {
+function mapStoryToCard(item, profile = null) {
   const categoryNamesStr = item.categoryNames ?? item.CategoryNames ?? '';
   const categoryNamesArr = categoryNamesStr
     ? String(categoryNamesStr).split(',').map((s) => s.trim()).filter(Boolean)
@@ -23,14 +24,16 @@ function mapStoryToCard(item) {
   const imageUrl = coverPath ? resolveBackendUrl(coverPath) : '';
   const totalViews = item.totalViews ?? item.TotalViews ?? 0;
   const rating = Number(item.avgRating ?? item.AvgRating ?? 0);
+  const authorName = profile?.displayName ?? item.authorName ?? item.AuthorName ?? 'Ẩn danh';
+  const authorAvatar = profile?.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '';
   return {
     id: item.id ?? item.Id,
     story: item.title ?? item.Title ?? 'Không có tiêu đề',
     author: {
-      name: item.authorName ?? item.AuthorName ?? 'Ẩn danh',
-      avatar: '',
-      followers: '-',
-      verified: false
+      name: authorName,
+      avatar: authorAvatar,
+      followers: profile?.stats?.totalReads != null ? formatViews(profile.stats.totalReads) : '-',
+      verified: profile?.isVerified ?? false
     },
     genre,
     chapters: item.totalChapters ?? item.TotalChapters ?? 0,
@@ -53,7 +56,23 @@ export function TopAuthorStoriesSection() {
     getStories({ status: 'PUBLISHED', pageSize: 6, page: 1 })
       .then((res) => {
         const items = res?.items ?? res?.Items ?? [];
-        if (!cancelled) setAuthorStories(items.map(mapStoryToCard));
+        const authorIds = [...new Set(items.map((i) => i.authorId ?? i.AuthorId).filter(Boolean))];
+        if (authorIds.length === 0) {
+          if (!cancelled) setAuthorStories(items.map((item) => mapStoryToCard(item)));
+          return;
+        }
+        return Promise.all(
+          authorIds.map((id) => getProfileByUserId(id).catch(() => null))
+        ).then((profiles) => {
+          if (cancelled) return;
+          const profileMap = {};
+          authorIds.forEach((id, i) => {
+            profileMap[id] = profiles[i] || null;
+          });
+          setAuthorStories(
+            items.map((item) => mapStoryToCard(item, profileMap[item.authorId ?? item.AuthorId]))
+          );
+        });
       })
       .catch((err) => {
         if (!cancelled) {
