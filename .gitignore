@@ -24,3 +24,13 @@ Thumbs.db
 **/appsettings.Local.json
 **/appsettings.*.Local.json
 backend/SEP490-G59-AICommunityStoryWriting/DataAccessObjects/Context/StoryPlatformDbContext.cs
+
+# ===============================
+# Upload files (images, icons...)
+# ===============================
+backend/SEP490-G59-AICommunityStoryWriting/AIStory.API/wwwroot/uploads/
+
+# ===============================
+# Frontend lock file (optional)
+# ===============================
+frontend/package-lock.json
