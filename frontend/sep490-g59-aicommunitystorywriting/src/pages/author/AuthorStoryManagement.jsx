@@ -8,7 +8,7 @@ import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
 import { createStory, updateStory, getStories, getStoryById } from '../../api/story/storyApi';
-import { createChapter, updateChapter, getChapterById } from '../../api/chapter/chapterApi';
+import { createChapter, updateChapter, getChapterById, getChapters } from '../../api/chapter/chapterApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -107,10 +107,70 @@ export function AuthorStoryManagement({ onBack }) {
                 const items = res?.items ?? res?.Items ?? [];
                 const total = res?.totalCount ?? res?.totalItems ?? res?.total ?? items.length;
                 const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / STORIES_PAGE_SIZE));
-                setStories(items.map(mapStoryFromApi));
-                setStoriesTotalCount(total);
-                setStoriesTotalPages(pages);
-                setStoriesCurrentPage(res?.page ?? page);
+                if (items.length === 0) {
+                    setStories([]);
+                    setStoriesTotalCount(0);
+                    setStoriesTotalPages(1);
+                    setStoriesCurrentPage(res?.page ?? page);
+                    return;
+                }
+                // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp
+                return Promise.all(
+                    items.map((s) => {
+                        const storyId = s.id ?? s.Id;
+                        return Promise.all([
+                            getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                        ])
+                            .then(([pubRes, pendRes]) => {
+                                const pubList = Array.isArray(pubRes) ? pubRes : (pubRes?.items ?? pubRes?.Items ?? []);
+                                const pendList = Array.isArray(pendRes) ? pendRes : (pendRes?.items ?? pendRes?.Items ?? []);
+                                return {
+                                    ...s,
+                                    _hasPublishedChapter: pubList.length > 0,
+                                    _hasPendingReviewChapter: pendList.length > 0
+                                };
+                            })
+                            .catch(() => ({ ...s, _hasPublishedChapter: false, _hasPendingReviewChapter: false }));
+                    })
+                ).then((itemsWithFlag) => {
+                    setStories(
+                        itemsWithFlag.map((item) => {
+                            const mapped = mapStoryFromApi(item);
+                            const hasPublished = item._hasPublishedChapter === true;
+                            const hasPendingReview = item._hasPendingReviewChapter === true;
+                            if (hasPublished) {
+                                mapped.status = 'published';
+                                mapped.publishStatus = 'Đã xuất bản';
+                            } else if (hasPendingReview) {
+                                mapped.status = 'pending_review';
+                                mapped.publishStatus = 'Chờ duyệt';
+                                // Gọi API lưu trạng thái truyện PENDING_REVIEW (chỉ khi backend chưa đúng)
+                                const currentStatus = (item.status ?? item.Status ?? '').toUpperCase();
+                                if (currentStatus !== 'PENDING_REVIEW') {
+                                    const id = item.id ?? item.Id;
+                                    const categoryIds = item.categoryIds ?? item.CategoryIds ?? [];
+                                    const ids = Array.isArray(categoryIds) ? categoryIds : [];
+                                    updateStory(id, {
+                                        title: item.title ?? item.Title ?? 'Untitled',
+                                        summary: item.summary ?? item.Summary ?? '',
+                                        categoryIds: ids,
+                                        status: 'PENDING_REVIEW',
+                                        ageRating: item.ageRating ?? item.AgeRating ?? 'ALL',
+                                        storyProgressStatus: item.storyProgressStatus ?? item.StoryProgressStatus ?? 'ONGOING'
+                                    }).catch(() => { });
+                                }
+                            } else {
+                                mapped.status = 'draft';
+                                mapped.publishStatus = 'Bản nháp';
+                            }
+                            return mapped;
+                        })
+                    );
+                    setStoriesTotalCount(total);
+                    setStoriesTotalPages(pages);
+                    setStoriesCurrentPage(res?.page ?? page);
+                });
             })
             .catch((err) => {
                 setStoriesError(err?.message ?? 'Không tải được danh sách truyện');
@@ -422,6 +482,7 @@ export function AuthorStoryManagement({ onBack }) {
                 onBack={() => {
                     setActiveView('stories');
                     setCurrentStory(null);
+                    loadStories(storiesCurrentPage);
                 }}
                 onAddChapter={() => handleAddChapter(currentStory)}
                 onEditChapter={(chapter) => handleEditChapter(chapter)}
@@ -758,13 +819,56 @@ export function AuthorStoryManagement({ onBack }) {
                         </div>
                     ) : (
                         <div style={{ maxWidth: '1200px' }}>
-                            {/* Header */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                    <div style={{ width: '20px', height: '20px', color: '#6b7280' }}>📚</div>
-                                    <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>
-                                        Truyện của tôi
-                                    </h2>
+                            {/* Header - format đồng bộ với hệ thống */}
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                flexWrap: 'wrap',
+                                gap: '1rem',
+                                marginBottom: '1.75rem',
+                                padding: '1.25rem 1.5rem',
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                    <div style={{
+                                        width: '48px',
+                                        height: '48px',
+                                        borderRadius: '12px',
+                                        background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 4px 12px rgba(19, 236, 91, 0.25)',
+                                        flexShrink: 0
+                                    }}>
+                                        <Book style={{ width: '26px', height: '26px', color: '#ffffff' }} />
+                                    </div>
+                                    <div>
+                                        <h2 style={{
+                                            fontFamily: "'Plus Jakarta Sans', sans-serif",
+                                            fontSize: '1.5rem',
+                                            fontWeight: 700,
+                                            color: '#1A2332',
+                                            margin: 0,
+                                            letterSpacing: '-0.02em',
+                                            lineHeight: 1.3
+                                        }}>
+                                            Truyện của tôi
+                                        </h2>
+                                        <p style={{
+                                            fontFamily: "'Plus Jakarta Sans', sans-serif",
+                                            fontSize: '0.875rem',
+                                            color: '#90A1B9',
+                                            margin: '4px 0 0 0',
+                                            fontWeight: 400
+                                        }}>
+                                            Quản lý và sáng tác truyện của bạn
+                                        </p>
+                                    </div>
                                 </div>
                                 <button
                                     onClick={handleCreateStory}
@@ -772,7 +876,7 @@ export function AuthorStoryManagement({ onBack }) {
                                         display: 'flex',
                                         alignItems: 'center',
                                         gap: '0.5rem',
-                                        padding: '0.625rem 1.25rem',
+                                        padding: '0.75rem 1.5rem',
                                         backgroundColor: '#13ec5b',
                                         border: 'none',
                                         borderRadius: '9999px',
@@ -780,17 +884,23 @@ export function AuthorStoryManagement({ onBack }) {
                                         fontWeight: 700,
                                         color: '#ffffff',
                                         cursor: 'pointer',
-                                        transition: 'background-color 0.2s'
+                                        transition: 'all 0.2s',
+                                        boxShadow: '0 2px 8px rgba(19, 236, 91, 0.3)',
+                                        fontFamily: "'Plus Jakarta Sans', sans-serif"
                                     }}
                                     onMouseEnter={(e) => {
                                         e.currentTarget.style.backgroundColor = '#10d452';
+                                        e.currentTarget.style.transform = 'translateY(-1px)';
+                                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.35)';
                                     }}
                                     onMouseLeave={(e) => {
                                         e.currentTarget.style.backgroundColor = '#13ec5b';
+                                        e.currentTarget.style.transform = 'translateY(0)';
+                                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(19, 236, 91, 0.3)';
                                     }}
                                 >
-                                    <Plus style={{ width: '16px', height: '16px' }} />
-                                    THÊM TRUYỆN MỚI
+                                    <Plus style={{ width: '18px', height: '18px' }} />
+                                    Thêm truyện mới
                                 </button>
                             </div>
 

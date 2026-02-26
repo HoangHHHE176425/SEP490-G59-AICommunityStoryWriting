@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Plus, Eye, MessageSquare, Book, Send, Undo2, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getChapters, getChapterById, updateChapter, unpublishChapter } from '../../api/chapter/chapterApi';
+import { updateStory } from '../../api/story/storyApi';
 import { Pagination } from '../../components/pagination/Pagination';
 
 const CHAPTER_STATUS_MAP = {
@@ -52,15 +53,17 @@ function mapChapterFromApi(item) {
 const CHAPTERS_PAGE_SIZE = 10;
 
 export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter }) {
+    const storyId = story?.id ?? story?.Id;
     const [chapters, setChapters] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [totalCount, setTotalCount] = useState(0);
+    const [hasPublishedChapter, setHasPublishedChapter] = useState(false);
+    const [hasPendingReviewChapter, setHasPendingReviewChapter] = useState(false);
 
     const loadChapters = (page = 1) => {
-        const storyId = story?.id ?? story?.Id;
         if (!storyId) return;
         setLoading(true);
         setError(null);
@@ -85,27 +88,36 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
 
     useEffect(() => {
         let cancelled = false;
-        const storyId = story?.id ?? story?.Id;
         const id = setTimeout(() => {
             if (!storyId) {
                 setChapters([]);
                 setLoading(false);
                 setTotalCount(0);
                 setTotalPages(1);
+                setHasPublishedChapter(false);
+                setHasPendingReviewChapter(false);
                 return;
             }
             setLoading(true);
             setError(null);
-            getChapters({ storyId, page: 1, pageSize: CHAPTERS_PAGE_SIZE })
-                .then((res) => {
+            Promise.all([
+                getChapters({ storyId, page: 1, pageSize: CHAPTERS_PAGE_SIZE }),
+                getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+            ])
+                .then(([res, publishedRes, pendingRes]) => {
                     const rawItems = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
                     const total = res?.totalCount ?? res?.totalItems ?? res?.total ?? rawItems.length;
                     const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / CHAPTERS_PAGE_SIZE));
+                    const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
+                    const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
                     if (!cancelled) {
                         setChapters(rawItems.map((item) => ({ ...mapChapterFromApi(item), content: item.content ?? item.Content ?? '' })));
                         setTotalCount(total);
                         setTotalPages(pages);
                         setCurrentPage(res?.page ?? 1);
+                        setHasPublishedChapter(publishedList.length > 0);
+                        setHasPendingReviewChapter(pendingList.length > 0);
                     }
                 })
                 .catch((err) => {
@@ -114,6 +126,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                         setChapters([]);
                         setTotalCount(0);
                         setTotalPages(1);
+                        setHasPublishedChapter(false);
+                        setHasPendingReviewChapter(false);
                     }
                 })
                 .finally(() => {
@@ -124,7 +138,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
             cancelled = true;
             clearTimeout(id);
         };
-    }, [story?.id ?? story?.Id]);
+    }, [storyId]);
 
     const handlePageChange = (page) => {
         setCurrentPage(page);
@@ -160,6 +174,30 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
             const doUpdate = (title, content) =>
                 updateChapter(chapterId, { title, content, status: 'PENDING_REVIEW' })
                     .then(() => loadChapters(currentPage))
+                    .then(() => {
+                        if (!storyId) return;
+                        return Promise.all([
+                            getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                        ]).then(([rPub, rPend]) => {
+                            const pubList = Array.isArray(rPub) ? rPub : (rPub?.items ?? rPub?.Items ?? []);
+                            const pendList = Array.isArray(rPend) ? rPend : (rPend?.items ?? rPend?.Items ?? []);
+                            setHasPublishedChapter(pubList.length > 0);
+                            setHasPendingReviewChapter(pendList.length > 0);
+                        });
+                    })
+                    .then(() => {
+                        if (!storyId || !story) return;
+                        const categoryIds = (story.categories || []).map((c) => (typeof c === 'object' && c != null ? c.id : c)).filter((id) => id && /^[0-9a-fA-F-]{36}$/.test(String(id)));
+                        return updateStory(storyId, {
+                            title: story.title || 'Untitled',
+                            summary: story.summary ?? '',
+                            categoryIds,
+                            status: 'PENDING_REVIEW',
+                            ageRating: story.ageRating ?? 'Phù hợp mọi lứa tuổi',
+                            storyProgressStatus: story.progressStatusDisplay ?? story.storyProgressStatus ?? 'Đang ra'
+                        });
+                    })
                     .catch((err) => {
                         alert(err?.message ?? 'Xuất bản thất bại');
                     })
@@ -181,6 +219,18 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
         } else if (action === 'unpublish') {
             unpublishChapter(chapterId)
                 .then(() => loadChapters(currentPage))
+                .then(() => {
+                    if (!storyId) return;
+                    return Promise.all([
+                        getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                        getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                    ]).then(([rPub, rPend]) => {
+                        const pubList = Array.isArray(rPub) ? rPub : (rPub?.items ?? rPub?.Items ?? []);
+                        const pendList = Array.isArray(rPend) ? rPend : (rPend?.items ?? rPend?.Items ?? []);
+                        setHasPublishedChapter(pubList.length > 0);
+                        setHasPendingReviewChapter(pendList.length > 0);
+                    });
+                })
                 .catch((err) => {
                     alert(err?.message ?? 'Hủy xuất bản thất bại');
                 })
@@ -195,41 +245,92 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
         openUnpublishConfirm(chapterId);
     };
 
+    // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp
+    const derivedStoryStatusDisplay = hasPublishedChapter ? 'Đã xuất bản' : hasPendingReviewChapter ? 'Chờ duyệt' : 'Bản nháp';
+    const derivedStatusKind = hasPublishedChapter ? 'published' : hasPendingReviewChapter ? 'pending_review' : 'draft';
+
     return (
         <div>
             <Header />
             <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5', padding: '2rem' }}>
                 <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
                     <>
-                        {/* Header */}
+                        {/* Header - format đồng bộ với hệ thống */}
                         <div style={{
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
+                            flexWrap: 'wrap',
                             gap: '1rem',
-                            marginBottom: '2rem'
+                            marginBottom: '1.75rem',
+                            padding: '1.25rem 1.5rem',
+                            backgroundColor: '#ffffff',
+                            borderRadius: '16px',
+                            border: '1px solid #e5e7eb',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
                         }}>
                             <div style={{
                                 display: 'flex',
                                 alignItems: 'center',
-                                gap: '0.75rem',
+                                gap: '1rem',
                                 flex: '1 1 0',
                                 minWidth: 0,
                                 overflow: 'hidden'
                             }}>
-                                <Book style={{ width: '24px', height: '24px', color: '#13ec5b', flexShrink: 0 }} />
-                                <h2 style={{
-                                    fontSize: '1.5rem',
-                                    fontWeight: 'bold',
-                                    color: '#333333',
-                                    margin: 0,
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                    maxWidth: '100%'
+                                <div style={{
+                                    width: '48px',
+                                    height: '48px',
+                                    borderRadius: '12px',
+                                    background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)',
+                                    flexShrink: 0
                                 }}>
-                                    Danh sách chương - Truyện "{story?.title || 'Untitled'}"
-                                </h2>
+                                    <ListOrdered style={{ width: '26px', height: '26px', color: '#ffffff' }} />
+                                </div>
+                                <div style={{ minWidth: 0 }}>
+                                    <h2 style={{
+                                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                                        fontSize: '1.5rem',
+                                        fontWeight: 700,
+                                        color: '#1A2332',
+                                        margin: 0,
+                                        letterSpacing: '-0.02em',
+                                        lineHeight: 1.3,
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap'
+                                    }}>
+                                        Danh sách chương
+                                    </h2>
+                                    <p style={{
+                                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                                        fontSize: '0.875rem',
+                                        color: '#90A1B9',
+                                        margin: '4px 0 0 0',
+                                        fontWeight: 400,
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap'
+                                    }}>
+                                        {story?.title || 'Chưa có tiêu đề'}
+                                    </p>
+                                    <span style={{
+                                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                                        fontSize: '0.75rem',
+                                        fontWeight: 600,
+                                        color: derivedStatusKind === 'published' ? '#065f46' : '#92400e',
+                                        backgroundColor: derivedStatusKind === 'published' ? '#d1fae5' : '#fef3c7',
+                                        padding: '4px 10px',
+                                        borderRadius: '8px',
+                                        marginTop: '8px',
+                                        display: 'inline-block'
+                                    }}>
+                                        Trạng thái truyện: {derivedStoryStatusDisplay}
+                                    </span>
+                                </div>
                             </div>
                             <button
                                 onClick={() => onAddChapter?.(story)}
@@ -237,7 +338,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.5rem',
-                                    padding: '0.625rem 1.5rem',
+                                    padding: '0.75rem 1.5rem',
                                     backgroundColor: '#13ec5b',
                                     border: 'none',
                                     borderRadius: '9999px',
@@ -247,20 +348,22 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                     cursor: 'pointer',
                                     transition: 'all 0.2s',
                                     flexShrink: 0,
-                                    whiteSpace: 'nowrap'
+                                    whiteSpace: 'nowrap',
+                                    boxShadow: '0 2px 8px rgba(19, 236, 91, 0.3)',
+                                    fontFamily: "'Plus Jakarta Sans', sans-serif"
                                 }}
                                 onMouseEnter={(e) => {
                                     e.currentTarget.style.backgroundColor = '#10d452';
-                                    e.currentTarget.style.transform = 'translateY(-2px)';
-                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.3)';
+                                    e.currentTarget.style.transform = 'translateY(-1px)';
+                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.35)';
                                 }}
                                 onMouseLeave={(e) => {
                                     e.currentTarget.style.backgroundColor = '#13ec5b';
                                     e.currentTarget.style.transform = 'translateY(0)';
-                                    e.currentTarget.style.boxShadow = 'none';
+                                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(19, 236, 91, 0.3)';
                                 }}
                             >
-                                <Plus style={{ width: '16px', height: '16px' }} />
+                                <Plus style={{ width: '18px', height: '18px' }} />
                                 Thêm chương mới
                             </button>
                         </div>
@@ -386,50 +489,56 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                             width: 'fit-content',
                                             margin: '0 auto'
                                         }}>
-                                            {/* Hàng 1: Chỉnh sửa, Xóa — độ rộng hàng 2 = độ rộng hàng này */}
+                                            {/* Hàng 1: Chỉnh sửa, Xóa — không cho phép khi chương đang Chờ duyệt (PENDING_REVIEW) */}
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                 <button
-                                                    onClick={() => onEditChapter(chapter)}
+                                                    onClick={() => chapter.status !== 'pending_review' && onEditChapter(chapter)}
+                                                    disabled={chapter.status === 'pending_review'}
+                                                    title={chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể chỉnh sửa' : ''}
                                                     style={{
                                                         display: 'inline-flex',
                                                         alignItems: 'center',
                                                         gap: '0.25rem',
                                                         padding: '0.4rem 0.75rem',
-                                                        backgroundColor: '#f0fdf4',
-                                                        border: '1px solid #86efac',
+                                                        backgroundColor: chapter.status === 'pending_review' ? '#f1f5f9' : '#f0fdf4',
+                                                        border: `1px solid ${chapter.status === 'pending_review' ? '#e2e8f0' : '#86efac'}`,
                                                         borderRadius: '9999px',
                                                         fontSize: '0.75rem',
                                                         fontWeight: 600,
-                                                        color: '#15803d',
-                                                        cursor: 'pointer',
+                                                        color: chapter.status === 'pending_review' ? '#94a3b8' : '#15803d',
+                                                        cursor: chapter.status === 'pending_review' ? 'not-allowed' : 'pointer',
                                                         transition: 'all 0.2s',
-                                                        whiteSpace: 'nowrap'
+                                                        whiteSpace: 'nowrap',
+                                                        opacity: chapter.status === 'pending_review' ? 0.8 : 1
                                                     }}
-                                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#dcfce7'; }}
-                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f0fdf4'; }}
+                                                    onMouseEnter={(e) => { if (chapter.status !== 'pending_review') e.currentTarget.style.backgroundColor = '#dcfce7'; }}
+                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'pending_review' ? '#f1f5f9' : '#f0fdf4'; }}
                                                 >
                                                     <Pencil size={12} />
                                                     Chỉnh sửa
                                                 </button>
                                                 <button
-                                                    onClick={() => handleDeleteChapter(chapter.id)}
+                                                    onClick={() => chapter.status !== 'pending_review' && handleDeleteChapter(chapter.id)}
+                                                    disabled={chapter.status === 'pending_review'}
+                                                    title={chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể xóa' : ''}
                                                     style={{
                                                         display: 'inline-flex',
                                                         alignItems: 'center',
                                                         gap: '0.25rem',
                                                         padding: '0.4rem 0.75rem',
-                                                        backgroundColor: '#fff',
-                                                        border: '1px solid #fecaca',
+                                                        backgroundColor: chapter.status === 'pending_review' ? '#f1f5f9' : '#fff',
+                                                        border: `1px solid ${chapter.status === 'pending_review' ? '#e2e8f0' : '#fecaca'}`,
                                                         borderRadius: '9999px',
                                                         fontSize: '0.75rem',
                                                         fontWeight: 600,
-                                                        color: '#dc2626',
-                                                        cursor: 'pointer',
+                                                        color: chapter.status === 'pending_review' ? '#94a3b8' : '#dc2626',
+                                                        cursor: chapter.status === 'pending_review' ? 'not-allowed' : 'pointer',
                                                         transition: 'all 0.2s',
-                                                        whiteSpace: 'nowrap'
+                                                        whiteSpace: 'nowrap',
+                                                        opacity: chapter.status === 'pending_review' ? 0.8 : 1
                                                     }}
-                                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#fef2f2'; }}
-                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#fff'; }}
+                                                    onMouseEnter={(e) => { if (chapter.status !== 'pending_review') e.currentTarget.style.backgroundColor = '#fef2f2'; }}
+                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'pending_review' ? '#f1f5f9' : '#fff'; }}
                                                 >
                                                     <Trash2 size={12} />
                                                     Xóa
@@ -512,30 +621,34 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                             />
                         )}
 
-                        {/* Back Button */}
+                        {/* Back Button - rõ ràng, có viền và màu nền nhìn thấy ngay */}
                         <div style={{ marginTop: '2rem' }}>
                             <button
                                 onClick={onBack}
                                 style={{
-                                    padding: '0.75rem 2rem',
-                                    backgroundColor: '#ffffff',
-                                    border: '2px solid #13ec5b',
-                                    borderRadius: '9999px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    padding: '0.5rem 1rem',
+                                    backgroundColor: '#e2e8f0',
+                                    color: '#0f172a',
                                     fontSize: '0.875rem',
-                                    fontWeight: 700,
-                                    color: '#13ec5b',
+                                    fontWeight: 600,
+                                    borderRadius: '9999px',
+                                    border: '1px solid #cbd5e1',
                                     cursor: 'pointer',
                                     transition: 'all 0.2s'
                                 }}
                                 onMouseEnter={(e) => {
-                                    e.currentTarget.style.backgroundColor = '#f0fdf4';
-                                    e.currentTarget.style.borderColor = '#10d452';
+                                    e.currentTarget.style.backgroundColor = '#cbd5e1';
+                                    e.currentTarget.style.borderColor = '#94a3b8';
                                 }}
                                 onMouseLeave={(e) => {
-                                    e.currentTarget.style.backgroundColor = '#ffffff';
-                                    e.currentTarget.style.borderColor = '#13ec5b';
+                                    e.currentTarget.style.backgroundColor = '#e2e8f0';
+                                    e.currentTarget.style.borderColor = '#cbd5e1';
                                 }}
                             >
+                                <ArrowLeft style={{ width: '16px', height: '16px' }} />
                                 Quay lại
                             </button>
                         </div>
