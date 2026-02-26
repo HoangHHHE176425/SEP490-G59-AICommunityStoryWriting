@@ -1,4 +1,5 @@
 using BusinessObjects.Entities;
+using System.Collections.Generic;
 using DataAccessObjects.Queries;
 using Repositories.Interfaces;
 using Services.DTOs.Admin;
@@ -41,6 +42,17 @@ namespace Services.Implementations
                 TotalCount = total,
                 Page = page,
                 PageSize = pageSize
+            };
+        }
+
+        public async Task<AdminPolicyStatsDto> GetStatsAsync()
+        {
+            var (total, active, byType) = await _policyRepo.GetStatsAsync();
+            return new AdminPolicyStatsDto
+            {
+                Total = total,
+                Active = active,
+                ByType = byType ?? new Dictionary<string, int>()
             };
         }
 

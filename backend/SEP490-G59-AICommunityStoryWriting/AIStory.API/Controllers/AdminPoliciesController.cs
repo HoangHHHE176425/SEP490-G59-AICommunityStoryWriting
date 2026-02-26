@@ -24,6 +24,13 @@ namespace AIStory.API.Controllers
             return Ok(result);
         }
 
+        [HttpGet("stats")]
+        public async Task<IActionResult> GetStats()
+        {
+            var stats = await _service.GetStatsAsync();
+            return Ok(stats);
+        }
+
         [HttpGet("{id:guid}")]
         public async Task<IActionResult> GetById(Guid id)
         {

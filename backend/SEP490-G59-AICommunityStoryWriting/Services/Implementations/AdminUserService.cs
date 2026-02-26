@@ -4,16 +4,19 @@ using Repositories.Interfaces;
 using Services.DTOs.Admin;
 using Services.DTOs.Admin.Users;
 using Services.Interfaces;
+using System;
 
 namespace Services.Implementations
 {
     public class AdminUserService : IAdminUserService
     {
         private readonly IUserRepository _userRepo;
+        private readonly IModeratorCategoryAssignmentRepository _modCatRepo;
 
-        public AdminUserService(IUserRepository userRepo)
+        public AdminUserService(IUserRepository userRepo, IModeratorCategoryAssignmentRepository modCatRepo)
         {
             _userRepo = userRepo;
+            _modCatRepo = modCatRepo;
         }
 
         public async Task<PagedResultDto<AdminUserListItemDto>> GetUsersAsync(AdminUserQueryDto query)
@@ -39,6 +42,21 @@ namespace Services.Implementations
                 TotalCount = total,
                 Page = page,
                 PageSize = pageSize
+            };
+        }
+
+        public async Task<AdminUserStatsDto> GetStatsAsync()
+        {
+            var (total, active, inactive, banned, pending, authors, moderators) = await _userRepo.GetStatsAsync();
+            return new AdminUserStatsDto
+            {
+                Total = total,
+                Active = active,
+                Inactive = inactive,
+                Banned = banned,
+                Pending = pending,
+                Authors = authors,
+                Moderators = moderators
             };
         }
 
@@ -115,6 +133,47 @@ namespace Services.Implementations
             if (user == null) return false;
 
             await _userRepo.DeleteUser(id);
+            // Ensure user exists (admin UX)
+            return true;
+        }
+
+        public async Task<List<Guid>> GetModeratorCategoriesAsync(Guid userId)
+        {
+            var user = await _userRepo.GetUserById(userId);
+            if (user == null) throw new InvalidOperationException("User not found.");
+
+            return await _modCatRepo.GetCategoryIdsAsync(userId);
+        }
+
+        public async Task<bool> SetModeratorCategoriesAsync(Guid userId, IReadOnlyCollection<Guid> categoryIds)
+        {
+            var user = await _userRepo.GetUserById(userId);
+            if (user == null) return false;
+
+            var ids = (categoryIds ?? Array.Empty<Guid>()).Distinct().ToList();
+            await _modCatRepo.ReplaceAssignmentsAsync(userId, ids);
+
+            // Keep user.role in sync for admin UX.
+            var role = (user.role ?? "").Trim().ToUpperInvariant();
+            if (ids.Count > 0)
+            {
+                if (role != "ADMIN" && role != "MODERATOR")
+                {
+                    user.role = "MODERATOR";
+                    user.updated_at = DateTime.UtcNow;
+                    await _userRepo.UpdateUser(user);
+                }
+            }
+            else
+            {
+                if (role == "MODERATOR")
+                {
+                    user.role = "USER";
+                    user.updated_at = DateTime.UtcNow;
+                    await _userRepo.UpdateUser(user);
+                }
+            }
+
             return true;
         }
 
@@ -127,6 +186,7 @@ namespace Services.Implementations
                 Role = u.role,
                 Status = u.status,
                 CreatedAt = u.created_at,
+                EmailVerifiedAt = u.email_verified_at,
                 Nickname = u.user_profiles?.nickname,
                 Phone = u.user_profiles?.Phone,
                 IdNumber = u.user_profiles?.IdNumber,

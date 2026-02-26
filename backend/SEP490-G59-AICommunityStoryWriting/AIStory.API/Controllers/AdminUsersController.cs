@@ -24,11 +24,45 @@ namespace AIStory.API.Controllers
             return Ok(result);
         }
 
+        [HttpGet("stats")]
+        public async Task<IActionResult> GetStats()
+        {
+            var stats = await _service.GetStatsAsync();
+            return Ok(stats);
+        }
+
         [HttpGet("{id:guid}")]
         public async Task<IActionResult> GetById(Guid id)
         {
             var user = await _service.GetUserByIdAsync(id);
             return user == null ? NotFound(new { message = "User not found." }) : Ok(user);
+        }
+
+        [HttpGet("{id:guid}/moderator-categories")]
+        public async Task<IActionResult> GetModeratorCategories(Guid id)
+        {
+            try
+            {
+                var ids = await _service.GetModeratorCategoriesAsync(id);
+                return Ok(new { categoryIds = ids });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        public class SetModeratorCategoriesRequest
+        {
+            public List<Guid> CategoryIds { get; set; } = new();
+        }
+
+        [HttpPut("{id:guid}/moderator-categories")]
+        public async Task<IActionResult> SetModeratorCategories(Guid id, [FromBody] SetModeratorCategoriesRequest request)
+        {
+            var ids = request?.CategoryIds ?? new List<Guid>();
+            var ok = await _service.SetModeratorCategoriesAsync(id, ids);
+            return ok ? NoContent() : NotFound(new { message = "User not found." });
         }
 
         [HttpPost]

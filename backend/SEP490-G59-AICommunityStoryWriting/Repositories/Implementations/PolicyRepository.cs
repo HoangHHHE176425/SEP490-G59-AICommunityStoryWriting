@@ -3,6 +3,7 @@ using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using DataAccessObjects.Queries;
 using Repositories.Interfaces;
+using System.Collections.Generic;
 
 namespace Repositories.Implementations
 {
@@ -35,6 +36,9 @@ namespace Repositories.Implementations
 
         public Task DeactivateOtherPoliciesOfTypeAsync(string type, Guid keepActiveId)
             => PolicyDAO.Instance.DeactivateOtherPoliciesOfTypeAsync(_context, type, keepActiveId);
+
+        public Task<(int Total, int Active, Dictionary<string, int> ByType)> GetStatsAsync()
+            => PolicyDAO.Instance.GetStatsAsync(_context);
     }
 }
 

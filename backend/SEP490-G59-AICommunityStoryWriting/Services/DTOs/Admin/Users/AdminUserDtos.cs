@@ -20,6 +20,7 @@ namespace Services.DTOs.Admin.Users
         public string? Role { get; set; }
         public string? Status { get; set; }
         public DateTime? CreatedAt { get; set; }
+        public DateTime? EmailVerifiedAt { get; set; }
 
         public string? Nickname { get; set; }
         public string? Phone { get; set; }
@@ -30,7 +31,6 @@ namespace Services.DTOs.Admin.Users
     public class AdminUserDetailDto : AdminUserListItemDto
     {
         public DateTime? UpdatedAt { get; set; }
-        public DateTime? EmailVerifiedAt { get; set; }
         public DateTime? DeletionRequestedAt { get; set; }
     }
 

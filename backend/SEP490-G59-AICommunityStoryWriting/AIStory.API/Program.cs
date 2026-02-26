@@ -1,6 +1,7 @@
 using AIStory.Services.Helpers;
 using AIStory.Services.Implementations;
 using BusinessObjects;
+using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -41,7 +42,7 @@ namespace AIStory.API
             builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
                 options.UseSqlServer(
                     builder.Configuration.GetConnectionString("DefaultConnection") 
-                    ?? "Server=localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                    ?? "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                     sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                         maxRetryCount: 5,
                         maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -87,6 +88,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IPolicyService, PolicyService>();
             builder.Services.AddScoped<IAdminPolicyService, AdminPolicyService>();
             builder.Services.AddScoped<IAdminUserService, AdminUserService>();
+            builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
 
 
             var jwtKey = builder.Configuration["Jwt:Key"];
@@ -109,8 +111,9 @@ namespace AIStory.API
                             ValidAudience = jwtAudience,
                             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
                             ClockSkew = TimeSpan.Zero,
-                            // JwtHelper issues claim type "role", so map it here for [Authorize(Roles=...)] and policies.
-                            RoleClaimType = "role"
+                            // Use the standard ASP.NET Core role claim type.
+                            // JwtHelper also emits ClaimTypes.Role, so [Authorize(Roles=...)] works reliably.
+                            RoleClaimType = ClaimTypes.Role
                         };
                     });
             }
@@ -183,7 +186,12 @@ namespace AIStory.API
                 });
             }
 
-            app.UseHttpsRedirection();
+            // In Development we often run on http://localhost:5000 (no HTTPS).
+            // Enabling HTTPS redirection there breaks CORS preflight (OPTIONS) due to redirects.
+            if (!app.Environment.IsDevelopment())
+            {
+                app.UseHttpsRedirection();
+            }
 
             app.UseStaticFiles();
 
@@ -193,7 +201,6 @@ namespace AIStory.API
             app.UseAuthorization();
 
             app.MapControllers();
-
             app.Run();
         }
     }
