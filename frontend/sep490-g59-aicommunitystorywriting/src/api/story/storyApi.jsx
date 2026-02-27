@@ -250,3 +250,31 @@ export async function unpublishStory(id) {
     const response = await axiosInstance.post(`/stories/${id}/unpublish`);
     return response.data;
 }
+
+/**
+ * Duyệt truyện (phê duyệt / approve) – gọi POST /stories/{id}/publish, chuyển status sang PUBLISHED.
+ * @param {string} id - Guid truyện
+ * @returns {Promise}
+ */
+export async function approveStory(id) {
+    const response = await axiosInstance.post(`/stories/${id}/publish`);
+    return response.data;
+}
+
+/**
+ * Từ chối duyệt truyện – cập nhật status sang REJECTED qua PUT /stories/{id}.
+ * Cần truyền đủ dữ liệu truyện (title, summary, categoryIds, ageRating, storyProgressStatus) theo format updateStory.
+ * @param {string} id - Guid truyện
+ * @param {Object} storyData - { title, summary?, categoryIds?, ageRating?, storyProgressStatus? }
+ * @returns {Promise}
+ */
+export async function rejectStory(id, storyData) {
+    return updateStory(id, {
+        title: storyData.title ?? storyData.Title ?? 'Untitled',
+        summary: storyData.summary ?? storyData.Summary ?? '',
+        categoryIds: storyData.categoryIds ?? storyData.CategoryIds ?? [],
+        ageRating: storyData.ageRating ?? storyData.AgeRating ?? 'ALL',
+        storyProgressStatus: storyData.storyProgressStatus ?? storyData.StoryProgressStatus ?? 'ONGOING',
+        status: 'REJECTED',
+    });
+}
