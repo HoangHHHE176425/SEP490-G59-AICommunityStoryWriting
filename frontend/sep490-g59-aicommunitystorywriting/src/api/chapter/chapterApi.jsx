@@ -170,3 +170,39 @@ export async function reorderChapter(id, newOrderIndex) {
     });
     return response.data;
 }
+
+/**
+ * Duyệt chương (phê duyệt / approve) – gọi POST /chapters/{id}/publish, chuyển status sang PUBLISHED.
+ * @param {string} id - Guid chương
+ * @returns {Promise}
+ */
+export async function approveChapter(id) {
+    const response = await axiosInstance.post(`/chapters/${id}/publish`);
+    return response.data;
+}
+
+/**
+ * Từ chối duyệt chương – cập nhật status sang REJECTED qua PUT /chapters/{id}.
+ * Cần title và content (backend Update chapter yêu cầu); nếu không truyền sẽ gọi getChapterById rồi cập nhật.
+ * @param {string} id - Guid chương
+ * @param {Object} [chapterData] - { title?, content?, orderIndex? } (nếu không truyền sẽ tự fetch)
+ * @returns {Promise}
+ */
+export async function rejectChapter(id, chapterData) {
+    let title = chapterData?.title ?? chapterData?.Title;
+    let content = chapterData?.content ?? chapterData?.Content;
+    let orderIndex = chapterData?.orderIndex ?? chapterData?.OrderIndex;
+    if (title == null || content == null) {
+        const chapter = await getChapterById(id);
+        title = title ?? chapter?.title ?? chapter?.Title ?? '';
+        content = content ?? chapter?.content ?? chapter?.Content ?? '';
+        if (orderIndex == null) orderIndex = chapter?.orderIndex ?? chapter?.OrderIndex;
+    }
+    const payload = {
+        title: title || 'Chương',
+        content: content ?? '',
+        status: 'REJECTED',
+    };
+    if (orderIndex != null) payload.orderIndex = orderIndex;
+    return updateChapter(id, payload);
+}
