@@ -201,31 +201,33 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                         {moderatorCategoryIds.length > 0 && (
                             <p className="text-sm text-emerald-700 mb-2">Đang kiểm duyệt: {moderatorCategoryIds.map(getCategoryName).join(', ') || '—'}</p>
                         )}
-                        <div className="flex flex-wrap gap-2 mb-3 max-h-32 overflow-y-auto">
-                            {categories.map((cat) => {
+                        <ul className="list-none space-y-2 mb-3 max-h-40 overflow-y-auto border border-slate-200 rounded-lg p-3 bg-slate-50/50">
+                            {categoriesLoading && <li className="text-sm text-slate-500">Đang tải thể loại...</li>}
+                            {!categoriesLoading && categoriesError && (
+                                <li className="text-sm text-red-600">{categoriesError}</li>
+                            )}
+                            {!categoriesLoading && !categoriesError && categories.length === 0 && (
+                                <li className="text-sm text-slate-500">Chưa có thể loại nào trong hệ thống.</li>
+                            )}
+                            {!categoriesLoading && !categoriesError && categories.map((cat) => {
                                 const id = cat.id ?? cat.Id;
                                 const name = cat.name ?? cat.Name ?? id;
                                 const checked = selectedCategoryIds.includes(id);
                                 return (
-                                    <label key={id} className="inline-flex items-center gap-1.5 cursor-pointer">
-                                        <input
-                                            type="checkbox"
-                                            checked={checked}
-                                            onChange={() => toggleCategory(id)}
-                                            className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                                        />
-                                        <span className="text-sm text-slate-700">{name}</span>
-                                    </label>
+                                    <li key={id}>
+                                        <label className="inline-flex items-center gap-2 cursor-pointer hover:bg-white/60 rounded px-2 py-1.5 w-full">
+                                            <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={() => toggleCategory(id)}
+                                                className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                                            />
+                                            <span className="text-sm text-slate-700">{name}</span>
+                                        </label>
+                                    </li>
                                 );
                             })}
-                            {categoriesLoading && <span className="text-sm text-slate-500">Đang tải thể loại...</span>}
-                            {!categoriesLoading && categoriesError && (
-                                <span className="text-sm text-red-600">{categoriesError}</span>
-                            )}
-                            {!categoriesLoading && !categoriesError && categories.length === 0 && (
-                                <span className="text-sm text-slate-500">Chưa có thể loại nào trong hệ thống.</span>
-                            )}
-                        </div>
+                        </ul>
                         <div className="flex gap-2">
                             <button
                                 type="button"

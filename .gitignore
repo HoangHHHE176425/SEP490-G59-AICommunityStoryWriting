@@ -27,3 +27,4 @@ backend/SEP490-G59-AICommunityStoryWriting/DataAccessObjects/Context/StoryPlatfo
 
 # Runtime uploads (do NOT commit)
 **/wwwroot/uploads/**
+backend/SEP490-G59-AICommunityStoryWriting/DataAccessObjects/Context/StoryPlatformDbContext.cs
