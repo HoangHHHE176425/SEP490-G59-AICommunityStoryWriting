@@ -104,12 +104,10 @@ export async function getAllCategories(params = {}) {
 export async function getCategoriesWithPagination(params = {}) {
     const queryParams = new URLSearchParams();
 
-    if (params.page != null) {
-        queryParams.append("page", params.page);
-    }
-    if (params.pageSize != null) {
-        queryParams.append("pageSize", params.pageSize);
-    }
+    const pageNum = typeof params.page === 'number' ? params.page : (parseInt(params.page, 10) || 1);
+    const pageSizeNum = typeof params.pageSize === 'number' ? params.pageSize : (parseInt(params.pageSize, 10) || 20);
+    if (pageNum >= 1) queryParams.append("page", pageNum);
+    if (pageSizeNum >= 1) queryParams.append("pageSize", pageSizeNum);
     if (params.search != null && params.search !== '') {
         queryParams.append("search", params.search);
     }
