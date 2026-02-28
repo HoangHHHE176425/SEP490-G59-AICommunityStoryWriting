@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -20,6 +20,9 @@ namespace Services.DTOs.Account
         public bool IsVerified { get; set; }    
         public string? Bio { get; set; }
         public string? AvatarUrl { get; set; }
+
+        /// <summary>Role từ DB: USER, AUTHOR, MODERATOR, ADMIN. Dùng cho FE kiểm tra quyền admin.</summary>
+        public string? Role { get; set; }
 
         public List<string> Tags { get; set; } = new List<string>();
 

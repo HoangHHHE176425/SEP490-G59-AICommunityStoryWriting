@@ -132,6 +132,10 @@ export function AuthProvider({ children }) {
         return res;
     };
 
+    const role = (user?.role ?? user?.Role ?? '').toString().trim().toUpperCase();
+    const hasAdminTag = Array.isArray(user?.tags) && user.tags.includes('Quản trị viên');
+    const isAdmin = role === 'ADMIN' || hasAdminTag;
+
     const value = {
         user,
         loading,
@@ -149,6 +153,8 @@ export function AuthProvider({ children }) {
         deleteMyAccount,
         uploadMyAvatar,
         isAuthenticated: !!user,
+        isAdmin,
+        role,
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
