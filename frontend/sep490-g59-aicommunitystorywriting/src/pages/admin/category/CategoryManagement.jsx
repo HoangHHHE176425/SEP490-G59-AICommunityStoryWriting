@@ -421,7 +421,7 @@ export function CategoryManagement() {
                             {error}
                         </p>
                         <button
-                            onClick={loadCategories}
+                            onClick={() => loadCategories(currentPage)}
                             style={{
                                 padding: '0.625rem 1rem',
                                 backgroundColor: '#13ec5b',

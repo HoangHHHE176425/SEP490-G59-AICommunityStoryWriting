@@ -1,4 +1,4 @@
-﻿using BusinessObjects.Entities;
+using BusinessObjects.Entities;
 using Repositories.Interfaces;
 using Services.DTOs.Account;
 using Services.Interfaces;
@@ -131,6 +131,8 @@ namespace Services.Implementations
                 JoinDate = user.created_at?.ToString("dd/MM/yyyy") ?? DateTime.UtcNow.ToString("dd/MM/yyyy"),
 
                 IsVerified = user.status == "ACTIVE",
+
+                Role = (user.role ?? "USER").Trim().ToUpperInvariant(),
 
                 Tags = tags,
 
