@@ -2,7 +2,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using Services.DTOs.Ai;
 using Services.DTOs.Stories;
+using Services.Exceptions;
+using Services.Interfaces;
 
 namespace AIStory.API.Controllers
 {
@@ -12,11 +15,13 @@ namespace AIStory.API.Controllers
     public class StoriesController : ControllerBase
     {
         private readonly IStoryService _storyService;
+        private readonly IStoryAiService _storyAiService;
         private readonly ILogger<StoriesController> _logger;
 
-        public StoriesController(IStoryService storyService, ILogger<StoriesController> logger)
+        public StoriesController(IStoryService storyService, IStoryAiService storyAiService, ILogger<StoriesController> logger)
         {
             _storyService = storyService;
+            _storyAiService = storyAiService;
             _logger = logger;
         }
 
@@ -339,6 +344,49 @@ namespace AIStory.API.Controllers
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while unpublishing the story", error = ex.Message });
+            }
+        }
+
+        /// <summary>AI gợi ý chương tiếp theo – đọc các chương đã viết và trả về 3–5 hướng phát triển (chỉ AUTHOR, demo Swagger).</summary>
+        [HttpPost("{id:guid}/suggest-next-chapter")]
+        [Authorize(Roles = "AUTHOR")]
+        [ProducesResponseType(typeof(SuggestNextChapterResponseDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status502BadGateway)]
+        [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+        [ProducesResponseType(429, Type = typeof(object))]
+        public async Task<IActionResult> SuggestNextChapter(Guid id, CancellationToken cancellationToken)
+        {
+            Guid userId;
+            var sub = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+            if (sub == null || !Guid.TryParse(sub.Value, out userId))
+                return Unauthorized(new { message = "User ID not found in token." });
+
+            try
+            {
+                var result = await _storyAiService.SuggestNextChapterAsync(id, userId, cancellationToken);
+                if (result == null)
+                    return NotFound(new { message = "Story not found, has no chapters, or Gemini API key is not configured. Check appsettings (Gemini:ApiKey)." });
+                return Ok(result);
+            }
+            catch (RateLimitExceededException ex)
+            {
+                _logger.LogWarning(ex, "Rate limit exceeded for user {UserId}, story {StoryId}.", userId, id);
+                return StatusCode(429, new { message = ex.Message });
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "Gemini request failed for story {StoryId}.", id);
+                var msg = ex.Message ?? "";
+                if (msg.Contains("429") || msg.Contains("Too Many Requests") || msg.Contains("RESOURCE_EXHAUSTED") || msg.Contains("quota"))
+                    return StatusCode(503, new { message = "Đã vượt hạn mức Gemini API (rate limit/quota). Vui lòng thử lại sau vài phút hoặc kiểm tra hạn mức tại https://ai.google.dev/gemini-api/docs/rate-limits", error = msg.Length > 300 ? msg[..300] + "..." : msg });
+                return StatusCode(502, new { message = "AI service temporarily unavailable.", error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Suggest next chapter failed for story {StoryId}.", id);
+                return StatusCode(500, new { message = "An error occurred while getting AI suggestions.", error = ex.Message });
             }
         }
     }

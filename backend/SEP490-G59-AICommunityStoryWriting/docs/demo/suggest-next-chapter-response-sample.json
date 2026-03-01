@@ -1,0 +1,22 @@
+{
+  "storyId": "b3333333-3333-3333-3333-333333333301",
+  "storyTitle": "Đấu Phá Thương Khung – Bản Demo",
+  "nextChapterNumber": 4,
+  "suggestions": [
+    {
+      "title": "Vào cổng Vân Lan tông, gặp Nạp Lan Yên",
+      "description": "Tiêu Viêm bước vào tông môn, đối diện Nạp Lan Yên và đề nghị ly hôn chính thức; có thể thêm xung đột với đệ tử Vân Lan tông."
+    },
+    {
+      "title": "Thử thách ba chiêu từ Vân Chi Vân",
+      "description": "Tông chủ đưa ra điều kiện: nếu Tiêu Viêm thắng ba chiêu sẽ cho ly hôn và trả lại hôn ước."
+    },
+    {
+      "title": "Đấu với đệ tử nội môn",
+      "description": "Trước khi gặp Nạp Lan Yên, Tiêu Viêm phải vượt qua trận đấu với đệ tử giỏi nhất của tông để chứng minh năng lực."
+    }
+  ],
+  "modelUsed": "gemini-2.0-flash",
+  "promptTokens": 850,
+  "completionTokens": 220
+}
