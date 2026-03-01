@@ -50,6 +50,8 @@ const STATUS_PARAM_MAP = {
 };
 
 const PAGE_SIZE = 10;
+/** Backend khuyến nghị: load lại danh sách duyệt/từ chối mỗi 30 giây để cập nhật khi có thay đổi từ nơi khác */
+const REFRESH_INTERVAL_MS = 30 * 1000;
 
 export function PublicationManagement() {
     const [selectedPublication, setSelectedPublication] = useState(null);
@@ -62,9 +64,12 @@ export function PublicationManagement() {
     const [totalPages, setTotalPages] = useState(1);
     const [totalCount, setTotalCount] = useState(0);
 
-    const loadPublications = useCallback((page = 1) => {
-        setLoading(true);
-        setError(null);
+    const loadPublications = useCallback((page = 1, options = {}) => {
+        const silent = options.silent === true;
+        if (!silent) {
+            setLoading(true);
+            setError(null);
+        }
 
         if (filterStatus === 'pending') {
             getChapters({ status: 'PENDING_REVIEW', pageSize: 500 })
@@ -91,12 +96,12 @@ export function PublicationManagement() {
                     });
                 })
                 .catch((err) => {
-                    setError(err?.message ?? 'Không tải được danh sách truyện');
+                    if (!silent) setError(err?.message ?? 'Không tải được danh sách truyện');
                     setPublications([]);
                     setTotalCount(0);
                     setTotalPages(1);
                 })
-                .finally(() => setLoading(false));
+                .finally(() => { if (!silent) setLoading(false); });
             return;
         }
 
@@ -115,12 +120,12 @@ export function PublicationManagement() {
                 setCurrentPage(res?.page ?? page);
             })
             .catch((err) => {
-                setError(err?.message ?? 'Không tải được danh sách truyện');
+                if (!silent) setError(err?.message ?? 'Không tải được danh sách truyện');
                 setPublications([]);
                 setTotalCount(0);
                 setTotalPages(1);
             })
-            .finally(() => setLoading(false));
+            .finally(() => { if (!silent) setLoading(false); });
     }, [filterStatus]);
 
     const handlePageChange = (page) => {
@@ -161,6 +166,14 @@ export function PublicationManagement() {
         const id = setTimeout(() => loadStats(), 0);
         return () => clearTimeout(id);
     }, [loadStats]);
+
+    useEffect(() => {
+        const intervalId = setInterval(() => {
+            loadPublications(currentPage, { silent: true });
+            loadStats();
+        }, REFRESH_INTERVAL_MS);
+        return () => clearInterval(intervalId);
+    }, [loadPublications, loadStats, currentPage]);
 
     const filteredPublications = filterStatus === 'pending'
         ? publications.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
