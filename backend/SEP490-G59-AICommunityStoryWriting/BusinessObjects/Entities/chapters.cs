@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
@@ -38,6 +38,8 @@ public partial class chapters
     public virtual ICollection<ai_plagiarism_reports> ai_plagiarism_reports { get; set; } = new List<ai_plagiarism_reports>();
 
     public virtual ICollection<chapter_versions> chapter_versions { get; set; } = new List<chapter_versions>();
+
+    public virtual ICollection<story_chapter_chunks> story_chapter_chunks { get; set; } = new List<story_chapter_chunks>();
 
     public virtual stories? story { get; set; }
 }

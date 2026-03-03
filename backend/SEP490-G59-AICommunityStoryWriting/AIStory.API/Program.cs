@@ -1,3 +1,4 @@
+using AIStory.API.Services;
 using AIStory.Services.Helpers;
 using AIStory.Services.Implementations;
 using BusinessObjects;
@@ -42,7 +43,7 @@ namespace AIStory.API
             builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
                 options.UseSqlServer(
                     builder.Configuration.GetConnectionString("DefaultConnection") 
-                    ?? "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                    ?? "Server=QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                     sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                         maxRetryCount: 5,
                         maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -90,6 +91,11 @@ namespace AIStory.API
             builder.Services.AddScoped<IAdminUserService, AdminUserService>();
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
 
+            // AI: gợi ý chương tiếp theo + đồng sáng tác 3 agent
+            builder.Services.AddScoped<IAIUsageLogRepository, AIUsageLogRepository>();
+            builder.Services.AddScoped<IAINextChapterService, AINextChapterService>();
+            builder.Services.AddScoped<IAICoCreationService, AICoCreationService>();
+            builder.Services.AddSingleton<IAISuggestRateLimitService, AISuggestRateLimitService>();
 
             var jwtKey = builder.Configuration["Jwt:Key"];
             var jwtIssuer = builder.Configuration["Jwt:Issuer"];
