@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
@@ -44,6 +44,8 @@ public partial class stories
     public virtual users? author { get; set; }
 
     public virtual ICollection<chapters> chapters { get; set; } = new List<chapters>();
+
+    public virtual ICollection<story_chapter_chunks> story_chapter_chunks { get; set; } = new List<story_chapter_chunks>();
 
     public virtual ICollection<comments> comments { get; set; } = new List<comments>();
 

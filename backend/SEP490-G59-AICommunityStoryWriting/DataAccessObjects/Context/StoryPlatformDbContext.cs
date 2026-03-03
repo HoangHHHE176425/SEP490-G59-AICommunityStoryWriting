@@ -82,6 +82,8 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<stories> stories { get; set; }
 
+    public virtual DbSet<story_chapter_chunks> story_chapter_chunks { get; set; }
+
     public virtual DbSet<story_commitments> story_commitments { get; set; }
 
     public virtual DbSet<system_policies> system_policies { get; set; }
@@ -110,7 +112,7 @@ public partial class StoryPlatformDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
-            optionsBuilder.UseSqlServer("Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;");
+            optionsBuilder.UseSqlServer("Server=QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;");
 
         }
     }
@@ -350,6 +352,32 @@ public partial class StoryPlatformDbContext : DbContext
             entity.HasOne(d => d.story).WithMany(p => p.chapters)
                 .HasForeignKey(d => d.story_id)
                 .HasConstraintName("fk_chapters_story");
+        });
+
+        modelBuilder.Entity<story_chapter_chunks>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("PK_story_chapter_chunks");
+
+            entity.ToTable("story_chapter_chunks");
+
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
+            entity.Property(e => e.content).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.embedding_json).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.embedding_model).HasMaxLength(128);
+            entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
+
+            entity.HasOne(d => d.chapter).WithMany(p => p.story_chapter_chunks)
+                .HasForeignKey(d => d.chapter_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_rag_chunks_chapter");
+
+            entity.HasOne(d => d.story).WithMany(p => p.story_chapter_chunks)
+                .HasForeignKey(d => d.story_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_rag_chunks_story");
+
+            entity.HasIndex(e => e.story_id).HasDatabaseName("IX_story_chapter_chunks_story_id");
+            entity.HasIndex(e => new { e.story_id, e.chapter_id, e.chunk_index }).IsUnique().HasDatabaseName("UQ_story_chapter_chunks_story_chapter_index");
         });
 
         modelBuilder.Entity<coin_orders>(entity =>
