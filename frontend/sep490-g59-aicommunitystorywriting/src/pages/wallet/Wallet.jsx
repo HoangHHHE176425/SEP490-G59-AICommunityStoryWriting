@@ -1,0 +1,157 @@
+import { useState } from 'react';
+import { Header } from '../../components/homepage/Header';
+import { Footer } from '../../components/homepage/Footer';
+import { Wallet as WalletIcon, History, ArrowDownCircle, ArrowUpCircle, Lock } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
+import RechargeCoin from '../../components/profile/RechargeCoin';
+import ActivityHistory from '../../components/profile/ActivityHistory';
+
+export default function Wallet() {
+    const { user } = useAuth();
+    const [activeTab, setActiveTab] = useState('recharge');
+
+    const balance = user?.stats?.currentCoins ?? 0;
+
+    // Mock summary numbers – thay bằng API thật sau
+    const summaryStats = {
+        totalRecharge: 1500,
+        totalSpent: 150,
+        locked: 0,
+    };
+
+    const spentPercent =
+        summaryStats.totalRecharge > 0
+            ? Math.min(100, Math.round((summaryStats.totalSpent / summaryStats.totalRecharge) * 100))
+            : 0;
+
+    const tabs = [
+        { id: 'recharge', label: 'Nạp tiền', icon: WalletIcon },
+        { id: 'history', label: 'Lịch sử', icon: History },
+    ];
+
+    const renderContent = () => {
+        switch (activeTab) {
+            case 'recharge':
+                return <RechargeCoin />;
+            case 'history':
+                return <ActivityHistory />;
+            default:
+                return <RechargeCoin />;
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-background-light dark:bg-background-dark flex flex-col">
+            <Header />
+            <div className="flex-1">
+                <div className="max-w-[1280px] mx-auto px-4 py-8">
+                    {/* Wallet summary */}
+                    <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6 mb-6 border border-slate-200 dark:border-slate-700">
+                        <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="size-12 rounded-full bg-primary/10 flex items-center justify-center">
+                                    <WalletIcon className="w-6 h-6 text-primary" />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold text-slate-900 dark:text-white">Ví của tôi</h2>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                                        Quản lý số dư coin và giao dịch
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                    Số dư hiện tại
+                                </p>
+                                <p className="text-2xl font-bold text-primary">
+                                    {Number(balance || 0).toLocaleString()} Coins
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Quick stats */}
+                        <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div className="flex items-center gap-3 rounded-lg border border-emerald-100 dark:border-emerald-900/60 bg-emerald-50/60 dark:bg-emerald-900/20 px-3 py-2.5">
+                                <div className="size-9 rounded-full bg-emerald-500/10 flex items-center justify-center">
+                                    <ArrowDownCircle className="w-5 h-5 text-emerald-500" />
+                                </div>
+                                <div>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">Tổng đã nạp</p>
+                                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                        {summaryStats.totalRecharge.toLocaleString()} Coins
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3 rounded-lg border border-amber-100 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-900/20 px-3 py-2.5">
+                                <div className="size-9 rounded-full bg-amber-500/10 flex items-center justify-center">
+                                    <ArrowUpCircle className="w-5 h-5 text-amber-500" />
+                                </div>
+                                <div>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">Đã sử dụng</p>
+                                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                        {summaryStats.totalSpent.toLocaleString()} Coins
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-900/40 px-3 py-2.5">
+                                <div className="size-9 rounded-full bg-slate-500/10 flex items-center justify-center">
+                                    <Lock className="w-5 h-5 text-slate-500" />
+                                </div>
+                                <div>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">Số dư khóa</p>
+                                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                                        {summaryStats.locked.toLocaleString()} Coins
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Usage progress */}
+                        <div className="mt-5">
+                            <div className="flex items-center justify-between mb-1 text-xs text-slate-500 dark:text-slate-400">
+                                <span>Đã sử dụng {spentPercent}% số coin đã nạp</span>
+                                <span>
+                                    {summaryStats.totalSpent.toLocaleString()} /{' '}
+                                    {summaryStats.totalRecharge.toLocaleString()} Coins
+                                </span>
+                            </div>
+                            <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
+                                <div
+                                    className="h-full bg-primary/80 rounded-full transition-all"
+                                    style={{ width: `${spentPercent}%` }}
+                                ></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Tabs */}
+                    <div className="mb-8 border-b border-slate-200 dark:border-slate-700">
+                        <div className="flex gap-8 overflow-x-auto">
+                            {tabs.map((tab) => {
+                                const Icon = tab.icon;
+                                const isActive = activeTab === tab.id;
+                                return (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveTab(tab.id)}
+                                        className={`flex items-center gap-2 px-4 py-4 font-semibold text-sm transition-colors border-b-2 whitespace-nowrap ${
+                                            isActive
+                                                ? 'text-primary border-primary'
+                                                : 'text-slate-500 dark:text-slate-400 border-transparent hover:text-primary'
+                                        }`}
+                                    >
+                                        <Icon className="w-5 h-5" />
+                                        {tab.label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {renderContent()}
+                </div>
+            </div>
+            <Footer />
+        </div>
+    );
+}

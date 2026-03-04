@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { User, Edit, Coins, History, Ticket, Trash2, BookOpen } from 'lucide-react';
+import { User, Edit, Coins, Ticket, Trash2, BookOpen } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import ViewProfile from '../../components/profile/ViewProfile';
 import EditProfile from '../../components/profile/EditProfile';
-import RechargeCoin from '../../components/profile/RechargeCoin';
-import ActivityHistory from '../../components/profile/ActivityHistory';
 import DeleteAccount from '../../components/profile/DeleteAccount';
+import { Link } from 'react-router-dom';
 
 export default function Profile() {
     const { user } = useAuth();
@@ -19,8 +18,6 @@ export default function Profile() {
     const tabs = [
         { id: 'info', label: 'Thông tin', icon: User },
         { id: 'edit', label: 'Chỉnh sửa', icon: Edit },
-        { id: 'recharge', label: 'Nạp Coin', icon: Coins },
-        { id: 'history', label: 'Lịch sử', icon: History },
         { id: 'voucher', label: 'Voucher', icon: Ticket },
         { id: 'delete', label: 'Xóa tài khoản', icon: Trash2 },
     ];
@@ -31,10 +28,6 @@ export default function Profile() {
                 return <ViewProfile />;
             case 'edit':
                 return <EditProfile />;
-            case 'recharge':
-                return <RechargeCoin />;
-            case 'history':
-                return <ActivityHistory />;
             case 'voucher':
                 return <div className="p-8 text-center text-slate-500">Tính năng Voucher đang được phát triển...</div>;
             case 'delete':
@@ -74,12 +67,15 @@ export default function Profile() {
                                     {(profileData?.tags || []).join(' | ')}
                                 </p>
                                 <div className="flex gap-3">
-                                    <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-full">
+                                    <Link
+                                        to="/wallet"
+                                        className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-full hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors"
+                                    >
                                         <Coins className="w-4 h-4 text-amber-500" />
                                         <span className="text-sm font-bold text-amber-700 dark:text-amber-400">
                                             {(profileData?.stats?.currentCoins ?? 0).toLocaleString()} Coins
                                         </span>
-                                    </div>
+                                    </Link>
                                     <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-full">
                                         <BookOpen className="w-4 h-4 text-green-500" />
                                         <span className="text-sm font-bold text-green-700 dark:text-green-400">

@@ -9,6 +9,7 @@ import Register from './pages/auth/Register';
 import ForgotPassword from './pages/auth/ForgotPassword';
 import VerifyOtp from './pages/auth/VerifyOtp';
 import Profile from './pages/profile/Profile';
+import Wallet from './pages/wallet/Wallet';
 import { ChapterReader } from './pages/chapter-detail/ChapterReader';
 import { AuthorStoryManagement } from './pages/author/AuthorStoryManagement';
 import { StoryBrowse } from './pages/story-list/StoryBrowse';
@@ -29,6 +30,7 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/verify-otp" element={<VerifyOtp />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/wallet" element={<Wallet />} />
           <Route path="/chapter" element={<ChapterReader />} />
           <Route path="/author" element={<AuthorStoryManagement />} />
           <Route path="/story-list" element={<StoryBrowse />} />
