@@ -5,25 +5,64 @@ export default function RechargeCoin() {
     const [selectedAmount, setSelectedAmount] = useState(null);
     const [customAmount, setCustomAmount] = useState('');
     const [paymentMethod, setPaymentMethod] = useState('card');
+    const [status, setStatus] = useState(null); // 'success' | 'error' | null
+    const [statusMessage, setStatusMessage] = useState('');
 
     const coinPackages = [
-        { coins: 100, price: 10000, bonus: 0 },
-        { coins: 500, price: 45000, bonus: 50 },
-        { coins: 1000, price: 85000, bonus: 150 },
-        { coins: 2000, price: 160000, bonus: 400 },
-        { coins: 5000, price: 375000, bonus: 1250 },
+        { coins: 100, price: 100000, bonus: 0 },
+        { coins: 500, price: 450000, bonus: 50 },
+        { coins: 1000, price: 850000, bonus: 150, recommended: true },
+        { coins: 2000, price: 1600000, bonus: 400 },
+        { coins: 5000, price: 3750000, bonus: 1250 },
     ];
 
+    const EXCHANGE_RATE = 1000; // 1 Coin = 1.000 VNĐ (demo)
+
     const handleRecharge = () => {
-        // Mock recharge - replace with actual API call
-        alert('Tính năng nạp coin đang được phát triển');
+        const amount = selectedAmount || Number(customAmount) || 0;
+        if (!amount || amount <= 0) {
+            setStatus('error');
+            setStatusMessage('Vui lòng chọn hoặc nhập số coin hợp lệ.');
+            return;
+        }
+
+        // Mock recharge - thay bằng API thật sau
+        setStatus('success');
+        setStatusMessage(
+            `Demo: Yêu cầu nạp ${amount.toLocaleString()} Coins đã được tạo. Khi tích hợp cổng thanh toán, coin sẽ được cộng sau khi thanh toán thành công.`
+        );
     };
 
     return (
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-8 border border-slate-200 dark:border-slate-700">
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6">
-                Nạp Coin
-            </h3>
+            <div className="flex items-center justify-between mb-2">
+                <div>
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+                        Nạp Coin
+                    </h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                        Chọn gói coin hoặc nhập số lượng tùy chỉnh để nạp vào ví.
+                    </p>
+                </div>
+                <div className="hidden sm:flex flex-col items-end text-right text-xs text-slate-500 dark:text-slate-400">
+                    <span className="font-semibold">Tỷ giá tham khảo</span>
+                    <span>1 Coin ≈ {EXCHANGE_RATE.toLocaleString('vi-VN')} VNĐ</span>
+                </div>
+            </div>
+
+            {/* Status message */}
+            {status && (
+                <div
+                    className={`mt-4 mb-2 rounded-lg px-4 py-3 text-sm flex items-start gap-2 ${
+                        status === 'success'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-900/60'
+                            : 'bg-red-50 text-red-700 border border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-900/60'
+                    }`}
+                >
+                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <p>{statusMessage}</p>
+                </div>
+            )}
 
             <div className="space-y-6">
                 {/* Coin Packages */}
@@ -39,12 +78,17 @@ export default function RechargeCoin() {
                                     setSelectedAmount(pkg.coins);
                                     setCustomAmount('');
                                 }}
-                                className={`p-4 border-2 rounded-lg text-left transition-all ${
+                                className={`relative p-4 border-2 rounded-lg text-left transition-all ${
                                     selectedAmount === pkg.coins
                                         ? 'border-primary bg-primary/10'
                                         : 'border-slate-200 dark:border-slate-600 hover:border-primary/50'
                                 }`}
                             >
+                                {pkg.recommended && (
+                                    <span className="absolute -top-3 right-3 inline-flex items-center rounded-full bg-primary text-white text-[11px] font-semibold px-2 py-0.5 shadow-sm">
+                                        Giá tốt nhất
+                                    </span>
+                                )}
                                 <div className="flex items-center justify-between mb-2">
                                     <div className="flex items-center gap-2">
                                         <Coins className="w-5 h-5 text-amber-500" />
@@ -59,7 +103,7 @@ export default function RechargeCoin() {
                                     )}
                                 </div>
                                 <div className="text-sm text-slate-600 dark:text-slate-400">
-                                    {pkg.price.toLocaleString()} VNĐ
+                                    {pkg.price.toLocaleString('vi-VN')} VNĐ
                                 </div>
                             </button>
                         ))}
@@ -136,6 +180,26 @@ export default function RechargeCoin() {
                                 </div>
                             </div>
                         </button>
+                    </div>
+                </div>
+
+                {/* Promotions */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 rounded-lg border border-purple-200 dark:border-purple-900/60 bg-purple-50/60 dark:bg-purple-900/20">
+                        <p className="text-sm font-semibold text-purple-800 dark:text-purple-200 mb-1">
+                            Ưu đãi nạp lần đầu
+                        </p>
+                        <p className="text-xs text-purple-700 dark:text-purple-300">
+                            Nạp từ 1.000 Coins trở lên lần đầu tiên sẽ được tặng thêm 10% coin (demo UI).
+                        </p>
+                    </div>
+                    <div className="p-4 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-900/20">
+                        <p className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-1">
+                            Khung giờ vàng
+                        </p>
+                        <p className="text-xs text-amber-700 dark:text-amber-300">
+                            Từ 20h - 22h mỗi tối, nạp gói từ 2.000 Coins trở lên được tặng thêm 5% coin (demo UI).
+                        </p>
                     </div>
                 </div>
 
