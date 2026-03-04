@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import {
     LayoutDashboard,
     Bookmark,
@@ -15,9 +18,24 @@ import {
     Shield
 } from 'lucide-react';
 
+const ROLE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', MODERATOR: 'Kiểm duyệt', ADMIN: 'Quản trị' };
+
 export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) {
+    const navigate = useNavigate();
+    const { user, logout } = useAuth();
+    const displayName = user?.displayName ?? user?.DisplayName ?? user?.email ?? 'Admin';
+    const roleLabel = ROLE_LABELS[(user?.role ?? user?.Role ?? 'ADMIN').toUpperCase()] ?? 'Quản trị';
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+    const handleLogout = async () => {
+        try {
+            await logout();
+        } finally {
+            setIsMobileSidebarOpen(false);
+            navigate('/login');
+        }
+    };
 
     const menuItems = [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -147,13 +165,14 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                             }}
                         >
                             <img
-                                src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop"
+                                src={user?.avatarUrl ? resolveBackendUrl(user.avatarUrl) : 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop'}
                                 alt="Admin"
                                 style={{ width: '32px', height: '32px', borderRadius: '50%' }}
+                                onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop'; }}
                             />
                             <div style={{ display: window.innerWidth >= 640 ? 'block' : 'none' }} className="hidden sm:block">
-                                <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b', margin: 0 }}>Admin User</p>
-                                <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0 }}>Administrator</p>
+                                <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b', margin: 0 }}>{displayName}</p>
+                                <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0 }}>{roleLabel}</p>
                             </div>
                         </div>
                     </div>
@@ -223,6 +242,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
 
                 <div style={{ position: 'absolute', bottom: '1rem', left: '1rem', right: '1rem' }}>
                     <button
+                        onClick={handleLogout}
                         style={{
                             width: '100%',
                             display: 'flex',
@@ -353,6 +373,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
 
                     <div style={{ padding: '1rem', borderTop: '1px solid #e2e8f0' }}>
                         <button
+                            onClick={handleLogout}
                             style={{
                                 width: '100%',
                                 display: 'flex',

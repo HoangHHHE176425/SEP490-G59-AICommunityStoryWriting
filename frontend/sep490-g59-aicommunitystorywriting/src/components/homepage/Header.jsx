@@ -1,8 +1,9 @@
-import { Search, Bell, Edit, BookOpen, Menu, X, ChevronDown, Coins, User, Library, LogOut, FileText, List } from 'lucide-react';
-import { useState } from 'react';
+import { Search, Bell, Edit, BookOpen, Menu, X, ChevronDown, Wallet, User, Library, LogOut, FileText, List } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { getAllCategories } from '../../api/category/categoryApi';
 
 export function Header() {
     const navigate = useNavigate();
@@ -10,6 +11,8 @@ export function Header() {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isGenreOpen, setIsGenreOpen] = useState(false);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+    const [categories, setCategories] = useState([]);
+    const [categoriesLoading, setCategoriesLoading] = useState(true);
 
     const userCoins = user?.stats?.currentCoins ?? 0;
 
@@ -19,20 +22,31 @@ export function Header() {
         navigate('/');
     };
 
-    const genres = [
-        'Tiên hiệp',
-        'Kiếm hiệp',
-        'Ngôn tình',
-        'Đô thị',
-        'Huyền huyễn',
-        'Khoa học viễn tưởng',
-        'Trinh thám',
-        'Kinh dị',
-        'Lịch sử',
-        'Đam mỹ',
-        'Trọng sinh',
-        'Xuyên không',
-    ];
+    useEffect(() => {
+        let cancelled = false;
+        getAllCategories({ includeInactive: false })
+            .then((data) => {
+                if (cancelled) return;
+                const items = Array.isArray(data) ? data : (data?.items ?? data?.Items ?? []);
+                const categoryNames = items
+                    .map((cat) => cat.name ?? cat.Name ?? '')
+                    .filter((name) => name && name.trim())
+                    .sort();
+                setCategories(categoryNames);
+            })
+            .catch((err) => {
+                if (!cancelled) {
+                    console.error('Failed to load categories:', err);
+                    setCategories([]);
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setCategoriesLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     return (
         <header className="sticky top-0 z-50 w-full bg-slate-900/95 backdrop-blur-md border-b border-slate-700/50">
@@ -80,15 +94,21 @@ export function Header() {
                                     onMouseDown={(e) => e.preventDefault()}
                                 >
                                     <div className="grid grid-cols-1 py-2">
-                                        {genres.map((genre) => (
-                                            <a
-                                                key={genre}
-                                                href="#"
-                                                className="px-4 py-2 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
-                                            >
-                                                {genre}
-                                            </a>
-                                        ))}
+                                        {categoriesLoading ? (
+                                            <div className="px-4 py-2 text-sm text-slate-400">Đang tải...</div>
+                                        ) : categories.length === 0 ? (
+                                            <div className="px-4 py-2 text-sm text-slate-400">Chưa có thể loại</div>
+                                        ) : (
+                                            categories.map((categoryName) => (
+                                                <a
+                                                    key={categoryName}
+                                                    href="#"
+                                                    className="px-4 py-2 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
+                                                >
+                                                    {categoryName}
+                                                </a>
+                                            ))
+                                        )}
                                     </div>
                                 </div>
                             )}
@@ -104,11 +124,14 @@ export function Header() {
                     <div className="flex items-center gap-3">
                         {isAuthenticated ? (
                             <>
-                                {/* Coin Balance */}
-                                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 border border-amber-700/50 rounded-full">
-                                    <Coins className="w-4 h-4 text-amber-400" />
+                                {/* Wallet - click to go to wallet page */}
+                                <Link
+                                    to="/wallet"
+                                    className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 border border-amber-700/50 rounded-full hover:bg-amber-950/60 transition-colors"
+                                >
+                                    <Wallet className="w-4 h-4 text-amber-400" />
                                     <span className="text-sm font-bold text-amber-400">{userCoins.toLocaleString()}</span>
-                                </div>
+                                </Link>
 
                                 <button className="p-2 text-slate-300 hover:bg-slate-800 rounded-full transition-colors relative">
                                     <Bell className="w-5 h-5" />
@@ -215,15 +238,19 @@ export function Header() {
             {isMenuOpen && (
                 <div className="lg:hidden border-t border-slate-700 bg-slate-900">
                     <div className="max-w-[1280px] mx-auto px-4 py-4 flex flex-col gap-4">
-                        {/* Coin Balance Mobile */}
+                        {/* Wallet Mobile - link to wallet page */}
                         {isAuthenticated && (
-                            <div className="flex items-center justify-between p-3 bg-amber-950/40 border border-amber-700/50 rounded-lg">
+                            <Link
+                                to="/wallet"
+                                onClick={() => setIsMenuOpen(false)}
+                                className="flex items-center justify-between p-3 bg-amber-950/40 border border-amber-700/50 rounded-lg hover:bg-amber-950/60 transition-colors"
+                            >
                                 <div className="flex items-center gap-2">
-                                    <Coins className="w-5 h-5 text-amber-400" />
-                                    <span className="font-semibold text-white">Số dư xu</span>
+                                    <Wallet className="w-5 h-5 text-amber-400" />
+                                    <span className="font-semibold text-white">Ví</span>
                                 </div>
                                 <span className="text-lg font-bold text-amber-400">{userCoins.toLocaleString()}</span>
-                            </div>
+                            </Link>
                         )}
 
                         <div className="relative mb-2">
@@ -245,15 +272,21 @@ export function Header() {
                                     <ChevronDown className="w-4 h-4 group-open:rotate-180 transition-transform" />
                                 </summary>
                                 <div className="mt-2 ml-4 flex flex-col gap-2">
-                                    {genres.map((genre) => (
-                                        <a
-                                            key={genre}
-                                            href="#"
-                                            className="text-sm text-slate-400 hover:text-primary transition-colors"
-                                        >
-                                            {genre}
-                                        </a>
-                                    ))}
+                                    {categoriesLoading ? (
+                                        <div className="text-sm text-slate-400">Đang tải...</div>
+                                    ) : categories.length === 0 ? (
+                                        <div className="text-sm text-slate-400">Chưa có thể loại</div>
+                                    ) : (
+                                        categories.map((categoryName) => (
+                                            <a
+                                                key={categoryName}
+                                                href="#"
+                                                className="text-sm text-slate-400 hover:text-primary transition-colors"
+                                            >
+                                                {categoryName}
+                                            </a>
+                                        ))
+                                    )}
                                 </div>
                             </details>
 

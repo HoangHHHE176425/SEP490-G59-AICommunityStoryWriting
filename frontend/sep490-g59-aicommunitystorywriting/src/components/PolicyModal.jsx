@@ -1,8 +1,47 @@
-import { X, Shield, FileText, AlertCircle } from 'lucide-react';
-import { PolicyContent } from './PolicyContent';
+import { useEffect, useMemo, useState } from 'react';
+import { X, Shield, AlertCircle } from 'lucide-react';
+import { getActivePolicy } from '../api/policy/policyApi';
+import { PolicyBody } from './policy/PolicyBody';
 
-export function PolicyModal({ isOpen, onClose, onAccept, onDecline }) {
+export function PolicyModal({ isOpen, onClose, onAccept, onDecline, type: typeProp = 'USER' }) {
     if (!isOpen) return null;
+
+    const type = useMemo(() => (typeProp ?? 'USER').trim().toUpperCase() || 'USER', [typeProp]);
+    const [policy, setPolicy] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        let alive = true;
+        setLoading(true);
+        setError(null);
+
+        getActivePolicy(type)
+            .then((p) => {
+                if (!alive) return;
+                setPolicy(p);
+            })
+            .catch((err) => {
+                if (!alive) return;
+                const data = err?.response?.data;
+                const parts = [
+                    data?.message,
+                    data?.detail,
+                    data?.inner,
+                    !data?.message && !data?.detail && !data?.inner ? err?.message : null,
+                ].filter(Boolean);
+                setError(parts.join(' | ') || `Không tải được policy loại ${type}`);
+                setPolicy(null);
+            })
+            .finally(() => {
+                if (!alive) return;
+                setLoading(false);
+            });
+
+        return () => {
+            alive = false;
+        };
+    }, [type]);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -49,7 +88,29 @@ export function PolicyModal({ isOpen, onClose, onAccept, onDecline }) {
                         </div>
                     </div>
 
-                    <PolicyContent />
+                    {loading ? (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                            Đang tải policy...
+                        </div>
+                    ) : error ? (
+                        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                            {error}
+                        </div>
+                    ) : !policy ? (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                            Chưa có policy đang áp dụng cho loại <span className="font-semibold">{type}</span>. Vui lòng tạo policy (và bật active) trong database.
+                        </div>
+                    ) : (
+                        <>
+                            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                                <span className="font-semibold text-slate-900">{policy?.type ?? type}</span>
+                                {policy?.version ? (
+                                    <span className="rounded-full bg-slate-100 px-2 py-0.5">v{policy.version}</span>
+                                ) : null}
+                            </div>
+                            <PolicyBody content={policy?.content} />
+                        </>
+                    )}
                 </div>
 
                 {/* Footer Actions */}
