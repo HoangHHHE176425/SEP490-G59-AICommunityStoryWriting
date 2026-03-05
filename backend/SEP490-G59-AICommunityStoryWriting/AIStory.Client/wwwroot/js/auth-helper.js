@@ -152,6 +152,11 @@ const AuthHelper = {
         return this.hasRole('AUTHOR');
     },
 
+    // Kiểm tra là MODERATOR hoặc ADMIN (quyền kiểm duyệt)
+    isModerator() {
+        return this.hasAnyRole('MODERATOR', 'ADMIN');
+    },
+
     // Kiểm tra token có hết hạn không
     isTokenExpired() {
         const token = this.getToken();

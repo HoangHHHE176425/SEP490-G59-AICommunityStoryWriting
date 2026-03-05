@@ -114,8 +114,8 @@ namespace DataAccessObjects.DAOs
                 q = q.Where(u =>
                     u.email.ToLower().Contains(s) ||
                     (u.user_profiles != null && u.user_profiles.nickname != null && u.user_profiles.nickname.ToLower().Contains(s)) ||
-                    (u.user_profiles != null && u.user_profiles.Phone != null && u.user_profiles.Phone.ToLower().Contains(s)) ||
-                    (u.user_profiles != null && u.user_profiles.IdNumber != null && u.user_profiles.IdNumber.ToLower().Contains(s)));
+                    (u.user_profiles != null && u.user_profiles.phone != null && u.user_profiles.phone.ToLower().Contains(s)) ||
+                    (u.user_profiles != null && u.user_profiles.id_number != null && u.user_profiles.id_number.ToLower().Contains(s)));
             }
 
             if (!string.IsNullOrWhiteSpace(query.Role))
