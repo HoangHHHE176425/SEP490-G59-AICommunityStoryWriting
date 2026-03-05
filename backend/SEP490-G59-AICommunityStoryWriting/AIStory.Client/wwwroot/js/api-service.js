@@ -305,6 +305,7 @@ class ApiService {
         if (options.search) params.append('search', options.search);
         if (options.sortBy) params.append('sortBy', options.sortBy);
         if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.claimFilter) params.append('claimFilter', options.claimFilter);
         return this.request(`/moderator/stories/pending?${params.toString()}`);
     }
 
@@ -316,7 +317,12 @@ class ApiService {
         if (options.search) params.append('search', options.search);
         if (options.sortBy) params.append('sortBy', options.sortBy);
         if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.claimFilter) params.append('claimFilter', options.claimFilter);
         return this.request(`/moderator/chapters/pending?${params.toString()}`);
+    }
+
+    static async moderatorClaimStory(id) {
+        return this.request(`/moderator/stories/${id}/claim`, { method: 'POST' });
     }
 
     static async moderatorApproveStory(id) {
@@ -328,6 +334,10 @@ class ApiService {
             method: 'POST',
             body: JSON.stringify({ reason: reason })
         });
+    }
+
+    static async moderatorClaimChapter(id) {
+        return this.request(`/moderator/chapters/${id}/claim`, { method: 'POST' });
     }
 
     static async moderatorApproveChapter(id) {
