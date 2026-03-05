@@ -16,7 +16,31 @@ export default function RechargeCoin() {
         { coins: 5000, price: 3750000, bonus: 1250 },
     ];
 
-    const EXCHANGE_RATE = 1000; // 1 Coin = 1.000 VNĐ (demo)
+    // Tỉ giá theo bậc: nạp càng nhiều, giá mỗi coin càng rẻ (VNĐ/coin)
+    const RATE_TIERS = [
+        { minCoins: 1, maxCoins: 99, ratePerCoin: 1000, label: 'Cơ bản' },
+        { minCoins: 100, maxCoins: 499, ratePerCoin: 900, label: 'Tiết kiệm' },
+        { minCoins: 500, maxCoins: 999, ratePerCoin: 850, label: 'Ưu đãi' },
+        { minCoins: 1000, maxCoins: 1999, ratePerCoin: 800, label: 'Vàng' },
+        { minCoins: 2000, maxCoins: 4999, ratePerCoin: 750, label: 'Bạch kim' },
+        { minCoins: 5000, maxCoins: Infinity, ratePerCoin: 700, label: 'Kim cương' },
+    ];
+
+    const getPriceForCustomCoins = (coins) => {
+        const n = Math.floor(Number(coins)) || 0;
+        if (n <= 0) return null;
+        const tier = RATE_TIERS.find((t) => n >= t.minCoins && n <= t.maxCoins);
+        if (!tier) return null;
+        return {
+            totalVnd: n * tier.ratePerCoin,
+            ratePerCoin: tier.ratePerCoin,
+            label: tier.label,
+            coins: n,
+        };
+    };
+
+    const customPrice = customAmount ? getPriceForCustomCoins(customAmount) : null;
+    const EXCHANGE_RATE = 1000; // tỉ giá tham khảo mặc định (1 Coin ≈ 1.000 VNĐ)
 
     const handleRecharge = () => {
         const amount = selectedAmount || Number(customAmount) || 0;
@@ -131,6 +155,25 @@ export default function RechargeCoin() {
                             min="1"
                         />
                     </div>
+                    {customPrice && (
+                        <div className="mt-3 p-4 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/80 dark:bg-emerald-950/30">
+                            <p className="text-sm font-semibold text-slate-900 dark:text-white mb-1">
+                                Số tiền cần thanh toán
+                            </p>
+                            <p className="text-xl font-bold text-primary">
+                                {customPrice.totalVnd.toLocaleString('vi-VN')} VNĐ
+                            </p>
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
+                                Tỷ giá áp dụng: <span className="font-semibold">{customPrice.ratePerCoin.toLocaleString('vi-VN')} VNĐ</span>/coin
+                                <span className="ml-1 px-1.5 py-0.5 rounded bg-emerald-200/80 dark:bg-emerald-800/50 text-emerald-800 dark:text-emerald-200 text-[10px] font-medium">
+                                    Bậc {customPrice.label}
+                                </span>
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
+                                Nạp càng nhiều coin, tỷ giá càng ưu đãi (từ 1.000 VNĐ/coin xuống 700 VNĐ/coin).
+                            </p>
+                        </div>
+                    )}
                 </div>
 
                 {/* Payment Method */}
