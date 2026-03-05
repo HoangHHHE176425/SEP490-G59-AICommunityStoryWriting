@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar, UserCheck } from 'lucide-react';
+import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar } from 'lucide-react';
 import { getChapters, getChapterById } from '../../../api/chapter/chapterApi';
 import { approveStory, approveChapter, rejectStory, rejectChapter } from '../../../api/moderator/moderatorApi';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
@@ -18,13 +18,14 @@ function mapChapterItem(item) {
     };
 }
 
-export function PublicationDetailModal({ publication, onClose, onApprove, onReject, onRefresh, onClaimStory, claimingId }) {
+export function PublicationDetailModal({ publication, onClose, onApprove, onReject, onRefresh }) {
     const { showToast, ToastContainer } = useToast();
     const [chapters, setChapters] = useState([]);
     const [chaptersLoading, setChaptersLoading] = useState(true);
     const [chapterContents, setChapterContents] = useState({});
     const [selectedChapter, setSelectedChapter] = useState(null);
     const [showRejectForm, setShowRejectForm] = useState(false);
+    const [showRejectConfirm, setShowRejectConfirm] = useState(false);
     const [showApproveConfirm, setShowApproveConfirm] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -124,13 +125,17 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         }
     };
 
-    const handleRejectSubmit = async () => {
+    const openRejectConfirm = () => {
         if (!rejectionReason.trim()) {
-            alert('Vui lòng nhập lý do từ chối');
+            showToast('Vui lòng nhập lý do từ chối', 'error');
             return;
         }
+        setShowRejectConfirm(true);
+    };
 
-        if (!window.confirm('Bạn có chắc chắn muốn từ chối xuất bản này?')) return;
+    const handleRejectSubmit = async () => {
+        setShowRejectConfirm(false);
+        if (!rejectionReason.trim()) return;
         setIsSubmitting(true);
         try {
             if (selectedChapter) {
@@ -298,31 +303,6 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
-                            {onClaimStory && (publication.type === 'story' || publication.type === 'new_story') && (
-                                <button
-                                    onClick={() => onClaimStory(publication.storyId ?? publication.id)}
-                                    disabled={
-                                        (publication.claimedByDisplayName && !publication.isClaimedByMe) ||
-                                        claimingId === (publication.storyId ?? publication.id)
-                                    }
-                                    style={{
-                                        padding: '0.5rem 1rem',
-                                        backgroundColor: (publication.claimedByDisplayName && !publication.isClaimedByMe) ? '#e2e8f0' : '#0ea5e9',
-                                        color: '#ffffff',
-                                        fontSize: '0.8125rem',
-                                        fontWeight: 600,
-                                        borderRadius: '8px',
-                                        border: 'none',
-                                        cursor: (publication.claimedByDisplayName && !publication.isClaimedByMe) ? 'not-allowed' : 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.375rem'
-                                    }}
-                                >
-                                    <UserCheck style={{ width: '14px', height: '14px' }} />
-                                    {(publication.claimedByDisplayName && !publication.isClaimedByMe) ? 'Đã có người nhận' : claimingId === (publication.storyId ?? publication.id) ? '...' : 'Nhận duyệt đơn'}
-                                </button>
-                            )}
                             <button
                                 onClick={onClose}
                                 style={{
@@ -614,7 +594,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 </button>
 
                                 <button
-                                    onClick={handleRejectSubmit}
+                                    onClick={openRejectConfirm}
                                     disabled={isSubmitting || !rejectionReason.trim()}
                                     style={{
                                         padding: '0.75rem 1.5rem',
@@ -752,6 +732,76 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     fontWeight: 600,
                                     color: '#ffffff',
                                     backgroundColor: '#13ec5b',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Xác nhận
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Popup xác nhận từ chối duyệt */}
+            {showRejectConfirm && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10000
+                    }}
+                    onClick={() => setShowRejectConfirm(false)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '400px',
+                            width: '90%',
+                            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#1e293b', margin: '0 0 1rem 0' }}>
+                            Xác nhận từ chối duyệt
+                        </h3>
+                        <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
+                            Bạn có chắc muốn từ chối xuất bản này? Hành động này không thể hoàn tác.
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => setShowRejectConfirm(false)}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#64748b',
+                                    backgroundColor: '#f1f5f9',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                onClick={handleRejectSubmit}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#ffffff',
+                                    backgroundColor: '#ef4444',
                                     border: 'none',
                                     borderRadius: '8px',
                                     cursor: 'pointer'
