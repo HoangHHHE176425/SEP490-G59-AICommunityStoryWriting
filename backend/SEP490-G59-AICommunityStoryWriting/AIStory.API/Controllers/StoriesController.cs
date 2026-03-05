@@ -241,7 +241,8 @@ namespace AIStory.API.Controllers
                     Status = request.Status,
                     AgeRating = request.AgeRating,
                     StoryProgressStatus = request.StoryProgressStatus,
-                    CoverImageUrl = coverUrl
+                    CoverImageUrl = coverUrl,
+                    ChangeSummary = request.ChangeSummary
                 };
 
                 var updated = _storyService.Update(id, updateRequest);
