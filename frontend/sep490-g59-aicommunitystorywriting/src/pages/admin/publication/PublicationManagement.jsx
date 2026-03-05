@@ -3,7 +3,6 @@ import { PublicationList } from '../../../components/admin/publication/Publicati
 import { PublicationDetailModal } from '../../../components/admin/publication/PublicationDetailModal';
 import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories } from '../../../api/story/storyApi';
-import { getChapters } from '../../../api/chapter/chapterApi';
 import { getPendingStories, getPendingChapters, claimStory, claimChapter } from '../../../api/moderator/moderatorApi';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
@@ -111,8 +110,8 @@ function mapPendingChapterToItem(c) {
 
 export function PublicationManagement() {
     const [selectedPublication, setSelectedPublication] = useState(null);
-    const [filterStatus, setFilterStatus] = useState('pending'); // 'pending' | 'approved' | 'rejected' | 'all'
-    const [claimFilter, setClaimFilter] = useState('CLAIMED'); // 'all' | 'UNCLAIMED' | 'CLAIMED' — danh sách chờ duyệt mặc định hiển thị đơn moderator đã nhận
+    const [filterStatus, setFilterStatus] = useState('pending'); // 'pending' | 'approved' | 'rejected'
+    const [claimFilter] = useState('all'); // Luôn hiển thị tất cả đơn chờ duyệt (đã bỏ filter Tất cả / Chưa nhận / Đã nhận của tôi)
     const [publications, setPublications] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -161,6 +160,7 @@ export function PublicationManagement() {
                     setTotalCount(total);
                     setTotalPages(Math.max(1, Math.ceil(total / PAGE_SIZE)));
                     setCurrentPage(Math.min(page, Math.max(1, Math.ceil(total / PAGE_SIZE))));
+                    setStatsData(prev => ({ ...prev, pending: total }));
                 })
                 .catch((err) => {
                     if (!silent) setError(err?.response?.data?.message ?? err?.message ?? 'Không tải được danh sách. Bạn cần đăng nhập với vai trò MODERATOR hoặc ADMIN.');
@@ -172,6 +172,7 @@ export function PublicationManagement() {
             return;
         }
 
+        // Lịch sử đã duyệt (PUBLISHED) / từ chối (REJECTED) — gọi API getStories với status
         const statusParam = STATUS_PARAM_MAP[filterStatus];
         const params = { page, pageSize: PAGE_SIZE };
         if (statusParam) params.status = statusParam;
@@ -203,14 +204,15 @@ export function PublicationManagement() {
     const loadStats = useCallback(() => {
         Promise.all([
             getStories({ pageSize: 500 }),
-            getChapters({ status: 'PENDING_REVIEW', pageSize: 500 })
+            getPendingStories({ pageSize: 500, claimFilter: 'all' }),
+            getPendingChapters({ pageSize: 500, claimFilter: 'all' })
         ])
-            .then(([storiesRes, chaptersRes]) => {
+            .then(([storiesRes, pendingStoriesRes, pendingChaptersRes]) => {
                 const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
-                const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
-                const storyIdsWithPendingChapters = new Set(chapterItems.map(c => String(c.storyId ?? c.StoryId)).filter(Boolean));
                 const mapped = storyItems.map(mapStoryToPublication);
-                const pendingCount = mapped.filter(p => storyIdsWithPendingChapters.has(String(p.storyId ?? p.id))).length;
+                const pendingStoryItems = pendingStoriesRes?.items ?? pendingStoriesRes?.Items ?? [];
+                const pendingChapterItems = pendingChaptersRes?.items ?? pendingChaptersRes?.Items ?? [];
+                const pendingCount = pendingStoryItems.length + pendingChapterItems.length;
                 setStatsData({
                     pending: pendingCount,
                     approved: mapped.filter(p => p.status === 'approved').length,
@@ -419,63 +421,33 @@ export function PublicationManagement() {
                 </div>
             </div>
 
-            {/* Một nút "Nhận duyệt đơn" + bộ lọc — chỉ khi tab Chờ duyệt */}
-            {filterStatus === 'pending' && (
-                <div style={{
-                    backgroundColor: '#ffffff',
-                    borderRadius: '12px',
-                    padding: '0.75rem 1rem',
-                    marginBottom: '1rem',
-                    border: '1px solid #e2e8f0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.75rem',
-                    flexWrap: 'wrap'
-                }}>
-                    <button
-                        onClick={() => setShowClaimModal(true)}
-                        style={{
-                            padding: '0.5rem 1rem',
-                            fontSize: '0.875rem',
-                            fontWeight: 600,
-                            backgroundColor: '#0ea5e9',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: '8px',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.375rem'
-                        }}
-                    >
-                        Nhận duyệt đơn
-                    </button>
-                    <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#475569' }}>Nhận đơn:</span>
-                    {[
-                        { value: 'all', label: 'Tất cả' },
-                        { value: 'UNCLAIMED', label: 'Chưa nhận' },
-                        { value: 'CLAIMED', label: 'Đã nhận của tôi' }
-                    ].map(tab => (
-                        <button
-                            key={tab.value}
-                            onClick={() => setClaimFilter(tab.value)}
-                            style={{
-                                padding: '0.5rem 1rem',
-                                fontSize: '0.8125rem',
-                                fontWeight: 600,
-                                backgroundColor: claimFilter === tab.value ? '#13ec5b' : 'transparent',
-                                color: claimFilter === tab.value ? '#ffffff' : '#64748b',
-                                border: claimFilter === tab.value ? 'none' : '1px solid #e2e8f0',
-                                borderRadius: '9999px',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s'
-                            }}
-                        >
-                            {tab.label}
-                        </button>
-                    ))}
-                </div>
-            )}
+            {/* Nút "Nhận duyệt đơn" — hiển thị trên mọi tab (Chờ duyệt, Đã duyệt, Từ chối) */}
+            <div style={{
+                backgroundColor: '#ffffff',
+                borderRadius: '12px',
+                padding: '0.75rem 1rem',
+                marginBottom: '1rem',
+                border: '1px solid #e2e8f0'
+            }}>
+                <button
+                    onClick={() => setShowClaimModal(true)}
+                    style={{
+                        padding: '0.5rem 1rem',
+                        fontSize: '0.875rem',
+                        fontWeight: 600,
+                        backgroundColor: '#0ea5e9',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.375rem'
+                    }}
+                >
+                    Nhận duyệt đơn
+                </button>
+            </div>
 
             {/* Filter Tabs */}
             <div style={{
@@ -491,8 +463,7 @@ export function PublicationManagement() {
                 {[
                     { value: 'pending', label: 'Chờ duyệt', color: '#ffc107' },
                     { value: 'approved', label: 'Đã duyệt', color: '#10b981' },
-                    { value: 'rejected', label: 'Từ chối', color: '#ef4444' },
-                    { value: 'all', label: 'Tất cả', color: '#64748b' }
+                    { value: 'rejected', label: 'Từ chối', color: '#ef4444' }
                 ].map(tab => (
                     <button
                         key={tab.value}
@@ -520,10 +491,9 @@ export function PublicationManagement() {
                         }}
                     >
                         {tab.label} ({
-                            tab.value === 'all' ? stats.total :
-                                tab.value === 'pending' ? stats.pending :
-                                    tab.value === 'approved' ? stats.approved :
-                                        stats.rejected
+                            tab.value === 'pending' ? stats.pending :
+                                tab.value === 'approved' ? stats.approved :
+                                    stats.rejected
                         })
                     </button>
                 ))}
@@ -559,7 +529,7 @@ export function PublicationManagement() {
                             onClaimStory={handleClaimStory}
                             onClaimChapter={handleClaimChapter}
                             claimingId={claimingId}
-                            showClaimButton={filterStatus === 'pending' && claimFilter !== 'CLAIMED'}
+                            showClaimButton={filterStatus === 'pending'}
                         />
                         {totalPages > 1 && (
                             <Pagination

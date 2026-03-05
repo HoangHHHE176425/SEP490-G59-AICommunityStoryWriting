@@ -15,6 +15,7 @@ function mapChapterItem(item) {
         content: null,
         wordCount: item.wordCount ?? item.WordCount ?? 0,
         status: (item.status ?? item.Status ?? '').toLowerCase(),
+        publishedAt: item.publishedAt ?? item.PublishedAt ?? null,
     };
 }
 
@@ -39,7 +40,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const fetchChaptersForStory = useCallback((sid, options = {}) => {
         if (!sid) return;
         if (options.showLoading !== false) setChaptersLoading(true);
-        getChapters({ storyId: sid, status: 'PENDING_REVIEW', pageSize: 100 })
+        const pubStatus = options.publicationStatus ?? 'pending';
+        const params = { storyId: sid, pageSize: 100 };
+        if (pubStatus === 'approved') params.status = 'PUBLISHED';
+        else if (pubStatus === 'pending') params.status = 'PENDING_REVIEW';
+        getChapters(params)
             .then((res) => {
                 const items = res?.items ?? res?.Items ?? [];
                 const mapped = items.map(mapChapterItem);
@@ -63,15 +68,15 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             setChapters([]);
             setSelectedChapter(null);
             setChapterContents({});
-            fetchChaptersForStory(storyId);
+            fetchChaptersForStory(storyId, { publicationStatus: publication?.status });
         }, 0);
         return () => clearTimeout(id);
-    }, [storyId, fetchChaptersForStory]);
+    }, [storyId, publication?.status, fetchChaptersForStory]);
 
     /** Real-time: khi có claim/approve/reject, refetch danh sách chương trong modal */
     const refetchChaptersRef = useRef(() => { });
     refetchChaptersRef.current = () => {
-        if (storyId) fetchChaptersForStory(storyId, { showLoading: false });
+        if (storyId) fetchChaptersForStory(storyId, { showLoading: false, publicationStatus: publication?.status });
     };
     useEffect(() => {
         if (!storyId) return;
@@ -277,40 +282,41 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         gap: '1rem'
                     }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                                <div style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.25rem',
-                                    padding: '0.25rem 0.625rem',
-                                    backgroundColor: publication.type === 'new_story' ? '#e0f2fe' : '#f3e8ff',
-                                    color: publication.type === 'new_story' ? '#075985' : '#6b21a8',
-                                    fontSize: '0.75rem',
-                                    fontWeight: 600,
-                                    borderRadius: '0.375rem'
-                                }}>
-                                    {publication.type === 'new_story' ? <BookOpen style={{ width: '12px', height: '12px' }} /> : <FileText style={{ width: '12px', height: '12px' }} />}
-                                    {publication.type === 'new_story' ? 'Truyện mới' : 'Chương mới'}
+                            {publication?.status !== 'approved' && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                                    <div style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.25rem',
+                                        padding: '0.25rem 0.625rem',
+                                        backgroundColor: publication.type === 'new_story' ? '#e0f2fe' : '#f3e8ff',
+                                        color: publication.type === 'new_story' ? '#075985' : '#6b21a8',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 600,
+                                        borderRadius: '0.375rem'
+                                    }}>
+                                        {publication.type === 'new_story' ? <BookOpen style={{ width: '12px', height: '12px' }} /> : <FileText style={{ width: '12px', height: '12px' }} />}
+                                        {publication.type === 'new_story' ? 'Truyện mới' : 'Chương mới'}
+                                    </div>
+                                    <div style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.375rem',
+                                        padding: '0.375rem 0.75rem',
+                                        backgroundColor: `${getStatusColor(chapters.length > 0 ? 'pending' : publication.status)}20`,
+                                        color: getStatusColor(chapters.length > 0 ? 'pending' : publication.status),
+                                        fontSize: '0.75rem',
+                                        fontWeight: 600,
+                                        borderRadius: '9999px',
+                                        border: `2px solid ${getStatusColor(chapters.length > 0 ? 'pending' : publication.status)}`
+                                    }}>
+                                        {(chapters.length > 0 || publication.status === 'pending') && <Clock style={{ width: '14px', height: '14px' }} />}
+                                        {chapters.length === 0 && publication.status === 'approved' && <CheckCircle style={{ width: '14px', height: '14px' }} />}
+                                        {chapters.length === 0 && publication.status === 'rejected' && <XCircle style={{ width: '14px', height: '14px' }} />}
+                                        {chapters.length > 0 ? 'Chờ duyệt' : publication.status === 'pending' ? 'Chờ duyệt' : publication.status === 'approved' ? 'Đã duyệt' : 'Từ chối'}
+                                    </div>
                                 </div>
-
-                                <div style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.375rem',
-                                    padding: '0.375rem 0.75rem',
-                                    backgroundColor: `${getStatusColor(chapters.length > 0 ? 'pending' : publication.status)}20`,
-                                    color: getStatusColor(chapters.length > 0 ? 'pending' : publication.status),
-                                    fontSize: '0.75rem',
-                                    fontWeight: 600,
-                                    borderRadius: '9999px',
-                                    border: `2px solid ${getStatusColor(chapters.length > 0 ? 'pending' : publication.status)}`
-                                }}>
-                                    {(chapters.length > 0 || publication.status === 'pending') && <Clock style={{ width: '14px', height: '14px' }} />}
-                                    {chapters.length === 0 && publication.status === 'approved' && <CheckCircle style={{ width: '14px', height: '14px' }} />}
-                                    {chapters.length === 0 && publication.status === 'rejected' && <XCircle style={{ width: '14px', height: '14px' }} />}
-                                    {chapters.length > 0 ? 'Chờ duyệt' : publication.status === 'pending' ? 'Chờ duyệt' : publication.status === 'approved' ? 'Đã duyệt' : 'Từ chối'}
-                                </div>
-                            </div>
+                            )}
 
                             <h2 style={{
                                 fontSize: '1.5rem',
@@ -378,11 +384,15 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                     }}>
                         {chaptersLoading ? (
                             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
-                                <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Đang tải danh sách chương chờ duyệt...</p>
+                                <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
+                                    {publication?.status === 'approved' ? 'Đang tải danh sách chương đã xuất bản...' : publication?.status === 'rejected' ? 'Đang tải danh sách chương...' : 'Đang tải danh sách chương chờ duyệt...'}
+                                </p>
                             </div>
                         ) : chapters.length === 0 ? (
                             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
-                                <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>Không có chương nào đang chờ kiểm duyệt</p>
+                                <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
+                                    {publication?.status === 'approved' ? 'Không có chương nào đã xuất bản' : publication?.status === 'rejected' ? 'Không có chương nào' : 'Không có chương nào đang chờ kiểm duyệt'}
+                                </p>
                             </div>
                         ) : (
                             <>
@@ -397,7 +407,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     }}>
                                         <div style={{ padding: '1rem', borderBottom: '1px solid #e2e8f0' }}>
                                             <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: '#64748b', margin: 0, textTransform: 'uppercase' }}>
-                                                Chương chờ duyệt
+                                                {publication?.status === 'approved' ? 'Chương đã xuất bản' : publication?.status === 'rejected' ? 'Chương' : 'Chương chờ duyệt'}
                                             </h3>
                                         </div>
                                         <div style={{ flex: 1, overflowY: 'auto', padding: '0.5rem' }}>
@@ -443,6 +453,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                     <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
                                                         {chapter.wordCount} từ
                                                     </div>
+                                                    {publication?.status === 'approved' && chapter.publishedAt && (
+                                                        <div style={{ fontSize: '0.6875rem', color: '#10b981', marginTop: '0.25rem' }}>
+                                                            Duyệt: {formatDate(chapter.publishedAt)}
+                                                        </div>
+                                                    )}
                                                 </button>
                                             ))}
                                         </div>
@@ -467,6 +482,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                 <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
                                                     {selectedChapter.wordCount} từ
                                                 </div>
+                                                {publication?.status === 'approved' && selectedChapter.publishedAt && (
+                                                    <div style={{ fontSize: '0.8125rem', color: '#10b981', marginTop: '0.375rem' }}>
+                                                        Duyệt lúc: {formatDate(selectedChapter.publishedAt)}
+                                                    </div>
+                                                )}
                                             </div>
 
                                             <div style={{
@@ -493,8 +513,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         )}
                     </div>
 
-                    {/* Footer - Actions - Hiển thị khi có chương chờ duyệt */}
-                    {chapters.length > 0 && !showRejectForm && (
+                    {/* Footer - Actions - Chỉ hiển thị khi đang chờ duyệt (có chương chờ duyệt), không hiện khi xem lịch sử đã duyệt/từ chối */}
+                    {chapters.length > 0 && !showRejectForm && publication?.status === 'pending' && (
                         <div style={{
                             padding: '1.5rem',
                             borderTop: '1px solid #e2e8f0',
