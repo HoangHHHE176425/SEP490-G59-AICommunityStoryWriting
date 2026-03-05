@@ -117,6 +117,21 @@ export function PublicationManagement() {
     const [totalPages, setTotalPages] = useState(1);
     const [totalCount, setTotalCount] = useState(0);
     const [claimingId, setClaimingId] = useState(null); // id đang gọi claim
+    const [showClaimModal, setShowClaimModal] = useState(false); // modal "Chọn truyện để nhận duyệt"
+    const [claimConfirmTarget, setClaimConfirmTarget] = useState(null); // { type: 'story', id, title } khi cần popup xác nhận
+    const [claimModalStories, setClaimModalStories] = useState([]);
+    const [claimModalLoading, setClaimModalLoading] = useState(false);
+
+    const loadClaimModalStories = useCallback(() => {
+        setClaimModalLoading(true);
+        getPendingStories({ claimFilter: 'UNCLAIMED', pageSize: 100 })
+            .then((res) => {
+                const items = res?.items ?? res?.Items ?? [];
+                setClaimModalStories(items.map(mapPendingStoryToItem));
+            })
+            .catch(() => setClaimModalStories([]))
+            .finally(() => setClaimModalLoading(false));
+    }, []);
 
     const loadPublications = useCallback((page = 1, options = {}) => {
         const silent = options.silent === true;
@@ -222,6 +237,10 @@ export function PublicationManagement() {
         return () => clearInterval(intervalId);
     }, [loadPublications, loadStats, currentPage]);
 
+    useEffect(() => {
+        if (showClaimModal) loadClaimModalStories();
+    }, [showClaimModal, loadClaimModalStories]);
+
     const filteredPublications = filterStatus === 'pending'
         ? publications.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
         : publications;
@@ -254,6 +273,25 @@ export function PublicationManagement() {
             await claimChapter(chapterId);
             loadPublications(currentPage);
             loadStats();
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể nhận duyệt đơn.';
+            alert(msg);
+        } finally {
+            setClaimingId(null);
+        }
+    };
+
+    /** Xác nhận nhận duyệt từ popup (sau khi bấm "Nhận duyệt đơn" trong modal Chọn truyện). */
+    const handleConfirmClaimFromModal = async () => {
+        if (!claimConfirmTarget || claimConfirmTarget.type !== 'story') return;
+        const storyId = claimConfirmTarget.id;
+        setClaimingId(storyId);
+        setClaimConfirmTarget(null);
+        try {
+            await claimStory(storyId);
+            loadPublications(currentPage);
+            loadStats();
+            loadClaimModalStories();
         } catch (err) {
             const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể nhận duyệt đơn.';
             alert(msg);
@@ -362,7 +400,7 @@ export function PublicationManagement() {
                 </div>
             </div>
 
-            {/* Bộ lọc "Nhận đơn" — chỉ khi tab Chờ duyệt */}
+            {/* Một nút "Nhận duyệt đơn" + bộ lọc — chỉ khi tab Chờ duyệt */}
             {filterStatus === 'pending' && (
                 <div style={{
                     backgroundColor: '#ffffff',
@@ -375,6 +413,24 @@ export function PublicationManagement() {
                     gap: '0.75rem',
                     flexWrap: 'wrap'
                 }}>
+                    <button
+                        onClick={() => setShowClaimModal(true)}
+                        style={{
+                            padding: '0.5rem 1rem',
+                            fontSize: '0.875rem',
+                            fontWeight: 600,
+                            backgroundColor: '#0ea5e9',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.375rem'
+                        }}
+                    >
+                        Nhận duyệt đơn
+                    </button>
                     <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#475569' }}>Nhận đơn:</span>
                     {[
                         { value: 'all', label: 'Tất cả' },
@@ -484,7 +540,7 @@ export function PublicationManagement() {
                             onClaimStory={handleClaimStory}
                             onClaimChapter={handleClaimChapter}
                             claimingId={claimingId}
-                            showClaimButton={filterStatus === 'pending'}
+                            showClaimButton={false}
                         />
                         {totalPages > 1 && (
                             <Pagination
@@ -498,6 +554,162 @@ export function PublicationManagement() {
                         )}
                     </div>
                 </>
+            )}
+
+            {/* Modal "Chọn truyện để nhận duyệt" — danh sách truyện trùng category với moderator */}
+            {showClaimModal && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 1000,
+                        padding: '1rem'
+                    }}
+                    onClick={() => setShowClaimModal(false)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            maxWidth: '560px',
+                            width: '100%',
+                            maxHeight: '85vh',
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h2 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#1e293b' }}>
+                                Chọn truyện để nhận duyệt
+                            </h2>
+                            <button
+                                type="button"
+                                onClick={() => setShowClaimModal(false)}
+                                style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#64748b', lineHeight: 1 }}
+                                aria-label="Đóng"
+                            >
+                                ×
+                            </button>
+                        </div>
+                        <div style={{ padding: '1rem', overflow: 'auto', flex: 1 }}>
+                            {claimModalLoading ? (
+                                <p style={{ textAlign: 'center', color: '#64748b', margin: 0 }}>Đang tải danh sách...</p>
+                            ) : claimModalStories.length === 0 ? (
+                                <p style={{ textAlign: 'center', color: '#64748b', margin: 0 }}>
+                                    Không có truyện nào chưa nhận (trùng thể loại với bạn).
+                                </p>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                    {claimModalStories.map((s) => (
+                                        <div
+                                            key={s.id}
+                                            style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '1rem',
+                                                padding: '0.75rem',
+                                                border: '1px solid #e2e8f0',
+                                                borderRadius: '8px',
+                                                backgroundColor: '#fafafa'
+                                            }}
+                                        >
+                                            <img
+                                                src={s.storyCover}
+                                                alt=""
+                                                style={{ width: '48px', height: '64px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }}
+                                            />
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: '0.25rem' }}>{s.storyTitle}</div>
+                                                <div style={{ fontSize: '0.8125rem', color: '#64748b' }}>{s.author}</div>
+                                                {Array.isArray(s.categories) && s.categories.length > 0 && (
+                                                    <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                                                        {s.categories.slice(0, 3).map((c) => (
+                                                            <span key={c} style={{ fontSize: '0.7rem', padding: '0.125rem 0.375rem', backgroundColor: '#e2e8f0', borderRadius: '4px', color: '#475569' }}>{c}</span>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => setClaimConfirmTarget({ type: 'story', id: s.storyId ?? s.id, title: s.storyTitle })}
+                                                disabled={claimingId === (s.storyId ?? s.id)}
+                                                style={{
+                                                    padding: '0.5rem 0.875rem',
+                                                    fontSize: '0.8125rem',
+                                                    fontWeight: 600,
+                                                    backgroundColor: '#0ea5e9',
+                                                    color: '#fff',
+                                                    border: 'none',
+                                                    borderRadius: '8px',
+                                                    cursor: claimingId === (s.storyId ?? s.id) ? 'wait' : 'pointer',
+                                                    opacity: claimingId === (s.storyId ?? s.id) ? 0.7 : 1
+                                                }}
+                                            >
+                                                {claimingId === (s.storyId ?? s.id) ? '...' : 'Nhận duyệt đơn'}
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Popup xác nhận nhận duyệt */}
+            {claimConfirmTarget && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 1001,
+                        padding: '1rem'
+                    }}
+                    onClick={() => setClaimConfirmTarget(null)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '400px',
+                            width: '100%',
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <p style={{ margin: 0, marginBottom: '1rem', fontSize: '0.9375rem', color: '#1e293b' }}>
+                            Bạn có chắc muốn nhận duyệt truyện <strong>"{claimConfirmTarget.title}"</strong>?
+                        </p>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                            <button
+                                type="button"
+                                onClick={() => setClaimConfirmTarget(null)}
+                                style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', fontWeight: 600, backgroundColor: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmClaimFromModal}
+                                style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', fontWeight: 600, backgroundColor: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+                            >
+                                Xác nhận
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* Detail Modal */}
