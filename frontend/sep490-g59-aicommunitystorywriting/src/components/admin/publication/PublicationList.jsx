@@ -1,6 +1,6 @@
-import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen, UserCheck } from 'lucide-react';
 
-export function PublicationList({ publications, onViewDetail }) {
+export function PublicationList({ publications, onViewDetail, onClaimStory, onClaimChapter, claimingId, showClaimButton }) {
     const getStatusBadge = (status) => {
         const configs = {
             pending: {
@@ -44,22 +44,22 @@ export function PublicationList({ publications, onViewDetail }) {
         );
     };
 
-    const getTypeBadge = (type) => {
-        const isNewStory = type === 'new_story';
+    const getTypeBadge = (pub) => {
+        const isStory = pub.type === 'story' || pub.type === 'new_story';
         return (
             <div style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.25rem',
                 padding: '0.25rem 0.625rem',
-                backgroundColor: isNewStory ? '#e0f2fe' : '#f3e8ff',
-                color: isNewStory ? '#075985' : '#6b21a8',
+                backgroundColor: isStory ? '#e0f2fe' : '#f3e8ff',
+                color: isStory ? '#075985' : '#6b21a8',
                 fontSize: '0.75rem',
                 fontWeight: 600,
                 borderRadius: '0.375rem'
             }}>
-                {isNewStory ? <BookOpen style={{ width: '12px', height: '12px' }} /> : <FileText style={{ width: '12px', height: '12px' }} />}
-                {isNewStory ? 'Truyện mới' : 'Chương mới'}
+                {isStory ? <BookOpen style={{ width: '12px', height: '12px' }} /> : <FileText style={{ width: '12px', height: '12px' }} />}
+                {isStory ? 'Truyện' : 'Chương'}
             </div>
         );
     };
@@ -139,8 +139,20 @@ export function PublicationList({ publications, onViewDetail }) {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.75rem', gap: '1rem', flexWrap: 'wrap' }}>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                                        {getTypeBadge(pub.type)}
+                                        {getTypeBadge(pub)}
                                         {getStatusBadge(pub.status)}
+                                        {showClaimButton && pub.claimedByDisplayName && (
+                                            <span style={{
+                                                fontSize: '0.75rem',
+                                                color: pub.isClaimedByMe ? '#065f46' : '#64748b',
+                                                backgroundColor: pub.isClaimedByMe ? '#d1fae5' : '#f1f5f9',
+                                                padding: '0.25rem 0.5rem',
+                                                borderRadius: '9999px',
+                                                fontWeight: 500
+                                            }}>
+                                                {pub.isClaimedByMe ? 'Đã nhận bởi bạn' : `Đã nhận: ${pub.claimedByDisplayName}`}
+                                            </span>
+                                        )}
                                     </div>
                                     <h3 style={{
                                         fontSize: '1.125rem',
@@ -150,36 +162,72 @@ export function PublicationList({ publications, onViewDetail }) {
                                         marginBottom: '0.25rem'
                                     }}>
                                         {pub.storyTitle}
+                                        {pub.type === 'chapter' && pub.chapterTitle && (
+                                            <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.9375rem' }}> — {pub.chapterTitle}</span>
+                                        )}
                                     </h3>
                                     <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
-                                        Tác giả: <span style={{ fontWeight: 500, color: '#475569' }}>{pub.author}</span>
+                                        {pub.author ? <>Tác giả: <span style={{ fontWeight: 500, color: '#475569' }}>{pub.author}</span></> : null}
+                                        {pub.type === 'chapter' && pub.wordCount != null ? ` • ${pub.wordCount} từ` : null}
                                     </p>
                                 </div>
 
-                                {/* View Button */}
-                                <button
-                                    onClick={() => onViewDetail(pub)}
-                                    style={{
-                                        padding: '0.625rem 1.25rem',
-                                        backgroundColor: '#13ec5b',
-                                        color: '#ffffff',
-                                        fontSize: '0.875rem',
-                                        fontWeight: 600,
-                                        borderRadius: '8px',
-                                        border: 'none',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.2s',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.5rem',
-                                        whiteSpace: 'nowrap'
-                                    }}
-                                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#10d954'}
-                                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#13ec5b'}
-                                >
-                                    <Eye style={{ width: '16px', height: '16px' }} />
-                                    Xem chi tiết
-                                </button>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0, flexWrap: 'wrap' }}>
+                                    {showClaimButton && (pub.type === 'story' || pub.type === 'chapter') && (
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                if (pub.type === 'story') onClaimStory?.(pub.storyId ?? pub.id);
+                                                else onClaimChapter?.(pub.chapterId ?? pub.id);
+                                            }}
+                                            disabled={
+                                                (pub.claimedByDisplayName && !pub.isClaimedByMe) ||
+                                                claimingId === (pub.type === 'story' ? (pub.storyId ?? pub.id) : (pub.chapterId ?? pub.id))
+                                            }
+                                            style={{
+                                                padding: '0.625rem 1rem',
+                                                backgroundColor: (pub.claimedByDisplayName && !pub.isClaimedByMe) ? '#e2e8f0' : '#0ea5e9',
+                                                color: '#ffffff',
+                                                fontSize: '0.8125rem',
+                                                fontWeight: 600,
+                                                borderRadius: '8px',
+                                                border: 'none',
+                                                cursor: (pub.claimedByDisplayName && !pub.isClaimedByMe) ? 'not-allowed' : 'pointer',
+                                                opacity: claimingId === (pub.type === 'story' ? (pub.storyId ?? pub.id) : (pub.chapterId ?? pub.id)) ? 0.7 : 1,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '0.375rem',
+                                                whiteSpace: 'nowrap'
+                                            }}
+                                        >
+                                            <UserCheck style={{ width: '14px', height: '14px' }} />
+                                            {(pub.claimedByDisplayName && !pub.isClaimedByMe) ? 'Đã có người nhận' : claimingId === (pub.type === 'story' ? (pub.storyId ?? pub.id) : (pub.chapterId ?? pub.id)) ? '...' : 'Nhận duyệt đơn'}
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => onViewDetail(pub)}
+                                        style={{
+                                            padding: '0.625rem 1.25rem',
+                                            backgroundColor: '#13ec5b',
+                                            color: '#ffffff',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            borderRadius: '8px',
+                                            border: 'none',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.2s',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.5rem',
+                                            whiteSpace: 'nowrap'
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#10d954'}
+                                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#13ec5b'}
+                                    >
+                                        <Eye style={{ width: '16px', height: '16px' }} />
+                                        Xem chi tiết
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Info */}
@@ -189,14 +237,26 @@ export function PublicationList({ publications, onViewDetail }) {
                                 gap: '1rem',
                                 marginBottom: '0.75rem'
                             }}>
-                                <div>
-                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
-                                        Số chương
+                                {pub.totalChapters != null && (
+                                    <div>
+                                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                                            Số chương
+                                        </div>
+                                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
+                                            {pub.totalChapters} chương
+                                        </div>
                                     </div>
-                                    <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
-                                        {pub.totalChapters} chương
+                                )}
+                                {pub.type === 'chapter' && pub.wordCount != null && (
+                                    <div>
+                                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                                            Số từ
+                                        </div>
+                                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
+                                            {pub.wordCount} từ
+                                        </div>
                                     </div>
-                                </div>
+                                )}
 
                                 <div>
                                     <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
@@ -220,6 +280,7 @@ export function PublicationList({ publications, onViewDetail }) {
                             </div>
 
                             {/* Categories */}
+                            {Array.isArray(pub.categories) && pub.categories.length > 0 && (
                             <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
                                 {pub.categories.map(cat => (
                                     <span
@@ -238,6 +299,7 @@ export function PublicationList({ publications, onViewDetail }) {
                                     </span>
                                 ))}
                             </div>
+                            )}
 
                             {/* Rejection Reason */}
                             {pub.status === 'rejected' && pub.rejectionReason && (
@@ -257,7 +319,7 @@ export function PublicationList({ publications, onViewDetail }) {
                             )}
 
                             {/* Description */}
-                            {pub.type === 'new_story' && pub.description && (
+                            {(pub.type === 'new_story' || pub.type === 'story') && pub.description && (
                                 <p style={{
                                     fontSize: '0.875rem',
                                     color: '#64748b',

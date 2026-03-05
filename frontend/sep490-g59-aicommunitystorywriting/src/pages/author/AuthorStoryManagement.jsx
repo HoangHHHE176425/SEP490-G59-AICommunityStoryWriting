@@ -334,6 +334,7 @@ export function AuthorStoryManagement({ onBack }) {
                     status: apiStatus,
                     accessType: apiAccessType,
                     coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
+                    changeSummary: chapterData.changeSummary ? String(chapterData.changeSummary).trim() : undefined,
                 });
 
                 showToast(

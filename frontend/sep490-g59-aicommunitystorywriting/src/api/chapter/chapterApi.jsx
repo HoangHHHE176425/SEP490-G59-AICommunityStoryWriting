@@ -99,9 +99,9 @@ export async function getChapterByStoryIdAndOrderIndex(storyId, orderIndex) {
 }
 
 /**
- * Cập nhật chapter.
+ * Cập nhật chapter (tạo version tự động trên BE khi có thay đổi nội dung).
  * @param {string} id - Guid
- * @param {Object} data - { title?, content?, orderIndex?, status?, accessType?, coinPrice?, aiContributionRatio?, isAiClean? }
+ * @param {Object} data - { title?, content?, orderIndex?, status?, accessType?, coinPrice?, aiContributionRatio?, isAiClean?, changeSummary? }
  * @returns {Promise} - NoContent khi thành công
  */
 export async function updateChapter(id, data) {
@@ -123,6 +123,9 @@ export async function updateChapter(id, data) {
         aiContributionRatio: data.aiContributionRatio,
         isAiClean: data.isAiClean,
     };
+    if (data.changeSummary != null && String(data.changeSummary).trim() !== '') {
+        body.changeSummary = String(data.changeSummary).trim();
+    }
 
     const response = await axiosInstance.put(`/chapters/${id}`, body);
     return response.data;

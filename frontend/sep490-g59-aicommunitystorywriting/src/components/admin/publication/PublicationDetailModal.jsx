@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar } from 'lucide-react';
+import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar, UserCheck } from 'lucide-react';
 import { getChapters, getChapterById, publishChapter } from '../../../api/chapter/chapterApi';
 import { publishStory } from '../../../api/story/storyApi';
 import { useToast } from '../../author/story-editor/Toast';
@@ -17,7 +17,7 @@ function mapChapterItem(item) {
     };
 }
 
-export function PublicationDetailModal({ publication, onClose, onApprove, onReject, onRefresh }) {
+export function PublicationDetailModal({ publication, onClose, onApprove, onReject, onRefresh, onClaimStory, claimingId }) {
     const { showToast, ToastContainer } = useToast();
     const [chapters, setChapters] = useState([]);
     const [chaptersLoading, setChaptersLoading] = useState(true);
@@ -232,23 +232,61 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 {publication.storyTitle}
                             </h2>
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', fontSize: '0.875rem', color: '#64748b', flexWrap: 'wrap' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', fontSize: '0.875rem', color: '#64748b', flexWrap: 'wrap' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                                     <User style={{ width: '14px', height: '14px' }} />
-                                    <span>{publication.author}</span>
+                                    <span>{publication.author ?? '—'}</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                                     <Calendar style={{ width: '14px', height: '14px' }} />
                                     <span>{formatDate(publication.submittedAt)}</span>
                                 </div>
                                 <div>
-                                    {publication.totalChapters} chương
+                                    {publication.totalChapters != null ? `${publication.totalChapters} chương` : null}
                                 </div>
+                                {publication.claimedByDisplayName && (
+                                    <span style={{
+                                        padding: '0.25rem 0.5rem',
+                                        backgroundColor: publication.isClaimedByMe ? '#d1fae5' : '#f1f5f9',
+                                        color: publication.isClaimedByMe ? '#065f46' : '#64748b',
+                                        borderRadius: '9999px',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 600
+                                    }}>
+                                        {publication.isClaimedByMe ? 'Đã nhận bởi bạn' : `Đã nhận: ${publication.claimedByDisplayName}`}
+                                    </span>
+                                )}
                             </div>
                         </div>
 
-                        <button
-                            onClick={onClose}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+                            {onClaimStory && (publication.type === 'story' || publication.type === 'new_story') && (
+                                <button
+                                    onClick={() => onClaimStory(publication.storyId ?? publication.id)}
+                                    disabled={
+                                        (publication.claimedByDisplayName && !publication.isClaimedByMe) ||
+                                        claimingId === (publication.storyId ?? publication.id)
+                                    }
+                                    style={{
+                                        padding: '0.5rem 1rem',
+                                        backgroundColor: (publication.claimedByDisplayName && !publication.isClaimedByMe) ? '#e2e8f0' : '#0ea5e9',
+                                        color: '#ffffff',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 600,
+                                        borderRadius: '8px',
+                                        border: 'none',
+                                        cursor: (publication.claimedByDisplayName && !publication.isClaimedByMe) ? 'not-allowed' : 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.375rem'
+                                    }}
+                                >
+                                    <UserCheck style={{ width: '14px', height: '14px' }} />
+                                    {(publication.claimedByDisplayName && !publication.isClaimedByMe) ? 'Đã có người nhận' : claimingId === (publication.storyId ?? publication.id) ? '...' : 'Nhận duyệt đơn'}
+                                </button>
+                            )}
+                            <button
+                                onClick={onClose}
                             style={{
                                 padding: '0.5rem',
                                 backgroundColor: 'transparent',
@@ -263,6 +301,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         >
                             <X style={{ width: '24px', height: '24px', color: '#64748b' }} />
                         </button>
+                        </div>
                     </div>
 
                     {/* Body */}
