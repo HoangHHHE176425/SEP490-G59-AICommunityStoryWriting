@@ -14,6 +14,9 @@ namespace Repositories
         public stories? GetBySlug(string slug)
             => StoryDAO.GetBySlug(slug);
 
+        public IReadOnlyList<Guid> GetStoryIdsByCategoryIds(IReadOnlyCollection<Guid> categoryIds)
+            => StoryDAO.GetIdsByCategoryIds(categoryIds ?? Array.Empty<Guid>());
+
         public void Add(stories story)
             => StoryDAO.Add(story);
 
