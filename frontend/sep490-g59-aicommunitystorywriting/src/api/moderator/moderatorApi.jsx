@@ -2,18 +2,19 @@ import axiosInstance from '../axiosInstance';
 
 /**
  * Danh sách truyện chờ duyệt (PENDING_REVIEW).
- * Moderator chỉ thấy truyện thuộc thể loại được gán (moderator_category_assignments); ADMIN thấy tất cả.
- * @param {Object} params - { page, pageSize, search, sortBy, sortOrder, claimFilter: 'all'|'UNCLAIMED'|'CLAIMED' }
+ * Moderator chỉ thấy truyện thuộc thể loại được gán; ADMIN thấy tất cả.
+ * claimFilter: all (mặc định) | UNCLAIMED | CLAIMED.
+ * @param {Object} params - { page, pageSize, search, sortBy, sortOrder, claimFilter }
  */
 export async function getPendingStories(params = {}) {
     const q = new URLSearchParams();
     if (params.page != null) q.append('page', params.page);
     if (params.pageSize != null) q.append('pageSize', params.pageSize);
     if (params.search) q.append('search', params.search);
-    if (params.sortBy) q.append('sortBy', params.sortBy);
-    if (params.sortOrder) q.append('sortOrder', params.sortOrder);
-    if (params.claimFilter) q.append('claimFilter', params.claimFilter);
-    const url = q.toString() ? `/moderator/stories/pending?${q}` : '/moderator/stories/pending';
+    q.append('sortBy', params.sortBy ?? 'updated_at');
+    q.append('sortOrder', params.sortOrder ?? 'asc');
+    q.append('claimFilter', params.claimFilter ?? 'all');
+    const url = `/moderator/stories/pending?${q}`;
     const res = await axiosInstance.get(url);
     return res.data;
 }
@@ -21,6 +22,7 @@ export async function getPendingStories(params = {}) {
 /**
  * Danh sách chương chờ duyệt (PENDING_REVIEW).
  * Moderator chỉ thấy chương thuộc truyện có thể loại được gán; ADMIN thấy tất cả.
+ * claimFilter: all | UNCLAIMED | CLAIMED.
  * @param {Object} params - { page, pageSize, storyId, search, sortBy, sortOrder, claimFilter }
  */
 export async function getPendingChapters(params = {}) {
@@ -29,10 +31,10 @@ export async function getPendingChapters(params = {}) {
     if (params.pageSize != null) q.append('pageSize', params.pageSize);
     if (params.storyId) q.append('storyId', params.storyId);
     if (params.search) q.append('search', params.search);
-    if (params.sortBy) q.append('sortBy', params.sortBy);
-    if (params.sortOrder) q.append('sortOrder', params.sortOrder);
-    if (params.claimFilter) q.append('claimFilter', params.claimFilter);
-    const url = q.toString() ? `/moderator/chapters/pending?${q}` : '/moderator/chapters/pending';
+    q.append('sortBy', params.sortBy ?? 'created_at');
+    q.append('sortOrder', params.sortOrder ?? 'asc');
+    q.append('claimFilter', params.claimFilter ?? 'all');
+    const url = `/moderator/chapters/pending?${q}`;
     const res = await axiosInstance.get(url);
     return res.data;
 }
