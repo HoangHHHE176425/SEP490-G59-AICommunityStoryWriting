@@ -29,6 +29,10 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [showApproveConfirm, setShowApproveConfirm] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    /** Sau khi duyệt chương 1 đã gọi approveStory rồi thì không gọi lại khi duyệt chương 2, 3... (publication.status không đổi trong modal) */
+    const storyApprovedInSessionRef = useRef(false);
+    /** Vừa từ chối trong phiên này → không hiển thị khối "Đã từ chối xuất bản" / "Lý do từ chối" để moderator duyệt liên tiếp thoải mái */
+    const justRejectedInSessionRef = useRef(false);
 
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
@@ -47,6 +51,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     }, []);
 
     useEffect(() => {
+        storyApprovedInSessionRef.current = false;
+        justRejectedInSessionRef.current = false;
         const id = setTimeout(() => {
             if (!storyId) {
                 setChapters([]);
@@ -101,8 +107,19 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         setShowApproveConfirm(false);
         setIsSubmitting(true);
         try {
-            if (publication.status !== 'approved') {
-                await approveStory(storyId);
+            // Gọi approveStory khi chưa duyệt truyện trong phiên (để set story PUBLISHED). Bắt 404 để không chặn duyệt chương khi truyện đã PUBLISHED.
+            const needApproveStory = publication.status !== 'approved' && !storyApprovedInSessionRef.current;
+            if (needApproveStory) {
+                try {
+                    await approveStory(storyId);
+                } catch (err) {
+                    if (err?.response?.status === 404) {
+                        storyApprovedInSessionRef.current = true;
+                    } else {
+                        throw err;
+                    }
+                }
+                storyApprovedInSessionRef.current = true;
             }
             await approveChapter(selectedChapter.id);
             showToast('Duyệt chương thành công!', 'success');
@@ -150,22 +167,48 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                     return next;
                 });
                 onRefresh?.();
-                // Giống logic duyệt: khi không còn chương chờ duyệt thì chuyển trạng thái truyện (gọi rejectStory để truyện về REJECTED)
+                // Gọi rejectStory khi không còn chương chờ duyệt. Bắt 404 (truyện đã PUBLISHED sau khi duyệt chương trước) để vẫn đóng form và không hiện toast lỗi.
+                const isStoryRow = publication.type === 'story' || publication.type === 'new_story';
+                if (remaining.length === 0 && isStoryRow && publication.status !== 'approved') {
+                    try {
+                        await rejectStory(storyId, rejectionReason.trim());
+                        onReject(publication.id);
+                    } catch (rejectErr) {
+                        if (rejectErr?.response?.status === 404) {
+                            onRefresh?.();
+                        } else {
+                            throw rejectErr;
+                        }
+                    }
+                }
                 if (remaining.length === 0) {
-                    await rejectStory(storyId, rejectionReason.trim());
-                    onReject(publication.id);
+                    onClose?.();
                 }
             } else {
-                await rejectStory(storyId, rejectionReason.trim());
-                showToast('Đã từ chối truyện.', 'success');
-                onReject(publication.id);
-                onRefresh?.();
+                if (publication.type === 'story' || publication.type === 'new_story') {
+                    try {
+                        await rejectStory(storyId, rejectionReason.trim());
+                        showToast('Đã từ chối truyện.', 'success');
+                        onReject(publication.id);
+                        onRefresh?.();
+                    } catch (rejectErr) {
+                        if (rejectErr?.response?.status === 404) {
+                            showToast('Truyện không còn ở trạng thái chờ duyệt.', 'info');
+                        } else {
+                            throw rejectErr;
+                        }
+                    }
+                } else {
+                    showToast('Truyện không còn ở trạng thái chờ duyệt.', 'info');
+                }
+                onClose?.();
             }
-            setShowRejectForm(false);
-            setRejectionReason('');
         } catch (err) {
             showToast(err?.response?.data?.message ?? err?.message ?? 'Không thể từ chối. Vui lòng thử lại.', 'error');
         } finally {
+            setShowRejectForm(false);
+            setRejectionReason('');
+            justRejectedInSessionRef.current = true;
             setIsSubmitting(false);
         }
     };
@@ -629,8 +672,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         </div>
                     )}
 
-                    {/* Already Reviewed Info - Chỉ hiển thị khi không còn chương chờ duyệt */}
-                    {chapters.length === 0 && publication.status !== 'pending' && (
+                    {/* Already Reviewed Info - Chỉ hiển thị khi không còn chương chờ duyệt. Ẩn nếu vừa từ chối trong phiên để moderator duyệt liên tiếp không bị hiện lại lý do từ chối */}
+                    {chapters.length === 0 && publication.status !== 'pending' && !justRejectedInSessionRef.current && (
                         <div style={{
                             padding: '1.5rem',
                             borderTop: '1px solid #e2e8f0',

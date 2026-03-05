@@ -55,12 +55,15 @@ const PAGE_SIZE = 10;
 /** Backend khuyến nghị: load lại danh sách duyệt/từ chối mỗi 30 giây để cập nhật khi có thay đổi từ nơi khác */
 const REFRESH_INTERVAL_MS = 30 * 1000;
 
-/** Map item từ moderator/stories/pending sang format dùng chung (type story). */
+/** Map item từ moderator/stories/pending sang format dùng chung (type story). Dùng trạng thái thật từ API để khi duyệt chương không gọi approveStory nếu truyện đã PUBLISHED. */
 function mapPendingStoryToItem(s) {
     const id = s.id ?? s.Id;
     const coverPath = s.coverImage ?? s.CoverImage;
     const categoryNamesStr = s.categoryNames ?? s.CategoryNames ?? '';
     const categoryNamesArr = categoryNamesStr ? String(categoryNamesStr).split(',').map((x) => x.trim()).filter(Boolean) : [];
+    const statusApi = (s.status ?? s.Status ?? '').toUpperCase();
+    const statusMap = { PENDING_REVIEW: 'pending', PUBLISHED: 'approved', REJECTED: 'rejected' };
+    const status = statusMap[statusApi] ?? 'pending';
     return {
         id,
         storyId: id,
@@ -69,7 +72,7 @@ function mapPendingStoryToItem(s) {
         storyCover: coverPath ? resolveBackendUrl(coverPath) : '',
         author: s.authorName ?? s.AuthorName ?? 'N/A',
         authorId: s.authorId ?? s.AuthorId ?? null,
-        status: 'pending',
+        status,
         submittedAt: s.createdAt ?? s.CreatedAt ?? s.updatedAt ?? s.UpdatedAt ?? null,
         totalChapters: s.totalChapters ?? s.TotalChapters ?? 0,
         categories: categoryNamesArr,
