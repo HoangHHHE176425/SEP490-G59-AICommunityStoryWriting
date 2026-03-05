@@ -31,6 +31,26 @@
                         <li class="nav-item">
                             <a class="nav-link text-dark" asp-area="" asp-controller="Chapters" asp-action="Index">Chapters</a>
                         </li>
+                        <li class="nav-item" id="moderatorNavItem" style="display: none;">
+                            <a class="nav-link text-dark" asp-area="" asp-controller="Moderator" asp-action="Index"><i class="bi bi-shield-check"></i> Kiểm duyệt</a>
+                        </li>
+                    </ul>
+                    <ul class="navbar-nav align-items-center">
+                        <li class="nav-item dropdown" id="notificationBellItem" style="display: none;">
+                            <a class="nav-link text-dark position-relative dropdown-toggle" href="#" id="notificationDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Thông báo">
+                                <i class="bi bi-bell fs-5"></i>
+                                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" id="notificationBadge" style="font-size: 0.65rem; display: none;">0</span>
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="notificationDropdown" style="min-width: 320px; max-height: 400px; overflow-y: auto;">
+                                <li class="dropdown-header d-flex justify-content-between align-items-center">
+                                    <span><i class="bi bi-bell me-1"></i> Thông báo</span>
+                                    <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" id="markAllNotificationsReadBtn" style="display: none;">Đánh dấu đã đọc</button>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li id="notificationListPlaceholder" class="text-center text-muted py-3 small">Đang tải...</li>
+                                <li id="notificationListContainer" style="display: none; list-style: none;"></li>
+                            </ul>
+                        </li>
                     </ul>
                     <ul class="navbar-nav" id="authNav">
                         <!-- Sẽ được cập nhật bởi JavaScript -->
@@ -78,6 +98,26 @@
             &copy; 2026 - AIStory.Client - <a asp-area="" asp-controller="Home" asp-action="Privacy">Privacy</a>
         </div>
     </footer>
+
+    <!-- Modal xem lý do từ chối (cho Author) -->
+    <div class="modal fade" id="rejectionReasonModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-x-circle"></i> Lý do từ chối</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="rejectionReasonBody" class="mb-0"></p>
+                    <p id="rejectionReasonDate" class="text-muted small mt-2 mb-0"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css"></script>
@@ -106,6 +146,13 @@
                 loginNavItem.style.display = 'none';
                 registerNavItem.style.display = 'none';
                 userNavItem.style.display = 'block';
+                var moderatorNav = document.getElementById('moderatorNavItem');
+                if (moderatorNav) {
+                    moderatorNav.style.display = AuthHelper.isModerator() ? 'block' : 'none';
+                }
+                var notificationBell = document.getElementById('notificationBellItem');
+                if (notificationBell) notificationBell.style.display = 'block';
+                if (typeof loadUnreadNotificationCount === 'function') loadUnreadNotificationCount();
 
                 // Lấy email từ token hoặc user info
                 const user = AuthHelper.getUser();
@@ -125,8 +172,87 @@
                 loginNavItem.style.display = 'block';
                 registerNavItem.style.display = 'block';
                 userNavItem.style.display = 'none';
+                var notificationBell = document.getElementById('notificationBellItem');
+                if (notificationBell) notificationBell.style.display = 'none';
             }
         }
+
+        async function loadUnreadNotificationCount() {
+            try {
+                var r = await ApiService.getUnreadNotificationCount();
+                var count = r && r.count !== undefined ? r.count : 0;
+                var badge = document.getElementById('notificationBadge');
+                if (badge) {
+                    badge.textContent = count > 99 ? '99+' : count;
+                    badge.style.display = count > 0 ? 'inline-block' : 'none';
+                }
+            } catch (_) { /* ignore */ }
+        }
+
+        async function loadNotificationList() {
+            var container = document.getElementById('notificationListContainer');
+            var placeholder = document.getElementById('notificationListPlaceholder');
+            if (!container || !placeholder) return;
+            placeholder.textContent = 'Đang tải...';
+            placeholder.style.display = 'block';
+            container.style.display = 'none';
+            container.innerHTML = '';
+            try {
+                var list = await ApiService.getNotifications({ limit: 20 });
+                if (!list || list.length === 0) {
+                    placeholder.textContent = 'Chưa có thông báo.';
+                    placeholder.style.display = 'block';
+                    return;
+                }
+                placeholder.style.display = 'none';
+                container.style.display = 'block';
+                container.innerHTML = list.map(function (n) {
+                    var itemClass = n.isRead ? '' : 'bg-light';
+                    var title = (n.title || '').substring(0, 60) + ((n.title || '').length > 60 ? '...' : '');
+                    var content = (n.content || '').substring(0, 80) + ((n.content || '').length > 80 ? '...' : '');
+                    var time = n.createdAt && typeof Utils !== 'undefined' && Utils.formatDate ? Utils.formatDate(n.createdAt) : '';
+                    return '<div class="dropdown-item-text px-3 py-2 border-bottom ' + itemClass + '" style="cursor:pointer; white-space:normal;" data-id="' + n.id + '" data-read="' + n.isRead + '" data-href="' + (n.linkUrl || '').replace(/"/g, '&quot;') + '">' +
+                        '<div class="fw-medium small">' + (title || '').replace(/</g, '&lt;') + '</div>' +
+                        '<div class="small text-muted">' + (content || '').replace(/</g, '&lt;') + '</div>' +
+                        '<div class="small text-muted">' + time + '</div>' +
+                        '</div>';
+                }).join('');
+                var markAllBtn = document.getElementById('markAllNotificationsReadBtn');
+                if (markAllBtn) markAllBtn.style.display = list.some(function (n) { return !n.isRead; }) ? 'block' : 'none';
+                container.querySelectorAll('[data-id]').forEach(function (el) {
+                    el.addEventListener('click', function () {
+                        var id = el.getAttribute('data-id');
+                        var href = (el.getAttribute('data-href') || '').trim();
+                        if (id && el.getAttribute('data-read') !== 'true') {
+                            ApiService.markNotificationRead(id).then(function () {
+                                loadUnreadNotificationCount();
+                            }).catch(function () {});
+                        }
+                        if (href && href.startsWith('/')) window.location.href = href;
+                    });
+                });
+            } catch (_) {
+                placeholder.textContent = 'Không tải được thông báo.';
+                placeholder.style.display = 'block';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            var dd = document.getElementById('notificationDropdown');
+            if (dd && typeof bootstrap !== 'undefined') {
+                dd.addEventListener('show.bs.dropdown', function () {
+                    loadNotificationList();
+                });
+            }
+            document.getElementById('markAllNotificationsReadBtn')?.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                ApiService.markAllNotificationsRead().then(function () {
+                    loadUnreadNotificationCount();
+                    loadNotificationList();
+                }).catch(function () {});
+            });
+        });
 
         // Lắng nghe sự kiện storage để cập nhật khi đăng nhập/đăng xuất từ tab khác
         window.addEventListener('storage', function(e) {
@@ -134,6 +260,28 @@
                 updateAuthNav();
             }
         });
+
+        window.showRejectionReasonModal = function(reason, rejectedAt) {
+            document.getElementById('rejectionReasonBody').textContent = reason || 'Không có lý do.';
+            document.getElementById('rejectionReasonDate').textContent = rejectedAt && typeof Utils !== 'undefined' && Utils.formatDate ? 'Ngày từ chối: ' + Utils.formatDate(rejectedAt) : '';
+            new bootstrap.Modal(document.getElementById('rejectionReasonModal')).show();
+        };
+        window.showStoryRejectionReason = async function(id) {
+            try {
+                var r = await ApiService.getStoryRejectionReason(id);
+                showRejectionReasonModal(r.reason, r.rejectedAt);
+            } catch (e) {
+                if (typeof Utils !== 'undefined') Utils.showAlert(e.message || 'Không tải được lý do.', 'danger');
+            }
+        };
+        window.showChapterRejectionReason = async function(id) {
+            try {
+                var r = await ApiService.getChapterRejectionReason(id);
+                showRejectionReasonModal(r.reason, r.rejectedAt);
+            } catch (e) {
+                if (typeof Utils !== 'undefined') Utils.showAlert(e.message || 'Không tải được lý do.', 'danger');
+            }
+        };
     </script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

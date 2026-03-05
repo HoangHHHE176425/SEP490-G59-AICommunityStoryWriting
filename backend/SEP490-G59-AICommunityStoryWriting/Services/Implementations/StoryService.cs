@@ -1,8 +1,9 @@
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
+using Microsoft.Extensions.Logging;
 using Repositories;
 using Services.DTOs.Stories;
-using Microsoft.Extensions.Logging;
+using Services.Interfaces;
 
 namespace Services.Implementations
 {
@@ -11,12 +12,14 @@ namespace Services.Implementations
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
         private readonly ILogger<StoryService> _logger;
+        private readonly IModerationHubNotifier? _moderationHubNotifier;
 
-        public StoryService(IStoryRepository storyRepository, IChapterRepository chapterRepository, ILogger<StoryService> logger)
+        public StoryService(IStoryRepository storyRepository, IChapterRepository chapterRepository, ILogger<StoryService> logger, IModerationHubNotifier? moderationHubNotifier = null)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
             _logger = logger;
+            _moderationHubNotifier = moderationHubNotifier;
         }
 
         public StoryResponseDto Create(CreateStoryRequestDto request, Guid authorId, string? coverImageUrl)
@@ -104,6 +107,24 @@ namespace Services.Implementations
                 storiesQuery = storiesQuery.Where(s => s.category.Any(c => c.id == query.CategoryId.Value));
             }
 
+            if (query.CategoryIds != null && query.CategoryIds.Count > 0)
+            {
+                var ids = query.CategoryIds;
+                storiesQuery = storiesQuery.Where(s => s.category.Any(c => ids.Contains(c.id)));
+            }
+
+            if (query.ExcludeStoryIds != null && query.ExcludeStoryIds.Count > 0)
+            {
+                var excludeIds = query.ExcludeStoryIds;
+                storiesQuery = storiesQuery.Where(s => !excludeIds.Contains(s.id));
+            }
+
+            if (query.IncludeStoryIds != null && query.IncludeStoryIds.Count > 0)
+            {
+                var includeIds = query.IncludeStoryIds;
+                storiesQuery = storiesQuery.Where(s => includeIds.Contains(s.id));
+            }
+
             if (query.AuthorId.HasValue)
             {
                 storiesQuery = storiesQuery.Where(s => s.author_id == query.AuthorId.Value);
@@ -149,13 +170,29 @@ namespace Services.Implementations
         public StoryResponseDto? GetById(Guid id)
         {
             var story = _storyRepository.GetById(id);
-            return story == null ? null : MapToResponseDto(story);
+            if (story == null) return null;
+            var dto = MapToResponseDto(story);
+            if (story.status == "REJECTED")
+            {
+                var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("STORY", id);
+                dto.RejectionReason = reason;
+                dto.RejectedAt = rejectedAt;
+            }
+            return dto;
         }
 
         public StoryResponseDto? GetBySlug(string slug)
         {
             var story = _storyRepository.GetBySlug(slug);
-            return story == null ? null : MapToResponseDto(story);
+            if (story == null) return null;
+            var dto = MapToResponseDto(story);
+            if (story.status == "REJECTED")
+            {
+                var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("STORY", story.id);
+                dto.RejectionReason = reason;
+                dto.RejectedAt = rejectedAt;
+            }
+            return dto;
         }
 
         public PagedResultDto<StoryListItemDto> GetByAuthor(Guid authorId, StoryQueryDto query)
@@ -296,16 +333,16 @@ namespace Services.Implementations
                 _logger?.LogInformation("StoryService.Publish: Found story '{Title}' (ID: {StoryId}), current status: {Status}",
                     story.title, id, story.status);
 
-                // Publish story independently - no check for chapters
-                story.status = "PUBLISHED";
-                story.published_at = DateTime.Now;
-                story.last_published_at = DateTime.Now;
+                // Author "Publish" = gửi chờ duyệt. Chỉ moderator approve mới chuyển sang PUBLISHED.
+                story.status = "PENDING_REVIEW";
                 story.updated_at = DateTime.Now;
+                // published_at, last_published_at chỉ set khi moderator approve (ModerationService.ApproveStory)
 
-                _logger?.LogInformation("StoryService.Publish: Updating story status to PUBLISHED for ID: {StoryId}", id);
+                _logger?.LogInformation("StoryService.Publish: Updating story status to PENDING_REVIEW for ID: {StoryId}", id);
                 _storyRepository.Update(story);
 
-                _logger?.LogInformation("StoryService.Publish: Successfully published story ID: {StoryId}", id);
+                _logger?.LogInformation("StoryService.Publish: Successfully submitted story for review (PENDING_REVIEW) ID: {StoryId}", id);
+                _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
                 return true;
             }
             catch (Exception ex)
