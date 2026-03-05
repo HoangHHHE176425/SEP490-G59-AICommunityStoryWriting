@@ -173,37 +173,46 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                 </div>
 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0, flexWrap: 'wrap' }}>
-                                    {showClaimButton && (pub.type === 'story' || pub.type === 'chapter') && (
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                if (pub.type === 'story') onClaimStory?.(pub.storyId ?? pub.id);
-                                                else onClaimChapter?.(pub.chapterId ?? pub.id);
-                                            }}
-                                            disabled={
-                                                (pub.claimedByDisplayName && !pub.isClaimedByMe) ||
-                                                claimingId === (pub.type === 'story' ? (pub.storyId ?? pub.id) : (pub.chapterId ?? pub.id))
-                                            }
-                                            style={{
-                                                padding: '0.625rem 1rem',
-                                                backgroundColor: (pub.claimedByDisplayName && !pub.isClaimedByMe) ? '#e2e8f0' : '#0ea5e9',
-                                                color: '#ffffff',
-                                                fontSize: '0.8125rem',
-                                                fontWeight: 600,
-                                                borderRadius: '8px',
-                                                border: 'none',
-                                                cursor: (pub.claimedByDisplayName && !pub.isClaimedByMe) ? 'not-allowed' : 'pointer',
-                                                opacity: claimingId === (pub.type === 'story' ? (pub.storyId ?? pub.id) : (pub.chapterId ?? pub.id)) ? 0.7 : 1,
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '0.375rem',
-                                                whiteSpace: 'nowrap'
-                                            }}
-                                        >
-                                            <UserCheck style={{ width: '14px', height: '14px' }} />
-                                            {(pub.claimedByDisplayName && !pub.isClaimedByMe) ? 'Đã có người nhận' : claimingId === (pub.type === 'story' ? (pub.storyId ?? pub.id) : (pub.chapterId ?? pub.id)) ? '...' : 'Nhận duyệt đơn'}
-                                        </button>
-                                    )}
+                                    {showClaimButton && (pub.type === 'story' || pub.type === 'chapter') && (() => {
+                                        const pubId = pub.type === 'story' ? (pub.storyId ?? pub.id) : (pub.chapterId ?? pub.id);
+                                        const isClaiming = claimingId === pubId;
+                                        const claimedByOther = pub.claimedByDisplayName && !pub.isClaimedByMe;
+                                        const claimedByMe = pub.isClaimedByMe;
+                                        const disabled = claimedByOther || claimedByMe || isClaiming;
+                                        let label = 'Nhận duyệt đơn';
+                                        if (isClaiming) label = '...';
+                                        else if (claimedByOther) label = `Đã nhận bởi ${pub.claimedByDisplayName}`;
+                                        else if (claimedByMe) label = 'Đã nhận bởi bạn';
+                                        return (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (disabled) return;
+                                                    if (pub.type === 'story') onClaimStory?.(pub.storyId ?? pub.id);
+                                                    else onClaimChapter?.(pub.chapterId ?? pub.id);
+                                                }}
+                                                disabled={disabled}
+                                                style={{
+                                                    padding: '0.625rem 1rem',
+                                                    backgroundColor: disabled ? '#e2e8f0' : '#0ea5e9',
+                                                    color: disabled ? '#64748b' : '#ffffff',
+                                                    fontSize: '0.8125rem',
+                                                    fontWeight: 600,
+                                                    borderRadius: '8px',
+                                                    border: 'none',
+                                                    cursor: disabled ? 'not-allowed' : 'pointer',
+                                                    opacity: isClaiming ? 0.7 : 1,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.375rem',
+                                                    whiteSpace: 'nowrap'
+                                                }}
+                                            >
+                                                <UserCheck style={{ width: '14px', height: '14px' }} />
+                                                {label}
+                                            </button>
+                                        );
+                                    })()}
                                     <button
                                         onClick={() => onViewDetail(pub)}
                                         style={{
@@ -281,24 +290,24 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
 
                             {/* Categories */}
                             {Array.isArray(pub.categories) && pub.categories.length > 0 && (
-                            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-                                {pub.categories.map(cat => (
-                                    <span
-                                        key={cat}
-                                        style={{
-                                            padding: '0.25rem 0.625rem',
-                                            backgroundColor: '#f8fafc',
-                                            color: '#475569',
-                                            fontSize: '0.75rem',
-                                            fontWeight: 500,
-                                            borderRadius: '0.375rem',
-                                            border: '1px solid #e2e8f0'
-                                        }}
-                                    >
-                                        {cat}
-                                    </span>
-                                ))}
-                            </div>
+                                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+                                    {pub.categories.map(cat => (
+                                        <span
+                                            key={cat}
+                                            style={{
+                                                padding: '0.25rem 0.625rem',
+                                                backgroundColor: '#f8fafc',
+                                                color: '#475569',
+                                                fontSize: '0.75rem',
+                                                fontWeight: 500,
+                                                borderRadius: '0.375rem',
+                                                border: '1px solid #e2e8f0'
+                                            }}
+                                        >
+                                            {cat}
+                                        </span>
+                                    ))}
+                                </div>
                             )}
 
                             {/* Rejection Reason */}

@@ -141,9 +141,10 @@ export function PublicationManagement() {
         }
 
         if (filterStatus === 'pending') {
+            const claimFilterParam = claimFilter === 'all' ? 'all' : claimFilter;
             Promise.all([
-                getPendingStories({ pageSize: 500, claimFilter: claimFilter === 'all' ? undefined : claimFilter }),
-                getPendingChapters({ pageSize: 500, claimFilter: claimFilter === 'all' ? undefined : claimFilter })
+                getPendingStories({ pageSize: 500, claimFilter: claimFilterParam, sortBy: 'updated_at', sortOrder: 'asc' }),
+                getPendingChapters({ pageSize: 500, claimFilter: claimFilterParam, sortBy: 'created_at', sortOrder: 'asc' })
             ])
                 .then(([storiesRes, chaptersRes]) => {
                     const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
@@ -253,6 +254,14 @@ export function PublicationManagement() {
         setSelectedPublication(null);
     };
 
+    /** Lấy thông báo lỗi khi claim (404 = đã được moderator khác nhận). */
+    const getClaimErrorMessage = (err) => {
+        if (err?.response?.status === 404) {
+            return err?.response?.data?.message ?? 'Đã được moderator khác nhận duyệt.';
+        }
+        return err?.response?.data?.message ?? err?.message ?? 'Không thể nhận duyệt đơn.';
+    };
+
     const handleClaimStory = async (storyId) => {
         setClaimingId(storyId);
         try {
@@ -260,8 +269,7 @@ export function PublicationManagement() {
             loadPublications(currentPage);
             loadStats();
         } catch (err) {
-            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể nhận duyệt đơn.';
-            alert(msg);
+            alert(getClaimErrorMessage(err));
         } finally {
             setClaimingId(null);
         }
@@ -274,8 +282,7 @@ export function PublicationManagement() {
             loadPublications(currentPage);
             loadStats();
         } catch (err) {
-            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể nhận duyệt đơn.';
-            alert(msg);
+            alert(getClaimErrorMessage(err));
         } finally {
             setClaimingId(null);
         }
@@ -293,8 +300,7 @@ export function PublicationManagement() {
             loadStats();
             loadClaimModalStories();
         } catch (err) {
-            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể nhận duyệt đơn.';
-            alert(msg);
+            alert(getClaimErrorMessage(err));
         } finally {
             setClaimingId(null);
         }
@@ -540,7 +546,7 @@ export function PublicationManagement() {
                             onClaimStory={handleClaimStory}
                             onClaimChapter={handleClaimChapter}
                             claimingId={claimingId}
-                            showClaimButton={false}
+                            showClaimButton={filterStatus === 'pending'}
                         />
                         {totalPages > 1 && (
                             <Pagination
