@@ -546,7 +546,7 @@ export function PublicationManagement() {
                             onClaimStory={handleClaimStory}
                             onClaimChapter={handleClaimChapter}
                             claimingId={claimingId}
-                            showClaimButton={filterStatus === 'pending'}
+                            showClaimButton={filterStatus === 'pending' && claimFilter !== 'CLAIMED'}
                         />
                         {totalPages > 1 && (
                             <Pagination

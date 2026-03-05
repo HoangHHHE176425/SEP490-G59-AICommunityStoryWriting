@@ -173,16 +173,14 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                 </div>
 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0, flexWrap: 'wrap' }}>
-                                    {showClaimButton && (pub.type === 'story' || pub.type === 'chapter') && (() => {
+                                    {showClaimButton && (pub.type === 'story' || pub.type === 'chapter') && !pub.isClaimedByMe && (() => {
                                         const pubId = pub.type === 'story' ? (pub.storyId ?? pub.id) : (pub.chapterId ?? pub.id);
                                         const isClaiming = claimingId === pubId;
                                         const claimedByOther = pub.claimedByDisplayName && !pub.isClaimedByMe;
-                                        const claimedByMe = pub.isClaimedByMe;
-                                        const disabled = claimedByOther || claimedByMe || isClaiming;
+                                        const disabled = claimedByOther || isClaiming;
                                         let label = 'Nhận duyệt đơn';
                                         if (isClaiming) label = '...';
                                         else if (claimedByOther) label = `Đã nhận bởi ${pub.claimedByDisplayName}`;
-                                        else if (claimedByMe) label = 'Đã nhận bởi bạn';
                                         return (
                                             <button
                                                 onClick={(e) => {
