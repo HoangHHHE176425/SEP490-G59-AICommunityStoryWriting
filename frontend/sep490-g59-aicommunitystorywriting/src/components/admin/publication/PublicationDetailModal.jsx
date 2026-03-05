@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar, UserCheck } from 'lucide-react';
-import { getChapters, getChapterById, publishChapter } from '../../../api/chapter/chapterApi';
-import { publishStory } from '../../../api/story/storyApi';
+import { getChapters, getChapterById } from '../../../api/chapter/chapterApi';
+import { approveStory, approveChapter, rejectStory, rejectChapter } from '../../../api/moderator/moderatorApi';
+import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { useToast } from '../../author/story-editor/Toast';
 
 /** Map API chapter list item sang format modal cần */
@@ -30,6 +31,20 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
 
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
+    const fetchChaptersForStory = useCallback((sid, options = {}) => {
+        if (!sid) return;
+        if (options.showLoading !== false) setChaptersLoading(true);
+        getChapters({ storyId: sid, status: 'PENDING_REVIEW', pageSize: 100 })
+            .then((res) => {
+                const items = res?.items ?? res?.Items ?? [];
+                const mapped = items.map(mapChapterItem);
+                setChapters(mapped);
+                setSelectedChapter((prev) => (prev && mapped.some((c) => c.id === prev.id)) ? prev : (mapped[0] ?? null));
+            })
+            .catch(() => setChapters([]))
+            .finally(() => setChaptersLoading(false));
+    }, []);
+
     useEffect(() => {
         const id = setTimeout(() => {
             if (!storyId) {
@@ -38,21 +53,23 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 setSelectedChapter(null);
                 return;
             }
-            setChaptersLoading(true);
             setChapters([]);
             setSelectedChapter(null);
             setChapterContents({});
-            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 100 })
-                .then((res) => {
-                    const items = res?.items ?? res?.Items ?? [];
-                    const mapped = items.map(mapChapterItem);
-                    setChapters(mapped);
-                    if (mapped.length > 0) setSelectedChapter(mapped[0]);
-                })
-                .catch(() => setChapters([]))
-                .finally(() => setChaptersLoading(false));
+            fetchChaptersForStory(storyId);
         }, 0);
         return () => clearTimeout(id);
+    }, [storyId, fetchChaptersForStory]);
+
+    /** Real-time: khi có claim/approve/reject, refetch danh sách chương trong modal */
+    const refetchChaptersRef = useRef(() => { });
+    refetchChaptersRef.current = () => {
+        if (storyId) fetchChaptersForStory(storyId, { showLoading: false });
+    };
+    useEffect(() => {
+        if (!storyId) return;
+        const { stop } = createModeratorHubConnection(() => refetchChaptersRef.current());
+        return () => { stop(); };
     }, [storyId]);
 
     const loadChapterContent = useCallback(async (chapterId) => {
@@ -84,9 +101,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         setIsSubmitting(true);
         try {
             if (publication.status !== 'approved') {
-                await publishStory(storyId);
+                await approveStory(storyId);
             }
-            await publishChapter(selectedChapter.id);
+            await approveChapter(selectedChapter.id);
             showToast('Duyệt chương thành công!', 'success');
             const remaining = chapters.filter(c => c.id !== selectedChapter.id);
             setChapters(remaining);
@@ -101,25 +118,46 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 onApprove(publication.id);
             }
         } catch (err) {
-            showToast(err?.message ?? 'Không thể duyệt xuất bản. Vui lòng thử lại.', 'error');
+            showToast(err?.response?.data?.message ?? err?.message ?? 'Không thể duyệt xuất bản. Vui lòng thử lại.', 'error');
         } finally {
             setIsSubmitting(false);
         }
     };
 
-    const handleRejectSubmit = () => {
+    const handleRejectSubmit = async () => {
         if (!rejectionReason.trim()) {
             alert('Vui lòng nhập lý do từ chối');
             return;
         }
 
-        if (window.confirm('Bạn có chắc chắn muốn từ chối xuất bản này?')) {
-            setIsSubmitting(true);
-            // Simulate API call
-            setTimeout(() => {
-                onReject(publication.id, rejectionReason);
-                setIsSubmitting(false);
-            }, 500);
+        if (!window.confirm('Bạn có chắc chắn muốn từ chối xuất bản này?')) return;
+        setIsSubmitting(true);
+        try {
+            if (selectedChapter) {
+                await rejectChapter(selectedChapter.id, rejectionReason.trim());
+                showToast('Đã từ chối chương.', 'success');
+                const remaining = chapters.filter(c => c.id !== selectedChapter.id);
+                setChapters(remaining);
+                setSelectedChapter(remaining[0] ?? null);
+                setChapterContents((prev) => {
+                    const next = { ...prev };
+                    delete next[selectedChapter.id];
+                    return next;
+                });
+                onRefresh?.();
+                if (remaining.length === 0) onReject(publication.id);
+            } else {
+                await rejectStory(storyId, rejectionReason.trim());
+                showToast('Đã từ chối truyện.', 'success');
+                onReject(publication.id);
+                onRefresh?.();
+            }
+            setShowRejectForm(false);
+            setRejectionReason('');
+        } catch (err) {
+            showToast(err?.response?.data?.message ?? err?.message ?? 'Không thể từ chối. Vui lòng thử lại.', 'error');
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -232,7 +270,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 {publication.storyTitle}
                             </h2>
 
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', fontSize: '0.875rem', color: '#64748b', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', fontSize: '0.875rem', color: '#64748b', flexWrap: 'wrap' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                                     <User style={{ width: '14px', height: '14px' }} />
                                     <span>{publication.author ?? '—'}</span>
@@ -287,20 +325,20 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                             )}
                             <button
                                 onClick={onClose}
-                            style={{
-                                padding: '0.5rem',
-                                backgroundColor: 'transparent',
-                                border: 'none',
-                                cursor: 'pointer',
-                                borderRadius: '0.5rem',
-                                transition: 'background-color 0.2s',
-                                flexShrink: 0
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                        >
-                            <X style={{ width: '24px', height: '24px', color: '#64748b' }} />
-                        </button>
+                                style={{
+                                    padding: '0.5rem',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    borderRadius: '0.5rem',
+                                    transition: 'background-color 0.2s',
+                                    flexShrink: 0
+                                }}
+                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                            >
+                                <X style={{ width: '24px', height: '24px', color: '#64748b' }} />
+                            </button>
                         </div>
                     </div>
 

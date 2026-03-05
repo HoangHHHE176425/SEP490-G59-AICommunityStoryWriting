@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { PublicationList } from '../../../components/admin/publication/PublicationList';
 import { PublicationDetailModal } from '../../../components/admin/publication/PublicationDetailModal';
 import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories } from '../../../api/story/storyApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
 import { getPendingStories, getPendingChapters, claimStory, claimChapter } from '../../../api/moderator/moderatorApi';
+import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 
 /** Map API story item sang format publication cho PublicationList / PublicationDetailModal */
@@ -238,6 +239,19 @@ export function PublicationManagement() {
         return () => clearInterval(intervalId);
     }, [loadPublications, loadStats, currentPage]);
 
+    /** Refetch khi SignalR báo PendingListChanged (author publish / claim / approve / reject). */
+    const onRefetchPendingRef = useRef(() => { });
+    onRefetchPendingRef.current = () => {
+        loadPublications(currentPage, { silent: true });
+        loadStats();
+    };
+
+    useEffect(() => {
+        if (filterStatus !== 'pending') return;
+        const { stop } = createModeratorHubConnection(() => onRefetchPendingRef.current());
+        return () => { stop(); };
+    }, [filterStatus]);
+
     useEffect(() => {
         if (showClaimModal) loadClaimModalStories();
     }, [showClaimModal, loadClaimModalStories]);
@@ -306,19 +320,15 @@ export function PublicationManagement() {
         }
     };
 
-    const handleApprove = (publicationId) => {
-        // TODO: API call to approve
-        console.log('Approved publication:', publicationId);
+    const handleApprove = () => {
         setSelectedPublication(null);
-        loadPublications();
+        loadPublications(currentPage);
         loadStats();
     };
 
-    const handleReject = (publicationId, reason) => {
-        // TODO: API call to reject
-        console.log('Rejected publication:', publicationId, 'Reason:', reason);
+    const handleReject = () => {
         setSelectedPublication(null);
-        loadPublications();
+        loadPublications(currentPage);
         loadStats();
     };
 

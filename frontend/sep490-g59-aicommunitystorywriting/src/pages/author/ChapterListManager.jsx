@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
@@ -63,10 +63,13 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     const [hasPublishedChapter, setHasPublishedChapter] = useState(false);
     const [hasPendingReviewChapter, setHasPendingReviewChapter] = useState(false);
 
-    const loadChapters = (page = 1) => {
+    const loadChapters = useCallback((page = 1, options = {}) => {
         if (!storyId) return;
-        setLoading(true);
-        setError(null);
+        const silent = options.silent === true;
+        if (!silent) {
+            setLoading(true);
+            setError(null);
+        }
         getChapters({ storyId, page, pageSize: CHAPTERS_PAGE_SIZE })
             .then((res) => {
                 const rawItems = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
@@ -76,15 +79,28 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                 setTotalCount(total);
                 setTotalPages(pages);
                 setCurrentPage(res?.page ?? page);
+                if (silent) {
+                    Promise.all([
+                        getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                        getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                    ]).then(([publishedRes, pendingRes]) => {
+                        const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
+                        const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
+                        setHasPublishedChapter(publishedList.length > 0);
+                        setHasPendingReviewChapter(pendingList.length > 0);
+                    }).catch(() => { });
+                }
             })
             .catch((err) => {
-                setError(err?.message ?? 'Không tải được danh sách chương');
-                setChapters([]);
-                setTotalCount(0);
-                setTotalPages(1);
+                if (!silent) {
+                    setError(err?.message ?? 'Không tải được danh sách chương');
+                    setChapters([]);
+                    setTotalCount(0);
+                    setTotalPages(1);
+                }
             })
-            .finally(() => setLoading(false));
-    };
+            .finally(() => { if (!silent) setLoading(false); });
+    }, [storyId]);
 
     useEffect(() => {
         let cancelled = false;
@@ -138,6 +154,25 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
             cancelled = true;
             clearTimeout(id);
         };
+    }, [storyId]);
+
+    /** Real-time: refetch danh sách chương khi tab đang hiển thị (moderator duyệt/từ chối bên tab kia). Backend chỉ có ModeratorHub nên tác giả dùng polling. */
+    const POLL_INTERVAL_MS = 1000;
+    const currentPageRef = useRef(currentPage);
+    const loadChaptersRef = useRef(loadChapters);
+    useEffect(() => {
+        currentPageRef.current = currentPage;
+        loadChaptersRef.current = loadChapters;
+    }, [currentPage, loadChapters]);
+    useEffect(() => {
+        if (!storyId) return;
+        const tick = () => {
+            if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+                loadChaptersRef.current?.(currentPageRef.current, { silent: true });
+            }
+        };
+        const id = setInterval(tick, POLL_INTERVAL_MS);
+        return () => clearInterval(id);
     }, [storyId]);
 
     const handlePageChange = (page) => {
