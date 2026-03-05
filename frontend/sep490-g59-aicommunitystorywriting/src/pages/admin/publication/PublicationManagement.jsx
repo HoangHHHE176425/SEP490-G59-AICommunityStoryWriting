@@ -4,6 +4,7 @@ import { PublicationDetailModal } from '../../../components/admin/publication/Pu
 import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories } from '../../../api/story/storyApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
+import { getPendingStories, getPendingChapters, claimStory, claimChapter } from '../../../api/moderator/moderatorApi';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 
 /** Map API story item sang format publication cho PublicationList / PublicationDetailModal */
@@ -53,9 +54,61 @@ const PAGE_SIZE = 10;
 /** Backend khuyến nghị: load lại danh sách duyệt/từ chối mỗi 30 giây để cập nhật khi có thay đổi từ nơi khác */
 const REFRESH_INTERVAL_MS = 30 * 1000;
 
+/** Map item từ moderator/stories/pending sang format dùng chung (type story). */
+function mapPendingStoryToItem(s) {
+    const id = s.id ?? s.Id;
+    const coverPath = s.coverImage ?? s.CoverImage;
+    const categoryNamesStr = s.categoryNames ?? s.CategoryNames ?? '';
+    const categoryNamesArr = categoryNamesStr ? String(categoryNamesStr).split(',').map((x) => x.trim()).filter(Boolean) : [];
+    return {
+        id,
+        storyId: id,
+        type: 'story',
+        storyTitle: s.title ?? s.Title ?? '',
+        storyCover: coverPath ? resolveBackendUrl(coverPath) : '',
+        author: s.authorName ?? s.AuthorName ?? 'N/A',
+        authorId: s.authorId ?? s.AuthorId ?? null,
+        status: 'pending',
+        submittedAt: s.createdAt ?? s.CreatedAt ?? s.updatedAt ?? s.UpdatedAt ?? null,
+        totalChapters: s.totalChapters ?? s.TotalChapters ?? 0,
+        categories: categoryNamesArr,
+        description: s.summary ?? s.Summary ?? '',
+        isClaimedByMe: s.isClaimedByMe ?? s.IsClaimedByMe ?? false,
+        claimedByDisplayName: s.claimedByDisplayName ?? s.ClaimedByDisplayName ?? null,
+        claimedAt: s.claimedAt ?? s.ClaimedAt ?? null,
+    };
+}
+
+/** Map item từ moderator/chapters/pending sang format dùng chung (type chapter). */
+function mapPendingChapterToItem(c) {
+    const id = c.id ?? c.Id;
+    const storyId = c.storyId ?? c.StoryId;
+    return {
+        id,
+        chapterId: id,
+        storyId,
+        type: 'chapter',
+        storyTitle: c.storyTitle ?? c.StoryTitle ?? '',
+        storyCover: '',
+        chapterTitle: c.title ?? c.Title ?? '',
+        orderIndex: c.orderIndex ?? c.OrderIndex ?? 0,
+        author: null,
+        authorId: null,
+        status: 'pending',
+        submittedAt: c.createdAt ?? c.CreatedAt ?? null,
+        totalChapters: null,
+        categories: [],
+        wordCount: c.wordCount ?? c.WordCount ?? 0,
+        isClaimedByMe: c.isClaimedByMe ?? c.IsClaimedByMe ?? false,
+        claimedByDisplayName: c.claimedByDisplayName ?? c.ClaimedByDisplayName ?? null,
+        claimedAt: c.claimedAt ?? c.ClaimedAt ?? null,
+    };
+}
+
 export function PublicationManagement() {
     const [selectedPublication, setSelectedPublication] = useState(null);
     const [filterStatus, setFilterStatus] = useState('pending'); // 'pending' | 'approved' | 'rejected' | 'all'
+    const [claimFilter, setClaimFilter] = useState('all'); // 'all' | 'UNCLAIMED' | 'CLAIMED' — chỉ áp dụng khi filterStatus === 'pending'
     const [publications, setPublications] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -63,6 +116,7 @@ export function PublicationManagement() {
     const [currentPage, setCurrentPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [totalCount, setTotalCount] = useState(0);
+    const [claimingId, setClaimingId] = useState(null); // id đang gọi claim
 
     const loadPublications = useCallback((page = 1, options = {}) => {
         const silent = options.silent === true;
@@ -72,31 +126,24 @@ export function PublicationManagement() {
         }
 
         if (filterStatus === 'pending') {
-            getChapters({ status: 'PENDING_REVIEW', pageSize: 500 })
-                .then((chaptersRes) => {
+            Promise.all([
+                getPendingStories({ pageSize: 500, claimFilter: claimFilter === 'all' ? undefined : claimFilter }),
+                getPendingChapters({ pageSize: 500, claimFilter: claimFilter === 'all' ? undefined : claimFilter })
+            ])
+                .then(([storiesRes, chaptersRes]) => {
+                    const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
                     const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
-                    const storyIds = [...new Set(chapterItems.map(c => c.storyId ?? c.StoryId).filter(Boolean))];
-                    if (storyIds.length === 0) {
-                        setPublications([]);
-                        setTotalCount(0);
-                        setTotalPages(1);
-                        setCurrentPage(1);
-                        return;
-                    }
-                    return getStories({ pageSize: 500 }).then((storiesRes) => {
-                        const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
-                        const storyIdSet = new Set(storyIds.map(String));
-                        const filtered = storyItems.filter(s => storyIdSet.has(String(s.id ?? s.Id)));
-                        const list = filtered.map(mapStoryToPublication);
-                        setPublications(list);
-                        const total = list.length;
-                        setTotalCount(total);
-                        setTotalPages(Math.max(1, Math.ceil(total / PAGE_SIZE)));
-                        setCurrentPage(Math.min(page, Math.max(1, Math.ceil(total / PAGE_SIZE))));
-                    });
+                    const storyList = storyItems.map(mapPendingStoryToItem);
+                    const chapterList = chapterItems.map(mapPendingChapterToItem);
+                    const combined = [...storyList, ...chapterList];
+                    setPublications(combined);
+                    const total = combined.length;
+                    setTotalCount(total);
+                    setTotalPages(Math.max(1, Math.ceil(total / PAGE_SIZE)));
+                    setCurrentPage(Math.min(page, Math.max(1, Math.ceil(total / PAGE_SIZE))));
                 })
                 .catch((err) => {
-                    if (!silent) setError(err?.message ?? 'Không tải được danh sách truyện');
+                    if (!silent) setError(err?.response?.data?.message ?? err?.message ?? 'Không tải được danh sách. Bạn cần đăng nhập với vai trò MODERATOR hoặc ADMIN.');
                     setPublications([]);
                     setTotalCount(0);
                     setTotalPages(1);
@@ -126,7 +173,7 @@ export function PublicationManagement() {
                 setTotalPages(1);
             })
             .finally(() => { if (!silent) setLoading(false); });
-    }, [filterStatus]);
+    }, [filterStatus, claimFilter]);
 
     const handlePageChange = (page) => {
         setCurrentPage(page);
@@ -187,6 +234,34 @@ export function PublicationManagement() {
         setSelectedPublication(null);
     };
 
+    const handleClaimStory = async (storyId) => {
+        setClaimingId(storyId);
+        try {
+            await claimStory(storyId);
+            loadPublications(currentPage);
+            loadStats();
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể nhận duyệt đơn.';
+            alert(msg);
+        } finally {
+            setClaimingId(null);
+        }
+    };
+
+    const handleClaimChapter = async (chapterId) => {
+        setClaimingId(chapterId);
+        try {
+            await claimChapter(chapterId);
+            loadPublications(currentPage);
+            loadStats();
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể nhận duyệt đơn.';
+            alert(msg);
+        } finally {
+            setClaimingId(null);
+        }
+    };
+
     const handleApprove = (publicationId) => {
         // TODO: API call to approve
         console.log('Approved publication:', publicationId);
@@ -219,7 +294,7 @@ export function PublicationManagement() {
                     Quản lý xuất bản
                 </h1>
                 <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
-                    Duyệt và phê duyệt các truyện, chương mới từ tác giả
+                    Duyệt và phê duyệt các truyện, chương mới từ tác giả. Moderator chỉ thấy truyện/chương trùng thể loại được gán (bảng moderator_category_assignments).
                 </p>
             </div>
 
@@ -286,6 +361,46 @@ export function PublicationManagement() {
                     </div>
                 </div>
             </div>
+
+            {/* Bộ lọc "Nhận đơn" — chỉ khi tab Chờ duyệt */}
+            {filterStatus === 'pending' && (
+                <div style={{
+                    backgroundColor: '#ffffff',
+                    borderRadius: '12px',
+                    padding: '0.75rem 1rem',
+                    marginBottom: '1rem',
+                    border: '1px solid #e2e8f0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                    flexWrap: 'wrap'
+                }}>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#475569' }}>Nhận đơn:</span>
+                    {[
+                        { value: 'all', label: 'Tất cả' },
+                        { value: 'UNCLAIMED', label: 'Chưa nhận' },
+                        { value: 'CLAIMED', label: 'Đã nhận của tôi' }
+                    ].map(tab => (
+                        <button
+                            key={tab.value}
+                            onClick={() => setClaimFilter(tab.value)}
+                            style={{
+                                padding: '0.5rem 1rem',
+                                fontSize: '0.8125rem',
+                                fontWeight: 600,
+                                backgroundColor: claimFilter === tab.value ? '#13ec5b' : 'transparent',
+                                color: claimFilter === tab.value ? '#ffffff' : '#64748b',
+                                border: claimFilter === tab.value ? 'none' : '1px solid #e2e8f0',
+                                borderRadius: '9999px',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
+            )}
 
             {/* Filter Tabs */}
             <div style={{
@@ -366,6 +481,10 @@ export function PublicationManagement() {
                         <PublicationList
                             publications={filteredPublications}
                             onViewDetail={handleViewDetail}
+                            onClaimStory={handleClaimStory}
+                            onClaimChapter={handleClaimChapter}
+                            claimingId={claimingId}
+                            showClaimButton={filterStatus === 'pending'}
                         />
                         {totalPages > 1 && (
                             <Pagination
@@ -389,9 +508,11 @@ export function PublicationManagement() {
                     onApprove={handleApprove}
                     onReject={handleReject}
                     onRefresh={() => {
-                        loadPublications();
+                        loadPublications(currentPage);
                         loadStats();
                     }}
+                    onClaimStory={handleClaimStory}
+                    claimingId={claimingId}
                 />
             )}
         </div>
