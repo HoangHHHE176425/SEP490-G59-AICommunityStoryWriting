@@ -24,6 +24,18 @@ namespace DataAccessObjects.DAOs
             return context.stories.FirstOrDefault(s => s.slug == slug);
         }
 
+        /// <summary>L?y danh sách story id có ít nh?t m?t category n?m trong categoryIds (dùng cho moderator).</summary>
+        public static List<Guid> GetIdsByCategoryIds(IReadOnlyCollection<Guid> categoryIds)
+        {
+            if (categoryIds == null || categoryIds.Count == 0)
+                return new List<Guid>();
+            using var context = new StoryPlatformDbContext();
+            return context.stories
+                .Where(s => s.category.Any(c => categoryIds.Contains(c.id)))
+                .Select(s => s.id)
+                .ToList();
+        }
+
         public static void Add(stories story)
         {
             using var context = new StoryPlatformDbContext();
