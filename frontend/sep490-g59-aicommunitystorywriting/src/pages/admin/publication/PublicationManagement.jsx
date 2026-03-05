@@ -108,7 +108,7 @@ function mapPendingChapterToItem(c) {
 export function PublicationManagement() {
     const [selectedPublication, setSelectedPublication] = useState(null);
     const [filterStatus, setFilterStatus] = useState('pending'); // 'pending' | 'approved' | 'rejected' | 'all'
-    const [claimFilter, setClaimFilter] = useState('all'); // 'all' | 'UNCLAIMED' | 'CLAIMED' — chỉ áp dụng khi filterStatus === 'pending'
+    const [claimFilter, setClaimFilter] = useState('CLAIMED'); // 'all' | 'UNCLAIMED' | 'CLAIMED' — danh sách chờ duyệt mặc định hiển thị đơn moderator đã nhận
     const [publications, setPublications] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
