@@ -150,7 +150,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                     return next;
                 });
                 onRefresh?.();
-                if (remaining.length === 0) onReject(publication.id);
+                // Giống logic duyệt: khi không còn chương chờ duyệt thì chuyển trạng thái truyện (gọi rejectStory để truyện về REJECTED)
+                if (remaining.length === 0) {
+                    await rejectStory(storyId, rejectionReason.trim());
+                    onReject(publication.id);
+                }
             } else {
                 await rejectStory(storyId, rejectionReason.trim());
                 showToast('Đã từ chối truyện.', 'success');

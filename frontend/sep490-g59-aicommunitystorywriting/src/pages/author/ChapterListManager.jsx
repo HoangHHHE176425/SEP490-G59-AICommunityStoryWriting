@@ -641,10 +641,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                                     Xóa
                                                 </button>
                                             </div>
-                                            {/* Hàng 2: Xuất bản hoặc Hủy xuất bản (cùng độ rộng với hàng 1) */}
-                                            {(chapter.status === 'draft' || chapter.status === 'pending_review') && (
+                                            {/* Hàng 2: Xuất bản hoặc Hủy xuất bản (draft/rejected = Xuất bản; pending_review = Hủy xuất bản) */}
+                                            {(chapter.status === 'draft' || chapter.status === 'pending_review' || chapter.status === 'rejected') && (
                                                 <div style={{ display: 'flex', width: '100%' }}>
-                                                    {chapter.status === 'draft' && (
+                                                    {(chapter.status === 'draft' || chapter.status === 'rejected') && (
                                                         <button
                                                             onClick={() => handlePublishChapter(chapter.id)}
                                                             disabled={actioningChapterId === chapter.id}
