@@ -78,6 +78,16 @@ export async function getChapterById(id) {
 }
 
 /**
+ * Lấy lý do từ chối chương (cho tác giả). GET /chapters/{id}/rejection-reason.
+ * @param {string} id - Guid chương
+ * @returns {Promise<{ reason: string|null, rejectedAt: string|null }>}
+ */
+export async function getChapterRejectionReason(id) {
+    const response = await axiosInstance.get(`/chapters/${id}/rejection-reason`);
+    return response.data;
+}
+
+/**
  * Lấy tất cả chapters của một story.
  * @param {string} storyId - Guid
  * @returns {Promise} - Mảng chapters

@@ -138,6 +138,16 @@ export async function getStoryById(id) {
 }
 
 /**
+ * Lấy lý do từ chối truyện (cho tác giả). GET /stories/{id}/rejection-reason.
+ * @param {string} id - Guid truyện
+ * @returns {Promise<{ reason: string|null, rejectedAt: string|null }>}
+ */
+export async function getStoryRejectionReason(id) {
+    const response = await axiosInstance.get(`/stories/${id}/rejection-reason`);
+    return response.data;
+}
+
+/**
  * Lấy truyện theo slug.
  * @param {string} slug
  * @returns {Promise}

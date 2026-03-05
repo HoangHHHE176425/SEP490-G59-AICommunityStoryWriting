@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft } from 'lucide-react';
+import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { getChapters, getChapterById, updateChapter, unpublishChapter } from '../../api/chapter/chapterApi';
+import { getChapters, getChapterById, updateChapter, unpublishChapter, getChapterRejectionReason } from '../../api/chapter/chapterApi';
+import { getStoryRejectionReason } from '../../api/story/storyApi';
 import { updateStory } from '../../api/story/storyApi';
 import { Pagination } from '../../components/pagination/Pagination';
 
@@ -182,6 +183,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
 
     const [actioningChapterId, setActioningChapterId] = useState(null);
     const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, chapterId: null });
+    const [rejectionReasonModal, setRejectionReasonModal] = useState({ open: false, title: '', reason: null, rejectedAt: null, loading: false });
 
     const handleDeleteChapter = (chapterId) => {
         if (window.confirm('Bạn có chắc chắn muốn xóa chương này?')) {
@@ -280,9 +282,27 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
         openUnpublishConfirm(chapterId);
     };
 
-    // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp
-    const derivedStoryStatusDisplay = hasPublishedChapter ? 'Đã xuất bản' : hasPendingReviewChapter ? 'Chờ duyệt' : 'Bản nháp';
-    const derivedStatusKind = hasPublishedChapter ? 'published' : hasPendingReviewChapter ? 'pending_review' : 'draft';
+    // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp / Bị từ chối
+    const isStoryRejected = story?.status === 'rejected' || (story?.publishStatus && String(story.publishStatus).includes('từ chối'));
+    const derivedStoryStatusDisplay = isStoryRejected ? 'Bị từ chối' : hasPublishedChapter ? 'Đã xuất bản' : hasPendingReviewChapter ? 'Chờ duyệt' : 'Bản nháp';
+    const derivedStatusKind = isStoryRejected ? 'rejected' : hasPublishedChapter ? 'published' : hasPendingReviewChapter ? 'pending_review' : 'draft';
+
+    const openStoryRejectionReason = () => {
+        if (!storyId) return;
+        setRejectionReasonModal({ open: true, title: 'Lý do từ chối truyện', reason: null, rejectedAt: null, loading: true });
+        getStoryRejectionReason(storyId)
+            .then((data) => setRejectionReasonModal(prev => ({ ...prev, reason: data?.reason ?? null, rejectedAt: data?.rejectedAt ?? null, loading: false })))
+            .catch(() => setRejectionReasonModal(prev => ({ ...prev, reason: null, rejectedAt: null, loading: false })));
+    };
+
+    const openChapterRejectionReason = (chapterTitle, chapterId) => {
+        setRejectionReasonModal({ open: true, title: `Lý do từ chối: ${chapterTitle || 'Chương'}`, reason: null, rejectedAt: null, loading: true });
+        getChapterRejectionReason(chapterId)
+            .then((data) => setRejectionReasonModal(prev => ({ ...prev, reason: data?.reason ?? null, rejectedAt: data?.rejectedAt ?? null, loading: false })))
+            .catch(() => setRejectionReasonModal(prev => ({ ...prev, reason: null, rejectedAt: null, loading: false })));
+    };
+
+    const closeRejectionReasonModal = () => setRejectionReasonModal(prev => ({ ...prev, open: false }));
 
     return (
         <div>
@@ -356,8 +376,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                         fontFamily: "'Plus Jakarta Sans', sans-serif",
                                         fontSize: '0.75rem',
                                         fontWeight: 600,
-                                        color: derivedStatusKind === 'published' ? '#065f46' : '#92400e',
-                                        backgroundColor: derivedStatusKind === 'published' ? '#d1fae5' : '#fef3c7',
+                                        color: derivedStatusKind === 'published' ? '#065f46' : derivedStatusKind === 'rejected' ? '#b91c1c' : '#92400e',
+                                        backgroundColor: derivedStatusKind === 'published' ? '#d1fae5' : derivedStatusKind === 'rejected' ? '#fee2e2' : '#fef3c7',
                                         padding: '4px 10px',
                                         borderRadius: '8px',
                                         marginTop: '8px',
@@ -365,6 +385,30 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                     }}>
                                         Trạng thái truyện: {derivedStoryStatusDisplay}
                                     </span>
+                                    {isStoryRejected && (
+                                        <button
+                                            type="button"
+                                            onClick={openStoryRejectionReason}
+                                            style={{
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '0.375rem',
+                                                marginTop: '8px',
+                                                marginLeft: '8px',
+                                                padding: '0.375rem 0.75rem',
+                                                fontSize: '0.75rem',
+                                                fontWeight: 600,
+                                                color: '#b91c1c',
+                                                backgroundColor: '#fef2f2',
+                                                border: '1px solid #fecaca',
+                                                borderRadius: '8px',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            <AlertCircle size={14} />
+                                            Xem lý do từ chối
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                             <button
@@ -505,6 +549,24 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                                 }}>
                                                     {chapter.statusDisplay}
                                                 </span>
+                                                {chapter.status === 'rejected' && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openChapterRejectionReason(chapter.title, chapter.id)}
+                                                        style={{
+                                                            padding: '0.15rem 0.5rem',
+                                                            fontSize: '0.6875rem',
+                                                            fontWeight: 600,
+                                                            color: '#b91c1c',
+                                                            backgroundColor: 'transparent',
+                                                            border: '1px solid #fecaca',
+                                                            borderRadius: '6px',
+                                                            cursor: 'pointer'
+                                                        }}
+                                                    >
+                                                        Lý do từ chối
+                                                    </button>
+                                                )}
                                                 <span style={{ fontSize: '0.6875rem', color: '#94a3b8' }}>{chapter.updatedAt}</span>
                                                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.6875rem', color: '#64748b' }}>
                                                     <Eye size={11} /> {chapter.views}
@@ -758,6 +820,73 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                 }}
                             >
                                 Xác nhận
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal lý do từ chối (truyện hoặc chương) */}
+            {rejectionReasonModal.open && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10001,
+                        padding: '1rem'
+                    }}
+                    onClick={closeRejectionReasonModal}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '440px',
+                            width: '100%',
+                            boxShadow: '0 20px 60px rgba(0,0,0,0.2)'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.125rem', fontWeight: 600, color: '#1e293b' }}>
+                            {rejectionReasonModal.title}
+                        </h3>
+                        {rejectionReasonModal.loading ? (
+                            <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748b' }}>Đang tải...</p>
+                        ) : rejectionReasonModal.reason ? (
+                            <>
+                                <p style={{ margin: 0, fontSize: '0.875rem', color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                                    {rejectionReasonModal.reason}
+                                </p>
+                                {rejectionReasonModal.rejectedAt && (
+                                    <p style={{ margin: '0.75rem 0 0 0', fontSize: '0.75rem', color: '#94a3b8' }}>
+                                        Từ chối lúc: {new Date(rejectionReasonModal.rejectedAt).toLocaleString('vi-VN')}
+                                    </p>
+                                )}
+                            </>
+                        ) : (
+                            <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748b' }}>Không có lý do từ chối hoặc chưa được ghi nhận.</p>
+                        )}
+                        <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                                type="button"
+                                onClick={closeRejectionReasonModal}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    backgroundColor: '#f1f5f9',
+                                    color: '#475569',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Đóng
                             </button>
                         </div>
                     </div>
