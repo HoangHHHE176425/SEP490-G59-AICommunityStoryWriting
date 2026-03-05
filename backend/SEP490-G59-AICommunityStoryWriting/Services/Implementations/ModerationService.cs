@@ -13,21 +13,46 @@ namespace Services.Implementations
         private readonly IChapterRepository _chapterRepository;
         private readonly IStoryService _storyService;
         private readonly IChapterService _chapterService;
+        private readonly IModerationHubNotifier? _moderationHubNotifier;
 
         public ModerationService(
             IStoryRepository storyRepository,
             IChapterRepository chapterRepository,
             IStoryService storyService,
-            IChapterService chapterService)
+            IChapterService chapterService,
+            IModerationHubNotifier? moderationHubNotifier = null)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
             _storyService = storyService;
             _chapterService = chapterService;
+            _moderationHubNotifier = moderationHubNotifier;
         }
 
-        public PagedResultDto<StoryListItemDto> GetPendingStories(int page = 1, int pageSize = 20, string? search = null, string? sortBy = null, string? sortOrder = null)
+        public PagedResultDto<StoryListItemDto> GetPendingStories(int page = 1, int pageSize = 20, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null)
         {
+            if (categoryIdsFilter != null && categoryIdsFilter.Count == 0)
+                return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+
+            var filter = (claimFilter ?? "all").Trim().ToUpperInvariant();
+            List<Guid>? excludeStoryIds = null;
+            List<Guid>? includeStoryIds = null;
+
+            if (filter == "UNCLAIMED")
+                excludeStoryIds = ReviewAssignmentDAO.GetLockedTargetIds(ReviewAssignmentDAO.TargetTypeStory);
+            else if (filter == "CLAIMED")
+            {
+                includeStoryIds = ReviewAssignmentDAO.GetClaimedTargetIdsByUser(ReviewAssignmentDAO.TargetTypeStory, moderatorId);
+                if (includeStoryIds.Count == 0)
+                    return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+            }
+            else
+            {
+                excludeStoryIds = moderatorId.HasValue
+                    ? ReviewAssignmentDAO.GetLockedTargetIdsByOthers(ReviewAssignmentDAO.TargetTypeStory, moderatorId.Value)
+                    : new List<Guid>();
+            }
+
             var query = new StoryQueryDto
             {
                 Status = "PENDING_REVIEW",
@@ -35,32 +60,130 @@ namespace Services.Implementations
                 PageSize = pageSize,
                 Search = search,
                 SortBy = !string.IsNullOrWhiteSpace(sortBy) ? sortBy : "updated_at",
-                SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "desc"
+                SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "asc",
+                CategoryIds = categoryIdsFilter != null ? categoryIdsFilter.ToList() : null,
+                ExcludeStoryIds = excludeStoryIds != null && excludeStoryIds.Count > 0 ? excludeStoryIds : null,
+                IncludeStoryIds = includeStoryIds != null && includeStoryIds.Count > 0 ? includeStoryIds : null
             };
-            return _storyService.GetAll(query);
+            var result = _storyService.GetAll(query);
+            foreach (var item in result.Items)
+            {
+                var claim = ReviewAssignmentDAO.GetClaimInfo(ReviewAssignmentDAO.TargetTypeStory, item.Id);
+                if (claim.HasValue)
+                {
+                    item.ClaimedAt = claim.Value.AssignedAt;
+                    item.ClaimedByDisplayName = claim.Value.DisplayName;
+                    item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
+                }
+            }
+            return result;
         }
 
-        public PagedResultDto<ChapterListItemDto> GetPendingChapters(int page = 1, int pageSize = 20, Guid? storyId = null, string? search = null, string? sortBy = null, string? sortOrder = null)
+        public PagedResultDto<ChapterListItemDto> GetPendingChapters(int page = 1, int pageSize = 20, Guid? storyId = null, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null)
         {
+            if (categoryIdsFilter != null && categoryIdsFilter.Count == 0)
+                return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+
+            List<Guid>? storyIdsFilter = null;
+            if (categoryIdsFilter != null && categoryIdsFilter.Count > 0)
+                storyIdsFilter = _storyRepository.GetStoryIdsByCategoryIds(categoryIdsFilter).ToList();
+
+            var filter = (claimFilter ?? "all").Trim().ToUpperInvariant();
+            List<Guid>? excludeChapterIds = null;
+            List<Guid>? includeChapterIds = null;
+
+            if (filter == "UNCLAIMED")
+                excludeChapterIds = ReviewAssignmentDAO.GetLockedTargetIds(ReviewAssignmentDAO.TargetTypeChapter);
+            else if (filter == "CLAIMED")
+            {
+                includeChapterIds = ReviewAssignmentDAO.GetClaimedTargetIdsByUser(ReviewAssignmentDAO.TargetTypeChapter, moderatorId);
+                if (includeChapterIds.Count == 0)
+                    return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+            }
+            else
+            {
+                excludeChapterIds = moderatorId.HasValue
+                    ? ReviewAssignmentDAO.GetLockedTargetIdsByOthers(ReviewAssignmentDAO.TargetTypeChapter, moderatorId.Value)
+                    : new List<Guid>();
+            }
+
             var query = new ChapterQueryDto
             {
                 Status = "PENDING_REVIEW",
                 StoryId = storyId,
+                StoryIds = storyIdsFilter,
+                ExcludeChapterIds = excludeChapterIds != null && excludeChapterIds.Count > 0 ? excludeChapterIds : null,
+                IncludeChapterIds = includeChapterIds != null && includeChapterIds.Count > 0 ? includeChapterIds : null,
                 Page = page,
                 PageSize = pageSize,
                 Search = search,
                 SortBy = !string.IsNullOrWhiteSpace(sortBy) ? sortBy : "created_at",
-                SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "desc"
+                SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "asc"
             };
-            return _chapterService.GetAll(query);
+            var result = _chapterService.GetAll(query);
+            foreach (var item in result.Items)
+            {
+                var claim = ReviewAssignmentDAO.GetClaimInfo(ReviewAssignmentDAO.TargetTypeChapter, item.Id);
+                if (claim.HasValue)
+                {
+                    item.ClaimedAt = claim.Value.AssignedAt;
+                    item.ClaimedByDisplayName = claim.Value.DisplayName;
+                    item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
+                }
+            }
+            return result;
         }
 
-        public bool ApproveStory(Guid storyId, Guid moderatorId)
+        public bool ClaimStory(Guid storyId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
         {
+            if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
+                return false;
+            var story = _storyRepository.GetById(storyId);
+            if (story == null || story.status != "PENDING_REVIEW")
+                return false;
+            if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
+                return false;
+            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, storyId))
+                return false;
+            var ok = ReviewAssignmentDAO.TryClaim(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId);
+            if (ok)
+                _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
+            return ok;
+        }
+
+        public bool ClaimChapter(Guid chapterId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
+        {
+            if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
+                return false;
+            var chapter = _chapterRepository.GetById(chapterId);
+            if (chapter == null || chapter.status != "PENDING_REVIEW")
+                return false;
+            if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && chapter.story_id.HasValue)
+            {
+                var story = StoryDAO.GetById(chapter.story_id.Value);
+                if (story == null || !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
+                    return false;
+            }
+            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId))
+                return false;
+            var ok = ReviewAssignmentDAO.TryClaim(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
+            if (ok)
+                _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
+            return ok;
+        }
+
+        public bool ApproveStory(Guid storyId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
+        {
+            if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
+                return false;
             var story = _storyRepository.GetById(storyId);
             if (story == null)
                 return false;
             if (story.status != "PENDING_REVIEW")
+                return false;
+            if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
+                return false;
+            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, storyId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId))
                 return false;
 
             story.status = "PUBLISHED";
@@ -69,37 +192,57 @@ namespace Services.Implementations
             story.updated_at = DateTime.Now;
             _storyRepository.Update(story);
 
+            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeStory, storyId);
             LogModeration("STORY", storyId, "APPROVED", moderatorId, null);
             NotifyStoryResult(story, "APPROVED", null);
+            _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
 
-        public bool RejectStory(Guid storyId, Guid moderatorId, string reason)
+        public bool RejectStory(Guid storyId, Guid moderatorId, string reason, IReadOnlyList<Guid>? allowedCategoryIds = null)
         {
             if (string.IsNullOrWhiteSpace(reason))
                 throw new ArgumentException("Lý do từ chối là bắt buộc.", nameof(reason));
+            if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
+                return false;
 
             var story = _storyRepository.GetById(storyId);
             if (story == null)
                 return false;
             if (story.status != "PENDING_REVIEW")
                 return false;
+            if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
+                return false;
+            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, storyId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId))
+                return false;
 
             story.status = "REJECTED";
             story.updated_at = DateTime.Now;
             _storyRepository.Update(story);
 
+            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeStory, storyId);
             LogModeration("STORY", storyId, "REJECTED", moderatorId, reason.Trim());
             NotifyStoryResult(story, "REJECTED", reason.Trim());
+            _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
 
-        public bool ApproveChapter(Guid chapterId, Guid moderatorId)
+        public bool ApproveChapter(Guid chapterId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
         {
+            if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
+                return false;
             var chapter = _chapterRepository.GetById(chapterId);
             if (chapter == null)
                 return false;
             if (chapter.status != "PENDING_REVIEW")
+                return false;
+            if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && chapter.story_id.HasValue)
+            {
+                var story = StoryDAO.GetById(chapter.story_id.Value);
+                if (story == null || !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
+                    return false;
+            }
+            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId))
                 return false;
 
             chapter.status = "PUBLISHED";
@@ -118,28 +261,42 @@ namespace Services.Implementations
                 }
             }
 
+            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
             LogModeration("CHAPTER", chapterId, "APPROVED", moderatorId, null);
             NotifyChapterResult(chapter, "APPROVED", null);
+            _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
 
-        public bool RejectChapter(Guid chapterId, Guid moderatorId, string reason)
+        public bool RejectChapter(Guid chapterId, Guid moderatorId, string reason, IReadOnlyList<Guid>? allowedCategoryIds = null)
         {
             if (string.IsNullOrWhiteSpace(reason))
                 throw new ArgumentException("Lý do từ chối là bắt buộc.", nameof(reason));
+            if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
+                return false;
 
             var chapter = _chapterRepository.GetById(chapterId);
             if (chapter == null)
                 return false;
             if (chapter.status != "PENDING_REVIEW")
                 return false;
+            if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && chapter.story_id.HasValue)
+            {
+                var story = StoryDAO.GetById(chapter.story_id.Value);
+                if (story == null || !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
+                    return false;
+            }
+            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId))
+                return false;
 
             chapter.status = "REJECTED";
             chapter.updated_at = DateTime.Now;
             _chapterRepository.Update(chapter);
 
+            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
             LogModeration("CHAPTER", chapterId, "REJECTED", moderatorId, reason.Trim());
             NotifyChapterResult(chapter, "REJECTED", reason.Trim());
+            _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
 

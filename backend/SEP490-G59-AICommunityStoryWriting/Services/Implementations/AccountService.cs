@@ -85,8 +85,8 @@ namespace Services.Implementations
                 }
             }
 
-            if (!string.IsNullOrEmpty(request.Phone)) user.user_profiles.Phone = request.Phone;
-            if (!string.IsNullOrEmpty(request.IdNumber)) user.user_profiles.IdNumber = request.IdNumber;
+            if (!string.IsNullOrEmpty(request.Phone)) user.user_profiles.phone = request.Phone;
+            if (!string.IsNullOrEmpty(request.IdNumber)) user.user_profiles.id_number = request.IdNumber;
             if (request.Bio != null) user.user_profiles.bio = request.Bio;
             if (request.Description != null) user.user_profiles.description = request.Description;
             if (!string.IsNullOrEmpty(request.AvatarUrl)) user.user_profiles.avatar_url = request.AvatarUrl;
@@ -122,8 +122,8 @@ namespace Services.Implementations
                               ? user.user_profiles.nickname
                               : user.email.Split('@')[0],
 
-                Phone = user.user_profiles?.Phone ?? "",
-                IdNumber = user.user_profiles?.IdNumber ?? "",
+                Phone = user.user_profiles?.phone ?? "",
+                IdNumber = user.user_profiles?.id_number ?? "",
                 Bio = user.user_profiles?.bio ?? "",
                 Description = user.user_profiles?.description ?? "",
                 AvatarUrl = user.user_profiles?.avatar_url ?? "",

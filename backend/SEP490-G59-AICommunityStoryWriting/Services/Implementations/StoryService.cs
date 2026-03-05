@@ -1,8 +1,9 @@
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
+using Microsoft.Extensions.Logging;
 using Repositories;
 using Services.DTOs.Stories;
-using Microsoft.Extensions.Logging;
+using Services.Interfaces;
 
 namespace Services.Implementations
 {
@@ -11,12 +12,14 @@ namespace Services.Implementations
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
         private readonly ILogger<StoryService> _logger;
+        private readonly IModerationHubNotifier? _moderationHubNotifier;
 
-        public StoryService(IStoryRepository storyRepository, IChapterRepository chapterRepository, ILogger<StoryService> logger)
+        public StoryService(IStoryRepository storyRepository, IChapterRepository chapterRepository, ILogger<StoryService> logger, IModerationHubNotifier? moderationHubNotifier = null)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
             _logger = logger;
+            _moderationHubNotifier = moderationHubNotifier;
         }
 
         public StoryResponseDto Create(CreateStoryRequestDto request, Guid authorId, string? coverImageUrl)
@@ -102,6 +105,24 @@ namespace Services.Implementations
             if (query.CategoryId.HasValue)
             {
                 storiesQuery = storiesQuery.Where(s => s.category.Any(c => c.id == query.CategoryId.Value));
+            }
+
+            if (query.CategoryIds != null && query.CategoryIds.Count > 0)
+            {
+                var ids = query.CategoryIds;
+                storiesQuery = storiesQuery.Where(s => s.category.Any(c => ids.Contains(c.id)));
+            }
+
+            if (query.ExcludeStoryIds != null && query.ExcludeStoryIds.Count > 0)
+            {
+                var excludeIds = query.ExcludeStoryIds;
+                storiesQuery = storiesQuery.Where(s => !excludeIds.Contains(s.id));
+            }
+
+            if (query.IncludeStoryIds != null && query.IncludeStoryIds.Count > 0)
+            {
+                var includeIds = query.IncludeStoryIds;
+                storiesQuery = storiesQuery.Where(s => includeIds.Contains(s.id));
             }
 
             if (query.AuthorId.HasValue)
@@ -321,6 +342,7 @@ namespace Services.Implementations
                 _storyRepository.Update(story);
 
                 _logger?.LogInformation("StoryService.Publish: Successfully submitted story for review (PENDING_REVIEW) ID: {StoryId}", id);
+                _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
                 return true;
             }
             catch (Exception ex)

@@ -3,16 +3,19 @@ using DataAccessObjects.DAOs;
 using Repositories;
 using Services.DTOs.Chapters;
 using Services.DTOs.Stories;
+using Services.Interfaces;
 
 namespace Services.Implementations
 {
     public class ChapterService : IChapterService
     {
         private readonly IChapterRepository _chapterRepository;
+        private readonly IModerationHubNotifier? _moderationHubNotifier;
 
-        public ChapterService(IChapterRepository chapterRepository)
+        public ChapterService(IChapterRepository chapterRepository, IModerationHubNotifier? moderationHubNotifier = null)
         {
             _chapterRepository = chapterRepository;
+            _moderationHubNotifier = moderationHubNotifier;
         }
 
         public ChapterResponseDto Create(CreateChapterRequestDto request)
@@ -112,6 +115,24 @@ namespace Services.Implementations
                 chaptersQuery = chaptersQuery.Where(c => c.story_id == query.StoryId.Value);
             }
 
+            if (query.StoryIds != null && query.StoryIds.Count > 0)
+            {
+                var ids = query.StoryIds;
+                chaptersQuery = chaptersQuery.Where(c => c.story_id.HasValue && ids.Contains(c.story_id.Value));
+            }
+
+            if (query.ExcludeChapterIds != null && query.ExcludeChapterIds.Count > 0)
+            {
+                var excludeIds = query.ExcludeChapterIds;
+                chaptersQuery = chaptersQuery.Where(c => !excludeIds.Contains(c.id));
+            }
+
+            if (query.IncludeChapterIds != null && query.IncludeChapterIds.Count > 0)
+            {
+                var includeIds = query.IncludeChapterIds;
+                chaptersQuery = chaptersQuery.Where(c => includeIds.Contains(c.id));
+            }
+
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
                 var searchLower = query.Search.Trim().ToLower();
@@ -134,6 +155,9 @@ namespace Services.Implementations
                 "created_at" => query.SortOrder == "asc"
                     ? chaptersQuery.OrderBy(c => c.created_at)
                     : chaptersQuery.OrderByDescending(c => c.created_at),
+                "updated_at" => query.SortOrder == "asc"
+                    ? chaptersQuery.OrderBy(c => c.updated_at)
+                    : chaptersQuery.OrderByDescending(c => c.updated_at),
                 "published_at" => query.SortOrder == "asc"
                     ? chaptersQuery.OrderBy(c => c.published_at)
                     : chaptersQuery.OrderByDescending(c => c.published_at),
@@ -375,6 +399,7 @@ namespace Services.Implementations
             // published_at và story.last_published_at chỉ set khi moderator approve (ModerationService.ApproveChapter)
 
             _chapterRepository.Update(chapter);
+            _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
 
