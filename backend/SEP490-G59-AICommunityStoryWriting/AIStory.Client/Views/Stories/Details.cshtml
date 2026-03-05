@@ -31,10 +31,10 @@
                         </div>
                         <div class="btn-group" role="group">
                             <button class="btn btn-success" id="publishStoryBtn" onclick="publishStoryFromDetails()" style="display: none;">
-                                <i class="bi bi-check-circle"></i> Publish Truyện
+                                <i class="bi bi-send-check"></i> Gửi duyệt
                             </button>
                             <button class="btn btn-warning" id="unpublishStoryBtn" onclick="unpublishStoryFromDetails()" style="display: none;">
-                                <i class="bi bi-x-circle"></i> Unpublish Truyện
+                                <i class="bi bi-x-circle"></i> Rút lại / Hủy xuất bản
                             </button>
                             <button class="btn btn-info" onclick="window.location.href='/Stories'">
                                 <i class="bi bi-list"></i> Danh sách Truyện
@@ -132,8 +132,8 @@
                 <button type="button" class="btn btn-outline-secondary" onclick="saveChapter('DRAFT')" id="saveDraftBtn">
                     <i class="bi bi-save"></i> Lưu nháp
                 </button>
-                <button type="button" class="btn btn-primary" onclick="saveChapter('PUBLISHED')" id="publishBtn">
-                    <i class="bi bi-check-circle"></i> Xuất bản
+                <button type="button" class="btn btn-primary" onclick="saveChapter('PENDING_REVIEW')" id="publishBtn">
+                    <i class="bi bi-send-check"></i> Gửi duyệt
                 </button>
             </div>
         </div>
@@ -231,12 +231,19 @@
                         <h2>${story.title}</h2>
                         <p class="text-muted">${story.summary || 'Chưa có mô tả'}</p>
                         <div class="mb-3">
-                            <span class="badge bg-primary">${story.categoryName || 'N/A'}</span>
-                            <span class="badge ${story.status === 'PUBLISHED' ? 'bg-success' : 'bg-secondary'}" id="storyStatusDisplay">${story.status || 'DRAFT'}</span>
+                            <span class="badge bg-primary">${story.categoryNames || story.categoryName || 'N/A'}</span>
+                            <span class="badge ${story.status === 'PUBLISHED' ? 'bg-success' : story.status === 'REJECTED' ? 'bg-danger' : 'bg-secondary'}" id="storyStatusDisplay">${story.status || 'DRAFT'}</span>
                             <span class="badge bg-info">${story.totalChapters || 0} chương</span>
                             <span class="badge bg-warning">${Utils.formatNumber(story.totalViews || 0)} lượt xem</span>
                             <span class="badge bg-danger">${Utils.formatNumber(story.totalFavorites || 0)} yêu thích</span>
                         </div>
+                        ${story.status === 'REJECTED' ? `
+                        <div class="alert alert-danger mb-3">
+                            <h6 class="alert-heading"><i class="bi bi-chat-left-quote"></i> Lý do từ chối</h6>
+                            <p class="mb-1">${story.rejectionReason || 'Không có lý do.'}</p>
+                            ${story.rejectedAt ? `<small class="text-muted">Ngày từ chối: ${Utils.formatDate(story.rejectedAt)}</small>` : ''}
+                        </div>
+                        ` : ''}
                         <div class="row">
                             <div class="col-md-6">
                                 <p><strong>Độ tuổi:</strong> ${story.ageRating || 'ALL'}</p>
@@ -261,12 +268,22 @@
 
             if (story.status === 'PUBLISHED') {
                 statusBadge.className = 'badge bg-success';
-                statusBadge.textContent = 'Đã Publish';
+                statusBadge.textContent = 'Đã xuất bản';
                 publishBtn.style.display = 'none';
                 unpublishBtn.style.display = 'inline-block';
+            } else if (story.status === 'PENDING_REVIEW') {
+                statusBadge.className = 'badge bg-warning text-dark';
+                statusBadge.textContent = 'Chờ duyệt';
+                publishBtn.style.display = 'none';
+                unpublishBtn.style.display = 'inline-block';
+            } else if (story.status === 'REJECTED') {
+                statusBadge.className = 'badge bg-danger';
+                statusBadge.textContent = 'Bị từ chối';
+                publishBtn.style.display = 'inline-block';
+                unpublishBtn.style.display = 'none';
             } else {
                 statusBadge.className = 'badge bg-secondary';
-                statusBadge.textContent = 'Draft';
+                statusBadge.textContent = 'Nháp';
                 publishBtn.style.display = 'inline-block';
                 unpublishBtn.style.display = 'none';
             }
@@ -317,9 +334,10 @@
                                     </small>
                                 </p>
                                 <div>
-                                    <span class="badge ${chapter.status === 'PUBLISHED' ? 'bg-success' : 'bg-secondary'}">${chapter.status || 'DRAFT'}</span>
+                                    <span class="badge ${chapter.status === 'PUBLISHED' ? 'bg-success' : chapter.status === 'PENDING_REVIEW' ? 'bg-warning text-dark' : chapter.status === 'REJECTED' ? 'bg-danger' : 'bg-secondary'}">${chapter.status === 'PENDING_REVIEW' ? 'Chờ duyệt' : chapter.status === 'REJECTED' ? 'Bị từ chối' : (chapter.status || 'DRAFT')}</span>
                                     <span class="badge ${chapter.accessType === 'FREE' ? 'bg-info' : 'bg-warning'}">${chapter.accessType || 'FREE'}</span>
                                     ${chapter.coinPrice > 0 ? `<span class="badge bg-danger">${chapter.coinPrice} coin</span>` : ''}
+                                    ${chapter.status === 'REJECTED' ? ` <button class="btn btn-sm btn-outline-danger" onclick="showChapterRejectionReason('${chapter.id}')" title="Xem lý do từ chối"><i class="bi bi-chat-left-quote"></i> Lý do</button>` : ''}
                                 </div>
                             </div>
                             <div class="ms-3">
@@ -329,8 +347,8 @@
                                 <button class="btn btn-sm btn-primary" onclick="editChapter('${chapter.id}')" title="Sửa">
                                     <i class="bi bi-pencil"></i>
                                 </button>
-                                <button class="btn btn-sm btn-success" onclick="publishChapter('${chapter.id}')" title="Publish" ${chapter.status === 'PUBLISHED' ? 'disabled' : ''}>
-                                    <i class="bi bi-check-circle"></i>
+                                <button class="btn btn-sm btn-success" onclick="publishChapter('${chapter.id}')" title="Gửi duyệt" ${(chapter.status === 'PUBLISHED' || chapter.status === 'PENDING_REVIEW') ? 'disabled' : ''}>
+                                    <i class="bi bi-send-check"></i> Gửi duyệt
                                 </button>
                                 <button class="btn btn-sm btn-danger" onclick="deleteChapter('${chapter.id}')" title="Xóa">
                                     <i class="bi bi-trash"></i>
@@ -403,12 +421,11 @@
 
                 // Show buttons based on current status
                 const currentStatus = chapter.status || 'DRAFT';
-                if (currentStatus === 'PUBLISHED') {
-                    // If already published, only show "Lưu nháp" button
+                if (currentStatus === 'PUBLISHED' || currentStatus === 'PENDING_REVIEW') {
+                    // Đã gửi duyệt hoặc đã xuất bản: chỉ hiện "Lưu nháp" (sửa nội dung)
                     document.getElementById('saveDraftBtn').style.display = 'inline-block';
                     document.getElementById('publishBtn').style.display = 'none';
                 } else {
-                    // If draft, show both buttons
                     document.getElementById('saveDraftBtn').style.display = 'inline-block';
                     document.getElementById('publishBtn').style.display = 'inline-block';
                 }
@@ -489,14 +506,18 @@
 
                 if (editingChapterId) {
                     await ApiService.updateChapter(editingChapterId, data);
-                    if (status === 'PUBLISHED') {
+                    if (status === 'PENDING_REVIEW') {
+                        Utils.showAlert('Đã gửi chapter chờ duyệt. Moderator sẽ xem xét và duyệt khi đạt yêu cầu.', 'success');
+                    } else if (status === 'PUBLISHED') {
                         Utils.showAlert('Xuất bản chapter thành công!', 'success');
                     } else {
                         Utils.showAlert('Cập nhật chapter thành công!', 'success');
                     }
                 } else {
                     await ApiService.createChapter(data);
-                    if (status === 'PUBLISHED') {
+                    if (status === 'PENDING_REVIEW') {
+                        Utils.showAlert('Đã gửi chapter chờ duyệt. Moderator sẽ xem xét và duyệt khi đạt yêu cầu.', 'success');
+                    } else if (status === 'PUBLISHED') {
                         Utils.showAlert('Tạo và xuất bản chapter thành công!', 'success');
                     } else {
                         Utils.showAlert('Tạo chapter nháp thành công!', 'success');
@@ -539,7 +560,7 @@
 
             try {
                 await ApiService.publishChapter(id);
-                Utils.showAlert('Publish chapter thành công!', 'success');
+                Utils.showAlert('Đã gửi chapter chờ duyệt. Moderator sẽ xem xét và duyệt khi đạt yêu cầu.', 'success');
                 loadChapters();
                 loadStoryDetails();
             } catch (error) {
@@ -560,7 +581,7 @@
 
             try {
                 await ApiService.publishStory(storyId);
-                Utils.showAlert('Publish truyện thành công!', 'success');
+                Utils.showAlert('Đã gửi truyện chờ duyệt. Moderator sẽ xem xét và duyệt khi đạt yêu cầu.', 'success');
                 await loadStoryDetails();
             } catch (error) {
                 Utils.showAlert('Lỗi: ' + error.message, 'danger');

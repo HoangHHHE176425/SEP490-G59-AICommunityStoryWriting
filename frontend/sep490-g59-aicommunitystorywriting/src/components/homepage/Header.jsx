@@ -1,4 +1,4 @@
-import { Search, Bell, Edit, BookOpen, Menu, X, ChevronDown, Coins, User, Library, LogOut, FileText, List } from 'lucide-react';
+import { Search, Bell, Edit, BookOpen, Menu, X, ChevronDown, Wallet, User, Library, LogOut, FileText, List } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -124,11 +124,14 @@ export function Header() {
                     <div className="flex items-center gap-3">
                         {isAuthenticated ? (
                             <>
-                                {/* Coin Balance */}
-                                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 border border-amber-700/50 rounded-full">
-                                    <Coins className="w-4 h-4 text-amber-400" />
+                                {/* Wallet - click to go to wallet page */}
+                                <Link
+                                    to="/wallet"
+                                    className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 border border-amber-700/50 rounded-full hover:bg-amber-950/60 transition-colors"
+                                >
+                                    <Wallet className="w-4 h-4 text-amber-400" />
                                     <span className="text-sm font-bold text-amber-400">{userCoins.toLocaleString()}</span>
-                                </div>
+                                </Link>
 
                                 <button className="p-2 text-slate-300 hover:bg-slate-800 rounded-full transition-colors relative">
                                     <Bell className="w-5 h-5" />
@@ -235,15 +238,19 @@ export function Header() {
             {isMenuOpen && (
                 <div className="lg:hidden border-t border-slate-700 bg-slate-900">
                     <div className="max-w-[1280px] mx-auto px-4 py-4 flex flex-col gap-4">
-                        {/* Coin Balance Mobile */}
+                        {/* Wallet Mobile - link to wallet page */}
                         {isAuthenticated && (
-                            <div className="flex items-center justify-between p-3 bg-amber-950/40 border border-amber-700/50 rounded-lg">
+                            <Link
+                                to="/wallet"
+                                onClick={() => setIsMenuOpen(false)}
+                                className="flex items-center justify-between p-3 bg-amber-950/40 border border-amber-700/50 rounded-lg hover:bg-amber-950/60 transition-colors"
+                            >
                                 <div className="flex items-center gap-2">
-                                    <Coins className="w-5 h-5 text-amber-400" />
-                                    <span className="font-semibold text-white">Số dư xu</span>
+                                    <Wallet className="w-5 h-5 text-amber-400" />
+                                    <span className="font-semibold text-white">Ví</span>
                                 </div>
                                 <span className="text-lg font-bold text-amber-400">{userCoins.toLocaleString()}</span>
-                            </div>
+                            </Link>
                         )}
 
                         <div className="relative mb-2">
