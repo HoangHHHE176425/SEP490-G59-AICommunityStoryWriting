@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
@@ -18,6 +18,8 @@ public partial class categories
     public bool? is_active { get; set; }
 
     public DateTime? created_at { get; set; }
+
+    public virtual ICollection<moderator_category_assignments> moderator_category_assignments { get; set; } = new List<moderator_category_assignments>();
 
     public virtual ICollection<stories> story { get; set; } = new List<stories>();
 }

@@ -23,5 +23,12 @@
 
         public DateTime? CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
+
+        /// <summary>Trong queue moderator: đã được moderator hiện tại nhận duyệt (lock).</summary>
+        public bool IsClaimedByMe { get; set; }
+        /// <summary>Trong queue moderator: tên người đang duyệt (nickname hoặc email).</summary>
+        public string? ClaimedByDisplayName { get; set; }
+        /// <summary>Trong queue moderator: thời điểm nhận duyệt.</summary>
+        public DateTime? ClaimedAt { get; set; }
     }
 }
