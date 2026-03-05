@@ -53,6 +53,27 @@ namespace Services.Implementations
                     : new List<Guid>();
             }
 
+            // Truyện có ít nhất một chương PENDING_REVIEW cũng hiển thị trong danh sách chờ duyệt (dù truyện đã PUBLISHED)
+            List<Guid>? alsoIncludeStoryIds = null;
+            var chapterQuery = new ChapterQueryDto
+            {
+                Status = "PENDING_REVIEW",
+                Page = 1,
+                PageSize = 10000,
+                StoryIds = categoryIdsFilter != null && categoryIdsFilter.Count > 0
+                    ? _storyRepository.GetStoryIdsByCategoryIds(categoryIdsFilter).ToList()
+                    : null
+            };
+            var pendingChaptersResult = _chapterService.GetAll(chapterQuery);
+            var storyIdsWithPendingChapters = pendingChaptersResult.Items
+                .Select(c => c.StoryId)
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .Distinct()
+                .ToList();
+            if (storyIdsWithPendingChapters.Count > 0)
+                alsoIncludeStoryIds = storyIdsWithPendingChapters;
+
             var query = new StoryQueryDto
             {
                 Status = "PENDING_REVIEW",
@@ -63,7 +84,8 @@ namespace Services.Implementations
                 SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "asc",
                 CategoryIds = categoryIdsFilter != null ? categoryIdsFilter.ToList() : null,
                 ExcludeStoryIds = excludeStoryIds != null && excludeStoryIds.Count > 0 ? excludeStoryIds : null,
-                IncludeStoryIds = includeStoryIds != null && includeStoryIds.Count > 0 ? includeStoryIds : null
+                IncludeStoryIds = includeStoryIds != null && includeStoryIds.Count > 0 ? includeStoryIds : null,
+                AlsoIncludeStoryIds = alsoIncludeStoryIds
             };
             var result = _storyService.GetAll(query);
             foreach (var item in result.Items)
@@ -139,8 +161,15 @@ namespace Services.Implementations
             if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
                 return false;
             var story = _storyRepository.GetById(storyId);
-            if (story == null || story.status != "PENDING_REVIEW")
+            if (story == null)
                 return false;
+            // Cho phép claim khi truyện PENDING_REVIEW hoặc khi truyện có ít nhất một chương PENDING_REVIEW (truyện đã có chương publish nhưng còn chương chờ duyệt)
+            if (story.status != "PENDING_REVIEW")
+            {
+                var storyChapters = _chapterRepository.GetByStoryId(storyId);
+                if (!storyChapters.Any(c => string.Equals(c.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase)))
+                    return false;
+            }
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
                 return false;
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, storyId))
