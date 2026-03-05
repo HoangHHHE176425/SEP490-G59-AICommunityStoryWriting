@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
@@ -37,6 +37,8 @@ public partial class users
 
     public virtual ICollection<author_income_logs> author_income_logs { get; set; } = new List<author_income_logs>();
 
+    public virtual ICollection<author_policy_acceptances> author_policy_acceptances { get; set; } = new List<author_policy_acceptances>();
+
     public virtual ICollection<chapter_versions> chapter_versions { get; set; } = new List<chapter_versions>();
 
     public virtual ICollection<coin_orders> coin_orders { get; set; } = new List<coin_orders>();
@@ -53,6 +55,8 @@ public partial class users
 
     public virtual ICollection<moderation_logs> moderation_logs { get; set; } = new List<moderation_logs>();
 
+    public virtual ICollection<moderator_category_assignments> moderator_category_assignments { get; set; } = new List<moderator_category_assignments>();
+
     public virtual ICollection<notifications> notifications { get; set; } = new List<notifications>();
 
     public virtual ICollection<otp_verifications> otp_verifications { get; set; } = new List<otp_verifications>();
@@ -65,11 +69,13 @@ public partial class users
 
     public virtual ICollection<reports> reportsreporter { get; set; } = new List<reports>();
 
+    public virtual ICollection<review_assignments> review_assignments { get; set; } = new List<review_assignments>();
+
     public virtual ICollection<stories> stories { get; set; } = new List<stories>();
 
     public virtual ICollection<story_commitments> story_commitments { get; set; } = new List<story_commitments>();
 
-    public virtual ICollection<author_policy_acceptances> author_policy_acceptances { get; set; } = new List<author_policy_acceptances>();
+    public virtual ICollection<story_versions> story_versions { get; set; } = new List<story_versions>();
 
     public virtual ICollection<system_settings> system_settings { get; set; } = new List<system_settings>();
 
