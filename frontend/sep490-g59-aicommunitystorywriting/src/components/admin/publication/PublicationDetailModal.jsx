@@ -19,6 +19,20 @@ function mapChapterItem(item) {
     };
 }
 
+/** Map chương từ story_group (tab Từ chối: publication.chapters) sang format modal */
+function mapStoryGroupChapterToModal(ch) {
+    const orderIndex = ch.orderIndex ?? 0;
+    return {
+        id: ch.id ?? ch.chapterId,
+        chapterNumber: orderIndex + 1,
+        title: ch.chapterTitle ?? '',
+        content: null,
+        wordCount: ch.wordCount ?? 0,
+        status: ch.status ?? 'rejected',
+        publishedAt: null,
+    };
+}
+
 export function PublicationDetailModal({ publication, onClose, onApprove, onReject, onRefresh }) {
     const { showToast, ToastContainer } = useToast();
     const [chapters, setChapters] = useState([]);
@@ -68,15 +82,25 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             setChapters([]);
             setSelectedChapter(null);
             setChapterContents({});
+            // Tab Đã duyệt / Từ chối: item là story_group có sẵn danh sách chương (đã duyệt hoặc bị từ chối) — chỉ hiển thị các chương đó, không gọi API lấy hết chương.
+            if (publication?.type === 'story_group' && Array.isArray(publication?.chapters) && publication.chapters.length > 0) {
+                const mapped = publication.chapters.map(mapStoryGroupChapterToModal);
+                setChapters(mapped);
+                setSelectedChapter(mapped[0] ?? null);
+                setChaptersLoading(false);
+                return;
+            }
             fetchChaptersForStory(storyId, { publicationStatus: publication?.status });
         }, 0);
         return () => clearTimeout(id);
-    }, [storyId, publication?.status, fetchChaptersForStory]);
+    }, [storyId, publication?.status, publication?.type, publication?.chapters, fetchChaptersForStory]);
 
-    /** Real-time: khi có claim/approve/reject, refetch danh sách chương trong modal */
+    /** Real-time: khi có claim/approve/reject, refetch danh sách chương trong modal (bỏ qua khi đang xem story_group từ tab Từ chối). */
     const refetchChaptersRef = useRef(() => { });
     refetchChaptersRef.current = () => {
-        if (storyId) fetchChaptersForStory(storyId, { showLoading: false, publicationStatus: publication?.status });
+        if (!storyId) return;
+        if (publication?.type === 'story_group' && publication?.chapters?.length > 0) return;
+        fetchChaptersForStory(storyId, { showLoading: false, publicationStatus: publication?.status });
     };
     useEffect(() => {
         if (!storyId) return;

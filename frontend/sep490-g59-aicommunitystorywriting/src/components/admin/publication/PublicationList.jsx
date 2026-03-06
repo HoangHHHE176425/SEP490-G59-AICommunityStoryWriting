@@ -191,7 +191,9 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                             <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.9375rem' }}> — {pub.chapterTitle}</span>
                                         )}
                                         {pub.type === 'story_group' && pub.chapterCount > 0 && (
-                                            <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.9375rem' }}> — {pub.chapterCount} chương cần duyệt</span>
+                                            <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.9375rem' }}>
+                                                — {pub.chapterCount} chương{pub.status === 'approved' ? ' đã duyệt' : pub.status === 'rejected' ? ' từ chối' : ' cần duyệt'}
+                                            </span>
                                         )}
                                     </h3>
                                     <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
@@ -240,7 +242,7 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                         );
                                     })()}
                                     <button
-                                        onClick={() => onViewDetail(pub.type === 'story_group' ? pub.representativePublication : pub)}
+                                        onClick={() => onViewDetail(pub)}
                                         style={{
                                             padding: '0.625rem 1.25rem',
                                             backgroundColor: '#13ec5b',
@@ -265,33 +267,25 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                 </div>
                             </div>
 
-                            {/* Info */}
+                            {/* Info — cùng cấu trúc cho truyện và nhóm chương (Đã duyệt/Từ chối/Chờ duyệt) */}
                             <div style={{
                                 display: 'grid',
                                 gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
                                 gap: '1rem',
                                 marginBottom: '0.75rem'
                             }}>
-                                {pub.type === 'story_group' && pub.chapterCount != null && (
+                                {(pub.type === 'story_group' && pub.chapterCount != null) || (pub.type !== 'story_group' && pub.totalChapters != null) ? (
                                     <div>
                                         <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
-                                            Số chương cần duyệt
+                                            {pub.type === 'story_group'
+                                                ? (pub.status === 'approved' ? 'Số chương đã duyệt' : pub.status === 'rejected' ? 'Số chương từ chối' : 'Số chương cần duyệt')
+                                                : 'Số chương'}
                                         </div>
                                         <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
-                                            {pub.chapterCount} chương
+                                            {pub.type === 'story_group' ? pub.chapterCount : pub.totalChapters} chương
                                         </div>
                                     </div>
-                                )}
-                                {pub.type !== 'story_group' && pub.totalChapters != null && (
-                                    <div>
-                                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
-                                            Số chương
-                                        </div>
-                                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
-                                            {pub.totalChapters} chương
-                                        </div>
-                                    </div>
-                                )}
+                                ) : null}
                                 {pub.type === 'chapter' && pub.wordCount != null && (
                                     <div>
                                         <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
