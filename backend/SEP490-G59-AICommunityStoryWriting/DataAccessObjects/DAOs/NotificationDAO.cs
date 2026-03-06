@@ -51,6 +51,68 @@ namespace DataAccessObjects.DAOs
             context.SaveChanges();
         }
 
+        /// <summary>Lấy tên hiển thị (nickname hoặc email) của user để dùng trong nội dung thông báo.</summary>
+        public static string GetUserDisplayName(Guid userId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.AsNoTracking().Include(x => x.user_profiles).FirstOrDefault(x => x.id == userId);
+            if (u == null) return "Người dùng";
+            var nickname = u.user_profiles?.nickname?.Trim();
+            var email = u.email?.Trim();
+            return !string.IsNullOrWhiteSpace(nickname) ? nickname : !string.IsNullOrWhiteSpace(email) ? email : "Người dùng";
+        }
+
+        /// <summary>Thông báo khi có người trả lời comment của mình. Gọi sau khi đã thêm comment reply thành công.</summary>
+        public static void NotifyCommentReply(Guid recipientUserId, string actorDisplayName, Guid storyId, string? storyTitle, Guid newCommentId)
+        {
+            if (string.IsNullOrWhiteSpace(actorDisplayName)) actorDisplayName = "Ai đó";
+            var title = "Trả lời bình luận";
+            var content = $"{actorDisplayName} đã trả lời bình luận của bạn" + (string.IsNullOrWhiteSpace(storyTitle) ? "." : $" trong truyện «{storyTitle.Trim()}».");
+            var linkUrl = $"/Home/Story?id={storyId}#comment-{newCommentId}";
+            Add(new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = recipientUserId,
+                type = "COMMENT_REPLY",
+                title = title,
+                content = content,
+                link_url = linkUrl,
+                is_read = false,
+                created_at = DateTime.Now
+            });
+        }
+
+        /// <summary>Thông báo khi có người thả cảm xúc (reaction) vào comment của mình. Chỉ gọi khi đặt/đổi reaction (không gọi khi bỏ reaction).</summary>
+        public static void NotifyCommentReaction(Guid recipientUserId, string actorDisplayName, Guid storyId, string? storyTitle, string reactionType)
+        {
+            if (string.IsNullOrWhiteSpace(actorDisplayName)) actorDisplayName = "Ai đó";
+            var reactionLabel = reactionType?.ToUpperInvariant() switch
+            {
+                "LIKE" => "Thích",
+                "DISLIKE" => "Không thích",
+                "FUNNY" => "Buồn cười",
+                "SAD" => "Buồn",
+                "ANGRY" => "Phẫn nộ",
+                "LOVE" => "Yêu thích",
+                "WOW" => "Wow",
+                _ => reactionType ?? "cảm xúc"
+            };
+            var title = "Reaction bình luận";
+            var content = $"{actorDisplayName} đã thả {reactionLabel} vào bình luận của bạn" + (string.IsNullOrWhiteSpace(storyTitle) ? "." : $" trong truyện «{storyTitle.Trim()}».");
+            var linkUrl = $"/Home/Story?id={storyId}";
+            Add(new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = recipientUserId,
+                type = "COMMENT_REACTION",
+                title = title,
+                content = content,
+                link_url = linkUrl,
+                is_read = false,
+                created_at = DateTime.Now
+            });
+        }
+
         /// <summary>Gửi thông báo cho tất cả user đang follow story khi có chapter mới được publish. Dùng một context và SaveChanges một lần.</summary>
         /// <param name="logger">Nếu có thì ghi log vào host (cùng luồng với EF/core).</param>
         public static void NotifyStoryFollowersNewChapter(Guid storyId, Guid chapterId, string? chapterTitle, string? storyTitle, ILogger? logger = null)
