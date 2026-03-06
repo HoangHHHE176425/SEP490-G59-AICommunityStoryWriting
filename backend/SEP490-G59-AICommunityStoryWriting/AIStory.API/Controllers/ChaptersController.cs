@@ -200,9 +200,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Xem lý do từ chối chapter - Chỉ AUTHOR (chỉ chapter thuộc truyện của mình).</summary>
+        /// <summary>Xem lý do từ chối chapter - AUTHOR (chapter thuộc truyện của mình), MODERATOR/ADMIN (mọi chapter).</summary>
         [HttpGet("{id:guid}/rejection-reason")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Roles = "AUTHOR,MODERATOR,ADMIN")]
         public IActionResult GetRejectionReason(Guid id)
         {
             try
@@ -210,16 +210,18 @@ namespace AIStory.API.Controllers
                 var chapter = _chapterService.GetById(id);
                 if (chapter == null)
                     return NotFound(new { message = "Chapter không tồn tại." });
-                if (!chapter.StoryId.HasValue)
-                    return Forbid();
-                var story = _storyService.GetById(chapter.StoryId.Value);
-                if (story == null)
-                    return Forbid();
-                var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
-                if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
-                    return Forbid();
                 if (chapter.Status != "REJECTED")
                     return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
+                var isModeratorOrAdmin = User.IsInRole("MODERATOR") || User.IsInRole("ADMIN");
+                if (!isModeratorOrAdmin && chapter.StoryId.HasValue)
+                {
+                    var story = _storyService.GetById(chapter.StoryId.Value);
+                    if (story == null)
+                        return Forbid();
+                    var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+                    if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
+                        return Forbid();
+                }
                 return Ok(new { reason = chapter.RejectionReason, rejectedAt = chapter.RejectedAt });
             }
             catch (Exception ex)

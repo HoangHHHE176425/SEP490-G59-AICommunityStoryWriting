@@ -1,4 +1,4 @@
-﻿using BusinessObjects.Entities;
+using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Repositories;
 using Services.DTOs.Chapters;
@@ -185,9 +185,21 @@ namespace Services.Implementations
                     storyTitles[sid] = story.title ?? "";
             }
 
+            var items = chapterList.Select(c =>
+            {
+                var dto = MapToListItemDto(c, c.story_id.HasValue ? storyTitles.GetValueOrDefault(c.story_id.Value) : null);
+                if (string.Equals(c.status, "REJECTED", StringComparison.OrdinalIgnoreCase))
+                {
+                    var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", c.id);
+                    dto.RejectionReason = reason;
+                    dto.RejectedAt = rejectedAt;
+                }
+                return dto;
+            }).ToList();
+
             return new PagedResultDto<ChapterListItemDto>
             {
-                Items = chapterList.Select(c => MapToListItemDto(c, c.story_id.HasValue ? storyTitles.GetValueOrDefault(c.story_id.Value) : null)),
+                Items = items,
                 TotalCount = totalCount,
                 Page = query.Page,
                 PageSize = query.PageSize
@@ -413,6 +425,11 @@ namespace Services.Implementations
             chapter.updated_at = DateTime.Now;
 
             _chapterRepository.Update(chapter);
+
+            // Giải phóng đơn đã nhận (claim) của moderator khi tác giả hủy xuất bản — để chương có thể hiển thị lại trong "Nhận duyệt đơn" khi tác giả gửi xuất bản lại.
+            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, id);
+
+            _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
 

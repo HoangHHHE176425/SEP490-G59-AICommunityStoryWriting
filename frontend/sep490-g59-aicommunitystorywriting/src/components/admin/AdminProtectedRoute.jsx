@@ -2,13 +2,15 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
 /**
- * Bảo vệ route admin: chỉ cho phép user có role ADMIN.
+ * Bảo vệ route admin: cho phép user có role ADMIN hoặc MODERATOR.
  * Chưa đăng nhập -> redirect /login
- * Đã đăng nhập nhưng không phải ADMIN -> redirect /home
+ * Đã đăng nhập nhưng không phải ADMIN/MODERATOR -> redirect /home
  */
 export function AdminProtectedRoute({ children }) {
-    const { user, loading, isAdmin } = useAuth();
+    const { user, loading, isAdmin, role } = useAuth();
     const location = useLocation();
+    const roleUpper = (role ?? '').toString().toUpperCase();
+    const canAccessAdmin = isAdmin || roleUpper === 'MODERATOR';
 
     if (loading) {
         return (
@@ -22,7 +24,7 @@ export function AdminProtectedRoute({ children }) {
         return <Navigate to="/login" state={{ from: location }} replace />;
     }
 
-    if (!isAdmin) {
+    if (!canAccessAdmin) {
         return <Navigate to="/home" replace />;
     }
 

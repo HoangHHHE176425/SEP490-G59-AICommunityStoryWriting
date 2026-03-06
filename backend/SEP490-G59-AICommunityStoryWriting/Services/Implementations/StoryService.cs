@@ -130,9 +130,19 @@ namespace Services.Implementations
                 storiesQuery = storiesQuery.Where(s => s.author_id == query.AuthorId.Value);
             }
 
-            if (!string.IsNullOrWhiteSpace(query.Status))
+            if (!string.IsNullOrWhiteSpace(query.Status) || (query.AlsoIncludeStoryIds != null && query.AlsoIncludeStoryIds.Count > 0))
             {
-                storiesQuery = storiesQuery.Where(s => s.status == query.Status);
+                if (query.AlsoIncludeStoryIds != null && query.AlsoIncludeStoryIds.Count > 0)
+                {
+                    var alsoIds = query.AlsoIncludeStoryIds;
+                    storiesQuery = storiesQuery.Where(s =>
+                        (!string.IsNullOrWhiteSpace(query.Status) && s.status == query.Status) ||
+                        alsoIds.Contains(s.id));
+                }
+                else
+                {
+                    storiesQuery = storiesQuery.Where(s => s.status == query.Status);
+                }
             }
 
             storiesQuery = query.SortBy?.ToLower() switch
@@ -369,6 +379,10 @@ namespace Services.Implementations
             story.updated_at = DateTime.Now;
 
             _storyRepository.Update(story);
+
+            // Giải phóng đơn đã nhận (claim) của moderator khi tác giả hủy xuất bản truyện.
+            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeStory, id);
+
             return true;
         }
 
