@@ -45,21 +45,24 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
     };
 
     const getTypeBadge = (pub) => {
+        const isStoryGroup = pub.type === 'story_group';
         const isStory = pub.type === 'story' || pub.type === 'new_story';
+        const label = isStoryGroup ? (pub.chapterCount > 0 ? `Truyện (${pub.chapterCount} chương)` : 'Truyện') : (isStory ? 'Truyện' : 'Chương');
+        const isStoryStyle = isStory || isStoryGroup;
         return (
             <div style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.25rem',
                 padding: '0.25rem 0.625rem',
-                backgroundColor: isStory ? '#e0f2fe' : '#f3e8ff',
-                color: isStory ? '#075985' : '#6b21a8',
+                backgroundColor: isStoryStyle ? '#e0f2fe' : '#f3e8ff',
+                color: isStoryStyle ? '#075985' : '#6b21a8',
                 fontSize: '0.75rem',
                 fontWeight: 600,
                 borderRadius: '0.375rem'
             }}>
-                {isStory ? <BookOpen style={{ width: '12px', height: '12px' }} /> : <FileText style={{ width: '12px', height: '12px' }} />}
-                {isStory ? 'Truyện' : 'Chương'}
+                {isStoryStyle ? <BookOpen style={{ width: '12px', height: '12px' }} /> : <FileText style={{ width: '12px', height: '12px' }} />}
+                {label}
             </div>
         );
     };
@@ -120,18 +123,40 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                     }}
                 >
                     <div style={{ display: 'flex', gap: '1.25rem' }}>
-                        {/* Cover Image */}
-                        <img
-                            src={pub.storyCover}
-                            alt={pub.storyTitle}
+                        {/* Cover Image — dùng ảnh truyện; chương không có ảnh riêng thì lấy từ truyện hoặc placeholder */}
+                        {pub.storyCover ? (
+                            <img
+                                src={pub.storyCover}
+                                alt={pub.storyTitle}
+                                style={{
+                                    width: '80px',
+                                    height: '112px',
+                                    objectFit: 'cover',
+                                    borderRadius: '8px',
+                                    flexShrink: 0
+                                }}
+                                onError={(e) => {
+                                    e.target.style.display = 'none';
+                                    e.target.nextSibling?.style?.display && (e.target.nextSibling.style.display = 'flex');
+                                }}
+                            />
+                        ) : null}
+                        <div
                             style={{
+                                display: pub.storyCover ? 'none' : 'flex',
                                 width: '80px',
                                 height: '112px',
-                                objectFit: 'cover',
                                 borderRadius: '8px',
-                                flexShrink: 0
+                                flexShrink: 0,
+                                backgroundColor: '#e2e8f0',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#94a3b8'
                             }}
-                        />
+                            aria-hidden
+                        >
+                            <BookOpen style={{ width: '32px', height: '32px' }} />
+                        </div>
 
                         {/* Content */}
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -164,6 +189,9 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                         {pub.storyTitle}
                                         {pub.type === 'chapter' && pub.chapterTitle && (
                                             <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.9375rem' }}> — {pub.chapterTitle}</span>
+                                        )}
+                                        {pub.type === 'story_group' && pub.chapterCount > 0 && (
+                                            <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.9375rem' }}> — {pub.chapterCount} chương cần duyệt</span>
                                         )}
                                     </h3>
                                     <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
@@ -212,7 +240,7 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                         );
                                     })()}
                                     <button
-                                        onClick={() => onViewDetail(pub)}
+                                        onClick={() => onViewDetail(pub.type === 'story_group' ? pub.representativePublication : pub)}
                                         style={{
                                             padding: '0.625rem 1.25rem',
                                             backgroundColor: '#13ec5b',
@@ -244,7 +272,17 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                 gap: '1rem',
                                 marginBottom: '0.75rem'
                             }}>
-                                {pub.totalChapters != null && (
+                                {pub.type === 'story_group' && pub.chapterCount != null && (
+                                    <div>
+                                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                                            Số chương cần duyệt
+                                        </div>
+                                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
+                                            {pub.chapterCount} chương
+                                        </div>
+                                    </div>
+                                )}
+                                {pub.type !== 'story_group' && pub.totalChapters != null && (
                                     <div>
                                         <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
                                             Số chương
@@ -270,7 +308,7 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                         Nộp lúc
                                     </div>
                                     <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
-                                        {formatDate(pub.submittedAt)}
+                                        {formatDate(pub.type === 'story_group' && pub.representativePublication ? pub.representativePublication.submittedAt : pub.submittedAt)}
                                     </div>
                                 </div>
 
@@ -325,8 +363,8 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                 </div>
                             )}
 
-                            {/* Description */}
-                            {(pub.type === 'new_story' || pub.type === 'story') && pub.description && (
+                            {/* Description — truyện hoặc chương (chương dùng mô tả truyện) */}
+                            {pub.description && (
                                 <p style={{
                                     fontSize: '0.875rem',
                                     color: '#64748b',
