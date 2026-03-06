@@ -129,9 +129,16 @@ export default function RechargeCoin() {
 
     return (
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-8 border border-slate-200 dark:border-slate-700">
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-6">
-                Nạp Coin
-            </h3>
+            <div className="flex items-center justify-between mb-2">
+                <div>
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+                        Nạp Coin
+                    </h3>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                        Chọn gói coin hoặc nhập số lượng tùy chỉnh để nạp vào ví.
+                    </p>
+                </div>
+            </div>
 
             {error && (
                 <div className="mb-6 p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
@@ -280,6 +287,26 @@ export default function RechargeCoin() {
                                 </div>
                             </div>
                         </button>
+                    </div>
+                </div>
+
+                {/* Promotions */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="p-4 rounded-lg border border-purple-200 dark:border-purple-900/60 bg-purple-50/60 dark:bg-purple-900/20">
+                        <p className="text-sm font-semibold text-purple-800 dark:text-purple-200 mb-1">
+                            Ưu đãi nạp lần đầu
+                        </p>
+                        <p className="text-xs text-purple-700 dark:text-purple-300">
+                            Nạp từ 1.000 Coins trở lên lần đầu tiên sẽ được tặng thêm 10% coin (demo UI).
+                        </p>
+                    </div>
+                    <div className="p-4 rounded-lg border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-900/20">
+                        <p className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-1">
+                            Khung giờ vàng
+                        </p>
+                        <p className="text-xs text-amber-700 dark:text-amber-300">
+                            Từ 20h - 22h mỗi tối, nạp gói từ 2.000 Coins trở lên được tặng thêm 5% coin (demo UI).
+                        </p>
                     </div>
                 </div>
 

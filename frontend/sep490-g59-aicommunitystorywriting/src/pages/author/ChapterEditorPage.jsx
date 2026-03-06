@@ -19,6 +19,7 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
         status: chapter?.status || 'draft',
         accessType: chapter?.accessType || 'public', // 'public' | 'paid'
         price: chapter?.price || 0,
+        changeSummary: '', // Mô tả thay đổi (ghi chú version) - chỉ khi chỉnh sửa
     });
 
     const [showSettings, setShowSettings] = useState(false);
@@ -40,6 +41,7 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
                 status: chapter.status || 'draft',
                 accessType: chapter.accessType || 'public',
                 price: chapter.price || 0,
+                changeSummary: chapter.changeSummary ?? '',
             });
         } else {
             // Reset to default for new chapter
@@ -50,6 +52,7 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
                 status: 'draft',
                 accessType: 'public',
                 price: 0,
+                changeSummary: '',
             });
         }
     }, [chapter, story?.chapters]);
@@ -367,6 +370,34 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
                                     </div>
                                 )}
                             </div>
+
+                            {/* Mô tả thay đổi (version) - chỉ hiện khi chỉnh sửa chương */}
+                            {chapter && (
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                        Mô tả thay đổi (ghi chú version)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={chapterData.changeSummary ?? ''}
+                                        onChange={(e) => setChapterData({ ...chapterData, changeSummary: e.target.value })}
+                                        placeholder="Ví dụ: Sửa lỗi chính tả, bổ sung đoạn mới..."
+                                        maxLength={500}
+                                        style={{
+                                            width: '100%',
+                                            padding: '0.75rem',
+                                            backgroundColor: '#f9fafb',
+                                            border: '1px solid #e5e7eb',
+                                            borderRadius: '8px',
+                                            fontSize: '0.875rem',
+                                            outline: 'none'
+                                        }}
+                                    />
+                                    <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.25rem' }}>
+                                        Tùy chọn. Khi lưu, hệ thống sẽ tạo version nội dung cho chương này.
+                                    </p>
+                                </div>
+                            )}
 
                             {/* Toolbar */}
                             <div style={{

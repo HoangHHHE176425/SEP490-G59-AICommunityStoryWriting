@@ -92,8 +92,8 @@ namespace Services.Implementations
                 {
                     user_id = userId,
                     nickname = nickname,
-                    Phone = request.Phone,
-                    IdNumber = request.IdNumber,
+                    phone = request.Phone,
+                    id_number = request.IdNumber,
                     settings = "{\"allow_notif\":true}",
                     updated_at = DateTime.UtcNow
                 }
@@ -188,8 +188,8 @@ namespace Services.Implementations
                 CreatedAt = u.created_at,
                 EmailVerifiedAt = u.email_verified_at,
                 Nickname = u.user_profiles?.nickname,
-                Phone = u.user_profiles?.Phone,
-                IdNumber = u.user_profiles?.IdNumber,
+                Phone = u.user_profiles?.phone,
+                IdNumber = u.user_profiles?.id_number,
                 IsEmailVerified = u.email_verified_at != null
             };
         }
@@ -207,8 +207,8 @@ namespace Services.Implementations
                 EmailVerifiedAt = u.email_verified_at,
                 DeletionRequestedAt = u.deletion_requested_at,
                 Nickname = u.user_profiles?.nickname,
-                Phone = u.user_profiles?.Phone,
-                IdNumber = u.user_profiles?.IdNumber,
+                Phone = u.user_profiles?.phone,
+                IdNumber = u.user_profiles?.id_number,
                 IsEmailVerified = u.email_verified_at != null
             };
             return dto;

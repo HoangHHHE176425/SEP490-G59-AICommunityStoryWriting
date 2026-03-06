@@ -1,0 +1,464 @@
+﻿@{
+    ViewData["Title"] = "Đọc truyện";
+    var storyId = ViewBag.StoryId ?? Guid.Empty;
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <a class="btn btn-outline-secondary btn-sm" href="/">
+                <i class="bi bi-arrow-left"></i> Trang chủ
+            </a>
+        </div>
+        <div class="small text-muted">Reader view</div>
+    </div>
+
+    <div class="card mb-3" id="storyHeaderCard">
+        <div class="card-body">
+            <div class="text-center">
+                <div class="spinner-border text-primary" role="status"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-8">
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <strong>Danh sách chương</strong>
+                    <span class="badge bg-info" id="publishedChapterCount">0</span>
+                </div>
+                <div class="card-body" id="chaptersList">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <strong>Bình luận</strong>
+                    <span class="badge bg-secondary" id="commentsCountBadge">0</span>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-warning small mb-3" id="commentRuleHint">
+                        Để comment: bạn cần <strong>đăng nhập</strong> và <strong>đọc ít nhất 1 chapter</strong> của truyện này.
+                    </div>
+
+                    <div class="mb-3">
+                        <textarea class="form-control" id="newCommentContent" rows="2" placeholder="Viết bình luận..."></textarea>
+                        <div class="d-flex justify-content-between align-items-center mt-2">
+                            <small class="text-muted">Tối đa 2000 ký tự</small>
+                            <button class="btn btn-primary btn-sm" id="submitCommentBtn" onclick="submitStoryComment()">
+                                <i class="bi bi-send"></i> Gửi bình luận
+                            </button>
+                        </div>
+                        <div class="mt-2 small" id="commentSubmitResult"></div>
+                    </div>
+
+                    <div id="commentsList">
+                        <div class="text-center">
+                            <div class="spinner-border text-primary" role="status"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card mb-3">
+                <div class="card-header"><strong>Thống kê</strong></div>
+                <div class="card-body">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <div class="p-2 border rounded bg-light">
+                                <div class="small text-muted">Lượt xem</div>
+                                <div class="fw-bold" id="statViews">0</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 border rounded bg-light">
+                                <div class="small text-muted">Bình luận</div>
+                                <div class="fw-bold" id="statComments">0</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 border rounded bg-light">
+                                <div class="small text-muted">Số chương</div>
+                                <div class="fw-bold" id="statChapters">0</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 border rounded bg-light">
+                                <div class="small text-muted">Cập nhật</div>
+                                <div class="small fw-bold" id="statLatestUpdated">-</div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="p-2 border rounded bg-light">
+                                <div class="small text-muted">Đánh giá TB</div>
+                                <div class="fw-bold" id="statAvgRating">0.00/5</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><strong>Đánh giá (1–5 sao)</strong></div>
+                <div class="card-body">
+                    <div class="alert alert-warning small" id="ratingLoginHint" style="display:none;">
+                        Bạn cần đăng nhập để đánh giá.
+                    </div>
+                    <div class="mb-2">
+                        <div class="btn-group w-100" role="group">
+                            <input type="radio" class="btn-check" name="readerStarValue" id="readerStar1" value="1">
+                            <label class="btn btn-outline-warning" for="readerStar1">1</label>
+                            <input type="radio" class="btn-check" name="readerStarValue" id="readerStar2" value="2">
+                            <label class="btn btn-outline-warning" for="readerStar2">2</label>
+                            <input type="radio" class="btn-check" name="readerStarValue" id="readerStar3" value="3">
+                            <label class="btn btn-outline-warning" for="readerStar3">3</label>
+                            <input type="radio" class="btn-check" name="readerStarValue" id="readerStar4" value="4">
+                            <label class="btn btn-outline-warning" for="readerStar4">4</label>
+                            <input type="radio" class="btn-check" name="readerStarValue" id="readerStar5" value="5" checked>
+                            <label class="btn btn-outline-warning" for="readerStar5">5</label>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <textarea class="form-control form-control-sm" id="readerReviewText" rows="2" placeholder="Review (tùy chọn)"></textarea>
+                    </div>
+                    <button class="btn btn-primary btn-sm w-100" id="readerSubmitRatingBtn" onclick="submitReaderRating()">
+                        <i class="bi bi-star-fill"></i> Gửi đánh giá
+                    </button>
+                    <div class="mt-2 small" id="readerRatingResult"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const storyId = '@(storyId)';
+        let story = null;
+        let chapters = [];
+        let replyingToCommentId = null;
+        let replyingToDisplayName = null;
+
+        document.addEventListener('DOMContentLoaded', async function () {
+            await AuthHelper.loadUserInfo().catch(() => {});
+            if (!AuthHelper.isAuthenticated()) {
+                document.getElementById('ratingLoginHint').style.display = 'block';
+                document.getElementById('readerSubmitRatingBtn').disabled = true;
+                document.getElementById('submitCommentBtn').disabled = true;
+            }
+            await loadStory();
+            await loadChapters();
+            await loadComments();
+            if (typeof window.loadUnreadNotificationCount === 'function') window.loadUnreadNotificationCount();
+        });
+
+        async function loadStory() {
+            story = await ApiService.getStoryById(storyId);
+            renderHeader();
+            renderStats();
+        }
+
+        async function loadChapters() {
+            const list = await ApiService.getChaptersByStoryId(storyId);
+            chapters = (list || []).slice().sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+            const published = chapters.filter(c => (c.status || '').toUpperCase() === 'PUBLISHED');
+            document.getElementById('publishedChapterCount').textContent = published.length;
+            renderChapterList(published);
+        }
+
+        async function loadComments() {
+            try {
+                const list = await ApiService.getStoryComments(storyId);
+                renderComments(list || []);
+            } catch (e) {
+                document.getElementById('commentsList').innerHTML =
+                    `<div class="alert alert-danger mb-0">Không tải được bình luận: ${(e?.message || e)}</div>`;
+            }
+        }
+
+        function renderHeader() {
+            const isFollowing = story.userIsFollowing === true;
+            const canFollow = typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated();
+            const followBtn = canFollow
+                ? (isFollowing
+                    ? `<button type="button" class="btn btn-outline-secondary btn-sm" id="btnFollowStory" onclick="toggleFollowStory()" title="Bỏ theo dõi"><i class="bi bi-bell-fill"></i> Đang theo dõi</button>`
+                    : `<button type="button" class="btn btn-primary btn-sm" id="btnFollowStory" onclick="toggleFollowStory()" title="Nhận thông báo khi có chương mới"><i class="bi bi-bell"></i> Theo dõi</button>`)
+                : `<span class="text-muted small" title="Đăng nhập để theo dõi truyện"><i class="bi bi-bell"></i> Theo dõi</span>`;
+            const followHint = canFollow ? '<p class="small text-muted mb-0 mt-1"><i class="bi bi-info-circle"></i> Thông báo chương mới hiện ở <strong>chuông <i class="bi bi-bell"></i> trên thanh menu</strong>.</p>' : '';
+            const el = document.getElementById('storyHeaderCard');
+            el.innerHTML = `
+                <div class="card-body">
+                    <div class="d-flex gap-3 align-items-start">
+                        <div style="width: 96px;">
+                            ${story.coverImage
+                                ? `<img src="http://localhost:5000${story.coverImage}" class="img-fluid rounded" alt="${story.title}">`
+                                : `<div class="bg-secondary rounded d-flex align-items-center justify-content-center" style="height:96px;">
+                                        <i class="bi bi-image text-white"></i>
+                                   </div>`}
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <h3 class="mb-1">${story.title}</h3>
+                                <div>${followBtn}</div>
+                            </div>
+                            ${followHint}
+                            <div class="text-muted mb-2">${story.summary || ''}</div>
+                            <div class="d-flex flex-wrap gap-2">
+                                <span class="badge bg-primary">${story.categoryNames || 'N/A'}</span>
+                                <span class="badge bg-secondary">${story.status || 'N/A'}</span>
+                                <span class="badge bg-success">${(story.avgRating ?? story.AvgRating) ? (story.avgRating ?? story.AvgRating).toFixed(1) : '0.0'}/5</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function toggleFollowStory() {
+            if (!AuthHelper || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) return;
+            const btn = document.getElementById('btnFollowStory');
+            if (!btn) return;
+            const isFollowing = story.userIsFollowing === true;
+            try {
+                btn.disabled = true;
+                if (isFollowing) {
+                    await ApiService.unfollowStory(storyId);
+                    story.userIsFollowing = false;
+                } else {
+                    await ApiService.followStory(storyId);
+                    story.userIsFollowing = true;
+                }
+                renderHeader();
+            } catch (e) {
+                alert(e?.message || e);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        function renderStats() {
+            const v = story.totalViews ?? story.TotalViews ?? 0;
+            const c = story.totalComments ?? story.TotalComments ?? 0;
+            const ch = story.publishedChaptersCount ?? story.PublishedChaptersCount ?? 0;
+            const lat = story.latestUpdatedAt ?? story.LatestUpdatedAt ?? story.updatedAt ?? story.UpdatedAt;
+            const avg = story.avgRating ?? story.AvgRating ?? 0;
+            document.getElementById('statViews').textContent = Utils.formatNumber(v);
+            document.getElementById('statComments').textContent = Utils.formatNumber(c);
+            document.getElementById('statChapters').textContent = Utils.formatNumber(ch);
+            document.getElementById('statLatestUpdated').textContent = lat ? Utils.formatDate(lat) : 'N/A';
+            document.getElementById('statAvgRating').textContent = (avg ? Number(avg).toFixed(2) : '0.00') + '/5';
+        }
+
+        function renderChapterList(publishedChapters) {
+            const el = document.getElementById('chaptersList');
+            if (!publishedChapters || publishedChapters.length === 0) {
+                el.innerHTML = `<div class="alert alert-info mb-0">Chưa có chapter PUBLISHED.</div>`;
+                return;
+            }
+            el.innerHTML = publishedChapters.map(ch => `
+                <div class="d-flex justify-content-between align-items-center border-bottom py-2">
+                    <div>
+                        <div class="fw-medium">Chương ${ch.orderIndex}: ${ch.title}</div>
+                        <div class="text-muted small">
+                            ${ch.publishedAt ? Utils.formatDate(ch.publishedAt) : ''}
+                            ${ch.wordCount ? ' · ' + Utils.formatNumber(ch.wordCount) + ' từ' : ''}
+                        </div>
+                    </div>
+                    <div>
+                        <a class="btn btn-outline-primary btn-sm" href="/Chapters/Read/${encodeURIComponent(ch.id)}">
+                            <i class="bi bi-book"></i> Đọc
+                        </a>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(text) {
+            if (text == null) return '';
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function renderComments(list) {
+            const container = document.getElementById('commentsList');
+            document.getElementById('commentsCountBadge').textContent = (list || []).length;
+            if (!list || list.length === 0) {
+                container.innerHTML = `<div class="text-muted">Chưa có bình luận.</div>`;
+                return;
+            }
+
+            const byParent = new Map();
+            const roots = [];
+            for (const c of list) {
+                const pid = c.parentId || null;
+                if (!pid) roots.push(c);
+                if (!byParent.has(pid)) byParent.set(pid, []);
+                byParent.get(pid).push(c);
+            }
+
+            // Stable order by createdAt (backend already ordered), keep insertion order
+            function renderNode(c, depth) {
+                const name = escapeHtml(c.userDisplayName || 'Ẩn danh');
+                const time = c.createdAt ? Utils.formatDate(c.createdAt) : '';
+                const content = escapeHtml(c.content || '');
+                const canReply = AuthHelper && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated();
+                const likesCount = c.likesCount ?? c.likes_count ?? 0;
+                const userHasLiked = c.userHasLiked === true;
+                const canLike = AuthHelper && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated();
+
+                const isReplyingHere = replyingToCommentId && replyingToCommentId === c.id;
+                const replyBadge = isReplyingHere
+                    ? `<span class="badge bg-info text-dark ms-2">Đang trả lời</span>`
+                    : '';
+
+                const replyBtn = canReply
+                    ? `<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" onclick="startReply('${c.id}', '${name.replace(/'/g, '\\&#039;')}')">Trả lời</button>`
+                    : '';
+
+                const likeIcon = userHasLiked ? 'bi-heart-fill text-danger' : 'bi-heart';
+                const likeBtn = canLike
+                    ? `<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none like-comment-btn" onclick="toggleCommentLike('${c.id}')" title="Thả cảm xúc"><i class="bi ${likeIcon}"></i> <span class="like-count">${likesCount}</span></button>`
+                    : `<span class="text-muted small" title="Đăng nhập để thả cảm xúc"><i class="bi bi-heart"></i> ${likesCount}</span>`;
+
+                const children = byParent.get(c.id) || [];
+                const indent = Math.min(depth, 6) * 16;
+
+                return `
+                    <div class="py-2 comment-node" style="margin-left:${indent}px;" data-comment-id="${c.id}">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div class="fw-medium">${name}${replyBadge}</div>
+                            <div class="text-muted small">${time}</div>
+                        </div>
+                        <div class="mb-1">${content}</div>
+                        <div class="small text-muted d-flex gap-2 align-items-center flex-wrap">
+                            ${replyBtn}
+                            ${likeBtn}
+                        </div>
+                        ${children.length ? children.map(ch => renderNode(ch, depth + 1)).join('') : ''}
+                    </div>
+                    ${depth === 0 ? '<div class="border-bottom"></div>' : ''}
+                `;
+            }
+
+            container.innerHTML = roots.map(c => renderNode(c, 0)).join('');
+            renderReplyStateUI();
+        }
+
+        function renderReplyStateUI() {
+            const hint = document.getElementById('commentRuleHint');
+            const textarea = document.getElementById('newCommentContent');
+            const btn = document.getElementById('submitCommentBtn');
+            let stateEl = document.getElementById('replyStateBar');
+            if (!stateEl) {
+                stateEl = document.createElement('div');
+                stateEl.id = 'replyStateBar';
+                stateEl.className = 'alert alert-info small py-2 d-flex justify-content-between align-items-center';
+                stateEl.style.display = 'none';
+                stateEl.innerHTML = `<div id="replyStateText"></div>
+                                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="cancelReply()">Hủy trả lời</button>`;
+                hint.parentElement.insertBefore(stateEl, hint.nextSibling);
+            }
+
+            if (replyingToCommentId) {
+                stateEl.style.display = 'flex';
+                document.getElementById('replyStateText').innerHTML =
+                    `Đang trả lời <strong>${escapeHtml(replyingToDisplayName || 'comment')}</strong>`;
+                textarea.placeholder = `Trả lời ${replyingToDisplayName || 'comment'}...`;
+                btn.innerHTML = `<i class="bi bi-send"></i> Gửi trả lời`;
+            } else {
+                stateEl.style.display = 'none';
+                textarea.placeholder = 'Viết bình luận...';
+                btn.innerHTML = `<i class="bi bi-send"></i> Gửi bình luận`;
+            }
+        }
+
+        function startReply(commentId, displayName) {
+            replyingToCommentId = commentId;
+            replyingToDisplayName = displayName;
+            renderReplyStateUI();
+            document.getElementById('newCommentContent').focus();
+        }
+
+        function cancelReply() {
+            replyingToCommentId = null;
+            replyingToDisplayName = null;
+            renderReplyStateUI();
+        }
+
+        async function toggleCommentLike(commentId) {
+            if (!AuthHelper || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) return;
+            try {
+                const res = await ApiService.toggleCommentLike(storyId, commentId);
+                if (res && typeof res.likesCount !== 'undefined') {
+                    const node = document.querySelector(`.comment-node[data-comment-id="${commentId}"]`);
+                    if (node) {
+                        const btn = node.querySelector('.like-comment-btn');
+                        if (btn) {
+                            const icon = btn.querySelector('i.bi');
+                            const countSpan = btn.querySelector('.like-count');
+                            if (icon) icon.className = res.liked ? 'bi bi-heart-fill text-danger' : 'bi bi-heart';
+                            if (countSpan) countSpan.textContent = res.likesCount;
+                        }
+                    }
+                } else {
+                    await loadComments();
+                }
+            } catch (e) {
+                console.error(e);
+                await loadComments();
+            }
+        }
+
+        async function submitStoryComment() {
+            const resultEl = document.getElementById('commentSubmitResult');
+            resultEl.innerHTML = '';
+            if (!AuthHelper.isAuthenticated()) {
+                resultEl.innerHTML = `<span class="text-danger">Vui lòng đăng nhập để bình luận.</span>`;
+                return;
+            }
+            const content = (document.getElementById('newCommentContent').value || '').trim();
+            if (!content) {
+                resultEl.innerHTML = `<span class="text-danger">Nội dung bình luận không được để trống.</span>`;
+                return;
+            }
+            try {
+                await ApiService.addStoryComment(storyId, { content: content, parentId: replyingToCommentId });
+                document.getElementById('newCommentContent').value = '';
+                cancelReply();
+                resultEl.innerHTML = `<span class="text-success">Đã gửi bình luận.</span>`;
+                await loadComments();
+                await loadStory(); // refresh comment count on stats
+            } catch (e) {
+                resultEl.innerHTML = `<span class="text-danger">${e?.message || e}</span>`;
+            }
+        }
+
+        function getReaderStarValue() {
+            const el = document.querySelector('input[name="readerStarValue"]:checked');
+            return el ? parseInt(el.value, 10) : 5;
+        }
+
+        async function submitReaderRating() {
+            const resultEl = document.getElementById('readerRatingResult');
+            resultEl.innerHTML = '';
+            try {
+                const payload = { starValue: getReaderStarValue(), reviewText: document.getElementById('readerReviewText').value || null };
+                const res = await ApiService.rateStory(storyId, payload);
+                resultEl.innerHTML = `<span class="text-success">OK. Avg: ${Number(res.avgRating).toFixed(2)} (${res.ratingCount}).</span>`;
+                await loadStory();
+            } catch (e) {
+                resultEl.innerHTML = `<span class="text-danger">${e?.message || e}</span>`;
+            }
+        }
+    </script>
+}
+

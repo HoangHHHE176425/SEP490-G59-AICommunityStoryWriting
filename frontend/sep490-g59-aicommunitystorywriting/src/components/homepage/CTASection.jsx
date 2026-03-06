@@ -65,29 +65,29 @@ export function CTASection() {
           {/* CTA Buttons */}
           {!isAuthenticated ? (
             <div className="flex items-center justify-center gap-4 flex-wrap">
-              <button 
+              <button
                 onClick={() => navigate('/register')}
                 className="px-10 py-4 bg-white text-[#13EC5B] rounded-xl hover:bg-gray-100 hover:scale-105 transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[16px] flex items-center gap-2 shadow-xl">
-              <Sparkles className="w-5 h-5" />
-              Đăng Ký Ngay
-            </button>
-            <button 
-              onClick={() => navigate('/stories')}
-              className="px-10 py-4 bg-[#1A2332] text-white rounded-xl hover:bg-[#0F172A] hover:scale-105 transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[16px] flex items-center gap-2 shadow-xl">
-              <BookOpen className="w-5 h-5" />
-              Khám Phá Truyện
-              <ArrowRight className="w-5 h-5" />
-            </button>
-          </div>
+                <Sparkles className="w-5 h-5" />
+                Đăng Ký Ngay
+              </button>
+              <button
+                onClick={() => navigate('/stories')}
+                className="px-10 py-4 bg-[#1A2332] text-white rounded-xl hover:bg-[#0F172A] hover:scale-105 transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[16px] flex items-center gap-2 shadow-xl">
+                <BookOpen className="w-5 h-5" />
+                Khám Phá Truyện
+                <ArrowRight className="w-5 h-5" />
+              </button>
+            </div>
           ) : (
             <div className="flex items-center justify-center gap-4 flex-wrap">
-              <button 
+              <button
                 onClick={() => navigate('/author/stories')}
                 className="px-10 py-4 bg-white text-[#13EC5B] rounded-xl hover:bg-gray-100 hover:scale-105 transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[16px] flex items-center gap-2 shadow-xl">
                 <Sparkles className="w-5 h-5" />
                 Bắt Đầu Viết Ngay
               </button>
-              <button 
+              <button
                 onClick={() => navigate('/stories')}
                 className="px-10 py-4 bg-[#1A2332] text-white rounded-xl hover:bg-[#0F172A] hover:scale-105 transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[16px] flex items-center gap-2 shadow-xl">
                 <BookOpen className="w-5 h-5" />
