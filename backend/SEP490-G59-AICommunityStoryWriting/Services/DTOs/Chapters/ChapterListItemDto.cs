@@ -21,10 +21,9 @@ namespace Services.DTOs.Chapters
         public string? ClaimedByDisplayName { get; set; }
         /// <summary>Trong queue moderator: thời điểm nhận duyệt.</summary>
         public DateTime? ClaimedAt { get; set; }
-
-        /// <summary>Lý do từ chối (khi status = REJECTED), lấy từ moderator_logs.</summary>
+        /// <summary>Lý do từ chối (khi status = REJECTED).</summary>
         public string? RejectionReason { get; set; }
-        /// <summary>Thời điểm từ chối.</summary>
+        /// <summary>Thời điểm moderator từ chối.</summary>
         public DateTime? RejectedAt { get; set; }
     }
 }

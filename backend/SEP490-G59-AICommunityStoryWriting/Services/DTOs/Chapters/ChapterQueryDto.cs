@@ -13,6 +13,8 @@
         public int PageSize { get; set; } = 20;
         public string? Search { get; set; }
         public string? Status { get; set; }
+        /// <summary>Khi set: chỉ lấy chapter có status nằm trong list (ví dụ: APPROVED, REJECTED cho "đã duyệt").</summary>
+        public List<string>? StatusIn { get; set; }
         public string? AccessType { get; set; }
         public string? SortBy { get; set; } = "order_index"; // order_index, created_at, published_at, title
         public string? SortOrder { get; set; } = "asc"; // asc, desc
