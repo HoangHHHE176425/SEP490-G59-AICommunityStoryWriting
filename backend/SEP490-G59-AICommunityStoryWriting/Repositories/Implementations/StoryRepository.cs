@@ -28,5 +28,8 @@ namespace Repositories
 
         public void Delete(Guid id)
             => StoryDAO.Delete(id);
+
+        public void IncrementViewCount(Guid storyId)
+            => StoryDAO.IncrementViewCount(storyId);
     }
 }

@@ -1,5 +1,6 @@
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Repositories;
 using Services.DTOs.Stories;
@@ -9,16 +10,21 @@ namespace Services.Implementations
 {
     public class StoryService : IStoryService
     {
+        private const string ViewCacheKeyPrefix = "story_view:";
+        private static readonly TimeSpan ViewCooldown = TimeSpan.FromHours(24);
+
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
         private readonly ILogger<StoryService> _logger;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
+        private readonly IMemoryCache _cache;
 
-        public StoryService(IStoryRepository storyRepository, IChapterRepository chapterRepository, ILogger<StoryService> logger, IModerationHubNotifier? moderationHubNotifier = null)
+        public StoryService(IStoryRepository storyRepository, IChapterRepository chapterRepository, ILogger<StoryService> logger, IMemoryCache cache, IModerationHubNotifier? moderationHubNotifier = null)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
             _logger = logger;
+            _cache = cache;
             _moderationHubNotifier = moderationHubNotifier;
         }
 
@@ -130,19 +136,9 @@ namespace Services.Implementations
                 storiesQuery = storiesQuery.Where(s => s.author_id == query.AuthorId.Value);
             }
 
-            if (!string.IsNullOrWhiteSpace(query.Status) || (query.AlsoIncludeStoryIds != null && query.AlsoIncludeStoryIds.Count > 0))
+            if (!string.IsNullOrWhiteSpace(query.Status))
             {
-                if (query.AlsoIncludeStoryIds != null && query.AlsoIncludeStoryIds.Count > 0)
-                {
-                    var alsoIds = query.AlsoIncludeStoryIds;
-                    storiesQuery = storiesQuery.Where(s =>
-                        (!string.IsNullOrWhiteSpace(query.Status) && s.status == query.Status) ||
-                        alsoIds.Contains(s.id));
-                }
-                else
-                {
-                    storiesQuery = storiesQuery.Where(s => s.status == query.Status);
-                }
+                storiesQuery = storiesQuery.Where(s => s.status == query.Status);
             }
 
             storiesQuery = query.SortBy?.ToLower() switch
@@ -227,6 +223,12 @@ namespace Services.Implementations
             var story = _storyRepository.GetById(id);
             if (story == null)
                 return false;
+
+            // Lưu version (vết tích) trước khi sửa nếu story đã public
+            if (string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
+            {
+                StoryVersionDAO.SaveVersion(story, request.ChangeSummary);
+            }
 
             if (request.CategoryIds != null && request.CategoryIds.Any())
             {
@@ -379,11 +381,74 @@ namespace Services.Implementations
             story.updated_at = DateTime.Now;
 
             _storyRepository.Update(story);
-
-            // Giải phóng đơn đã nhận (claim) của moderator khi tác giả hủy xuất bản truyện.
-            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeStory, id);
-
             return true;
+        }
+
+        public void RecordViewIfAllowed(Guid storyId, string viewerKey)
+        {
+            if (string.IsNullOrWhiteSpace(viewerKey))
+                return;
+            var cacheKey = $"{ViewCacheKeyPrefix}{storyId}:{viewerKey}";
+            if (_cache.TryGetValue(cacheKey, out _))
+                return;
+            var story = _storyRepository.GetById(storyId);
+            if (story == null || story.status != "PUBLISHED")
+                return;
+            _cache.Set(cacheKey, true, ViewCooldown);
+            _storyRepository.IncrementViewCount(storyId);
+        }
+
+        public void RecordReadStory(Guid storyId, Guid userId, string? ipAddress = null, string? deviceInfo = null)
+        {
+            if (userId == Guid.Empty || storyId == Guid.Empty)
+                return;
+            try
+            {
+                UserActivityLogDAO.LogReadStory(userId, storyId, ipAddress, deviceInfo);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to log read story activity. storyId={StoryId}, userId={UserId}", storyId, userId);
+            }
+        }
+
+        public void RecordReadChapter(Guid storyId, Guid chapterId, Guid userId, string? ipAddress = null, string? deviceInfo = null)
+        {
+            if (userId == Guid.Empty || storyId == Guid.Empty || chapterId == Guid.Empty)
+                return;
+            try
+            {
+                UserActivityLogDAO.LogReadChapter(userId, storyId, chapterId, ipAddress, deviceInfo);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to log read chapter activity. storyId={StoryId}, chapterId={ChapterId}, userId={UserId}", storyId, chapterId, userId);
+            }
+        }
+
+        public (decimal avgRating, int ratingCount) RateStory(Guid storyId, Guid userId, int starValue, string? reviewText)
+        {
+            if (storyId == Guid.Empty)
+                throw new InvalidOperationException("StoryId không hợp lệ.");
+            if (userId == Guid.Empty)
+                throw new InvalidOperationException("UserId không hợp lệ.");
+            if (starValue < 1 || starValue > 5)
+                throw new InvalidOperationException("StarValue phải từ 1 đến 5.");
+
+            var story = _storyRepository.GetById(storyId);
+            if (story == null)
+                throw new InvalidOperationException("Truyện không tồn tại.");
+            if (!string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Chỉ có thể đánh giá truyện đã được phát hành (PUBLISHED).");
+
+            // Chặn rating khi chưa đọc chapter: yêu cầu có log READ_CHAPTER cho story.
+            if (!UserActivityLogDAO.HasReadAnyChapterOfStory(userId, storyId))
+                throw new InvalidOperationException("Bạn cần đọc ít nhất một chapter trước khi đánh giá.");
+
+            RatingDAO.Upsert(userId, storyId, starValue, reviewText, status: "VISIBLE");
+            var (avg, count) = RatingDAO.GetAverageAndCount(storyId, status: "VISIBLE");
+            StoryDAO.UpdateAvgRating(storyId, avg);
+            return (avg, count);
         }
 
         private string GenerateSlug(string title)
@@ -468,6 +533,14 @@ namespace Services.Implementations
             var categoryIds = categories.Select(c => c.id).ToList();
             var categoryNames = categories.Any() ? string.Join(", ", categories.Select(c => c.name)) : null;
 
+            var totalChapters = story.total_chapters ?? ChapterDAO.GetCountByStoryId(story.id);
+            var publishedChaptersCount = ChapterDAO.GetPublishedCountByStoryId(story.id);
+            var totalComments = CommentDAO.GetCountByStoryId(story.id);
+            var latestChapterUpdatedAt = ChapterDAO.GetLatestUpdatedAtByStoryId(story.id);
+            var latestUpdatedAt = story.updated_at;
+            if (latestChapterUpdatedAt.HasValue && (!latestUpdatedAt.HasValue || latestChapterUpdatedAt > latestUpdatedAt))
+                latestUpdatedAt = latestChapterUpdatedAt;
+
             return new StoryResponseDto
             {
                 Id = story.id,
@@ -481,13 +554,16 @@ namespace Services.Implementations
                 Status = story.status,
                 StoryProgressStatus = story.story_progress_status,
                 AgeRating = story.age_rating,
-                TotalChapters = story.total_chapters,
+                TotalChapters = totalChapters,
+                PublishedChaptersCount = publishedChaptersCount,
                 TotalViews = story.total_views,
+                TotalComments = totalComments,
                 TotalFavorites = story.total_favorites,
                 AvgRating = story.avg_rating,
                 WordCount = story.word_count,
                 CreatedAt = story.created_at,
                 UpdatedAt = story.updated_at,
+                LatestUpdatedAt = latestUpdatedAt,
                 PublishedAt = story.published_at,
                 LastPublishedAt = story.last_published_at
             };
@@ -498,6 +574,14 @@ namespace Services.Implementations
             var categories = story.category?.ToList() ?? new List<categories>();
             var categoryIds = categories.Select(c => c.id).ToList();
             var categoryNames = categories.Any() ? string.Join(", ", categories.Select(c => c.name)) : null;
+
+            var totalChapters = story.total_chapters ?? ChapterDAO.GetCountByStoryId(story.id);
+            var publishedChaptersCount = ChapterDAO.GetPublishedCountByStoryId(story.id);
+            var totalComments = CommentDAO.GetCountByStoryId(story.id);
+            var latestChapterUpdatedAt = ChapterDAO.GetLatestUpdatedAtByStoryId(story.id);
+            var latestUpdatedAt = story.updated_at;
+            if (latestChapterUpdatedAt.HasValue && (!latestUpdatedAt.HasValue || latestChapterUpdatedAt > latestUpdatedAt))
+                latestUpdatedAt = latestChapterUpdatedAt;
 
             return new StoryListItemDto
             {
@@ -511,12 +595,15 @@ namespace Services.Implementations
                 CategoryIds = categoryIds,
                 CategoryNames = categoryNames,
                 AuthorId = story.author_id,
-                TotalChapters = story.total_chapters,
+                TotalChapters = totalChapters,
+                PublishedChaptersCount = publishedChaptersCount,
                 TotalViews = story.total_views,
+                TotalComments = totalComments,
                 TotalFavorites = story.total_favorites,
                 AvgRating = story.avg_rating,
                 CreatedAt = story.created_at,
-                UpdatedAt = story.updated_at
+                UpdatedAt = story.updated_at,
+                LatestUpdatedAt = latestUpdatedAt
             };
         }
     }

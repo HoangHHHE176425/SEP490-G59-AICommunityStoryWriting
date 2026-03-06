@@ -17,12 +17,17 @@
         public string? AuthorName { get; set; }
 
         public int? TotalChapters { get; set; }
+        /// <summary>Số chapter đã PUBLISHED.</summary>
+        public int? PublishedChaptersCount { get; set; }
         public long? TotalViews { get; set; }
+        public int? TotalComments { get; set; }
         public int? TotalFavorites { get; set; }
         public decimal? AvgRating { get; set; }
 
         public DateTime? CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
+        /// <summary>Thời gian cập nhật gần nhất (max giữa story.updated_at và chapter.updated_at mới nhất).</summary>
+        public DateTime? LatestUpdatedAt { get; set; }
 
         /// <summary>Trong queue moderator: đã được moderator hiện tại nhận duyệt (lock).</summary>
         public bool IsClaimedByMe { get; set; }
