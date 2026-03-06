@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { User, Edit, Coins, History, Ticket, Trash2, BookOpen } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { useLocation } from 'react-router-dom';
 import ViewProfile from '../../components/profile/ViewProfile';
 import EditProfile from '../../components/profile/EditProfile';
 import RechargeCoin from '../../components/profile/RechargeCoin';
@@ -12,6 +13,7 @@ import DeleteAccount from '../../components/profile/DeleteAccount';
 
 export default function Profile() {
     const { user } = useAuth();
+    const location = useLocation();
     const [activeTab, setActiveTab] = useState('info');
 
     const profileData = user;
@@ -24,6 +26,15 @@ export default function Profile() {
         { id: 'voucher', label: 'Voucher', icon: Ticket },
         { id: 'delete', label: 'Xóa tài khoản', icon: Trash2 },
     ];
+
+    useEffect(() => {
+        const sp = new URLSearchParams(location.search);
+        const tab = sp.get('tab');
+        if (tab && tabs.some((t) => t.id === tab)) {
+            setActiveTab(tab);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.search]);
 
     const renderContent = () => {
         switch (activeTab) {
