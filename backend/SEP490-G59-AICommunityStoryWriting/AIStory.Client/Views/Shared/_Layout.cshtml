@@ -1,0 +1,293 @@
+﻿@inject IConfiguration Configuration
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - AIStory.Client</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/AIStory.Client.styles.css" asp-append-version="true" />
+</head>
+<body>
+    <header>
+        <nav class="navbar navbar-expand-sm navbar-toggleable-sm navbar-light bg-white border-bottom box-shadow mb-3">
+            <div class="container-fluid">
+                <a class="navbar-brand" asp-area="" asp-controller="Home" asp-action="Index">AIStory.Client</a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse" aria-controls="navbarSupportedContent"
+                        aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
+                    <ul class="navbar-nav flex-grow-1">
+                        <li class="nav-item">
+                            <a class="nav-link text-dark" asp-area="" asp-controller="Home" asp-action="Index">Home</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link text-dark" asp-area="" asp-controller="Categories" asp-action="Index">Thể loại</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link text-dark" asp-area="" asp-controller="Stories" asp-action="Index">Truyện</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link text-dark" asp-area="" asp-controller="Chapters" asp-action="Index">Chapters</a>
+                        </li>
+                        <li class="nav-item" id="moderatorNavItem" style="display: none;">
+                            <a class="nav-link text-dark" asp-area="" asp-controller="Moderator" asp-action="Index"><i class="bi bi-shield-check"></i> Kiểm duyệt</a>
+                        </li>
+                    </ul>
+                    <ul class="navbar-nav align-items-center">
+                        <li class="nav-item dropdown" id="notificationBellItem" style="display: none;">
+                            <a class="nav-link text-dark position-relative dropdown-toggle" href="#" id="notificationDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false" title="Thông báo">
+                                <i class="bi bi-bell fs-5"></i>
+                                <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" id="notificationBadge" style="font-size: 0.65rem; display: none;">0</span>
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="notificationDropdown" style="min-width: 320px; max-height: 400px; overflow-y: auto;">
+                                <li class="dropdown-header d-flex justify-content-between align-items-center">
+                                    <span><i class="bi bi-bell me-1"></i> Thông báo</span>
+                                    <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" id="markAllNotificationsReadBtn" style="display: none;">Đánh dấu đã đọc</button>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li id="notificationListPlaceholder" class="text-center text-muted py-3 small">Đang tải...</li>
+                                <li id="notificationListContainer" style="display: none; list-style: none;"></li>
+                            </ul>
+                        </li>
+                    </ul>
+                    <ul class="navbar-nav" id="authNav">
+                        <!-- Sẽ được cập nhật bởi JavaScript -->
+                        <li class="nav-item" id="loginNavItem" style="display: none;">
+                            <a class="nav-link text-dark" asp-controller="Auth" asp-action="Login">
+                                <i class="bi bi-box-arrow-in-right"></i> Đăng nhập
+                            </a>
+                        </li>
+                        <li class="nav-item" id="registerNavItem" style="display: none;">
+                            <a class="nav-link text-dark" asp-controller="Auth" asp-action="Register">
+                                <i class="bi bi-person-plus"></i> Đăng ký
+                            </a>
+                        </li>
+                        <li class="nav-item dropdown" id="userNavItem" style="display: none;">
+                            <a class="nav-link dropdown-toggle text-dark" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                <i class="bi bi-person-circle"></i> <span id="userEmail">User</span>
+                            </a>
+                            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                                <li>
+                                    <a class="dropdown-item" href="#" id="profileLink">
+                                        <i class="bi bi-person"></i> Hồ sơ
+                                    </a>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li>
+                                    <a class="dropdown-item text-danger" href="#" onclick="AuthHelper.logout()">
+                                        <i class="bi bi-box-arrow-right"></i> Đăng xuất
+                                    </a>
+                                </li>
+                            </ul>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+    </header>
+    <div class="container">
+        <main role="main" class="pb-3">
+            @RenderBody()
+        </main>
+    </div>
+
+    <footer class="border-top footer text-muted">
+        <div class="container">
+            &copy; 2026 - AIStory.Client - <a asp-area="" asp-controller="Home" asp-action="Privacy">Privacy</a>
+        </div>
+    </footer>
+
+    <!-- Modal xem lý do từ chối (cho Author) -->
+    <div class="modal fade" id="rejectionReasonModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-x-circle"></i> Lý do từ chối</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p id="rejectionReasonBody" class="mb-0"></p>
+                    <p id="rejectionReasonDate" class="text-muted small mt-2 mb-0"></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="~/lib/jquery/dist/jquery.min.js"></script>
+    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <script>
+        window.__API_BASE_URL = @Html.Raw(Json.Serialize(((string)(Configuration["GivenAPIBaseUrl"] ?? "http://localhost:5000")).TrimEnd('/') + "/api"));
+    </script>
+    <script src="~/js/api-service.js" asp-append-version="true"></script>
+    <script src="~/js/auth-helper.js" asp-append-version="true"></script>
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    <script>
+        // Cập nhật navigation dựa trên trạng thái đăng nhập
+        document.addEventListener('DOMContentLoaded', function() {
+            // Đợi một chút để đảm bảo AuthHelper đã được load
+            setTimeout(() => {
+                updateAuthNav();
+            }, 100);
+        });
+
+        function updateAuthNav() {
+            const isAuthenticated = AuthHelper.isAuthenticated();
+            const loginNavItem = document.getElementById('loginNavItem');
+            const registerNavItem = document.getElementById('registerNavItem');
+            const userNavItem = document.getElementById('userNavItem');
+            const userEmail = document.getElementById('userEmail');
+
+            if (isAuthenticated) {
+                // Hiển thị user menu
+                loginNavItem.style.display = 'none';
+                registerNavItem.style.display = 'none';
+                userNavItem.style.display = 'block';
+                var moderatorNav = document.getElementById('moderatorNavItem');
+                if (moderatorNav) {
+                    moderatorNav.style.display = AuthHelper.isModerator() ? 'block' : 'none';
+                }
+                var notificationBell = document.getElementById('notificationBellItem');
+                if (notificationBell) notificationBell.style.display = 'block';
+                if (typeof loadUnreadNotificationCount === 'function') loadUnreadNotificationCount();
+
+                // Lấy email từ token hoặc user info
+                const user = AuthHelper.getUser();
+                const token = AuthHelper.getToken();
+                if (user && user.email) {
+                    userEmail.textContent = user.email;
+                } else if (token) {
+                    const decoded = AuthHelper.decodeToken(token);
+                    if (decoded && decoded.email) {
+                        userEmail.textContent = decoded.email;
+                    } else if (decoded && decoded.sub) {
+                        userEmail.textContent = decoded.sub;
+                    }
+                }
+            } else {
+                // Hiển thị login/register
+                loginNavItem.style.display = 'block';
+                registerNavItem.style.display = 'block';
+                userNavItem.style.display = 'none';
+                var notificationBell = document.getElementById('notificationBellItem');
+                if (notificationBell) notificationBell.style.display = 'none';
+            }
+        }
+
+        async function loadUnreadNotificationCount() {
+            try {
+                var r = await ApiService.getUnreadNotificationCount();
+                var count = r && r.count !== undefined ? r.count : 0;
+                var badge = document.getElementById('notificationBadge');
+                if (badge) {
+                    badge.textContent = count > 99 ? '99+' : count;
+                    badge.style.display = count > 0 ? 'inline-block' : 'none';
+                }
+            } catch (_) { /* ignore */ }
+        }
+        window.loadUnreadNotificationCount = loadUnreadNotificationCount;
+
+        async function loadNotificationList() {
+            var container = document.getElementById('notificationListContainer');
+            var placeholder = document.getElementById('notificationListPlaceholder');
+            if (!container || !placeholder) return;
+            placeholder.textContent = 'Đang tải...';
+            placeholder.style.display = 'block';
+            container.style.display = 'none';
+            container.innerHTML = '';
+            try {
+                var list = await ApiService.getNotifications({ limit: 20 });
+                if (!list || list.length === 0) {
+                    placeholder.textContent = 'Chưa có thông báo.';
+                    placeholder.style.display = 'block';
+                    return;
+                }
+                placeholder.style.display = 'none';
+                container.style.display = 'block';
+                container.innerHTML = list.map(function (n) {
+                    var itemClass = n.isRead ? '' : 'bg-light';
+                    var title = (n.title || '').substring(0, 60) + ((n.title || '').length > 60 ? '...' : '');
+                    var content = (n.content || '').substring(0, 80) + ((n.content || '').length > 80 ? '...' : '');
+                    var time = n.createdAt && typeof Utils !== 'undefined' && Utils.formatDate ? Utils.formatDate(n.createdAt) : '';
+                    return '<div class="dropdown-item-text px-3 py-2 border-bottom ' + itemClass + '" style="cursor:pointer; white-space:normal;" data-id="' + n.id + '" data-read="' + n.isRead + '" data-href="' + (n.linkUrl || '').replace(/"/g, '&quot;') + '">' +
+                        '<div class="fw-medium small">' + (title || '').replace(/</g, '&lt;') + '</div>' +
+                        '<div class="small text-muted">' + (content || '').replace(/</g, '&lt;') + '</div>' +
+                        '<div class="small text-muted">' + time + '</div>' +
+                        '</div>';
+                }).join('');
+                var markAllBtn = document.getElementById('markAllNotificationsReadBtn');
+                if (markAllBtn) markAllBtn.style.display = list.some(function (n) { return !n.isRead; }) ? 'block' : 'none';
+                container.querySelectorAll('[data-id]').forEach(function (el) {
+                    el.addEventListener('click', function () {
+                        var id = el.getAttribute('data-id');
+                        var href = (el.getAttribute('data-href') || '').trim();
+                        if (id && el.getAttribute('data-read') !== 'true') {
+                            ApiService.markNotificationRead(id).then(function () {
+                                loadUnreadNotificationCount();
+                            }).catch(function () {});
+                        }
+                        if (href && href.startsWith('/')) window.location.href = href;
+                    });
+                });
+            } catch (_) {
+                placeholder.textContent = 'Không tải được thông báo.';
+                placeholder.style.display = 'block';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            var dd = document.getElementById('notificationDropdown');
+            if (dd && typeof bootstrap !== 'undefined') {
+                dd.addEventListener('show.bs.dropdown', function () {
+                    loadNotificationList();
+                });
+            }
+            document.getElementById('markAllNotificationsReadBtn')?.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                ApiService.markAllNotificationsRead().then(function () {
+                    loadUnreadNotificationCount();
+                    loadNotificationList();
+                }).catch(function () {});
+            });
+        });
+
+        // Lắng nghe sự kiện storage để cập nhật khi đăng nhập/đăng xuất từ tab khác
+        window.addEventListener('storage', function(e) {
+            if (e.key === AuthHelper.TOKEN_KEY || e.key === AuthHelper.USER_KEY) {
+                updateAuthNav();
+            }
+        });
+
+        window.showRejectionReasonModal = function(reason, rejectedAt) {
+            document.getElementById('rejectionReasonBody').textContent = reason || 'Không có lý do.';
+            document.getElementById('rejectionReasonDate').textContent = rejectedAt && typeof Utils !== 'undefined' && Utils.formatDate ? 'Ngày từ chối: ' + Utils.formatDate(rejectedAt) : '';
+            new bootstrap.Modal(document.getElementById('rejectionReasonModal')).show();
+        };
+        window.showStoryRejectionReason = async function(id) {
+            try {
+                var r = await ApiService.getStoryRejectionReason(id);
+                showRejectionReasonModal(r.reason, r.rejectedAt);
+            } catch (e) {
+                if (typeof Utils !== 'undefined') Utils.showAlert(e.message || 'Không tải được lý do.', 'danger');
+            }
+        };
+        window.showChapterRejectionReason = async function(id) {
+            try {
+                var r = await ApiService.getChapterRejectionReason(id);
+                showRejectionReasonModal(r.reason, r.rejectedAt);
+            } catch (e) {
+                if (typeof Utils !== 'undefined') Utils.showAlert(e.message || 'Không tải được lý do.', 'danger');
+            }
+        };
+    </script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

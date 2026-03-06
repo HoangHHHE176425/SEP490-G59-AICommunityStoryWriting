@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens + theme */
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --primary: 142 86% 50%;
+    --radius: 0.5rem;
+
+    --background-light: #f6f8f6;
+    --background-dark: #102216;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background-light dark:bg-background-dark text-foreground font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
