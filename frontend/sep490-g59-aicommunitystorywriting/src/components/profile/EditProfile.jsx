@@ -18,7 +18,7 @@ export default function EditProfile() {
     const [avatarLoading, setAvatarLoading] = useState(false);
     const [avatarError, setAvatarError] = useState('');
     const [avatarSuccess, setAvatarSuccess] = useState(false);
-    
+
     // Password change modal state
     const [showPasswordModal, setShowPasswordModal] = useState(false);
     const [passwordData, setPasswordData] = useState({
@@ -204,11 +204,10 @@ export default function EditProfile() {
                             />
                             <label
                                 htmlFor="avatar-upload"
-                                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold cursor-pointer transition-all ${
-                                    avatarLoading
-                                        ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 cursor-not-allowed'
-                                        : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200'
-                                }`}
+                                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg font-semibold cursor-pointer transition-all ${avatarLoading
+                                    ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 cursor-not-allowed'
+                                    : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200'
+                                    }`}
                             >
                                 <ImageUp className="w-4 h-4" />
                                 {avatarLoading ? 'Đang tải...' : 'Tải ảnh lên'}

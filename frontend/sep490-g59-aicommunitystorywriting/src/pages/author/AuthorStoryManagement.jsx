@@ -161,7 +161,7 @@ export function AuthorStoryManagement({ onBack }) {
                                             status: 'PENDING_REVIEW',
                                             ageRating: item.ageRating ?? item.AgeRating ?? 'ALL',
                                             storyProgressStatus: item.storyProgressStatus ?? item.StoryProgressStatus ?? 'ONGOING'
-                                        }).catch(() => {});
+                                        }).catch(() => { });
                                     }
                                 }
                             } else {
