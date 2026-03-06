@@ -1,52 +1,62 @@
-import { useState } from 'react';
-import { Coins, BookOpen, CreditCard, Calendar, ArrowDown, ArrowUp } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Coins, Calendar, ArrowDown, ArrowUp, RefreshCcw } from 'lucide-react';
+import * as coinApi from '../../api/coins/coinApi';
 
 export default function ActivityHistory() {
     const [filter, setFilter] = useState('all');
+    const [rechargeActivities, setRechargeActivities] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
 
-    // Mock data - replace with actual API data
-    const activities = [
-        {
-            id: 1,
-            type: 'recharge',
-            title: 'Nạp coin',
-            amount: 1000,
-            date: '2026-01-20',
-            time: '14:30',
-            status: 'success',
-        },
-        {
-            id: 2,
-            type: 'unlock',
-            title: 'Mở khóa truyện "Kiếm Thánh"',
-            amount: -50,
-            date: '2026-01-19',
-            time: '10:15',
-            status: 'success',
-        },
-        {
-            id: 3,
-            type: 'payment',
-            title: 'Thanh toán đăng truyện',
-            amount: -100,
-            date: '2026-01-18',
-            time: '16:45',
-            status: 'success',
-        },
-        {
-            id: 4,
-            type: 'recharge',
-            title: 'Nạp coin',
-            amount: 500,
-            date: '2026-01-15',
-            time: '09:20',
-            status: 'success',
-        },
-    ];
+    const formatApiDateTimeParts = (value) => {
+        if (!value) return { date: '', time: '' };
+        const s = String(value);
+        const hasTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(s);
+        const iso = hasTimezone ? s : `${s}Z`;
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return { date: s, time: '' };
+        return {
+            date: d.toLocaleDateString(),
+            time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+    };
 
-    const filteredActivities = filter === 'all' 
-        ? activities 
-        : activities.filter(a => a.type === filter);
+    const loadRechargeActivities = useCallback(async () => {
+        setError('');
+        setLoading(true);
+        try {
+            const res = await coinApi.getMyCoinOrders({ take: 50 });
+            if (!res.success) throw new Error(res.message);
+            const items = Array.isArray(res.data) ? res.data : [];
+            const mapped = items.map((o) => {
+                const { date, time } = formatApiDateTimeParts(o.createdAt);
+                return {
+                    id: o.id,
+                    type: 'recharge',
+                    title: `Nạp coin (${o.paymentGateway || 'PAYOS'})`,
+                    amount: o.coinsGranted ?? 0,
+                    date,
+                    time,
+                    status: o.status || 'PENDING',
+                };
+            });
+            setRechargeActivities(mapped);
+        } catch (e) {
+            setError(e?.message || 'Không thể tải lịch sử nạp coin');
+            setRechargeActivities([]);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadRechargeActivities();
+    }, [loadRechargeActivities]);
+
+    const filteredActivities = (() => {
+        if (filter === 'recharge' || filter === 'all') return rechargeActivities;
+        return [];
+    })();
 
     const getIcon = (type) => {
         switch (type) {
@@ -66,7 +76,7 @@ export default function ActivityHistory() {
                 <h3 className="text-xl font-bold text-slate-900 dark:text-white">
                     Lịch sử hoạt động
                 </h3>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                     <button
                         onClick={() => setFilter('all')}
                         className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${
@@ -107,11 +117,33 @@ export default function ActivityHistory() {
                     >
                         Thanh toán
                     </button>
+                    <button
+                        onClick={loadRechargeActivities}
+                        disabled={loading}
+                        className="ml-2 inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+                    >
+                        <RefreshCcw className="w-4 h-4" />
+                        Làm mới
+                    </button>
                 </div>
             </div>
 
             <div className="space-y-4">
-                {filteredActivities.length === 0 ? (
+                {error && (
+                    <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
+                        {error}
+                    </div>
+                )}
+
+                {filter !== 'all' && filter !== 'recharge' ? (
+                    <div className="text-center py-12 text-slate-500 dark:text-slate-400">
+                        Chức năng này đang được phát triển.
+                    </div>
+                ) : loading ? (
+                    <div className="text-center py-12 text-slate-500 dark:text-slate-400">
+                        Đang tải dữ liệu...
+                    </div>
+                ) : filteredActivities.length === 0 ? (
                     <div className="text-center py-12 text-slate-500 dark:text-slate-400">
                         Không có hoạt động nào
                     </div>
@@ -127,6 +159,17 @@ export default function ActivityHistory() {
                             <div className="flex-1">
                                 <div className="font-semibold text-slate-900 dark:text-white">
                                     {activity.title}
+                                    <span
+                                        className={`ml-2 inline-block px-2 py-0.5 rounded text-xs font-bold ${
+                                            activity.status === 'PAID'
+                                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                                                : activity.status === 'PENDING'
+                                                  ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                                                  : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                                        }`}
+                                    >
+                                        {activity.status}
+                                    </span>
                                 </div>
                                 <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                                     <Calendar className="w-4 h-4" />

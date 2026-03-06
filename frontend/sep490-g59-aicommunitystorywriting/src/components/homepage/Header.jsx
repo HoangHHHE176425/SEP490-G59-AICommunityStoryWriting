@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { getAllCategories } from '../../api/category/categoryApi';
+import * as coinApi from '../../api/coins/coinApi';
 
 export function Header() {
     const navigate = useNavigate();
@@ -14,7 +15,10 @@ export function Header() {
     const [categories, setCategories] = useState([]);
     const [categoriesLoading, setCategoriesLoading] = useState(true);
 
-    const userCoins = user?.stats?.currentCoins ?? 0;
+    const userCoinsFallback = user?.stats?.currentCoins ?? 0;
+    const [walletCoins, setWalletCoins] = useState(null);
+
+    const displayedCoins = (walletCoins ?? userCoinsFallback);
 
     const handleLogout = async () => {
         await logout();
@@ -47,6 +51,31 @@ export function Header() {
             cancelled = true;
         };
     }, []);
+
+    // Fetch wallet coin balance from backend API
+    useEffect(() => {
+        let cancelled = false;
+
+        const run = async () => {
+            if (!isAuthenticated) {
+                setWalletCoins(null);
+                return;
+            }
+            const res = await coinApi.getMyWallet();
+            if (cancelled) return;
+            if (res?.success) {
+                setWalletCoins(res?.data?.balanceCoin ?? 0);
+            }
+        };
+
+        run().catch(() => {
+            // Silent fail: keep showing fallback coins from profile stats
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [isAuthenticated]);
 
     return (
         <header className="sticky top-0 z-50 w-full bg-slate-900/95 backdrop-blur-md border-b border-slate-700/50">
@@ -127,7 +156,7 @@ export function Header() {
                                 {/* Coin Balance */}
                                 <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 border border-amber-700/50 rounded-full">
                                     <Coins className="w-4 h-4 text-amber-400" />
-                                    <span className="text-sm font-bold text-amber-400">{userCoins.toLocaleString()}</span>
+                                    <span className="text-sm font-bold text-amber-400">{displayedCoins.toLocaleString()}</span>
                                 </div>
 
                                 <button className="p-2 text-slate-300 hover:bg-slate-800 rounded-full transition-colors relative">
@@ -242,7 +271,7 @@ export function Header() {
                                     <Coins className="w-5 h-5 text-amber-400" />
                                     <span className="font-semibold text-white">Số dư xu</span>
                                 </div>
-                                <span className="text-lg font-bold text-amber-400">{userCoins.toLocaleString()}</span>
+                                <span className="text-lg font-bold text-amber-400">{displayedCoins.toLocaleString()}</span>
                             </div>
                         )}
 
