@@ -44,6 +44,74 @@
                 </div>
             </div>
 
+            <!-- Thống kê + Đánh giá (Stats & Rating) -->
+            <div class="card mb-4" id="storyStatsRatingCard" style="display: none;">
+                <div class="card-header"><strong>Thống kê &amp; Đánh giá</strong></div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-7">
+                            <h6 class="text-muted mb-2">Thống kê</h6>
+                            <div class="row g-2">
+                                <div class="col-6 col-md-4">
+                                    <div class="p-2 border rounded bg-light">
+                                        <div class="small text-muted">Lượt xem</div>
+                                        <div class="fw-bold" id="statViews">0</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-4">
+                                    <div class="p-2 border rounded bg-light">
+                                        <div class="small text-muted">Bình luận</div>
+                                        <div class="fw-bold" id="statComments">0</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-4">
+                                    <div class="p-2 border rounded bg-light">
+                                        <div class="small text-muted">Số chương</div>
+                                        <div class="fw-bold" id="statChapters">0</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-4">
+                                    <div class="p-2 border rounded bg-light">
+                                        <div class="small text-muted">Cập nhật gần nhất</div>
+                                        <div class="small fw-bold" id="statLatestUpdated">-</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-4">
+                                    <div class="p-2 border rounded bg-light">
+                                        <div class="small text-muted">Đánh giá TB</div>
+                                        <div class="fw-bold" id="statAvgRating">0.00</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-5 border-start">
+                            <h6 class="text-muted mb-2">Đánh giá (1–5 sao)</h6>
+                            <div class="mb-2">
+                                <div class="btn-group w-100" role="group">
+                                    <input type="radio" class="btn-check" name="detailStarValue" id="detailStar1" value="1">
+                                    <label class="btn btn-outline-warning" for="detailStar1">1</label>
+                                    <input type="radio" class="btn-check" name="detailStarValue" id="detailStar2" value="2">
+                                    <label class="btn btn-outline-warning" for="detailStar2">2</label>
+                                    <input type="radio" class="btn-check" name="detailStarValue" id="detailStar3" value="3">
+                                    <label class="btn btn-outline-warning" for="detailStar3">3</label>
+                                    <input type="radio" class="btn-check" name="detailStarValue" id="detailStar4" value="4">
+                                    <label class="btn btn-outline-warning" for="detailStar4">4</label>
+                                    <input type="radio" class="btn-check" name="detailStarValue" id="detailStar5" value="5" checked>
+                                    <label class="btn btn-outline-warning" for="detailStar5">5</label>
+                                </div>
+                            </div>
+                            <div class="mb-2">
+                                <textarea class="form-control form-control-sm" id="detailReviewText" rows="2" placeholder="Review (tùy chọn)"></textarea>
+                            </div>
+                            <button type="button" class="btn btn-primary btn-sm" id="submitRatingBtn" onclick="submitRatingFromDetails()">
+                                <i class="bi bi-star-fill"></i> Gửi đánh giá
+                            </button>
+                            <div class="mt-2 small" id="ratingResultDetail"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Chapters Section -->
             <div class="card">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -233,9 +301,11 @@
                         <div class="mb-3">
                             <span class="badge bg-primary">${story.categoryNames || story.categoryName || 'N/A'}</span>
                             <span class="badge ${story.status === 'PUBLISHED' ? 'bg-success' : story.status === 'REJECTED' ? 'bg-danger' : 'bg-secondary'}" id="storyStatusDisplay">${story.status || 'DRAFT'}</span>
-                            <span class="badge bg-info">${story.totalChapters || 0} chương</span>
-                            <span class="badge bg-warning">${Utils.formatNumber(story.totalViews || 0)} lượt xem</span>
+                            <span class="badge bg-info">${(story.totalChapters ?? story.TotalChapters) || 0} chương</span>
+                            <span class="badge bg-warning">${Utils.formatNumber((story.totalViews ?? story.TotalViews) || 0)} lượt xem</span>
+                            <span class="badge bg-secondary">${Utils.formatNumber((story.totalComments ?? story.TotalComments) || 0)} bình luận</span>
                             <span class="badge bg-danger">${Utils.formatNumber(story.totalFavorites || 0)} yêu thích</span>
+                            <span class="badge bg-success">${(story.avgRating ?? story.AvgRating) ? (story.avgRating ?? story.AvgRating).toFixed(1) : '0.0'}/5 sao</span>
                         </div>
                         ${story.status === 'REJECTED' ? `
                         <div class="alert alert-danger mb-3">
@@ -247,11 +317,12 @@
                         <div class="row">
                             <div class="col-md-6">
                                 <p><strong>Độ tuổi:</strong> ${story.ageRating || 'ALL'}</p>
+                                <p><strong>Ngày tạo:</strong> ${Utils.formatDate(story.createdAt)}</p>
+                                <p><strong>Cập nhật gần nhất:</strong> ${(story.latestUpdatedAt || story.LatestUpdatedAt || story.updatedAt || story.UpdatedAt) ? Utils.formatDate(story.latestUpdatedAt || story.LatestUpdatedAt || story.updatedAt || story.UpdatedAt) : 'N/A'}</p>
                             </div>
                             <div class="col-md-6">
                                 <p><strong>Tổng số từ:</strong> ${Utils.formatNumber(story.wordCount || 0)}</p>
-                                <p><strong>Đánh giá trung bình:</strong> ${story.avgRating ? story.avgRating.toFixed(2) : '0.00'}/5.00</p>
-                                <p><strong>Ngày tạo:</strong> ${Utils.formatDate(story.createdAt)}</p>
+                                <p><strong>Đánh giá trung bình:</strong> ${(story.avgRating ?? story.AvgRating) ? (story.avgRating ?? story.AvgRating).toFixed(2) : '0.00'}/5.00</p>
                             </div>
                         </div>
                     </div>
@@ -286,6 +357,40 @@
                 statusBadge.textContent = 'Nháp';
                 publishBtn.style.display = 'inline-block';
                 unpublishBtn.style.display = 'none';
+            }
+
+            // Hiển thị thống kê & đánh giá
+            const statsCard = document.getElementById('storyStatsRatingCard');
+            if (statsCard) {
+                statsCard.style.display = 'block';
+                const v = story.totalViews ?? story.TotalViews ?? 0;
+                const c = story.totalComments ?? story.TotalComments ?? 0;
+                const ch = story.totalChapters ?? story.TotalChapters ?? 0;
+                const lat = story.latestUpdatedAt ?? story.LatestUpdatedAt ?? story.updatedAt ?? story.UpdatedAt;
+                const avg = story.avgRating ?? story.AvgRating ?? 0;
+                document.getElementById('statViews').textContent = Utils.formatNumber(v);
+                document.getElementById('statComments').textContent = Utils.formatNumber(c);
+                document.getElementById('statChapters').textContent = Utils.formatNumber(ch);
+                document.getElementById('statLatestUpdated').textContent = lat ? Utils.formatDate(lat) : 'N/A';
+                document.getElementById('statAvgRating').textContent = avg ? Number(avg).toFixed(2) + '/5' : '0.00/5';
+            }
+        }
+
+        function getDetailStarValue() {
+            const el = document.querySelector('input[name="detailStarValue"]:checked');
+            return el ? parseInt(el.value, 10) : 5;
+        }
+
+        async function submitRatingFromDetails() {
+            const resultEl = document.getElementById('ratingResultDetail');
+            if (resultEl) resultEl.innerHTML = '';
+            try {
+                const payload = { starValue: getDetailStarValue(), reviewText: document.getElementById('detailReviewText').value || null };
+                const res = await ApiService.rateStory(storyId, payload);
+                if (resultEl) resultEl.innerHTML = '<span class="text-success">Đã gửi đánh giá. Điểm TB: ' + Number(res.avgRating).toFixed(2) + ' (' + res.ratingCount + ' lượt).</span>';
+                await loadStoryDetails();
+            } catch (e) {
+                if (resultEl) resultEl.innerHTML = '<span class="text-danger">' + (e && e.message ? e.message : e) + '</span>';
             }
         }
 
