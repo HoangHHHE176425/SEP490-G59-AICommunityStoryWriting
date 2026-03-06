@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { PublicationList } from '../../../components/admin/publication/PublicationList';
 import { PublicationDetailModal } from '../../../components/admin/publication/PublicationDetailModal';
 import { Pagination } from '../../../components/pagination/Pagination';
-import { getStories } from '../../../api/story/storyApi';
-import { getPendingStories, getPendingChapters, claimStory, claimChapter } from '../../../api/moderator/moderatorApi';
+import { getStories, getStoryById } from '../../../api/story/storyApi';
+import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, claimStory, claimChapter } from '../../../api/moderator/moderatorApi';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 
@@ -43,6 +43,20 @@ function mapStoryToPublication(item) {
     };
 }
 
+/** Lấy cover, author, categories, description từ response GET /stories/:id để gán vào story_group. */
+function storyResponseToMeta(story) {
+    if (!story) return { storyCover: '', author: 'N/A', categories: [], description: '' };
+    const categoryNamesStr = story.categoryNames ?? story.CategoryNames ?? '';
+    const categoryNamesArr = categoryNamesStr ? String(categoryNamesStr).split(',').map((s) => s.trim()).filter(Boolean) : [];
+    const coverPath = story.coverImage ?? story.CoverImage;
+    return {
+        storyCover: coverPath ? resolveBackendUrl(coverPath) : '',
+        author: story.authorName ?? story.AuthorName ?? 'N/A',
+        categories: categoryNamesArr,
+        description: story.summary ?? story.Summary ?? '',
+    };
+}
+
 const STATUS_PARAM_MAP = {
     pending: 'PENDING_REVIEW',
     approved: 'PUBLISHED',
@@ -79,6 +93,27 @@ function mapPendingStoryToItem(s) {
         isClaimedByMe: s.isClaimedByMe ?? s.IsClaimedByMe ?? false,
         claimedByDisplayName: s.claimedByDisplayName ?? s.ClaimedByDisplayName ?? null,
         claimedAt: s.claimedAt ?? s.ClaimedAt ?? null,
+    };
+}
+
+/** Map chapter từ API reviewed (REJECTED/PUBLISHED) sang format dùng chung. */
+function mapReviewedChapterToItem(c) {
+    const id = c.id ?? c.Id;
+    const storyId = c.storyId ?? c.StoryId;
+    const statusApi = (c.status ?? c.Status ?? '').toUpperCase();
+    const statusMap = { PENDING_REVIEW: 'pending', PUBLISHED: 'approved', REJECTED: 'rejected' };
+    return {
+        id,
+        chapterId: id,
+        storyId,
+        type: 'chapter',
+        storyTitle: c.storyTitle ?? c.StoryTitle ?? '',
+        storyCover: '',
+        chapterTitle: c.title ?? c.Title ?? '',
+        orderIndex: c.orderIndex ?? c.OrderIndex ?? 0,
+        status: statusMap[statusApi] ?? 'rejected',
+        submittedAt: c.createdAt ?? c.CreatedAt ?? null,
+        wordCount: c.wordCount ?? c.WordCount ?? 0,
     };
 }
 
@@ -124,6 +159,11 @@ export function PublicationManagement() {
     /** Modal "Nhận duyệt đơn": danh sách truyện + chương chưa nhận (type 'story' | 'chapter') */
     const [claimModalItems, setClaimModalItems] = useState([]);
     const [claimModalLoading, setClaimModalLoading] = useState(false);
+    /** Cache Đã duyệt / Từ chối để vừa vào màn đã load sẵn, chuyển tab thấy ngay. */
+    const [approvedCache, setApprovedCache] = useState({ items: [], total: 0, totalPages: 1 });
+    const [rejectedCache, setRejectedCache] = useState({ items: [], total: 0, totalPages: 1 });
+    const [approvedCacheLoading, setApprovedCacheLoading] = useState(false);
+    const [rejectedCacheLoading, setRejectedCacheLoading] = useState(false);
 
     /** Modal "Nhận duyệt đơn": gộp theo truyện — mỗi truyện 1 dòng; nhận 1 lần = claim truyện (nếu chưa) + tất cả chương chờ duyệt của truyện đó. */
     const loadClaimModalItems = useCallback(() => {
@@ -183,6 +223,144 @@ export function PublicationManagement() {
             })
             .catch(() => setClaimModalItems([]))
             .finally(() => setClaimModalLoading(false));
+    }, []);
+
+    /** Preload Đã duyệt: truyện PUBLISHED + chương PUBLISHED (gộp theo truyện) để hiển thị cả chương đã duyệt (ví dụ Chương 1 Conan). */
+    const loadApprovedCache = useCallback(() => {
+        setApprovedCacheLoading(true);
+        Promise.all([
+            getModeratorReviewedStories({ status: 'PUBLISHED', page: 1, pageSize: 500, sortBy: 'updated_at', sortOrder: 'desc' }),
+            getModeratorReviewedChapters({ status: 'PUBLISHED', pageSize: 500, sortBy: 'updated_at', sortOrder: 'desc' }),
+        ])
+            .then(([storiesRes, chaptersRes]) => {
+                const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
+                const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
+                const storyPubs = Array.isArray(storyItems) ? storyItems.map(mapStoryToPublication) : [];
+                const chapterList = Array.isArray(chapterItems) ? chapterItems.map(mapReviewedChapterToItem) : [];
+                const byStory = new Map();
+                for (const ch of chapterList) {
+                    const sid = ch.storyId;
+                    if (!sid) continue;
+                    if (!byStory.has(sid)) byStory.set(sid, { storyId: sid, storyTitle: ch.storyTitle, storyCover: '', author: null, categories: [], chapters: [] });
+                    byStory.get(sid).chapters.push(ch);
+                }
+                const storyIdsInStoryPubs = new Set(storyPubs.map((s) => s.storyId ?? s.id));
+                const chapterGroups = [];
+                for (const g of byStory.values()) {
+                    if (storyIdsInStoryPubs.has(g.storyId)) continue;
+                    const rep = g.chapters[0];
+                    chapterGroups.push({
+                        type: 'story_group',
+                        id: g.storyId,
+                        storyId: g.storyId,
+                        storyTitle: g.storyTitle,
+                        storyCover: g.storyCover || '',
+                        author: g.author,
+                        categories: g.categories || [],
+                        description: '',
+                        status: 'approved',
+                        chapters: g.chapters,
+                        representativePublication: rep,
+                        chapterCount: g.chapters.length,
+                    });
+                }
+                const total = storyPubs.length + chapterGroups.length;
+                const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+                if (chapterGroups.length === 0) {
+                    setApprovedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
+                    setStatsData((prev) => ({ ...prev, approved: total }));
+                    return;
+                }
+                Promise.all(chapterGroups.map((g) => getStoryById(g.storyId).catch(() => null)))
+                    .then((storyDetails) => {
+                        storyDetails.forEach((story, i) => {
+                            const meta = storyResponseToMeta(story);
+                            chapterGroups[i].storyCover = meta.storyCover;
+                            chapterGroups[i].author = meta.author;
+                            chapterGroups[i].categories = meta.categories;
+                            chapterGroups[i].description = meta.description;
+                        });
+                        setApprovedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
+                        setStatsData((prev) => ({ ...prev, approved: total }));
+                    })
+                    .catch(() => {
+                        setApprovedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
+                        setStatsData((prev) => ({ ...prev, approved: total }));
+                    });
+            })
+            .catch((err) => {
+                console.warn('[PublicationManagement] loadApprovedCache failed:', err?.response?.status, err?.response?.data ?? err?.message);
+            })
+            .finally(() => setApprovedCacheLoading(false));
+    }, []);
+
+    /** Preload Từ chối: truyện REJECTED + chương REJECTED (gộp theo truyện), cập nhật rejectedCache và stats. */
+    const loadRejectedCache = useCallback(() => {
+        setRejectedCacheLoading(true);
+        Promise.all([
+            getModeratorReviewedStories({ status: 'REJECTED', pageSize: 500, sortBy: 'updated_at', sortOrder: 'desc' }),
+            getModeratorReviewedChapters({ status: 'REJECTED', pageSize: 500, sortBy: 'updated_at', sortOrder: 'desc' }),
+        ])
+            .then(([storiesRes, chaptersRes]) => {
+                const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
+                const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
+                const storyPubs = Array.isArray(storyItems) ? storyItems.map(mapStoryToPublication) : [];
+                const chapterList = Array.isArray(chapterItems) ? chapterItems.map(mapReviewedChapterToItem) : [];
+                const byStory = new Map();
+                for (const ch of chapterList) {
+                    const sid = ch.storyId;
+                    if (!sid) continue;
+                    if (!byStory.has(sid)) byStory.set(sid, { storyId: sid, storyTitle: ch.storyTitle, storyCover: '', author: null, categories: [], chapters: [] });
+                    byStory.get(sid).chapters.push(ch);
+                }
+                const chapterGroups = [];
+                for (const g of byStory.values()) {
+                    const rep = g.chapters[0];
+                    chapterGroups.push({
+                        type: 'story_group',
+                        id: g.storyId,
+                        storyId: g.storyId,
+                        storyTitle: g.storyTitle,
+                        storyCover: g.storyCover || '',
+                        author: g.author,
+                        categories: g.categories || [],
+                        description: '',
+                        status: 'rejected',
+                        chapters: g.chapters,
+                        representativePublication: rep,
+                        chapterCount: g.chapters.length,
+                    });
+                }
+                const total = storyPubs.length + chapterGroups.length;
+                const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+                if (chapterGroups.length === 0) {
+                    setRejectedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
+                    setStatsData((prev) => ({ ...prev, rejected: total }));
+                    return;
+                }
+                Promise.all(chapterGroups.map((g) => getStoryById(g.storyId).catch(() => null)))
+                    .then((storyDetails) => {
+                        storyDetails.forEach((story, i) => {
+                            const meta = storyResponseToMeta(story);
+                            chapterGroups[i].storyCover = meta.storyCover;
+                            chapterGroups[i].author = meta.author;
+                            chapterGroups[i].categories = meta.categories;
+                            chapterGroups[i].description = meta.description;
+                        });
+                        setRejectedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
+                        setStatsData((prev) => ({ ...prev, rejected: total }));
+                    })
+                    .catch(() => {
+                        setRejectedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
+                        setStatsData((prev) => ({ ...prev, rejected: total }));
+                    });
+            })
+            .catch((err) => {
+                console.warn('[PublicationManagement] loadRejectedCache failed:', err?.response?.status, err?.response?.data ?? err?.message);
+            })
+            .finally(() => setRejectedCacheLoading(false));
     }, []);
 
     const loadPublications = useCallback((page = 1, options = {}) => {
@@ -269,33 +447,91 @@ export function PublicationManagement() {
             return;
         }
 
-        // Lịch sử đã duyệt (PUBLISHED) / từ chối (REJECTED) — gọi API getStories với status
+        // Lịch sử đã duyệt (PUBLISHED) / từ chối (REJECTED). Tab Từ chối = truyện REJECTED + chương REJECTED (gộp theo truyện).
         const statusParam = STATUS_PARAM_MAP[filterStatus];
-        const params = { page, pageSize: PAGE_SIZE };
-        if (statusParam) params.status = statusParam;
-
-        getStories(params)
+        if (!statusParam) {
+            if (!silent) setLoading(false);
+            return;
+        }
+        if (filterStatus === 'rejected') {
+            Promise.all([
+                getModeratorReviewedStories({ status: statusParam, pageSize: 500, sortBy: 'updated_at', sortOrder: 'desc' }),
+                getModeratorReviewedChapters({ status: statusParam, pageSize: 500, sortBy: 'updated_at', sortOrder: 'desc' }),
+            ])
+                .then(([storiesRes, chaptersRes]) => {
+                    const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
+                    const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
+                    const storyPubs = Array.isArray(storyItems) ? storyItems.map(mapStoryToPublication) : [];
+                    const chapterList = Array.isArray(chapterItems) ? chapterItems.map(mapReviewedChapterToItem) : [];
+                    const byStory = new Map();
+                    for (const ch of chapterList) {
+                        const sid = ch.storyId;
+                        if (!sid) continue;
+                        if (!byStory.has(sid)) byStory.set(sid, { storyId: sid, storyTitle: ch.storyTitle, storyCover: '', author: null, categories: [], chapters: [] });
+                        byStory.get(sid).chapters.push(ch);
+                    }
+                    const chapterGroups = [];
+                    for (const g of byStory.values()) {
+                        const rep = g.chapters[0];
+                        chapterGroups.push({
+                            type: 'story_group',
+                            id: g.storyId,
+                            storyId: g.storyId,
+                            storyTitle: g.storyTitle,
+                            storyCover: g.storyCover || '',
+                            author: g.author,
+                            categories: g.categories || [],
+                            status: 'rejected',
+                            chapters: g.chapters,
+                            representativePublication: rep,
+                            chapterCount: g.chapters.length,
+                        });
+                    }
+                    const combined = [...storyPubs, ...chapterGroups];
+                    const total = combined.length;
+                    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+                    setPublications(combined);
+                    setTotalCount(total);
+                    setTotalPages(pages);
+                    setCurrentPage(Math.min(page, pages));
+                })
+                .catch((err) => {
+                    if (!silent) setError(err?.response?.data?.message ?? err?.message ?? 'Không tải được lịch sử từ chối.');
+                    if (!silent) setTotalCount(0);
+                    if (!silent) setTotalPages(1);
+                })
+                .finally(() => { if (!silent) setLoading(false); });
+            return;
+        }
+        getModeratorReviewedStories({
+            status: statusParam,
+            page,
+            pageSize: PAGE_SIZE,
+            sortBy: 'updated_at',
+            sortOrder: 'desc',
+        })
             .then((res) => {
                 const items = res?.items ?? res?.Items ?? [];
-                const total = res?.totalCount ?? res?.totalItems ?? res?.total ?? items.length;
-                const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
-                setPublications(items.map(mapStoryToPublication));
+                const total = res?.totalCount ?? res?.TotalCount ?? res?.total ?? items.length;
+                const pages = res?.totalPages ?? res?.TotalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
+                const pageNum = res?.page ?? res?.Page ?? page;
+                const list = Array.isArray(items) ? items.map(mapStoryToPublication) : [];
+                setPublications(list);
                 setTotalCount(total);
                 setTotalPages(pages);
-                setCurrentPage(res?.page ?? page);
+                setCurrentPage(pageNum);
             })
             .catch((err) => {
-                if (!silent) setError(err?.message ?? 'Không tải được danh sách truyện');
-                setPublications([]);
-                setTotalCount(0);
-                setTotalPages(1);
+                if (!silent) setError(err?.response?.data?.message ?? err?.message ?? 'Không tải được lịch sử đã duyệt.');
+                if (!silent) setTotalCount(0);
+                if (!silent) setTotalPages(1);
             })
             .finally(() => { if (!silent) setLoading(false); });
     }, [filterStatus]);
 
     const handlePageChange = (page) => {
         setCurrentPage(page);
-        if (filterStatus !== 'pending') loadPublications(page);
+        if (filterStatus === 'pending') loadPublications(page);
     };
 
     const loadStats = useCallback(() => {
@@ -333,44 +569,82 @@ export function PublicationManagement() {
     }, []);
 
     useEffect(() => {
+        setError(null);
+        if (filterStatus !== 'pending') return;
         const id = setTimeout(() => {
             setCurrentPage(1);
             loadPublications(1);
         }, 0);
         return () => clearTimeout(id);
-    }, [loadPublications]);
+    }, [loadPublications, filterStatus]);
+
+    /** Ngay khi vào màn: preload Đã duyệt và Từ chối để chuyển tab thấy ngay. */
+    useEffect(() => {
+        loadApprovedCache();
+        loadRejectedCache();
+    }, [loadApprovedCache, loadRejectedCache]);
+
+    /** Chuyển sang tab Đã duyệt / Từ chối: hiển thị từ cache; nếu cache trống thì gọi load ngay. */
+    const approvedCacheRequestedRef = useRef(false);
+    const rejectedCacheRequestedRef = useRef(false);
+    useEffect(() => {
+        if (filterStatus === 'approved') {
+            setPublications(approvedCache.items);
+            setTotalCount(approvedCache.total);
+            setTotalPages(approvedCache.totalPages);
+            setCurrentPage(1);
+            if (approvedCache.items.length === 0 && !approvedCacheLoading && !approvedCacheRequestedRef.current) {
+                approvedCacheRequestedRef.current = true;
+                loadApprovedCache();
+            }
+        } else if (filterStatus === 'rejected') {
+            setPublications(rejectedCache.items);
+            setTotalCount(rejectedCache.total);
+            setTotalPages(rejectedCache.totalPages);
+            setCurrentPage(1);
+            if (rejectedCache.items.length === 0 && !rejectedCacheLoading && !rejectedCacheRequestedRef.current) {
+                rejectedCacheRequestedRef.current = true;
+                loadRejectedCache();
+            }
+        } else {
+            approvedCacheRequestedRef.current = false;
+            rejectedCacheRequestedRef.current = false;
+        }
+    }, [filterStatus, approvedCache, rejectedCache, approvedCacheLoading, rejectedCacheLoading, loadApprovedCache, loadRejectedCache]);
 
     useEffect(() => {
         const id = setTimeout(() => loadStats(), 0);
         return () => clearTimeout(id);
     }, [loadStats]);
 
+    /** Chỉ refresh định kỳ khi đang ở tab Chờ duyệt. Tab Đã duyệt/Từ chối dùng cache, không gọi loadPublications (tránh ghi đè list và làm mất item như Conan). */
     useEffect(() => {
+        if (filterStatus !== 'pending') return;
         const intervalId = setInterval(() => {
             loadPublications(currentPage, { silent: true });
             loadStats();
         }, REFRESH_INTERVAL_MS);
         return () => clearInterval(intervalId);
-    }, [loadPublications, loadStats, currentPage]);
+    }, [filterStatus, loadPublications, loadStats, currentPage]);
 
-    /** Refetch khi SignalR báo PendingListChanged (author publish / claim / approve / reject). */
+    /** Refetch khi SignalR báo PendingListChanged. Chỉ refetch khi đang ở tab Chờ duyệt; tab Đã duyệt/Từ chối không ghi đè list. */
     const onRefetchPendingRef = useRef(() => { });
     onRefetchPendingRef.current = () => {
+        if (filterStatus !== 'pending') return;
         loadPublications(currentPage, { silent: true });
         loadStats();
     };
 
     useEffect(() => {
-        if (filterStatus !== 'pending') return;
         const { stop } = createModeratorHubConnection(() => onRefetchPendingRef.current());
         return () => { stop(); };
-    }, [filterStatus]);
+    }, []);
 
     useEffect(() => {
         if (showClaimModal) loadClaimModalItems();
     }, [showClaimModal, loadClaimModalItems]);
 
-    const filteredPublications = filterStatus === 'pending'
+    const filteredPublications = (filterStatus === 'pending' || filterStatus === 'rejected' || filterStatus === 'approved')
         ? publications.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
         : publications;
 
@@ -448,12 +722,14 @@ export function PublicationManagement() {
         setSelectedPublication(null);
         loadPublications(currentPage);
         loadStats();
+        loadApprovedCache();
     };
 
     const handleReject = () => {
         setSelectedPublication(null);
         loadPublications(currentPage);
         loadStats();
+        loadRejectedCache();
     };
 
     const stats = statsData;
@@ -504,7 +780,7 @@ export function PublicationManagement() {
                     border: '2px solid #10b981'
                 }}>
                     <div style={{ fontSize: '2rem', fontWeight: 700, color: '#065f46', marginBottom: '0.25rem' }}>
-                        {stats.approved}
+                        {approvedCache.total}
                     </div>
                     <div style={{ fontSize: '0.875rem', color: '#065f46', fontWeight: 600 }}>
                         Đã duyệt
@@ -518,7 +794,7 @@ export function PublicationManagement() {
                     border: '2px solid #ef4444'
                 }}>
                     <div style={{ fontSize: '2rem', fontWeight: 700, color: '#991b1b', marginBottom: '0.25rem' }}>
-                        {stats.rejected}
+                        {rejectedCache.total}
                     </div>
                     <div style={{ fontSize: '0.875rem', color: '#991b1b', fontWeight: 600 }}>
                         Từ chối
@@ -611,15 +887,15 @@ export function PublicationManagement() {
                     >
                         {tab.label} ({
                             tab.value === 'pending' ? stats.pending :
-                                tab.value === 'approved' ? stats.approved :
-                                    stats.rejected
+                                tab.value === 'approved' ? approvedCache.total :
+                                    rejectedCache.total
                         })
                     </button>
                 ))}
             </div>
 
             {/* Publications List */}
-            {loading ? (
+            {(loading || (filterStatus === 'approved' && approvedCacheLoading) || (filterStatus === 'rejected' && rejectedCacheLoading)) ? (
                 <div style={{
                     backgroundColor: '#ffffff',
                     borderRadius: '12px',

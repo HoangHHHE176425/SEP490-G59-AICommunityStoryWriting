@@ -1,7 +1,9 @@
+using DataAccessObjects.DAOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Repositories.Interfaces;
 using Services.DTOs.Moderation;
+using Services.DTOs.Stories;
 using Services.Interfaces;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -15,12 +17,14 @@ namespace AIStory.API.Controllers
     public class ModeratorController : ControllerBase
     {
         private readonly IModerationService _moderationService;
+        private readonly IStoryService _storyService;
         private readonly IModeratorCategoryAssignmentRepository _moderatorCategoryRepo;
         private readonly ILogger<ModeratorController> _logger;
 
-        public ModeratorController(IModerationService moderationService, IModeratorCategoryAssignmentRepository moderatorCategoryRepo, ILogger<ModeratorController> logger)
+        public ModeratorController(IModerationService moderationService, IStoryService storyService, IModeratorCategoryAssignmentRepository moderatorCategoryRepo, ILogger<ModeratorController> logger)
         {
             _moderationService = moderationService;
+            _storyService = storyService;
             _moderatorCategoryRepo = moderatorCategoryRepo;
             _logger = logger;
         }
@@ -62,6 +66,94 @@ namespace AIStory.API.Controllers
             {
                 _logger.LogError(ex, "GetPendingStories failed");
                 return StatusCode(500, new { message = "Lỗi lấy danh sách truyện chờ duyệt", error = ex.Message });
+            }
+        }
+
+        /// <summary>Lịch sử đã duyệt / từ chối: truyện do moderator này duyệt (từ moderator_logs). ADMIN thấy tất cả truyện theo status + category.</summary>
+        [HttpGet("stories/reviewed")]
+        public async Task<IActionResult> GetReviewedStories(
+            [FromQuery] string? status = null,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] string? search = null,
+            [FromQuery] string? sortBy = null,
+            [FromQuery] string? sortOrder = null)
+        {
+            try
+            {
+                IReadOnlyList<Guid>? categoryIdsFilter = null;
+                List<Guid>? includeStoryIdsFromLogs = null;
+                if (!IsAdmin())
+                {
+                    var moderatorId = GetCurrentUserId();
+                    if (!moderatorId.HasValue)
+                        return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+                    categoryIdsFilter = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
+                    var statusUpper = (status ?? "").Trim().ToUpperInvariant();
+                    var action = statusUpper == "PUBLISHED" ? "APPROVED" : "REJECTED";
+                    includeStoryIdsFromLogs = ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "STORY", action);
+                    if (includeStoryIdsFromLogs.Count == 0)
+                        return Ok(new PagedResultDto<StoryListItemDto> { Items = Array.Empty<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize });
+                }
+                var statusUpperQuery = (status ?? "").Trim().ToUpperInvariant();
+                if (string.IsNullOrEmpty(statusUpperQuery) || (statusUpperQuery != "PUBLISHED" && statusUpperQuery != "REJECTED"))
+                    return BadRequest(new { message = "status phải là PUBLISHED hoặc REJECTED." });
+                // Khi lấy từ moderator_logs (IncludeStoryIds) thì không lọc category để hiển thị đủ truyện moderator đã duyệt/từ chối.
+                var query = new StoryQueryDto
+                {
+                    Page = page,
+                    PageSize = pageSize,
+                    Search = search,
+                    Status = statusUpperQuery,
+                    SortBy = !string.IsNullOrWhiteSpace(sortBy) ? sortBy : "updated_at",
+                    SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "desc",
+                    CategoryIds = includeStoryIdsFromLogs != null ? null : categoryIdsFilter?.ToList(),
+                    IncludeStoryIds = includeStoryIdsFromLogs
+                };
+                var result = _storyService.GetAll(query);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetReviewedStories failed");
+                return StatusCode(500, new { message = "Lỗi lấy lịch sử đã duyệt", error = ex.Message });
+            }
+        }
+
+        /// <summary>Lịch sử chương đã duyệt/từ chối: chương do moderator này duyệt (từ moderator_logs). ADMIN thấy tất cả theo status + category.</summary>
+        [HttpGet("chapters/reviewed")]
+        public async Task<IActionResult> GetReviewedChapters(
+            [FromQuery] string? status = null,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] string? search = null,
+            [FromQuery] string? sortBy = null,
+            [FromQuery] string? sortOrder = null)
+        {
+            try
+            {
+                IReadOnlyList<Guid>? categoryIdsFilter = null;
+                IReadOnlyList<Guid>? reviewedByModeratorChapterIds = null;
+                if (!IsAdmin())
+                {
+                    var moderatorId = GetCurrentUserId();
+                    if (!moderatorId.HasValue)
+                        return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+                    categoryIdsFilter = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
+                    var statusUpper = (status ?? "REJECTED").Trim().ToUpperInvariant();
+                    var action = statusUpper == "PUBLISHED" ? "APPROVED" : "REJECTED";
+                    reviewedByModeratorChapterIds = ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "CHAPTER", action);
+                }
+                var statusUpperQuery = (status ?? "REJECTED").Trim().ToUpperInvariant();
+                if (statusUpperQuery != "PUBLISHED" && statusUpperQuery != "REJECTED")
+                    return BadRequest(new { message = "status phải là PUBLISHED hoặc REJECTED." });
+                var result = _moderationService.GetReviewedChapters(page, pageSize, statusUpperQuery, search, sortBy, sortOrder, categoryIdsFilter, reviewedByModeratorChapterIds);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetReviewedChapters failed");
+                return StatusCode(500, new { message = "Lỗi lấy lịch sử chương đã duyệt/từ chối", error = ex.Message });
             }
         }
 

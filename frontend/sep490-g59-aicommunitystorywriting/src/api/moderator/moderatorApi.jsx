@@ -40,6 +40,40 @@ export async function getPendingChapters(params = {}) {
 }
 
 /**
+ * Lịch sử chương đã duyệt/từ chối (PUBLISHED | REJECTED), lọc theo category moderator. Dùng cho tab Từ chối (chương bị từ chối).
+ * @param {Object} params - { status: 'PUBLISHED' | 'REJECTED', page, pageSize, search?, sortBy?, sortOrder? }
+ */
+export async function getModeratorReviewedChapters(params = {}) {
+    const q = new URLSearchParams();
+    if (params.status) q.append('status', params.status);
+    if (params.page != null) q.append('page', params.page);
+    if (params.pageSize != null) q.append('pageSize', params.pageSize);
+    if (params.search) q.append('search', params.search);
+    if (params.sortBy) q.append('sortBy', params.sortBy);
+    if (params.sortOrder) q.append('sortOrder', params.sortOrder);
+    const url = `/moderator/chapters/reviewed?${q}`;
+    const res = await axiosInstance.get(url);
+    return res.data;
+}
+
+/**
+ * Lịch sử đã duyệt / từ chối cho moderator: truyện theo status (PUBLISHED | REJECTED), lọc theo category moderator được gán.
+ * @param {Object} params - { status: 'PUBLISHED' | 'REJECTED', page, pageSize, search?, sortBy?, sortOrder? }
+ */
+export async function getModeratorReviewedStories(params = {}) {
+    const q = new URLSearchParams();
+    if (params.status) q.append('status', params.status);
+    if (params.page != null) q.append('page', params.page);
+    if (params.pageSize != null) q.append('pageSize', params.pageSize);
+    if (params.search) q.append('search', params.search);
+    if (params.sortBy) q.append('sortBy', params.sortBy);
+    if (params.sortOrder) q.append('sortOrder', params.sortOrder);
+    const url = `/moderator/stories/reviewed?${q}`;
+    const res = await axiosInstance.get(url);
+    return res.data;
+}
+
+/**
  * Moderator nhận duyệt truyện (claim). 1 item chỉ 1 moderator; đã nhận thì người khác không thấy trong queue unclaimed.
  */
 export async function claimStory(storyId) {

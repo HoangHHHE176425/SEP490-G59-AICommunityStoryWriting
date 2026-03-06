@@ -156,6 +156,34 @@ namespace Services.Implementations
             return result;
         }
 
+        public PagedResultDto<ChapterListItemDto> GetReviewedChapters(int page = 1, int pageSize = 20, string status = "REJECTED", string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, IReadOnlyList<Guid>? reviewedByModeratorChapterIds = null)
+        {
+            var statusUpper = (status ?? "REJECTED").Trim().ToUpperInvariant();
+            if (statusUpper != "REJECTED" && statusUpper != "PUBLISHED")
+                return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+
+            if (reviewedByModeratorChapterIds != null && reviewedByModeratorChapterIds.Count == 0)
+                return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+
+            // Khi lấy từ moderator_logs (IncludeChapterIds) thì không lọc theo category để hiển thị đủ chương moderator đã duyệt/từ chối.
+            List<Guid>? storyIdsFilter = null;
+            if (reviewedByModeratorChapterIds == null && categoryIdsFilter != null && categoryIdsFilter.Count > 0)
+                storyIdsFilter = _storyRepository.GetStoryIdsByCategoryIds(categoryIdsFilter).ToList();
+
+            var query = new ChapterQueryDto
+            {
+                Page = page,
+                PageSize = pageSize,
+                Status = statusUpper,
+                StoryIds = storyIdsFilter,
+                IncludeChapterIds = reviewedByModeratorChapterIds?.ToList(),
+                Search = search,
+                SortBy = !string.IsNullOrWhiteSpace(sortBy) ? sortBy : "updated_at",
+                SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "desc"
+            };
+            return _chapterService.GetAll(query);
+        }
+
         public bool ClaimStory(Guid storyId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
         {
             if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
