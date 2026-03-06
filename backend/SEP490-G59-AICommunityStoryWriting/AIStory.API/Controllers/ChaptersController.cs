@@ -60,15 +60,27 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy chapter theo ID (Guid) (cho phép xem không cần đăng nhập)</summary>
+        /// <summary>Lấy chapter theo ID (Guid) (bắt buộc đăng nhập để đọc)</summary>
         [HttpGet("{id:guid}")]
-        [AllowAnonymous]
+        [Authorize]
         public IActionResult GetById(Guid id)
         {
             try
             {
                 var chapter = _chapterService.GetById(id);
-                return chapter == null ? NotFound(new { message = $"Chapter with ID {id} not found" }) : Ok(chapter);
+                if (chapter == null)
+                    return NotFound(new { message = $"Chapter with ID {id} not found" });
+
+                var sub = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                          ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (chapter.StoryId.HasValue && Guid.TryParse(sub, out var userId) && userId != Guid.Empty)
+                {
+                    var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    var ua = Request.Headers.UserAgent.ToString();
+                    _storyService.RecordReadChapter(chapter.StoryId.Value, id, userId, ip, ua);
+                }
+
+                return Ok(chapter);
             }
             catch (Exception ex)
             {
@@ -200,9 +212,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Xem lý do từ chối chapter - AUTHOR (chapter thuộc truyện của mình), MODERATOR/ADMIN (mọi chapter).</summary>
+        /// <summary>Xem lý do từ chối chapter - Chỉ AUTHOR (chỉ chapter thuộc truyện của mình).</summary>
         [HttpGet("{id:guid}/rejection-reason")]
-        [Authorize(Roles = "AUTHOR,MODERATOR,ADMIN")]
+        [Authorize(Roles = "AUTHOR")]
         public IActionResult GetRejectionReason(Guid id)
         {
             try
@@ -210,18 +222,16 @@ namespace AIStory.API.Controllers
                 var chapter = _chapterService.GetById(id);
                 if (chapter == null)
                     return NotFound(new { message = "Chapter không tồn tại." });
+                if (!chapter.StoryId.HasValue)
+                    return Forbid();
+                var story = _storyService.GetById(chapter.StoryId.Value);
+                if (story == null)
+                    return Forbid();
+                var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+                if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
+                    return Forbid();
                 if (chapter.Status != "REJECTED")
                     return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
-                var isModeratorOrAdmin = User.IsInRole("MODERATOR") || User.IsInRole("ADMIN");
-                if (!isModeratorOrAdmin && chapter.StoryId.HasValue)
-                {
-                    var story = _storyService.GetById(chapter.StoryId.Value);
-                    if (story == null)
-                        return Forbid();
-                    var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
-                    if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
-                        return Forbid();
-                }
                 return Ok(new { reason = chapter.RejectionReason, rejectedAt = chapter.RejectedAt });
             }
             catch (Exception ex)
