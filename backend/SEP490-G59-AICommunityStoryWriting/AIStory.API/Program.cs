@@ -35,6 +35,7 @@ namespace AIStory.API
             // Add services
             // =======================
 
+            builder.Services.AddMemoryCache();
             builder.Services.AddControllers()
                 .AddJsonOptions(options =>
                 {
