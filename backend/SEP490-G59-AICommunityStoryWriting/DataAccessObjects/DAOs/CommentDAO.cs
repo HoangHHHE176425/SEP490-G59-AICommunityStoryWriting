@@ -98,6 +98,99 @@ namespace DataAccessObjects.DAOs
             context.SaveChanges();
             return !alreadyLiked;
         }
+
+        // --- Comment reactions (LIKE, DISLIKE, FUNNY, SAD, ANGRY, LOVE, WOW) ---
+
+        /// <summary>Đếm số reaction theo từng type cho một comment. Key = reaction_type, Value = count.</summary>
+        public static IReadOnlyDictionary<string, int> GetReactionCounts(Guid commentId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var list = context.comment_reactions
+                .AsNoTracking()
+                .Where(r => r.comment_id == commentId && r.reaction_type != null)
+                .GroupBy(r => r.reaction_type!)
+                .Select(g => new { Type = g.Key!, Count = g.Count() })
+                .ToList();
+            var dict = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in comment_reactions.ReactionTypes.All)
+                dict[t] = 0;
+            foreach (var x in list)
+                dict[x.Type] = x.Count;
+            return dict;
+        }
+
+        /// <summary>Danh sách người đã reaction comment (UserId, DisplayName, ReactionType). Cho xem danh sách khi click tổng reaction.</summary>
+        public static IReadOnlyList<(Guid UserId, string? DisplayName, string ReactionType)> GetCommentReactions(Guid commentId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var list = context.comment_reactions
+                .AsNoTracking()
+                .Include(r => r.user)
+                .ThenInclude(u => u!.user_profiles)
+                .Where(r => r.comment_id == commentId && r.reaction_type != null)
+                .OrderBy(r => r.created_at)
+                .ToList();
+            return list.Select(r =>
+            {
+                var nickname = r.user?.user_profiles?.nickname;
+                var email = r.user?.email;
+                var display = !string.IsNullOrWhiteSpace(nickname) ? nickname : email;
+                return (r.user_id, DisplayName: display, r.reaction_type!);
+            }).ToList();
+        }
+
+        /// <summary>Reaction type mà current user đã chọn cho comment (null nếu chưa reaction).</summary>
+        public static string? GetUserReaction(Guid userId, Guid commentId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var r = context.comment_reactions
+                .AsNoTracking()
+                .FirstOrDefault(x => x.user_id == userId && x.comment_id == commentId);
+            return r?.reaction_type;
+        }
+
+        /// <summary>Đặt hoặc đổi reaction của user cho comment. reactionType = null hoặc rỗng = bỏ reaction. Trả về reaction_type sau khi lưu (null nếu đã bỏ).</summary>
+        public static string? SetReaction(Guid userId, Guid commentId, string? reactionType)
+        {
+            using var context = new StoryPlatformDbContext();
+            var comment = context.comments.FirstOrDefault(c => c.id == commentId);
+            if (comment == null) return null;
+
+            var existing = context.comment_reactions
+                .FirstOrDefault(r => r.user_id == userId && r.comment_id == commentId);
+
+            if (string.IsNullOrWhiteSpace(reactionType) || !comment_reactions.ReactionTypes.IsValid(reactionType))
+            {
+                if (existing != null)
+                {
+                    context.comment_reactions.Remove(existing);
+                    comment.likes_count = Math.Max(0, (comment.likes_count ?? 1) - 1);
+                    context.SaveChanges();
+                }
+                return null;
+            }
+
+            var type = reactionType!.Trim().ToUpperInvariant();
+            if (existing != null)
+            {
+                if (existing.reaction_type == type) return type;
+                existing.reaction_type = type;
+                existing.created_at = DateTime.Now;
+            }
+            else
+            {
+                context.comment_reactions.Add(new comment_reactions
+                {
+                    user_id = userId,
+                    comment_id = commentId,
+                    reaction_type = type,
+                    created_at = DateTime.Now
+                });
+                comment.likes_count = (comment.likes_count ?? 0) + 1;
+            }
+            context.SaveChanges();
+            return type;
+        }
     }
 }
 
