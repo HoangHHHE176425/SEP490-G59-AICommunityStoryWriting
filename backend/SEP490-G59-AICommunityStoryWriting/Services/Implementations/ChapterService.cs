@@ -185,9 +185,21 @@ namespace Services.Implementations
                     storyTitles[sid] = story.title ?? "";
             }
 
+            var items = chapterList.Select(c =>
+            {
+                var dto = MapToListItemDto(c, c.story_id.HasValue ? storyTitles.GetValueOrDefault(c.story_id.Value) : null);
+                if (string.Equals(c.status, "REJECTED", StringComparison.OrdinalIgnoreCase))
+                {
+                    var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", c.id);
+                    dto.RejectionReason = reason;
+                    dto.RejectedAt = rejectedAt;
+                }
+                return dto;
+            }).ToList();
+
             return new PagedResultDto<ChapterListItemDto>
             {
-                Items = chapterList.Select(c => MapToListItemDto(c, c.story_id.HasValue ? storyTitles.GetValueOrDefault(c.story_id.Value) : null)),
+                Items = items,
                 TotalCount = totalCount,
                 Page = query.Page,
                 PageSize = query.PageSize

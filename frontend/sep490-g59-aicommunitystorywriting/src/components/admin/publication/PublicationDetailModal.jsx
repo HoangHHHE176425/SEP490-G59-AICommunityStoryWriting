@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar } from 'lucide-react';
-import { getChapters, getChapterById } from '../../../api/chapter/chapterApi';
+import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
 import { approveStory, approveChapter, rejectStory, rejectChapter } from '../../../api/moderator/moderatorApi';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { useToast } from '../../author/story-editor/Toast';
@@ -30,6 +30,8 @@ function mapStoryGroupChapterToModal(ch) {
         wordCount: ch.wordCount ?? 0,
         status: ch.status ?? 'rejected',
         publishedAt: null,
+        rejectionReason: ch.rejectionReason ?? null,
+        rejectedAt: ch.rejectedAt ?? null,
     };
 }
 
@@ -48,6 +50,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const storyApprovedInSessionRef = useRef(false);
     /** Vừa từ chối trong phiên này → không hiển thị khối "Đã từ chối xuất bản" / "Lý do từ chối" để moderator duyệt liên tiếp thoải mái */
     const justRejectedInSessionRef = useRef(false);
+    /** Lý do từ chối lấy từ API GET /chapters/:id/rejection-reason khi chưa có trong danh sách (tab Từ chối). */
+    const [fetchedRejectionByChapter, setFetchedRejectionByChapter] = useState({});
 
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
@@ -72,6 +76,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     useEffect(() => {
         storyApprovedInSessionRef.current = false;
         justRejectedInSessionRef.current = false;
+        setFetchedRejectionByChapter({});
         const id = setTimeout(() => {
             if (!storyId) {
                 setChapters([]);
@@ -126,6 +131,24 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         }, 0);
         return () => clearTimeout(id);
     }, [selectedChapter?.id, loadChapterContent]);
+
+    /** Tab Từ chối: nếu chương chưa có rejectionReason (từ list API) thì gọi GET /chapters/:id/rejection-reason để hiển thị lý do. */
+    useEffect(() => {
+        if (publication?.status !== 'rejected' || !selectedChapter?.id) return;
+        if (selectedChapter.rejectionReason) return;
+        getChapterRejectionReason(selectedChapter.id)
+            .then((data) => {
+                const reason = data?.reason ?? data?.Reason ?? null;
+                const rejectedAt = data?.rejectedAt ?? data?.RejectedAt ?? null;
+                if (reason != null || rejectedAt != null) {
+                    setFetchedRejectionByChapter((prev) => ({
+                        ...prev,
+                        [selectedChapter.id]: { reason: reason ?? '', rejectedAt }
+                    }));
+                }
+            })
+            .catch(() => { });
+    }, [publication?.status, selectedChapter?.id, selectedChapter?.rejectionReason]);
 
     const openApproveConfirm = () => {
         if (selectedChapter) setShowApproveConfirm(true);
@@ -254,15 +277,6 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         });
     };
 
-    const getStatusColor = (status) => {
-        const colors = {
-            pending: '#ffc107',
-            approved: '#13ec5b',
-            rejected: '#ef4444'
-        };
-        return colors[status] || '#64748b';
-    };
-
     return (
         <>
             <ToastContainer />
@@ -306,42 +320,6 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         gap: '1rem'
                     }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                            {publication?.status !== 'approved' && (
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                                    <div style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '0.25rem',
-                                        padding: '0.25rem 0.625rem',
-                                        backgroundColor: publication.type === 'new_story' ? '#e0f2fe' : '#f3e8ff',
-                                        color: publication.type === 'new_story' ? '#075985' : '#6b21a8',
-                                        fontSize: '0.75rem',
-                                        fontWeight: 600,
-                                        borderRadius: '0.375rem'
-                                    }}>
-                                        {publication.type === 'new_story' ? <BookOpen style={{ width: '12px', height: '12px' }} /> : <FileText style={{ width: '12px', height: '12px' }} />}
-                                        {publication.type === 'new_story' ? 'Truyện mới' : 'Chương mới'}
-                                    </div>
-                                    <div style={{
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '0.375rem',
-                                        padding: '0.375rem 0.75rem',
-                                        backgroundColor: `${getStatusColor(chapters.length > 0 ? 'pending' : publication.status)}20`,
-                                        color: getStatusColor(chapters.length > 0 ? 'pending' : publication.status),
-                                        fontSize: '0.75rem',
-                                        fontWeight: 600,
-                                        borderRadius: '9999px',
-                                        border: `2px solid ${getStatusColor(chapters.length > 0 ? 'pending' : publication.status)}`
-                                    }}>
-                                        {(chapters.length > 0 || publication.status === 'pending') && <Clock style={{ width: '14px', height: '14px' }} />}
-                                        {chapters.length === 0 && publication.status === 'approved' && <CheckCircle style={{ width: '14px', height: '14px' }} />}
-                                        {chapters.length === 0 && publication.status === 'rejected' && <XCircle style={{ width: '14px', height: '14px' }} />}
-                                        {chapters.length > 0 ? 'Chờ duyệt' : publication.status === 'pending' ? 'Chờ duyệt' : publication.status === 'approved' ? 'Đã duyệt' : 'Từ chối'}
-                                    </div>
-                                </div>
-                            )}
-
                             <h2 style={{
                                 fontSize: '1.5rem',
                                 fontWeight: 700,
@@ -511,6 +489,34 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                         Duyệt lúc: {formatDate(selectedChapter.publishedAt)}
                                                     </div>
                                                 )}
+                                                {publication?.status === 'rejected' && (() => {
+                                                    const displayReason = selectedChapter?.rejectionReason ?? fetchedRejectionByChapter[selectedChapter?.id]?.reason;
+                                                    const displayRejectedAt = selectedChapter?.rejectedAt ?? fetchedRejectionByChapter[selectedChapter?.id]?.rejectedAt;
+                                                    if (!displayReason && !displayRejectedAt) return null;
+                                                    return (
+                                                        <div style={{
+                                                            marginTop: '1rem',
+                                                            padding: '0.75rem 1rem',
+                                                            backgroundColor: '#fef2f2',
+                                                            borderLeft: '4px solid #ef4444',
+                                                            borderRadius: '0.5rem'
+                                                        }}>
+                                                            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991b1b', marginBottom: '0.25rem' }}>
+                                                                Lý do từ chối (đã nhập trước đó):
+                                                            </div>
+                                                            {displayReason && (
+                                                                <div style={{ fontSize: '0.875rem', color: '#991b1b', whiteSpace: 'pre-wrap' }}>
+                                                                    {displayReason}
+                                                                </div>
+                                                            )}
+                                                            {displayRejectedAt && (
+                                                                <div style={{ fontSize: '0.75rem', color: '#b91c1c', marginTop: displayReason ? '0.5rem' : 0 }}>
+                                                                    Từ chối lúc: {formatDate(displayRejectedAt)}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
 
                                             <div style={{

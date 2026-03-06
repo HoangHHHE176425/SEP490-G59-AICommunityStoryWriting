@@ -114,6 +114,8 @@ function mapReviewedChapterToItem(c) {
         status: statusMap[statusApi] ?? 'rejected',
         submittedAt: c.createdAt ?? c.CreatedAt ?? null,
         wordCount: c.wordCount ?? c.WordCount ?? 0,
+        rejectionReason: c.rejectionReason ?? c.RejectionReason ?? null,
+        rejectedAt: c.rejectedAt ?? c.RejectedAt ?? null,
     };
 }
 
@@ -424,18 +426,42 @@ export function PublicationManagement() {
                             storyCover: g.storyCover,
                             author: g.author,
                             categories: g.categories,
+                            description: rep.description ?? '',
                             status: 'pending',
                             chapters: g.chapters,
                             representativePublication: rep,
                             chapterCount: g.chapters.length,
                         });
                     }
-                    setPublications(groupedList);
-                    const total = groupedList.length;
-                    setTotalCount(total);
-                    setTotalPages(Math.max(1, Math.ceil(total / PAGE_SIZE)));
-                    setCurrentPage(Math.min(page, Math.max(1, Math.ceil(total / PAGE_SIZE))));
-                    setStatsData(prev => ({ ...prev, pending: total }));
+                    if (groupedList.length === 0) {
+                        setPublications([]);
+                        setTotalCount(0);
+                        setTotalPages(1);
+                        setCurrentPage(1);
+                        setStatsData(prev => ({ ...prev, pending: 0 }));
+                        return;
+                    }
+                    // Bổ sung ảnh bìa, tác giả, thể loại, mô tả từ GET /stories/:id để giao diện Chờ duyệt giống Đã duyệt/Từ chối.
+                    return Promise.all(groupedList.map((g) => getStoryById(g.storyId).then((story) => storyResponseToMeta(story)).catch(() => null)))
+                        .then((metas) => {
+                            const enriched = groupedList.map((g, i) => {
+                                const meta = metas[i];
+                                if (!meta) return g;
+                                return {
+                                    ...g,
+                                    storyCover: meta.storyCover || g.storyCover,
+                                    author: meta.author ?? g.author,
+                                    categories: (meta.categories?.length ? meta.categories : g.categories) ?? [],
+                                    description: meta.description || g.description || '',
+                                };
+                            });
+                            setPublications(enriched);
+                            const total = enriched.length;
+                            setTotalCount(total);
+                            setTotalPages(Math.max(1, Math.ceil(total / PAGE_SIZE)));
+                            setCurrentPage(Math.min(page, Math.max(1, Math.ceil(total / PAGE_SIZE))));
+                            setStatsData(prev => ({ ...prev, pending: total }));
+                        });
                 })
                 .catch((err) => {
                     if (!silent) setError(err?.response?.data?.message ?? err?.message ?? 'Không tải được danh sách. Bạn cần đăng nhập với vai trò MODERATOR hoặc ADMIN.');

@@ -47,7 +47,7 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
     const getTypeBadge = (pub) => {
         const isStoryGroup = pub.type === 'story_group';
         const isStory = pub.type === 'story' || pub.type === 'new_story';
-        const label = isStoryGroup ? (pub.chapterCount > 0 ? `Truyện (${pub.chapterCount} chương)` : 'Truyện') : (isStory ? 'Truyện' : 'Chương');
+        const label = isStoryGroup || isStory ? 'Truyện' : 'Chương';
         const isStoryStyle = isStory || isStoryGroup;
         return (
             <div style={{
@@ -190,11 +190,6 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                         {pub.type === 'chapter' && pub.chapterTitle && (
                                             <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.9375rem' }}> — {pub.chapterTitle}</span>
                                         )}
-                                        {pub.type === 'story_group' && pub.chapterCount > 0 && (
-                                            <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.9375rem' }}>
-                                                — {pub.chapterCount} chương{pub.status === 'approved' ? ' đã duyệt' : pub.status === 'rejected' ? ' từ chối' : ' cần duyệt'}
-                                            </span>
-                                        )}
                                     </h3>
                                     <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
                                         {pub.author ? <>Tác giả: <span style={{ fontWeight: 500, color: '#475569' }}>{pub.author}</span></> : null}
@@ -277,9 +272,7 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                 {(pub.type === 'story_group' && pub.chapterCount != null) || (pub.type !== 'story_group' && pub.totalChapters != null) ? (
                                     <div>
                                         <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
-                                            {pub.type === 'story_group'
-                                                ? (pub.status === 'approved' ? 'Số chương đã duyệt' : pub.status === 'rejected' ? 'Số chương từ chối' : 'Số chương cần duyệt')
-                                                : 'Số chương'}
+                                            Số chương
                                         </div>
                                         <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
                                             {pub.type === 'story_group' ? pub.chapterCount : pub.totalChapters} chương
