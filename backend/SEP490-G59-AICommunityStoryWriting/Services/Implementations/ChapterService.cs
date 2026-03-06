@@ -1,5 +1,6 @@
-﻿using BusinessObjects.Entities;
+using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
+using Microsoft.Extensions.Logging;
 using Repositories;
 using Services.DTOs.Chapters;
 using Services.DTOs.Stories;
@@ -11,10 +12,12 @@ namespace Services.Implementations
     {
         private readonly IChapterRepository _chapterRepository;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
+        private readonly ILogger<ChapterService> _logger;
 
-        public ChapterService(IChapterRepository chapterRepository, IModerationHubNotifier? moderationHubNotifier = null)
+        public ChapterService(IChapterRepository chapterRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null)
         {
             _chapterRepository = chapterRepository;
+            _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
         }
 
@@ -89,11 +92,14 @@ namespace Services.Implementations
             {
                 UpdateStoryChapterStats(request.StoryId);
 
-                // If chapter is published, update story's last_published_at
+                // If chapter is published, update story's last_published_at and notify followers
                 if (status == "PUBLISHED" && story != null)
                 {
                     story.last_published_at = DateTime.Now;
                     StoryDAO.Update(story);
+                    Console.WriteLine($"[CONSOLE] ChapterService.Create PUBLISHED -> NotifyStoryFollowersNewChapter StoryId={request.StoryId} ChapterId={chapter.id}");
+                    _logger.LogInformation("ChapterService.Create calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", request.StoryId, chapter.id);
+                    NotificationDAO.NotifyStoryFollowersNewChapter(request.StoryId, chapter.id, request.Title, story.title, _logger);
                 }
             }
             catch (Exception)
@@ -140,7 +146,12 @@ namespace Services.Implementations
                     (c.title != null && c.title.ToLower().Contains(searchLower)));
             }
 
-            if (!string.IsNullOrWhiteSpace(query.Status))
+            if (query.StatusIn != null && query.StatusIn.Count > 0)
+            {
+                var statusList = query.StatusIn;
+                chaptersQuery = chaptersQuery.Where(c => c.status != null && statusList.Contains(c.status));
+            }
+            else if (!string.IsNullOrWhiteSpace(query.Status))
             {
                 chaptersQuery = chaptersQuery.Where(c => c.status == query.Status);
             }
@@ -185,9 +196,21 @@ namespace Services.Implementations
                     storyTitles[sid] = story.title ?? "";
             }
 
+            var items = chapterList.Select(c =>
+            {
+                var dto = MapToListItemDto(c, c.story_id.HasValue ? storyTitles.GetValueOrDefault(c.story_id.Value) : null);
+                if (string.Equals(c.status, "REJECTED", StringComparison.OrdinalIgnoreCase))
+                {
+                    var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", c.id);
+                    dto.RejectionReason = reason;
+                    dto.RejectedAt = rejectedAt;
+                }
+                return dto;
+            }).ToList();
+
             return new PagedResultDto<ChapterListItemDto>
             {
-                Items = chapterList.Select(c => MapToListItemDto(c, c.story_id.HasValue ? storyTitles.GetValueOrDefault(c.story_id.Value) : null)),
+                Items = items,
                 TotalCount = totalCount,
                 Page = query.Page,
                 PageSize = query.PageSize
@@ -340,7 +363,7 @@ namespace Services.Implementations
                 {
                     UpdateStoryChapterStats(chapter.story_id.Value);
 
-                    // If chapter status was changed to PUBLISHED, update story's last_published_at
+                    // If chapter status was changed to PUBLISHED, update story's last_published_at and notify followers
                     if (!string.IsNullOrWhiteSpace(request.Status) && request.Status.ToUpper() == "PUBLISHED")
                     {
                         var story = StoryDAO.GetById(chapter.story_id.Value);
@@ -349,6 +372,9 @@ namespace Services.Implementations
                             story.last_published_at = DateTime.Now;
                             StoryDAO.Update(story);
                         }
+                        Console.WriteLine($"[CONSOLE] ChapterService.Update PUBLISHED -> NotifyStoryFollowersNewChapter StoryId={chapter.story_id} ChapterId={chapter.id}");
+                        _logger.LogInformation("ChapterService.Update calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id, chapter.id);
+                        NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapter.id, chapter.title, story?.title, _logger);
                     }
                 }
                 catch (Exception)
@@ -413,6 +439,11 @@ namespace Services.Implementations
             chapter.updated_at = DateTime.Now;
 
             _chapterRepository.Update(chapter);
+
+            // Giải phóng đơn đã nhận (claim) của moderator khi tác giả hủy xuất bản — để chương có thể hiển thị lại trong "Nhận duyệt đơn" khi tác giả gửi xuất bản lại.
+            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, id);
+
+            _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
 

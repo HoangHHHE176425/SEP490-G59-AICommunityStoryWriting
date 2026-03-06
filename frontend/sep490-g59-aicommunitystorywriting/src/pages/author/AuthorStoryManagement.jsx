@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List } from 'lucide-react';
 import { StoryEditor } from './StoryEditor';
 import { StoryInfoEditor } from './StoryInfoEditor';
@@ -94,14 +94,17 @@ export function AuthorStoryManagement({ onBack }) {
     const STORIES_PAGE_SIZE = 10;
     const authorId = user?.id ?? user?.Id;
 
-    const loadStories = useCallback((page = 1) => {
+    const loadStories = useCallback((page = 1, options = {}) => {
         if (!authorId) {
             setStories([]);
             setStoriesLoading(false);
             return;
         }
-        setStoriesLoading(true);
-        setStoriesError(null);
+        const silent = options.silent === true;
+        if (!silent) {
+            setStoriesLoading(true);
+            setStoriesError(null);
+        }
         getStories({ authorId, page, pageSize: STORIES_PAGE_SIZE })
             .then((res) => {
                 const items = res?.items ?? res?.Items ?? [];
@@ -114,7 +117,7 @@ export function AuthorStoryManagement({ onBack }) {
                     setStoriesCurrentPage(res?.page ?? page);
                     return;
                 }
-                // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp
+                // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp / Bị từ chối
                 return Promise.all(
                     items.map((s) => {
                         const storyId = s.id ?? s.Id;
@@ -145,20 +148,21 @@ export function AuthorStoryManagement({ onBack }) {
                             } else if (hasPendingReview) {
                                 mapped.status = 'pending_review';
                                 mapped.publishStatus = 'Chờ duyệt';
-                                // Gọi API lưu trạng thái truyện PENDING_REVIEW (chỉ khi backend chưa đúng)
-                                const currentStatus = (item.status ?? item.Status ?? '').toUpperCase();
-                                if (currentStatus !== 'PENDING_REVIEW') {
-                                    const id = item.id ?? item.Id;
-                                    const categoryIds = item.categoryIds ?? item.CategoryIds ?? [];
-                                    const ids = Array.isArray(categoryIds) ? categoryIds : [];
-                                    updateStory(id, {
-                                        title: item.title ?? item.Title ?? 'Untitled',
-                                        summary: item.summary ?? item.Summary ?? '',
-                                        categoryIds: ids,
-                                        status: 'PENDING_REVIEW',
-                                        ageRating: item.ageRating ?? item.AgeRating ?? 'ALL',
-                                        storyProgressStatus: item.storyProgressStatus ?? item.StoryProgressStatus ?? 'ONGOING'
-                                    }).catch(() => { });
+                                if (!silent) {
+                                    const currentStatus = (item.status ?? item.Status ?? '').toUpperCase();
+                                    if (currentStatus !== 'PENDING_REVIEW') {
+                                        const id = item.id ?? item.Id;
+                                        const categoryIds = item.categoryIds ?? item.CategoryIds ?? [];
+                                        const ids = Array.isArray(categoryIds) ? categoryIds : [];
+                                        updateStory(id, {
+                                            title: item.title ?? item.Title ?? 'Untitled',
+                                            summary: item.summary ?? item.Summary ?? '',
+                                            categoryIds: ids,
+                                            status: 'PENDING_REVIEW',
+                                            ageRating: item.ageRating ?? item.AgeRating ?? 'ALL',
+                                            storyProgressStatus: item.storyProgressStatus ?? item.StoryProgressStatus ?? 'ONGOING'
+                                        }).catch(() => { });
+                                    }
                                 }
                             } else {
                                 mapped.status = 'draft';
@@ -173,12 +177,14 @@ export function AuthorStoryManagement({ onBack }) {
                 });
             })
             .catch((err) => {
-                setStoriesError(err?.message ?? 'Không tải được danh sách truyện');
-                setStories([]);
-                setStoriesTotalCount(0);
-                setStoriesTotalPages(1);
+                if (!silent) {
+                    setStoriesError(err?.message ?? 'Không tải được danh sách truyện');
+                    setStories([]);
+                    setStoriesTotalCount(0);
+                    setStoriesTotalPages(1);
+                }
             })
-            .finally(() => setStoriesLoading(false));
+            .finally(() => { if (!silent) setStoriesLoading(false); });
     }, [authorId]);
 
     const handleStoriesPageChange = (page) => {
@@ -189,6 +195,25 @@ export function AuthorStoryManagement({ onBack }) {
     useEffect(() => {
         queueMicrotask(() => loadStories(1));
     }, [loadStories]);
+
+    /** Real-time: refetch danh sách truyện khi tab đang hiển thị (moderator duyệt/từ chối → trạng thái truyện thay đổi). */
+    const STORIES_POLL_INTERVAL_MS = 1000;
+    const storiesCurrentPageRef = useRef(storiesCurrentPage);
+    const loadStoriesRef = useRef(loadStories);
+    useEffect(() => {
+        storiesCurrentPageRef.current = storiesCurrentPage;
+        loadStoriesRef.current = loadStories;
+    }, [storiesCurrentPage, loadStories]);
+    useEffect(() => {
+        if (activeView !== 'stories' || !authorId) return;
+        const tick = () => {
+            if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+                loadStoriesRef.current?.(storiesCurrentPageRef.current, { silent: true });
+            }
+        };
+        const id = setInterval(tick, STORIES_POLL_INTERVAL_MS);
+        return () => clearInterval(id);
+    }, [activeView, authorId]);
 
     // Mock comments data
     const mockComments = [
@@ -334,6 +359,7 @@ export function AuthorStoryManagement({ onBack }) {
                     status: apiStatus,
                     accessType: apiAccessType,
                     coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
+                    changeSummary: chapterData.changeSummary ? String(chapterData.changeSummary).trim() : undefined,
                 });
 
                 showToast(

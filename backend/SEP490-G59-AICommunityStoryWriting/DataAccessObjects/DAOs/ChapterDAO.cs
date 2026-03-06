@@ -56,6 +56,22 @@ namespace DataAccessObjects.DAOs
             return context.chapters.Count(c => c.story_id == storyId);
         }
 
+        /// <summary>Đếm số chapter PUBLISHED theo story_id (Guid) - dùng cho màn reader.</summary>
+        public static int GetPublishedCountByStoryId(Guid storyId)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.chapters.Count(c => c.story_id == storyId && c.status == "PUBLISHED");
+        }
+
+        /// <summary>Lấy thời gian updated_at mới nhất của chapters theo story_id (Guid).</summary>
+        public static DateTime? GetLatestUpdatedAtByStoryId(Guid storyId)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.chapters
+                .Where(c => c.story_id == storyId)
+                .Max(c => (DateTime?)c.updated_at);
+        }
+
         /// <summary>Xóa tất cả chapters của một story</summary>
         public static void DeleteByStoryId(Guid storyId)
         {

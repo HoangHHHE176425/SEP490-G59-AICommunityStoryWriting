@@ -78,6 +78,16 @@ export async function getChapterById(id) {
 }
 
 /**
+ * Lấy lý do từ chối chương (cho tác giả). GET /chapters/{id}/rejection-reason.
+ * @param {string} id - Guid chương
+ * @returns {Promise<{ reason: string|null, rejectedAt: string|null }>}
+ */
+export async function getChapterRejectionReason(id) {
+    const response = await axiosInstance.get(`/chapters/${id}/rejection-reason`);
+    return response.data;
+}
+
+/**
  * Lấy tất cả chapters của một story.
  * @param {string} storyId - Guid
  * @returns {Promise} - Mảng chapters
@@ -99,9 +109,9 @@ export async function getChapterByStoryIdAndOrderIndex(storyId, orderIndex) {
 }
 
 /**
- * Cập nhật chapter.
+ * Cập nhật chapter (tạo version tự động trên BE khi có thay đổi nội dung).
  * @param {string} id - Guid
- * @param {Object} data - { title?, content?, orderIndex?, status?, accessType?, coinPrice?, aiContributionRatio?, isAiClean? }
+ * @param {Object} data - { title?, content?, orderIndex?, status?, accessType?, coinPrice?, aiContributionRatio?, isAiClean?, changeSummary? }
  * @returns {Promise} - NoContent khi thành công
  */
 export async function updateChapter(id, data) {
@@ -123,6 +133,9 @@ export async function updateChapter(id, data) {
         aiContributionRatio: data.aiContributionRatio,
         isAiClean: data.isAiClean,
     };
+    if (data.changeSummary != null && String(data.changeSummary).trim() !== '') {
+        body.changeSummary = String(data.changeSummary).trim();
+    }
 
     const response = await axiosInstance.put(`/chapters/${id}`, body);
     return response.data;
@@ -169,4 +182,40 @@ export async function reorderChapter(id, newOrderIndex) {
         headers: { "Content-Type": "application/json" },
     });
     return response.data;
+}
+
+/**
+ * Duyệt chương (phê duyệt / approve) – gọi POST /chapters/{id}/publish, chuyển status sang PUBLISHED.
+ * @param {string} id - Guid chương
+ * @returns {Promise}
+ */
+export async function approveChapter(id) {
+    const response = await axiosInstance.post(`/chapters/${id}/publish`);
+    return response.data;
+}
+
+/**
+ * Từ chối duyệt chương – cập nhật status sang REJECTED qua PUT /chapters/{id}.
+ * Cần title và content (backend Update chapter yêu cầu); nếu không truyền sẽ gọi getChapterById rồi cập nhật.
+ * @param {string} id - Guid chương
+ * @param {Object} [chapterData] - { title?, content?, orderIndex? } (nếu không truyền sẽ tự fetch)
+ * @returns {Promise}
+ */
+export async function rejectChapter(id, chapterData) {
+    let title = chapterData?.title ?? chapterData?.Title;
+    let content = chapterData?.content ?? chapterData?.Content;
+    let orderIndex = chapterData?.orderIndex ?? chapterData?.OrderIndex;
+    if (title == null || content == null) {
+        const chapter = await getChapterById(id);
+        title = title ?? chapter?.title ?? chapter?.Title ?? '';
+        content = content ?? chapter?.content ?? chapter?.Content ?? '';
+        if (orderIndex == null) orderIndex = chapter?.orderIndex ?? chapter?.OrderIndex;
+    }
+    const payload = {
+        title: title || 'Chương',
+        content: content ?? '',
+        status: 'REJECTED',
+    };
+    if (orderIndex != null) payload.orderIndex = orderIndex;
+    return updateChapter(id, payload);
 }

@@ -19,13 +19,18 @@
         public string? AgeRating { get; set; }
 
         public int? TotalChapters { get; set; }
+        /// <summary>Số chapter đã PUBLISHED.</summary>
+        public int? PublishedChaptersCount { get; set; }
         public long? TotalViews { get; set; }
+        public int? TotalComments { get; set; }
         public int? TotalFavorites { get; set; }
         public decimal? AvgRating { get; set; }
         public int? WordCount { get; set; }
 
         public DateTime? CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
+        /// <summary>Thời gian cập nhật gần nhất (max giữa story.updated_at và chapter.updated_at mới nhất).</summary>
+        public DateTime? LatestUpdatedAt { get; set; }
         public DateTime? PublishedAt { get; set; }
         public DateTime? LastPublishedAt { get; set; }
 
@@ -33,5 +38,8 @@
         public string? RejectionReason { get; set; }
         /// <summary>Thời điểm moderator từ chối.</summary>
         public DateTime? RejectedAt { get; set; }
+
+        /// <summary>User hiện tại đã theo dõi story này chưa (chỉ có khi đăng nhập).</summary>
+        public bool? UserIsFollowing { get; set; }
     }
 }

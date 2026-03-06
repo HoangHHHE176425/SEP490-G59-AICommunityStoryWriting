@@ -117,5 +117,29 @@ namespace DataAccessObjects.DAOs
                 context.SaveChanges();
             }
         }
+
+        /// <summary>Tãng total_views c?a story lên 1 (dùng khi ghi nh?n lý?t xem h?p l?, ch?ng spam ? t?ng service).</summary>
+        public static void IncrementViewCount(Guid storyId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var story = context.stories.FirstOrDefault(s => s.id == storyId);
+            if (story != null)
+            {
+                story.total_views = (story.total_views ?? 0) + 1;
+                context.SaveChanges();
+            }
+        }
+
+        /// <summary>C?p nh?t avg_rating cho story.</summary>
+        public static void UpdateAvgRating(Guid storyId, decimal avgRating)
+        {
+            using var context = new StoryPlatformDbContext();
+            var story = context.stories.FirstOrDefault(s => s.id == storyId);
+            if (story != null)
+            {
+                story.avg_rating = avgRating;
+                context.SaveChanges();
+            }
+        }
     }
 }

@@ -60,15 +60,27 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy chapter theo ID (Guid) (cho phép xem không cần đăng nhập)</summary>
+        /// <summary>Lấy chapter theo ID (Guid) (bắt buộc đăng nhập để đọc)</summary>
         [HttpGet("{id:guid}")]
-        [AllowAnonymous]
+        [Authorize]
         public IActionResult GetById(Guid id)
         {
             try
             {
                 var chapter = _chapterService.GetById(id);
-                return chapter == null ? NotFound(new { message = $"Chapter with ID {id} not found" }) : Ok(chapter);
+                if (chapter == null)
+                    return NotFound(new { message = $"Chapter with ID {id} not found" });
+
+                var sub = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                          ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (chapter.StoryId.HasValue && Guid.TryParse(sub, out var userId) && userId != Guid.Empty)
+                {
+                    var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    var ua = Request.Headers.UserAgent.ToString();
+                    _storyService.RecordReadChapter(chapter.StoryId.Value, id, userId, ip, ua);
+                }
+
+                return Ok(chapter);
             }
             catch (Exception ex)
             {
