@@ -230,6 +230,38 @@ class ApiService {
         return this.request(`/stories/${id}/rejection-reason`);
     }
 
+    static async rateStory(storyId, data) {
+        return this.request(`/stories/${storyId}/ratings`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    static async followStory(storyId) {
+        return this.request(`/stories/${storyId}/follow`, { method: 'POST' });
+    }
+
+    static async unfollowStory(storyId) {
+        return this.request(`/stories/${storyId}/follow`, { method: 'DELETE' });
+    }
+
+    static async getStoryComments(storyId) {
+        return this.request(`/stories/${storyId}/comments`);
+    }
+
+    static async addStoryComment(storyId, data) {
+        return this.request(`/stories/${storyId}/comments`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    static async toggleCommentLike(storyId, commentId) {
+        return this.request(`/stories/${storyId}/comments/${commentId}/like`, {
+            method: 'POST'
+        });
+    }
+
     static async getChapterRejectionReason(id) {
         return this.request(`/chapters/${id}/rejection-reason`);
     }

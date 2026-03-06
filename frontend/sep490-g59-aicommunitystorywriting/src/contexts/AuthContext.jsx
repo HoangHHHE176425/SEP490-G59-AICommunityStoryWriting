@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import * as authApi from '../api/auth/authApi';
 import * as accountApi from '../api/account/accountApi';
+import { createNotificationHubConnection } from '../api/notification/notificationHub';
 
 // Preserve context identity across Vite HMR to avoid "useAuth must be used within AuthProvider"
 // when modules reload and recreate a new Context instance.
@@ -64,6 +65,29 @@ export function AuthProvider({ children }) {
 
         bootstrap();
     }, []);
+
+    /** Real-time notification: khi moderator duyệt/từ chối, backend push NewNotification tới author. Dispatch event để component có thể hiển thị toast hoặc refresh danh sách. */
+    const notificationHubStopRef = useRef(null);
+    useEffect(() => {
+        const token = localStorage.getItem('accessToken');
+        if (!token || !user) {
+            if (notificationHubStopRef.current) {
+                notificationHubStopRef.current();
+                notificationHubStopRef.current = null;
+            }
+            return;
+        }
+        const { stop } = createNotificationHubConnection((notification) => {
+            window.dispatchEvent(new CustomEvent('app:notification', { detail: notification }));
+        });
+        notificationHubStopRef.current = stop;
+        return () => {
+            if (notificationHubStopRef.current) {
+                notificationHubStopRef.current();
+                notificationHubStopRef.current = null;
+            }
+        };
+    }, [user]);
 
     const login = async (email, password) => {
         const result = await authApi.login({ email, password });
@@ -159,7 +183,6 @@ export function AuthProvider({ children }) {
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-
 export function useAuth() {
     const context = useContext(AuthContext);
     if (!context) {
@@ -167,3 +190,4 @@ export function useAuth() {
     }
     return context;
 }
+

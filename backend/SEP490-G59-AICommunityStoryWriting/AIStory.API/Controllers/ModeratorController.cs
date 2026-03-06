@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Repositories.Interfaces;
 using Services.DTOs.Moderation;
@@ -210,6 +210,8 @@ namespace AIStory.API.Controllers
         [HttpPost("chapters/{id:guid}/approve")]
         public async Task<IActionResult> ApproveChapter(Guid id)
         {
+            Console.WriteLine($"[CONSOLE] ApproveChapter API called ChapterId={id}");
+            _logger.LogWarning("[NOTIFY] ApproveChapter API called ChapterId={ChapterId}", id);
             var moderatorId = GetCurrentUserId();
             if (!moderatorId.HasValue)
                 return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
@@ -221,12 +223,14 @@ namespace AIStory.API.Controllers
             try
             {
                 var ok = _moderationService.ApproveChapter(id, moderatorId.Value, allowedCategoryIds);
+                Console.WriteLine($"[CONSOLE] ApproveChapter result ok={ok}");
                 if (!ok)
                     return NotFound(new { message = "Chapter không tồn tại, không ở trạng thái chờ duyệt (PENDING_REVIEW), hoặc không thuộc category bạn được gán." });
                 return NoContent();
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"[CONSOLE] ApproveChapter EXCEPTION ChapterId={id} ex={ex.Message}");
                 _logger.LogError(ex, "ApproveChapter {ChapterId} failed", id);
                 return StatusCode(500, new { message = "Lỗi duyệt chapter", error = ex.Message });
             }

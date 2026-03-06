@@ -13,6 +13,13 @@ namespace AIStory.API.Controllers
     [Authorize]
     public class NotificationsController : ControllerBase
     {
+        private readonly ILogger<NotificationsController> _logger;
+
+        public NotificationsController(ILogger<NotificationsController> logger)
+        {
+            _logger = logger;
+        }
+
         private static NotificationDto MapToDto(notifications n)
         {
             return new NotificationDto
@@ -44,6 +51,7 @@ namespace AIStory.API.Controllers
                 return Unauthorized(new { message = "Không xác định user." });
 
             var list = NotificationDAO.GetByUserId(userId.Value, limit, onlyUnread);
+            _logger.LogInformation("GetList UserId={UserId} OnlyUnread={OnlyUnread} Count={Count}", userId, onlyUnread, list.Count);
             return Ok(list.Select(MapToDto));
         }
 
@@ -56,6 +64,7 @@ namespace AIStory.API.Controllers
                 return Unauthorized(new { message = "Không xác định user." });
 
             var count = NotificationDAO.GetUnreadCount(userId.Value);
+            _logger.LogInformation("GetUnreadCount UserId={UserId} Count={Count}", userId, count);
             return Ok(new { count });
         }
 

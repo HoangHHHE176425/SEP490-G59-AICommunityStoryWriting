@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { AdminDashboard } from '../../components/admin/AdminDashboard';
 import { CategoryManagement } from './category/CategoryManagement';
@@ -7,8 +8,10 @@ import { UserManagement } from './user/UserManagement';
 import { PolicyManagement } from './policy/PolicyManagement';
 
 export function AdminPage() {
-    // eslint-disable-next-line no-unused-vars
-    const [activePage, setActivePage] = useState('categories'); // Start with categories
+    const { role } = useAuth();
+    const roleUpper = (role ?? '').toString().toUpperCase();
+    const isModeratorOnly = roleUpper === 'MODERATOR';
+    const [activePage, setActivePage] = useState(isModeratorOnly ? 'publication' : 'categories');
 
     const renderPage = () => {
         switch (activePage) {
