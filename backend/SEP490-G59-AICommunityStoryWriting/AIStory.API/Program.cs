@@ -96,6 +96,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IModerationService, ModerationService>();
             builder.Services.AddSignalR();
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
+            builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
 
 
             var jwtKey = builder.Configuration["Jwt:Key"];
@@ -223,6 +224,7 @@ namespace AIStory.API
 
             app.MapControllers();
             app.MapHub<ModeratorHub>("/hubs/moderator");
+            app.MapHub<NotificationHub>("/hubs/notifications");
             app.Run();
         }
     }
