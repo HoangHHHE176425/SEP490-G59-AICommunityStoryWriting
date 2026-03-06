@@ -1,8 +1,8 @@
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
+using Microsoft.Extensions.Logging;
 using Repositories;
 using Services.DTOs.Chapters;
-using Services.DTOs.Notifications;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 
@@ -15,22 +15,22 @@ namespace Services.Implementations
         private readonly IStoryService _storyService;
         private readonly IChapterService _chapterService;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
-        private readonly INotificationHubNotifier? _notificationHubNotifier;
+        private readonly ILogger<ModerationService> _logger;
 
         public ModerationService(
             IStoryRepository storyRepository,
             IChapterRepository chapterRepository,
             IStoryService storyService,
             IChapterService chapterService,
-            IModerationHubNotifier? moderationHubNotifier = null,
-            INotificationHubNotifier? notificationHubNotifier = null)
+            ILogger<ModerationService> logger,
+            IModerationHubNotifier? moderationHubNotifier = null)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
             _storyService = storyService;
             _chapterService = chapterService;
+            _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
-            _notificationHubNotifier = notificationHubNotifier;
         }
 
         public PagedResultDto<StoryListItemDto> GetPendingStories(int page = 1, int pageSize = 20, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null)
@@ -57,27 +57,6 @@ namespace Services.Implementations
                     : new List<Guid>();
             }
 
-            // Truyện có ít nhất một chương PENDING_REVIEW cũng hiển thị trong danh sách chờ duyệt (dù truyện đã PUBLISHED)
-            List<Guid>? alsoIncludeStoryIds = null;
-            var chapterQuery = new ChapterQueryDto
-            {
-                Status = "PENDING_REVIEW",
-                Page = 1,
-                PageSize = 10000,
-                StoryIds = categoryIdsFilter != null && categoryIdsFilter.Count > 0
-                    ? _storyRepository.GetStoryIdsByCategoryIds(categoryIdsFilter).ToList()
-                    : null
-            };
-            var pendingChaptersResult = _chapterService.GetAll(chapterQuery);
-            var storyIdsWithPendingChapters = pendingChaptersResult.Items
-                .Select(c => c.StoryId)
-                .Where(id => id.HasValue)
-                .Select(id => id!.Value)
-                .Distinct()
-                .ToList();
-            if (storyIdsWithPendingChapters.Count > 0)
-                alsoIncludeStoryIds = storyIdsWithPendingChapters;
-
             var query = new StoryQueryDto
             {
                 Status = "PENDING_REVIEW",
@@ -88,8 +67,7 @@ namespace Services.Implementations
                 SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "asc",
                 CategoryIds = categoryIdsFilter != null ? categoryIdsFilter.ToList() : null,
                 ExcludeStoryIds = excludeStoryIds != null && excludeStoryIds.Count > 0 ? excludeStoryIds : null,
-                IncludeStoryIds = includeStoryIds != null && includeStoryIds.Count > 0 ? includeStoryIds : null,
-                AlsoIncludeStoryIds = alsoIncludeStoryIds
+                IncludeStoryIds = includeStoryIds != null && includeStoryIds.Count > 0 ? includeStoryIds : null
             };
             var result = _storyService.GetAll(query);
             foreach (var item in result.Items)
@@ -160,32 +138,38 @@ namespace Services.Implementations
             return result;
         }
 
-        public PagedResultDto<ChapterListItemDto> GetReviewedChapters(int page = 1, int pageSize = 20, string status = "REJECTED", string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, IReadOnlyList<Guid>? reviewedByModeratorChapterIds = null)
+        public PagedResultDto<ChapterListItemDto> GetReviewedChapters(int page, int pageSize, string? search, string? sortBy, string? sortOrder, string? claimFilter, IReadOnlyList<Guid>? categoryIdsFilter, IReadOnlyList<Guid>? storyIdsFilter)
         {
-            var statusUpper = (status ?? "REJECTED").Trim().ToUpperInvariant();
-            if (statusUpper != "REJECTED" && statusUpper != "PUBLISHED")
-                return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+            if (page < 1) page = 1;
+            if (pageSize < 1) pageSize = 20;
 
-            if (reviewedByModeratorChapterIds != null && reviewedByModeratorChapterIds.Count == 0)
-                return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+            List<Guid>? storyIdsByCategory = null;
+            if (categoryIdsFilter != null && categoryIdsFilter.Count > 0)
+                storyIdsByCategory = _storyRepository.GetStoryIdsByCategoryIds(categoryIdsFilter).ToList();
 
-            // Khi lấy từ moderator_logs (IncludeChapterIds) thì không lọc theo category để hiển thị đủ chương moderator đã duyệt/từ chối.
-            List<Guid>? storyIdsFilter = null;
-            if (reviewedByModeratorChapterIds == null && categoryIdsFilter != null && categoryIdsFilter.Count > 0)
-                storyIdsFilter = _storyRepository.GetStoryIdsByCategoryIds(categoryIdsFilter).ToList();
+            List<Guid>? combinedStoryIds = null;
+            if (storyIdsByCategory != null && storyIdsByCategory.Count > 0)
+                combinedStoryIds = storyIdsByCategory;
+            if (storyIdsFilter != null && storyIdsFilter.Count > 0)
+                combinedStoryIds = combinedStoryIds == null ? storyIdsFilter.ToList() : combinedStoryIds.Where(s => storyIdsFilter.Contains(s)).ToList();
+
+            if (categoryIdsFilter != null && categoryIdsFilter.Count == 0)
+                return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+            if (combinedStoryIds != null && combinedStoryIds.Count == 0)
+                return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
 
             var query = new ChapterQueryDto
             {
+                StatusIn = new List<string> { "APPROVED", "REJECTED" },
+                StoryIds = combinedStoryIds,
                 Page = page,
                 PageSize = pageSize,
-                Status = statusUpper,
-                StoryIds = storyIdsFilter,
-                IncludeChapterIds = reviewedByModeratorChapterIds?.ToList(),
                 Search = search,
                 SortBy = !string.IsNullOrWhiteSpace(sortBy) ? sortBy : "updated_at",
                 SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "desc"
             };
-            return _chapterService.GetAll(query);
+            var result = _chapterService.GetAll(query);
+            return result;
         }
 
         public bool ClaimStory(Guid storyId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
@@ -193,15 +177,8 @@ namespace Services.Implementations
             if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
                 return false;
             var story = _storyRepository.GetById(storyId);
-            if (story == null)
+            if (story == null || story.status != "PENDING_REVIEW")
                 return false;
-            // Cho phép claim khi truyện PENDING_REVIEW hoặc khi truyện có ít nhất một chương PENDING_REVIEW (truyện đã có chương publish nhưng còn chương chờ duyệt)
-            if (story.status != "PENDING_REVIEW")
-            {
-                var storyChapters = _chapterRepository.GetByStoryId(storyId);
-                if (!storyChapters.Any(c => string.Equals(c.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase)))
-                    return false;
-            }
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
                 return false;
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, storyId))
@@ -290,28 +267,48 @@ namespace Services.Implementations
 
         public bool ApproveChapter(Guid chapterId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
         {
+            Console.WriteLine($"[CONSOLE] ModerationService.ApproveChapter ENTER ChapterId={chapterId}");
             if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
+            {
+                Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: allowedCategoryIds empty");
                 return false;
+            }
             var chapter = _chapterRepository.GetById(chapterId);
             if (chapter == null)
+            {
+                Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: chapter not found ChapterId={chapterId}");
                 return false;
+            }
+            Console.WriteLine($"[CONSOLE] ApproveChapter chapter found Status={chapter.status} StoryId={chapter.story_id}");
             if (chapter.status != "PENDING_REVIEW")
+            {
+                Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: status not PENDING_REVIEW (current={chapter.status})");
                 return false;
+            }
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && chapter.story_id.HasValue)
             {
                 var story = StoryDAO.GetById(chapter.story_id.Value);
                 if (story == null || !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
+                {
+                    Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: story not found or category not allowed");
                     return false;
+                }
             }
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId))
+            {
+                Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: chapter locked by another moderator");
                 return false;
+            }
 
             chapter.status = "PUBLISHED";
             chapter.published_at = DateTime.Now;
             chapter.updated_at = DateTime.Now;
             _chapterRepository.Update(chapter);
 
-            // Cập nhật last_published_at của story nếu cần
+            // Cập nhật last_published_at của story nếu cần và gửi thông báo cho user follow story
+            Console.WriteLine($"[CONSOLE] ApproveChapter ChapterId={chapterId} StoryId={chapter.story_id} HasStoryId={chapter.story_id.HasValue}");
+            _logger.LogWarning("[NOTIFY] ApproveChapter ChapterId={ChapterId} StoryId={StoryId} HasStoryId={HasValue}",
+                chapterId, chapter.story_id, chapter.story_id.HasValue);
             if (chapter.story_id.HasValue)
             {
                 var story = StoryDAO.GetById(chapter.story_id.Value);
@@ -320,6 +317,14 @@ namespace Services.Implementations
                     story.last_published_at = DateTime.Now;
                     StoryDAO.Update(story);
                 }
+                Console.WriteLine($"[CONSOLE] ApproveChapter calling NotifyStoryFollowersNewChapter StoryId={chapter.story_id.Value} ChapterId={chapterId} StoryTitle={story?.title ?? "(null)"}");
+                _logger.LogWarning("[NOTIFY] ApproveChapter calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id.Value, chapterId);
+                NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapterId, chapter.title, story?.title, _logger);
+            }
+            else
+            {
+                Console.WriteLine($"[CONSOLE] ApproveChapter SKIP notify: chapter has no story_id ChapterId={chapterId}");
+                _logger.LogWarning("[NOTIFY] ApproveChapter SKIP notify: chapter has no story_id ChapterId={ChapterId}", chapterId);
             }
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
@@ -361,7 +366,7 @@ namespace Services.Implementations
             return true;
         }
 
-        private void NotifyStoryResult(stories story, string action, string? rejectionReason)
+        private static void NotifyStoryResult(stories story, string action, string? rejectionReason)
         {
             if (story.author_id == null) return;
             var title = action == "APPROVED"
@@ -371,24 +376,21 @@ namespace Services.Implementations
                 ? $"Truyện \"{story.title}\" đã được phê duyệt và xuất bản."
                 : $"Truyện \"{story.title}\" không được phê duyệt. Lý do: {rejectionReason}";
             var linkUrl = $"/Stories/Details/{story.id}";
-            var id = Guid.NewGuid();
-            var createdAt = DateTime.Now;
+            if (action == "REJECTED") linkUrl = $"/Stories/Details/{story.id}"; // Author xem truyện để thấy lý do
             NotificationDAO.Add(new notifications
             {
-                id = id,
+                id = Guid.NewGuid(),
                 user_id = story.author_id,
                 type = "STORY_" + action,
                 title = title,
                 content = content,
                 link_url = linkUrl,
                 is_read = false,
-                created_at = createdAt
+                created_at = DateTime.Now
             });
-            var dto = new NotificationDto { Id = id, Type = "STORY_" + action, Title = title, Content = content, LinkUrl = linkUrl, IsRead = false, CreatedAt = createdAt };
-            _ = _notificationHubNotifier?.NotifyUserAsync(story.author_id.Value, dto);
         }
 
-        private void NotifyChapterResult(chapters chapter, string action, string? rejectionReason)
+        private static void NotifyChapterResult(chapters chapter, string action, string? rejectionReason)
         {
             var story = chapter.story_id.HasValue ? StoryDAO.GetById(chapter.story_id.Value) : null;
             if (story?.author_id == null) return;
@@ -400,21 +402,17 @@ namespace Services.Implementations
                 : $"Chapter \"{chapter.title}\" không được phê duyệt. Lý do: {rejectionReason}";
             var linkUrl = chapter.story_id.HasValue ? $"/Stories/Details/{chapter.story_id}" : "/Chapters/Index";
             if (action == "REJECTED") linkUrl = $"/Chapters/Index?storyId={chapter.story_id}";
-            var id = Guid.NewGuid();
-            var createdAt = DateTime.Now;
             NotificationDAO.Add(new notifications
             {
-                id = id,
+                id = Guid.NewGuid(),
                 user_id = story.author_id,
                 type = "CHAPTER_" + action,
                 title = title,
                 content = content,
                 link_url = linkUrl,
                 is_read = false,
-                created_at = createdAt
+                created_at = DateTime.Now
             });
-            var dto = new NotificationDto { Id = id, Type = "CHAPTER_" + action, Title = title, Content = content, LinkUrl = linkUrl, IsRead = false, CreatedAt = createdAt };
-            _ = _notificationHubNotifier?.NotifyUserAsync(story.author_id.Value, dto);
         }
 
         private static void LogModeration(string targetType, Guid targetId, string action, Guid moderatorId, string? rejectionReason)
