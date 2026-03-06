@@ -27,6 +27,8 @@ public partial class comments
 
     public virtual ICollection<comments> Inverseparent { get; set; } = new List<comments>();
 
+    public virtual ICollection<comment_reactions> comment_reactions { get; set; } = new List<comment_reactions>();
+
     public virtual comments? parent { get; set; }
 
     public virtual stories? story { get; set; }
