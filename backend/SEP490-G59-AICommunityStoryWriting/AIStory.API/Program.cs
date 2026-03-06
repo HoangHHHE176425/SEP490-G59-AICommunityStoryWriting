@@ -1,8 +1,10 @@
+using AIStory.API.Hubs;
 using AIStory.Services.Helpers;
 using AIStory.Services.Implementations;
 using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -34,21 +36,24 @@ namespace AIStory.API
             // Add services
             // =======================
 
+            builder.Services.AddMemoryCache();
             builder.Services.AddControllers()
                 .AddJsonOptions(options =>
                 {
                     options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
                     options.JsonSerializerOptions.WriteIndented = true;
                 });
-            builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
-                options.UseSqlServer(
-                    builder.Configuration.GetConnectionString("DefaultConnection") 
-                    ?? "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
-                    sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
-                        maxRetryCount: 5,
-                        maxRetryDelay: TimeSpan.FromSeconds(30),
-                        errorNumbersToAdd: null)
-                ));
+            // Connection chỉ cấu hình trong StoryPlatformDbContext.OnConfiguring
+            // builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
+            //     options.UseSqlServer(
+            //         builder.Configuration.GetConnectionString("DefaultConnection")
+            //         ?? "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+            //         sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
+            //             maxRetryCount: 5,
+            //             maxRetryDelay: TimeSpan.FromSeconds(30),
+            //             errorNumbersToAdd: null)
+            //     ));
+            builder.Services.AddDbContext<StoryPlatformDbContext>();
             // CORS Configuration
             builder.Services.AddCors(options =>
             {
@@ -94,6 +99,10 @@ namespace AIStory.API
             builder.Services.AddScoped<IAdminPolicyService, AdminPolicyService>();
             builder.Services.AddScoped<IAdminUserService, AdminUserService>();
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
+            builder.Services.AddScoped<IModerationService, ModerationService>();
+            builder.Services.AddSignalR();
+            builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
+            builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
 
 
             var jwtKey = builder.Configuration["Jwt:Key"];
@@ -119,6 +128,20 @@ namespace AIStory.API
                             // Use the standard ASP.NET Core role claim type.
                             // JwtHelper also emits ClaimTypes.Role, so [Authorize(Roles=...)] works reliably.
                             RoleClaimType = ClaimTypes.Role
+                        };
+                        // SignalR: accept JWT from query string (WebSocket cannot send custom headers)
+                        options.Events = new JwtBearerEvents
+                        {
+                            OnMessageReceived = context =>
+                            {
+                                var accessToken = context.Request.Query["access_token"];
+                                var path = context.HttpContext.Request.Path;
+                                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                                {
+                                    context.Token = accessToken;
+                                }
+                                return Task.CompletedTask;
+                            }
                         };
                     });
             }
@@ -206,6 +229,8 @@ namespace AIStory.API
             app.UseAuthorization();
 
             app.MapControllers();
+            app.MapHub<ModeratorHub>("/hubs/moderator");
+            app.MapHub<NotificationHub>("/hubs/notifications");
             app.Run();
         }
     }

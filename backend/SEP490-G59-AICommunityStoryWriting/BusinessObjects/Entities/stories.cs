@@ -55,6 +55,8 @@ public partial class stories
 
     public virtual ICollection<story_commitments> story_commitments { get; set; } = new List<story_commitments>();
 
+    public virtual ICollection<story_versions> story_versions { get; set; } = new List<story_versions>();
+
     public virtual ICollection<user_library> user_library { get; set; } = new List<user_library>();
 
     public virtual ICollection<categories> category { get; set; } = new List<categories>();

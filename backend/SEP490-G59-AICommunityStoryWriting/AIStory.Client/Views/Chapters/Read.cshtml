@@ -9,7 +9,7 @@
         <div class="container py-2">
             <div class="d-flex justify-content-between align-items-center">
                 <div>
-                    <a href="/Stories" class="btn btn-sm btn-outline-secondary">
+                    <a href="/" class="btn btn-sm btn-outline-secondary">
                         <i class="bi bi-arrow-left"></i> Quay lại
                     </a>
                     <span class="ms-2" id="storyTitleHeader">Đang tải...</span>
@@ -133,6 +133,18 @@
         let currentChapterIndex = -1;
 
         document.addEventListener('DOMContentLoaded', function() {
+            // Bắt buộc đăng nhập mới được đọc chapter
+            if (!AuthHelper.isAuthenticated()) {
+                if (typeof Utils !== 'undefined') {
+                    Utils.showAlert('Vui lòng đăng nhập để đọc chapter.', 'warning');
+                }
+                const returnUrl = encodeURIComponent(window.location.pathname + window.location.search);
+                setTimeout(() => {
+                    window.location.href = '/Auth/Login?returnUrl=' + returnUrl;
+                }, 800);
+                return;
+            }
+
             loadChapter();
         });
 
@@ -158,12 +170,12 @@
                     const story = await ApiService.getStoryById(storyId);
                     if (story && story.title) {
                         document.getElementById('storyTitleHeader').textContent = story.title;
-                        document.getElementById('backToStoryLink').href = `/Stories/Details/${encodeURIComponent(storyId)}`;
+                        document.getElementById('backToStoryLink').href = `/Home/Story/${encodeURIComponent(storyId)}`;
                     }
                 } catch (error) {
                     console.warn('Không thể tải thông tin story:', error);
                     document.getElementById('storyTitleHeader').textContent = 'Đang tải...';
-                    document.getElementById('backToStoryLink').href = '/Stories';
+                    document.getElementById('backToStoryLink').href = '/';
                 }
 
                 // Load all chapters for navigation - non-critical, show warning if fails

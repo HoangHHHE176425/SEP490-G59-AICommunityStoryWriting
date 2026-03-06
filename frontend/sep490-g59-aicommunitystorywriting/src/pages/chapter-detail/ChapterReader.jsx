@@ -71,22 +71,32 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                         author: storyRes?.authorName ?? storyRes?.AuthorName ?? 'Ẩn danh',
                     });
                     const orderIndex = chapterRes?.orderIndex ?? chapterRes?.OrderIndex ?? 0;
+                    const accessType = (chapterRes?.accessType ?? chapterRes?.AccessType ?? 'FREE').toUpperCase();
+                    const coinPrice = Number(chapterRes?.coinPrice ?? chapterRes?.CoinPrice ?? 0) || 0;
+                    const isPaidLocked = accessType === 'PAID' && coinPrice > 0;
                     const content = chapterRes?.content ?? chapterRes?.Content ?? '';
                     const wordCount = (content.trim().split(/\s+/).filter(Boolean).length) || 0;
                     setChapter({
                         number: orderIndex + 1,
                         title: chapterRes?.title ?? chapterRes?.Title ?? 'Không có tiêu đề',
-                        content: content || 'Chưa có nội dung.',
+                        content: isPaidLocked ? '' : (content || 'Chưa có nội dung.'),
                         publishedAt: chapterRes?.publishedAt ?? chapterRes?.PublishedAt ?? chapterRes?.updatedAt ? formatTimeAgo(chapterRes.updatedAt ?? chapterRes.UpdatedAt) : '',
                         views: Number(chapterRes?.viewCount ?? chapterRes?.ViewCount ?? 0) || 0,
                         words: wordCount,
+                        isPaidLocked,
+                        coinPrice,
                     });
-                    setAllChapters(rawChapters.map((ch, idx) => ({
-                        number: (ch.orderIndex ?? ch.OrderIndex ?? idx) + 1,
-                        title: ch.title ?? ch.Title ?? `Chương ${idx + 1}`,
-                        chapterId: ch.id ?? ch.Id,
-                        isLocked: false,
-                    })));
+                    setAllChapters(rawChapters.map((ch, idx) => {
+                        const chAccess = (ch.accessType ?? ch.AccessType ?? 'FREE').toUpperCase();
+                        const chPrice = Number(ch.coinPrice ?? ch.CoinPrice ?? 0) || 0;
+                        return {
+                            number: (ch.orderIndex ?? ch.OrderIndex ?? idx) + 1,
+                            title: ch.title ?? ch.Title ?? `Chương ${idx + 1}`,
+                            chapterId: ch.id ?? ch.Id,
+                            isLocked: chAccess === 'PAID' && chPrice > 0,
+                            coinPrice: chPrice,
+                        };
+                    }));
                 })
                 .catch((err) => {
                     if (!cancelled) {
@@ -114,6 +124,8 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         publishedAt: '',
         views: 0,
         words: 0,
+        isPaidLocked: false,
+        coinPrice: 0,
     };
 
     const chapterForContent = chapter || {
@@ -123,6 +135,8 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         publishedAt: '',
         views: 0,
         words: 0,
+        isPaidLocked: false,
+        coinPrice: 0,
     };
 
     const comments = [
@@ -284,6 +298,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                 backgroundColor={backgroundColor}
                 textColor={textColor}
                 lineHeight={lineHeight}
+                onPayClick={() => {}}
             />
 
             {/* Navigation Buttons */}

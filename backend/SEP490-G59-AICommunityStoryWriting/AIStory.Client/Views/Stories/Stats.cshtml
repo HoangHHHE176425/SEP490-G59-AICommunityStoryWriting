@@ -1,0 +1,217 @@
+﻿@{
+    ViewData["Title"] = "Story Stats & Rating (Test)";
+    var storyId = ViewBag.StoryId;
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="mb-0">Story Stats & Rating (Test)</h3>
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-secondary" href="/Stories">
+                <i class="bi bi-list"></i> Danh sách
+            </a>
+            <a class="btn btn-outline-primary" href="/Stories/Details/@(storyId)">
+                <i class="bi bi-wrench"></i> Quản lý (AUTHOR)
+            </a>
+        </div>
+    </div>
+
+    <div class="card mb-3" id="storyCard">
+        <div class="card-body">
+            <div class="text-center">
+                <div class="spinner-border text-primary" role="status"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-7">
+            <div class="card">
+                <div class="card-header">
+                    <strong>Thông tin thống kê</strong>
+                </div>
+                <div class="card-body">
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <div class="p-3 border rounded">
+                                <div class="text-muted small">Tổng lượt xem</div>
+                                <div class="fs-5" id="statViews">-</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="p-3 border rounded">
+                                <div class="text-muted small">Tổng bình luận (APPROVED)</div>
+                                <div class="fs-5" id="statComments">-</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="p-3 border rounded">
+                                <div class="text-muted small">Tổng chương</div>
+                                <div class="fs-5" id="statChapters">-</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="p-3 border rounded">
+                                <div class="text-muted small">Cập nhật gần nhất</div>
+                                <div class="fs-6" id="statLatestUpdatedAt">-</div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <div class="p-3 border rounded">
+                                <div class="text-muted small">Đánh giá trung bình</div>
+                                <div class="fs-5">
+                                    <span id="statAvgRating">0.00</span><span class="text-muted">/5.00</span>
+                                </div>
+                                <div class="small text-muted mt-1" id="statRatingHint">
+                                    (Điểm trung bình được cập nhật sau khi bạn rating)
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card">
+                <div class="card-header">
+                    <strong>Test Rating 1–5 sao</strong>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-warning small" id="ratingAuthWarning" style="display:none;">
+                        Bạn cần đăng nhập để rating. (Backend cũng chặn nếu chưa đọc truyện)
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Chọn số sao</label>
+                        <div class="btn-group w-100" role="group" aria-label="Star rating">
+                            <input type="radio" class="btn-check" name="starValue" id="star1" value="1">
+                            <label class="btn btn-outline-warning" for="star1">1</label>
+                            <input type="radio" class="btn-check" name="starValue" id="star2" value="2">
+                            <label class="btn btn-outline-warning" for="star2">2</label>
+                            <input type="radio" class="btn-check" name="starValue" id="star3" value="3">
+                            <label class="btn btn-outline-warning" for="star3">3</label>
+                            <input type="radio" class="btn-check" name="starValue" id="star4" value="4">
+                            <label class="btn btn-outline-warning" for="star4">4</label>
+                            <input type="radio" class="btn-check" name="starValue" id="star5" value="5" checked>
+                            <label class="btn btn-outline-warning" for="star5">5</label>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Review (optional)</label>
+                        <textarea class="form-control" id="reviewText" rows="3" placeholder="Nhập cảm nhận..."></textarea>
+                    </div>
+
+                    <button class="btn btn-primary w-100" id="submitRatingBtn" onclick="submitRating()">
+                        <i class="bi bi-star-fill"></i> Gửi đánh giá
+                    </button>
+
+                    <div class="mt-3 small" id="ratingResult"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const storyId = '@(storyId)';
+        let story = null;
+
+        document.addEventListener('DOMContentLoaded', async function () {
+            try {
+                await AuthHelper.loadUserInfo().catch(() => {});
+                if (!AuthHelper.isAuthenticated()) {
+                    document.getElementById('ratingAuthWarning').style.display = 'block';
+                    document.getElementById('submitRatingBtn').disabled = true;
+                }
+                await loadStory();
+            } catch (e) {
+                Utils.showAlert('Lỗi load trang: ' + (e?.message || e), 'danger');
+            }
+        });
+
+        async function loadStory() {
+            story = await ApiService.getStoryById(storyId);
+            renderStoryHeader();
+            renderStats();
+        }
+
+        function renderStoryHeader() {
+            const el = document.getElementById('storyCard');
+            el.innerHTML = `
+                <div class="card-body">
+                    <div class="d-flex gap-3 align-items-start">
+                        <div style="width: 90px;">
+                            ${story.coverImage
+                                ? `<img src="http://localhost:5000${story.coverImage}" class="img-fluid rounded" alt="${story.title}">`
+                                : `<div class="bg-secondary rounded d-flex align-items-center justify-content-center" style="height: 90px;">
+                                        <i class="bi bi-image text-white"></i>
+                                   </div>`}
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="d-flex justify-content-between gap-2 flex-wrap">
+                                <div>
+                                    <h4 class="mb-1">${story.title}</h4>
+                                    <div class="text-muted small">${story.slug || ''}</div>
+                                </div>
+                                <div class="text-end">
+                                    <span class="badge bg-secondary">${story.status || 'N/A'}</span>
+                                    <span class="badge bg-primary">${story.categoryNames || 'N/A'}</span>
+                                </div>
+                            </div>
+                            <div class="mt-2 text-muted">${story.summary || 'Chưa có tóm tắt'}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderStats() {
+            const totalViews = story.totalViews ?? story.TotalViews ?? 0;
+            const totalComments = story.totalComments ?? story.TotalComments ?? 0;
+            const totalChapters = story.totalChapters ?? story.TotalChapters ?? 0;
+            const latestUpdatedAt = story.latestUpdatedAt ?? story.LatestUpdatedAt ?? story.updatedAt ?? story.UpdatedAt;
+            const avgRating = story.avgRating ?? story.AvgRating ?? 0;
+
+            document.getElementById('statViews').textContent = Utils.formatNumber(totalViews);
+            document.getElementById('statComments').textContent = Utils.formatNumber(totalComments);
+            document.getElementById('statChapters').textContent = Utils.formatNumber(totalChapters);
+            document.getElementById('statLatestUpdatedAt').textContent = latestUpdatedAt ? Utils.formatDate(latestUpdatedAt) : 'N/A';
+            document.getElementById('statAvgRating').textContent = (avgRating ? Number(avgRating).toFixed(2) : '0.00');
+        }
+
+        function getSelectedStar() {
+            const checked = document.querySelector('input[name="starValue"]:checked');
+            return checked ? parseInt(checked.value) : 5;
+        }
+
+        async function submitRating() {
+            const resultEl = document.getElementById('ratingResult');
+            resultEl.innerHTML = '';
+
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để rating.', 'warning');
+                return;
+            }
+
+            try {
+                const payload = {
+                    starValue: getSelectedStar(),
+                    reviewText: document.getElementById('reviewText').value || null
+                };
+                const res = await ApiService.rateStory(storyId, payload);
+                resultEl.innerHTML = `<div class="alert alert-success py-2 mb-0">
+                    Rating OK. Avg: <strong>${Number(res.avgRating).toFixed(2)}</strong> (${res.ratingCount} ratings)
+                </div>`;
+                await loadStory(); // reload to see updated avg
+            } catch (e) {
+                resultEl.innerHTML = `<div class="alert alert-danger py-2 mb-0">
+                    ${e?.message || e}
+                </div>`;
+            }
+        }
+    </script>
+}
+
