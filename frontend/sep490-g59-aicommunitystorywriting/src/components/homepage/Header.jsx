@@ -1,9 +1,10 @@
 import { Search, Bell, Edit, BookOpen, Menu, X, ChevronDown, Wallet, User, Library, LogOut } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { getAllCategories } from '../../api/category/categoryApi';
+import { getNotifications, getUnreadCount, markNotificationAsRead } from '../../api/notification/notificationApi';
 
 export function Header() {
     const navigate = useNavigate();
@@ -11,10 +12,42 @@ export function Header() {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isGenreOpen, setIsGenreOpen] = useState(false);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+    const [isNotificationOpen, setIsNotificationOpen] = useState(false);
     const [categories, setCategories] = useState([]);
     const [categoriesLoading, setCategoriesLoading] = useState(true);
+    const [notifications, setNotifications] = useState([]);
+    const [unreadCount, setUnreadCount] = useState(0);
+    const [notificationsLoading, setNotificationsLoading] = useState(false);
 
     const userCoins = user?.stats?.currentCoins ?? 0;
+
+    const fetchNotifications = useCallback(() => {
+        if (!isAuthenticated) return;
+        setNotificationsLoading(true);
+        Promise.all([getNotifications({ limit: 30 }), getUnreadCount()])
+            .then(([list, countRes]) => {
+                setNotifications(Array.isArray(list) ? list : []);
+                setUnreadCount(countRes?.count ?? 0);
+            })
+            .catch(() => {
+                setNotifications([]);
+                setUnreadCount(0);
+            })
+            .finally(() => setNotificationsLoading(false));
+    }, [isAuthenticated]);
+
+    useEffect(() => {
+        if (!isAuthenticated) return;
+        const t = setTimeout(() => fetchNotifications(), 0);
+        return () => clearTimeout(t);
+    }, [isAuthenticated, fetchNotifications]);
+
+    useEffect(() => {
+        if (!isAuthenticated) return;
+        const handler = () => fetchNotifications();
+        window.addEventListener('app:notification', handler);
+        return () => window.removeEventListener('app:notification', handler);
+    }, [isAuthenticated, fetchNotifications]);
 
     const handleLogout = async () => {
         await logout();
@@ -133,10 +166,63 @@ export function Header() {
                                     <span className="text-sm font-bold text-amber-400">{userCoins.toLocaleString()}</span>
                                 </Link>
 
-                                <button className="p-2 text-slate-300 hover:bg-slate-800 rounded-full transition-colors relative">
-                                    <Bell className="w-5 h-5" />
-                                    <span className="absolute top-2 right-2 size-2 bg-primary border-2 border-slate-900 rounded-full"></span>
-                                </button>
+                                <div className="relative">
+                                    <button
+                                        className="p-2 text-slate-300 hover:bg-slate-800 rounded-full transition-colors relative"
+                                        onClick={() => setIsNotificationOpen((prev) => !prev)}
+                                        onBlur={() => setTimeout(() => setIsNotificationOpen(false), 200)}
+                                    >
+                                        <Bell className="w-5 h-5" />
+                                        {unreadCount > 0 && (
+                                            <span className="absolute top-1.5 right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-primary text-white text-xs font-bold rounded-full border-2 border-slate-900">
+                                                {unreadCount > 99 ? '99+' : unreadCount}
+                                            </span>
+                                        )}
+                                    </button>
+                                    {isNotificationOpen && (
+                                        <div
+                                            className="absolute top-full right-0 mt-2 w-80 max-h-[400px] bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden z-50 flex flex-col"
+                                            onMouseDown={(e) => e.preventDefault()}
+                                        >
+                                            <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                                                <span className="font-semibold text-white">Thông báo</span>
+                                                {unreadCount > 0 && (
+                                                    <span className="text-xs text-slate-400">{unreadCount} chưa đọc</span>
+                                                )}
+                                            </div>
+                                            <div className="overflow-y-auto flex-1">
+                                                {notificationsLoading ? (
+                                                    <div className="px-4 py-6 text-center text-slate-400 text-sm">Đang tải...</div>
+                                                ) : notifications.length === 0 ? (
+                                                    <div className="px-4 py-6 text-center text-slate-400 text-sm">Chưa có thông báo</div>
+                                                ) : (
+                                                    notifications.map((n) => (
+                                                        <Link
+                                                            key={n.id}
+                                                            to={n.linkUrl && n.linkUrl.startsWith('/') ? n.linkUrl : '/home'}
+                                                            className="block px-4 py-3 border-b border-slate-700/50 hover:bg-slate-700/50 transition-colors"
+                                                            onClick={async () => {
+                                                                if (!n.isRead) {
+                                                                    try {
+                                                                        await markNotificationAsRead(n.id);
+                                                                        setUnreadCount((c) => Math.max(0, c - 1));
+                                                                        setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)));
+                                                                    } catch {
+                                                                        // ignore
+                                                                    }
+                                                                }
+                                                                setIsNotificationOpen(false);
+                                                            }}
+                                                        >
+                                                            <p className={`text-sm font-medium ${n.isRead ? 'text-slate-400' : 'text-white'}`}>{n.title}</p>
+                                                            <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.content}</p>
+                                                        </Link>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
 
                                 <Link
                                     to="/author"

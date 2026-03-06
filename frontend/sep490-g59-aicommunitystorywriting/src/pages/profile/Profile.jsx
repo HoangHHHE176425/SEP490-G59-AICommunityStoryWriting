@@ -97,11 +97,10 @@ export default function Profile() {
                                     <button
                                         key={tab.id}
                                         onClick={() => setActiveTab(tab.id)}
-                                        className={`flex items-center gap-2 px-4 py-4 font-semibold text-sm transition-colors border-b-2 ${
-                                            isActive
+                                        className={`flex items-center gap-2 px-4 py-4 font-semibold text-sm transition-colors border-b-2 ${isActive
                                                 ? 'text-primary border-primary'
                                                 : 'text-slate-500 dark:text-slate-400 border-transparent hover:text-primary'
-                                        }`}
+                                            }`}
                                     >
                                         <Icon className="w-5 h-5" />
                                         {tab.label}

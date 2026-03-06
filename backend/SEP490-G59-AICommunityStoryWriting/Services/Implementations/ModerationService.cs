@@ -2,6 +2,7 @@ using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Repositories;
 using Services.DTOs.Chapters;
+using Services.DTOs.Notifications;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 
@@ -14,19 +15,22 @@ namespace Services.Implementations
         private readonly IStoryService _storyService;
         private readonly IChapterService _chapterService;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
+        private readonly INotificationHubNotifier? _notificationHubNotifier;
 
         public ModerationService(
             IStoryRepository storyRepository,
             IChapterRepository chapterRepository,
             IStoryService storyService,
             IChapterService chapterService,
-            IModerationHubNotifier? moderationHubNotifier = null)
+            IModerationHubNotifier? moderationHubNotifier = null,
+            INotificationHubNotifier? notificationHubNotifier = null)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
             _storyService = storyService;
             _chapterService = chapterService;
             _moderationHubNotifier = moderationHubNotifier;
+            _notificationHubNotifier = notificationHubNotifier;
         }
 
         public PagedResultDto<StoryListItemDto> GetPendingStories(int page = 1, int pageSize = 20, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null)
@@ -357,7 +361,7 @@ namespace Services.Implementations
             return true;
         }
 
-        private static void NotifyStoryResult(stories story, string action, string? rejectionReason)
+        private void NotifyStoryResult(stories story, string action, string? rejectionReason)
         {
             if (story.author_id == null) return;
             var title = action == "APPROVED"
@@ -367,21 +371,24 @@ namespace Services.Implementations
                 ? $"Truyện \"{story.title}\" đã được phê duyệt và xuất bản."
                 : $"Truyện \"{story.title}\" không được phê duyệt. Lý do: {rejectionReason}";
             var linkUrl = $"/Stories/Details/{story.id}";
-            if (action == "REJECTED") linkUrl = $"/Stories/Details/{story.id}"; // Author xem truyện để thấy lý do
+            var id = Guid.NewGuid();
+            var createdAt = DateTime.Now;
             NotificationDAO.Add(new notifications
             {
-                id = Guid.NewGuid(),
+                id = id,
                 user_id = story.author_id,
                 type = "STORY_" + action,
                 title = title,
                 content = content,
                 link_url = linkUrl,
                 is_read = false,
-                created_at = DateTime.Now
+                created_at = createdAt
             });
+            var dto = new NotificationDto { Id = id, Type = "STORY_" + action, Title = title, Content = content, LinkUrl = linkUrl, IsRead = false, CreatedAt = createdAt };
+            _ = _notificationHubNotifier?.NotifyUserAsync(story.author_id.Value, dto);
         }
 
-        private static void NotifyChapterResult(chapters chapter, string action, string? rejectionReason)
+        private void NotifyChapterResult(chapters chapter, string action, string? rejectionReason)
         {
             var story = chapter.story_id.HasValue ? StoryDAO.GetById(chapter.story_id.Value) : null;
             if (story?.author_id == null) return;
@@ -393,17 +400,21 @@ namespace Services.Implementations
                 : $"Chapter \"{chapter.title}\" không được phê duyệt. Lý do: {rejectionReason}";
             var linkUrl = chapter.story_id.HasValue ? $"/Stories/Details/{chapter.story_id}" : "/Chapters/Index";
             if (action == "REJECTED") linkUrl = $"/Chapters/Index?storyId={chapter.story_id}";
+            var id = Guid.NewGuid();
+            var createdAt = DateTime.Now;
             NotificationDAO.Add(new notifications
             {
-                id = Guid.NewGuid(),
+                id = id,
                 user_id = story.author_id,
                 type = "CHAPTER_" + action,
                 title = title,
                 content = content,
                 link_url = linkUrl,
                 is_read = false,
-                created_at = DateTime.Now
+                created_at = createdAt
             });
+            var dto = new NotificationDto { Id = id, Type = "CHAPTER_" + action, Title = title, Content = content, LinkUrl = linkUrl, IsRead = false, CreatedAt = createdAt };
+            _ = _notificationHubNotifier?.NotifyUserAsync(story.author_id.Value, dto);
         }
 
         private static void LogModeration(string targetType, Guid targetId, string action, Guid moderatorId, string? rejectionReason)
