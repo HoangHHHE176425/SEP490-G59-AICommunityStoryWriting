@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.Chapters
+namespace Services.DTOs.Chapters
 {
     public class ChapterListItemDto
     {
@@ -21,5 +21,10 @@
         public string? ClaimedByDisplayName { get; set; }
         /// <summary>Trong queue moderator: thời điểm nhận duyệt.</summary>
         public DateTime? ClaimedAt { get; set; }
+
+        /// <summary>Lý do từ chối (khi status = REJECTED), lấy từ moderator_logs.</summary>
+        public string? RejectionReason { get; set; }
+        /// <summary>Thời điểm từ chối.</summary>
+        public DateTime? RejectedAt { get; set; }
     }
 }
