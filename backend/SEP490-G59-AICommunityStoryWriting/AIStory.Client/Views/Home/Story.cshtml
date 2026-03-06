@@ -63,6 +63,24 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Modal: Danh sách người đã reaction comment -->
+            <div class="modal fade" id="commentReactionsModal" tabindex="-1">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title"><i class="bi bi-emoji-smile me-1"></i> Người đã thả cảm xúc</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                        </div>
+                        <div class="modal-body" id="commentReactionsModalBody">
+                            <div class="text-center py-3"><div class="spinner-border text-primary"></div></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         <div class="col-lg-4">
             <div class="card mb-3">
@@ -288,6 +306,16 @@
                 .replace(/'/g, '&#039;');
         }
 
+        const COMMENT_REACTIONS = [
+            { type: 'LIKE', icon: 'bi-hand-thumbs-up', label: 'Thích' },
+            { type: 'DISLIKE', icon: 'bi-hand-thumbs-down', label: 'Không thích' },
+            { type: 'FUNNY', icon: 'bi-emoji-laughing', label: 'Buồn cười' },
+            { type: 'SAD', icon: 'bi-emoji-frown', label: 'Buồn' },
+            { type: 'ANGRY', icon: 'bi-emoji-angry', label: 'Phẫn nộ' },
+            { type: 'LOVE', icon: 'bi-heart-fill', label: 'Yêu thích' },
+            { type: 'WOW', icon: 'bi-emoji-surprise', label: 'Wow' }
+        ];
+
         function renderComments(list) {
             const container = document.getElementById('commentsList');
             document.getElementById('commentsCountBadge').textContent = (list || []).length;
@@ -305,15 +333,14 @@
                 byParent.get(pid).push(c);
             }
 
-            // Stable order by createdAt (backend already ordered), keep insertion order
             function renderNode(c, depth) {
                 const name = escapeHtml(c.userDisplayName || 'Ẩn danh');
                 const time = c.createdAt ? Utils.formatDate(c.createdAt) : '';
                 const content = escapeHtml(c.content || '');
                 const canReply = AuthHelper && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated();
-                const likesCount = c.likesCount ?? c.likes_count ?? 0;
-                const userHasLiked = c.userHasLiked === true;
-                const canLike = AuthHelper && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated();
+                const canReact = AuthHelper && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated();
+                const reactionCounts = c.reactionCounts || {};
+                const userReactionType = c.userReactionType || null;
 
                 const isReplyingHere = replyingToCommentId && replyingToCommentId === c.id;
                 const replyBadge = isReplyingHere
@@ -324,10 +351,20 @@
                     ? `<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" onclick="startReply('${c.id}', '${name.replace(/'/g, '\\&#039;')}')">Trả lời</button>`
                     : '';
 
-                const likeIcon = userHasLiked ? 'bi-heart-fill text-danger' : 'bi-heart';
-                const likeBtn = canLike
-                    ? `<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none like-comment-btn" onclick="toggleCommentLike('${c.id}')" title="Thả cảm xúc"><i class="bi ${likeIcon}"></i> <span class="like-count">${likesCount}</span></button>`
-                    : `<span class="text-muted small" title="Đăng nhập để thả cảm xúc"><i class="bi bi-heart"></i> ${likesCount}</span>`;
+                const reactionBtns = COMMENT_REACTIONS.map(r => {
+                    const count = reactionCounts[r.type] ?? 0;
+                    const isActive = userReactionType === r.type;
+                    const cur = (userReactionType || '').replace(/'/g, "\\'");
+                    if (canReact) {
+                        return `<button type="button" class="btn btn-link btn-sm p-0 px-1 text-decoration-none comment-reaction-btn ${isActive ? 'text-primary fw-bold' : 'text-muted'}" data-type="${r.type}" data-comment-id="${c.id}" title="${r.label}" onclick="setCommentReaction('${c.id}', '${r.type}', '${cur}')"><i class="bi ${r.icon}"></i> <span class="reaction-count" data-type="${r.type}">${count}</span></button>`;
+                    }
+                    return `<span class="text-muted small px-1" title="${r.label}"><i class="bi ${r.icon}"></i> ${count}</span>`;
+                }).join('');
+
+                const totalReactions = Object.values(reactionCounts).reduce((a, b) => a + b, 0);
+                const totalReactionsHtml = totalReactions > 0
+                    ? ` <span class="text-muted small text-decoration-underline" style="cursor:pointer" onclick="openCommentReactionsModal('${c.id}')" title="Xem tất cả người đã thả cảm xúc" role="button">(${totalReactions} reaction)</span>`
+                    : '';
 
                 const children = byParent.get(c.id) || [];
                 const indent = Math.min(depth, 6) * 16;
@@ -339,9 +376,9 @@
                             <div class="text-muted small">${time}</div>
                         </div>
                         <div class="mb-1">${content}</div>
-                        <div class="small text-muted d-flex gap-2 align-items-center flex-wrap">
+                        <div class="small d-flex gap-2 align-items-center flex-wrap">
                             ${replyBtn}
-                            ${likeBtn}
+                            <span class="d-flex gap-1 align-items-center flex-wrap reaction-bar">${reactionBtns}</span>${totalReactionsHtml}
                         </div>
                         ${children.length ? children.map(ch => renderNode(ch, depth + 1)).join('') : ''}
                     </div>
@@ -415,6 +452,52 @@
             } catch (e) {
                 console.error(e);
                 await loadComments();
+            }
+        }
+
+        async function setCommentReaction(commentId, reactionType, currentUserReaction) {
+            if (!AuthHelper || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) return;
+            const toSet = (currentUserReaction === reactionType) ? null : reactionType;
+            try {
+                await ApiService.setCommentReaction(storyId, commentId, toSet);
+                await loadComments();
+            } catch (e) {
+                console.error(e);
+                await loadComments();
+            }
+        }
+
+        async function openCommentReactionsModal(commentId) {
+            const modalEl = document.getElementById('commentReactionsModal');
+            const bodyEl = document.getElementById('commentReactionsModalBody');
+            if (!modalEl || !bodyEl) return;
+            bodyEl.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary"></div></div>';
+            const modal = typeof bootstrap !== 'undefined' && bootstrap.Modal ? new bootstrap.Modal(modalEl) : null;
+            if (modal) modal.show();
+            try {
+                const list = await ApiService.getCommentReactions(storyId, commentId) || [];
+                const typeToIcon = Object.fromEntries(COMMENT_REACTIONS.map(r => [r.type, r.icon]));
+                const typeToLabel = Object.fromEntries(COMMENT_REACTIONS.map(r => [r.type, r.label]));
+                if (list.length === 0) {
+                    bodyEl.innerHTML = '<p class="text-muted mb-0">Chưa có ai thả cảm xúc.</p>';
+                } else {
+                    bodyEl.innerHTML = '<ul class="list-group list-group-flush">' + list.map(item => {
+                        const icon = typeToIcon[item.reactionType] || 'bi-emoji-smile';
+                        const label = typeToLabel[item.reactionType] || item.reactionType;
+                        const name = escapeHtml(item.userDisplayName || 'Ẩn danh');
+                        return `<li class="list-group-item d-flex align-items-center gap-2 py-2">
+                            <i class="bi ${icon} text-primary" title="${escapeHtml(label)}"></i>
+                            <span>${name}</span>
+                        </li>`;
+                    }).join('') + '</ul>';
+                }
+            } catch (e) {
+                const msg = e?.message || String(e);
+                const isNotFound = /not found|404/i.test(msg);
+                const hint = isNotFound
+                    ? ' Kiểm tra: (1) Ứng dụng API (AIStory.API) đã chạy chưa (port 5000?), (2) Trong Client appsettings.json, GivenAPIBaseUrl trỏ đúng địa chỉ API.'
+                    : '';
+                bodyEl.innerHTML = '<p class="text-danger mb-0">Không tải được danh sách: ' + escapeHtml(msg) + escapeHtml(hint) + '</p>';
             }
         }
 
