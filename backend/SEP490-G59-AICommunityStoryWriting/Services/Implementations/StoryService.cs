@@ -379,6 +379,10 @@ namespace Services.Implementations
             story.updated_at = DateTime.Now;
 
             _storyRepository.Update(story);
+
+            // Giải phóng đơn đã nhận (claim) của moderator khi tác giả hủy xuất bản truyện.
+            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeStory, id);
+
             return true;
         }
 

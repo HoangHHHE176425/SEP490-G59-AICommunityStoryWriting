@@ -413,6 +413,11 @@ namespace Services.Implementations
             chapter.updated_at = DateTime.Now;
 
             _chapterRepository.Update(chapter);
+
+            // Giải phóng đơn đã nhận (claim) của moderator khi tác giả hủy xuất bản — để chương có thể hiển thị lại trong "Nhận duyệt đơn" khi tác giả gửi xuất bản lại.
+            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, id);
+
+            _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
 
