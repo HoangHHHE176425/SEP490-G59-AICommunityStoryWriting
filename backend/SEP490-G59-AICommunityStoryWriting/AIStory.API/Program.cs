@@ -16,6 +16,7 @@ using Services.Interfaces;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using Services.Integrations.PayOS;
 
 namespace AIStory.API
 {
@@ -86,6 +87,10 @@ namespace AIStory.API
             builder.Services.AddScoped<ICategoryService, CategoryService>();
             builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
             builder.Services.AddScoped<IChapterService, ChapterService>();
+
+            // Payments / Coin recharge
+            builder.Services.AddHttpClient<PayOSClient>();
+            builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
 
             // Policies
             builder.Services.AddScoped<IPolicyRepository, PolicyRepository>();
