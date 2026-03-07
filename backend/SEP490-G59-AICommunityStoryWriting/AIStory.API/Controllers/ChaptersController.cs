@@ -230,9 +230,11 @@ namespace AIStory.API.Controllers
                 var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
                 if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
                     return Forbid();
-                if (chapter.Status != "REJECTED")
+                // Chỉ ẩn lịch sử từ chối khi chapter đã được duyệt (PUBLISHED). Khi gửi lại (PENDING_REVIEW) vẫn hiển thị.
+                if (chapter.Status == "PUBLISHED")
                     return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
-                return Ok(new { reason = chapter.RejectionReason, rejectedAt = chapter.RejectedAt });
+                var (reason, rejectedAt) = _chapterService.GetLatestRejectionForChapter(id);
+                return Ok(new { reason, rejectedAt });
             }
             catch (Exception ex)
             {

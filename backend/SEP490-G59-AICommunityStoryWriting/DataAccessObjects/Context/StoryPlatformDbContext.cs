@@ -50,6 +50,8 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<coin_packages> coin_packages { get; set; }
 
+    public virtual DbSet<comment_reactions> comment_reactions { get; set; }
+
     public virtual DbSet<comments> comments { get; set; }
 
     public virtual DbSet<daily_statistics> daily_statistics { get; set; }
@@ -115,7 +117,7 @@ public partial class StoryPlatformDbContext : DbContext
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer(
-                "Server= localhost;uid=sa;password=a123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                "Server= localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                     maxRetryCount: 5,
                     maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -409,6 +411,24 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.is_active).HasDefaultValue(true);
             entity.Property(e => e.name).HasMaxLength(100);
             entity.Property(e => e.price_amount).HasColumnType("decimal(15, 2)");
+        });
+
+        modelBuilder.Entity<comment_reactions>(entity =>
+        {
+            entity.HasKey(e => new { e.user_id, e.comment_id }).HasName("PK__comment___D7C7606794177090");
+
+            entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.reaction_type).HasMaxLength(20);
+
+            entity.HasOne(d => d.comment).WithMany(p => p.comment_reactions)
+                .HasForeignKey(d => d.comment_id)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("fk_creact_comment");
+
+            entity.HasOne(d => d.user).WithMany(p => p.comment_reactions)
+                .HasForeignKey(d => d.user_id)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("fk_creact_user");
         });
 
         modelBuilder.Entity<comments>(entity =>

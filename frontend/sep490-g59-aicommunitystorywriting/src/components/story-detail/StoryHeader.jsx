@@ -1,6 +1,14 @@
 import { Star, Play, Bookmark, Flag } from 'lucide-react';
 
-export function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, onOpenReport, onReadStory }) {
+/** Format số để hiển thị: 1234 -> 1.2K, 1234567 -> 1.2M, nhỏ thì hiển thị nguyên. */
+function formatStatNumber(n) {
+    const num = Number(n) || 0;
+    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+    if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+    return num.toLocaleString();
+}
+
+export default function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, onOpenReport, onReadStory }) {
     return (
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="p-6">
@@ -61,14 +69,14 @@ export function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, 
                             </div>
                         </div>
 
-                        {/* Stats */}
+                        {/* Stats - số liệu từ API: totalViews, comments */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
                             <div>
                                 <div className="text-slate-500 dark:text-slate-400 text-xs mb-1">
                                     Lượt xem
                                 </div>
                                 <p className="font-bold text-slate-900 dark:text-white">
-                                    {(story.totalViews / 1000000).toFixed(1)}M
+                                    {formatStatNumber(story.totalViews ?? story.views ?? 0)}
                                 </p>
                             </div>
                             <div>
@@ -76,7 +84,7 @@ export function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, 
                                     Bình luận
                                 </div>
                                 <p className="font-bold text-slate-900 dark:text-white">
-                                    {(story.comments / 1000).toFixed(1)}K
+                                    {formatStatNumber(story.comments ?? 0)}
                                 </p>
                             </div>
                             <div>
