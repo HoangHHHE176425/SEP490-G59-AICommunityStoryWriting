@@ -348,3 +348,22 @@ export async function rejectStory(id, storyData) {
         status: 'REJECTED',
     });
 }
+
+/**
+ * Đánh giá truyện (1–5 sao). Bắt buộc đăng nhập. BE chặn nếu chưa đọc (chưa có log đọc chapter/story).
+ * @param {string} storyId - Guid truyện
+ * @param {Object} payload - { starValue: number (1..5), reviewText?: string }
+ * @returns {Promise<{ avgRating: number, ratingCount: number }>}
+ * @throws Nếu 400: message thường là "Bạn cần đọc truyện trước khi đánh giá."
+ */
+export async function rateStory(storyId, payload) {
+    const starValue = Number(payload.starValue);
+    if (starValue < 1 || starValue > 5) {
+        throw new Error('Số sao phải từ 1 đến 5.');
+    }
+    const response = await axiosInstance.post(`/stories/${storyId}/ratings`, {
+        starValue,
+        reviewText: payload.reviewText != null ? String(payload.reviewText).trim() || null : null,
+    });
+    return response.data;
+}
