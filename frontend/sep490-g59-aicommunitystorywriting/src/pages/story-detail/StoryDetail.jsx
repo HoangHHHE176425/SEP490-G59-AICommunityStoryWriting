@@ -1,7 +1,7 @@
 import { ChevronRight, Star } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { StoryHeader } from '../../components/story-detail/StoryHeader';
+import StoryHeader from '../../components/story-detail/StoryHeader';
 import { ChapterList } from '../../components/story-detail/ChapterList';
 import { CommentSection } from '../../components/story-detail/CommentSection';
 import { AuthorCard } from '../../components/story-detail/AuthorCard';
@@ -16,6 +16,7 @@ import {
     getViewerKeyForViewCache,
     hasViewedStoryInCooldown,
     setStoryViewCache,
+    rateStory,
 } from '../../api/story/storyApi';
 import { getChapters } from '../../api/chapter/chapterApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
@@ -51,6 +52,8 @@ export function StoryDetail() {
     const [isReportCommentModalOpen, setIsReportCommentModalOpen] = useState(false);
     const [isReportStoryModalOpen, setIsReportStoryModalOpen] = useState(false);
     const [reportingCommentId, setReportingCommentId] = useState(null);
+    const [ratingError, setRatingError] = useState(null);
+    const [ratingSubmitting, setRatingSubmitting] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -278,9 +281,39 @@ export function StoryDetail() {
         setIsReportCommentModalOpen(true);
     };
 
-    const handleSubmitRating = (rating, review) => {
-        console.log('Rating submitted:', rating, review);
-        // Handle rating submission
+    const handleSubmitRating = async (starValue, reviewText) => {
+        if (!storyId) return;
+        if (!user?.id) {
+            setRatingError('Vui lòng đăng nhập để đánh giá.');
+            return;
+        }
+        setRatingError(null);
+        setRatingSubmitting(true);
+        try {
+            const data = await rateStory(storyId, { starValue, reviewText });
+            setStory((prev) => (prev ? { ...prev, rating: data.avgRating ?? data.avg, totalRatings: data.ratingCount ?? data.count ?? 0 } : prev));
+            setIsRatingModalOpen(false);
+        } catch (err) {
+            const status = err?.response?.status;
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể gửi đánh giá.';
+            if (status === 401) {
+                setRatingError('Vui lòng đăng nhập để đánh giá.');
+            } else {
+                setRatingError(msg);
+            }
+        } finally {
+            setRatingSubmitting(false);
+        }
+    };
+
+    const handleOpenRating = () => {
+        setRatingError(null);
+        setIsRatingModalOpen(true);
+    };
+
+    const handleCloseRatingModal = () => {
+        setIsRatingModalOpen(false);
+        setRatingError(null);
     };
 
     const handleSubmitCommentReport = (reason, details) => {
@@ -335,7 +368,7 @@ export function StoryDetail() {
                             story={story}
                             isFollowing={isFollowing}
                             onToggleFollow={() => setIsFollowing(!isFollowing)}
-                            onOpenRating={() => setIsRatingModalOpen(true)}
+                            onOpenRating={handleOpenRating}
                             onOpenReport={() => setIsReportStoryModalOpen(true)}
                             onReadStory={() => {
                                 const first = chapters[0];
@@ -415,8 +448,10 @@ export function StoryDetail() {
             {/* Modals */}
             <RatingModal
                 isOpen={isRatingModalOpen}
-                onClose={() => setIsRatingModalOpen(false)}
+                onClose={handleCloseRatingModal}
                 onSubmit={handleSubmitRating}
+                errorMessage={ratingError}
+                submitting={ratingSubmitting}
             />
 
             <ReportModal

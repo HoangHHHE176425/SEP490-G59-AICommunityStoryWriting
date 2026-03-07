@@ -8,7 +8,7 @@ function formatStatNumber(n) {
     return num.toLocaleString();
 }
 
-export function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, onOpenReport, onReadStory }) {
+export default function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, onOpenReport, onReadStory }) {
     return (
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="p-6">
