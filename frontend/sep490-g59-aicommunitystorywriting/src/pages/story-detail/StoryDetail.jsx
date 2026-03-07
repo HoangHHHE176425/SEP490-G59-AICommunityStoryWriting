@@ -22,6 +22,7 @@ import { getChapters } from '../../api/chapter/chapterApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../components/author/story-editor/Toast';
 
 function formatTimeAgo(dateStr) {
     if (!dateStr) return '';
@@ -54,6 +55,7 @@ export function StoryDetail() {
     const [reportingCommentId, setReportingCommentId] = useState(null);
     const [ratingError, setRatingError] = useState(null);
     const [ratingSubmitting, setRatingSubmitting] = useState(false);
+    const { showToast, ToastContainer } = useToast();
 
     useEffect(() => {
         let cancelled = false;
@@ -293,6 +295,7 @@ export function StoryDetail() {
             const data = await rateStory(storyId, { starValue, reviewText });
             setStory((prev) => (prev ? { ...prev, rating: data.avgRating ?? data.avg, totalRatings: data.ratingCount ?? data.count ?? 0 } : prev));
             setIsRatingModalOpen(false);
+            showToast('Đánh giá thành công!', 'success');
         } catch (err) {
             const status = err?.response?.status;
             const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể gửi đánh giá.';
@@ -469,6 +472,7 @@ export function StoryDetail() {
                 title="Báo cáo truyện"
                 type="story"
             />
+            <ToastContainer />
             <Footer />
         </div>
     );
