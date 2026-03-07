@@ -138,38 +138,78 @@ namespace Services.Implementations
             return result;
         }
 
-        public PagedResultDto<ChapterListItemDto> GetReviewedChapters(int page, int pageSize, string? search, string? sortBy, string? sortOrder, string? claimFilter, IReadOnlyList<Guid>? categoryIdsFilter, IReadOnlyList<Guid>? storyIdsFilter)
+        public PagedResultDto<StoryListItemDto> GetReviewedStories(int page, int pageSize, string status, string? search, string? sortBy, string? sortOrder, IReadOnlyList<Guid>? categoryIdsFilter, Guid? moderatorId, bool isAdmin)
         {
             if (page < 1) page = 1;
             if (pageSize < 1) pageSize = 20;
+            var statusUpper = (status ?? "").Trim().ToUpperInvariant();
+            if (statusUpper != "PUBLISHED" && statusUpper != "REJECTED")
+                return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
 
-            List<Guid>? storyIdsByCategory = null;
-            if (categoryIdsFilter != null && categoryIdsFilter.Count > 0)
-                storyIdsByCategory = _storyRepository.GetStoryIdsByCategoryIds(categoryIdsFilter).ToList();
+            List<Guid>? includeStoryIds = null;
+            if (!isAdmin && moderatorId.HasValue)
+            {
+                var action = statusUpper == "PUBLISHED" ? "APPROVED" : "REJECTED";
+                includeStoryIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "STORY", action);
+                if (includeStoryIds == null || includeStoryIds.Count == 0)
+                    return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+            }
 
-            List<Guid>? combinedStoryIds = null;
-            if (storyIdsByCategory != null && storyIdsByCategory.Count > 0)
-                combinedStoryIds = storyIdsByCategory;
-            if (storyIdsFilter != null && storyIdsFilter.Count > 0)
-                combinedStoryIds = combinedStoryIds == null ? storyIdsFilter.ToList() : combinedStoryIds.Where(s => storyIdsFilter.Contains(s)).ToList();
+            var query = new StoryQueryDto
+            {
+                Status = statusUpper,
+                Page = page,
+                PageSize = pageSize,
+                Search = search,
+                SortBy = !string.IsNullOrWhiteSpace(sortBy) ? sortBy : "updated_at",
+                SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "desc",
+                CategoryIds = isAdmin ? (categoryIdsFilter != null ? categoryIdsFilter.ToList() : null) : null,
+                IncludeStoryIds = includeStoryIds
+            };
+            return _storyService.GetAll(query);
+        }
 
-            if (categoryIdsFilter != null && categoryIdsFilter.Count == 0)
+        public PagedResultDto<ChapterListItemDto> GetReviewedChapters(int page, int pageSize, string status, string? search, string? sortBy, string? sortOrder, IReadOnlyList<Guid>? categoryIdsFilter, Guid? moderatorId, bool isAdmin)
+        {
+            if (page < 1) page = 1;
+            if (pageSize < 1) pageSize = 20;
+            var statusUpper = (status ?? "").Trim().ToUpperInvariant();
+            if (statusUpper != "PUBLISHED" && statusUpper != "REJECTED")
                 return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
-            if (combinedStoryIds != null && combinedStoryIds.Count == 0)
+
+            List<Guid>? storyIdsFilter = null;
+            List<Guid>? includeChapterIds = null;
+
+            if (isAdmin && categoryIdsFilter != null && categoryIdsFilter.Count > 0)
+                storyIdsFilter = _storyRepository.GetStoryIdsByCategoryIds(categoryIdsFilter).ToList();
+            if (!isAdmin && moderatorId.HasValue)
+            {
+                var action = statusUpper == "PUBLISHED" ? "APPROVED" : "REJECTED";
+                includeChapterIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "CHAPTER", action);
+                if (includeChapterIds == null || includeChapterIds.Count == 0)
+                    return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+            }
+
+            if (!isAdmin && (categoryIdsFilter == null || categoryIdsFilter.Count == 0))
+                storyIdsFilter = null;
+
+            if (isAdmin && categoryIdsFilter != null && categoryIdsFilter.Count == 0)
+                return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+            if (storyIdsFilter != null && storyIdsFilter.Count == 0)
                 return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
 
             var query = new ChapterQueryDto
             {
-                StatusIn = new List<string> { "APPROVED", "REJECTED" },
-                StoryIds = combinedStoryIds,
+                Status = statusUpper,
+                StoryIds = storyIdsFilter,
+                IncludeChapterIds = includeChapterIds,
                 Page = page,
                 PageSize = pageSize,
                 Search = search,
                 SortBy = !string.IsNullOrWhiteSpace(sortBy) ? sortBy : "updated_at",
                 SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "desc"
             };
-            var result = _chapterService.GetAll(query);
-            return result;
+            return _chapterService.GetAll(query);
         }
 
         public bool ClaimStory(Guid storyId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
