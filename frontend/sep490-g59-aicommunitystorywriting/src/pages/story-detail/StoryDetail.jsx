@@ -65,6 +65,7 @@ export function StoryDetail() {
     const [commentError, setCommentError] = useState(null);
     const [reviews, setReviews] = useState([]);
     const [reviewsLoading, setReviewsLoading] = useState(false);
+    const [visibleReviewsCount, setVisibleReviewsCount] = useState(5);
 
     useEffect(() => {
         let cancelled = false;
@@ -107,7 +108,7 @@ export function StoryDetail() {
                         genre: genreArr.length ? genreArr : ['Chưa phân loại'],
                         status: 'Đang cập nhật',
                         rating: Number(storyRes?.avgRating ?? storyRes?.AvgRating ?? 0) || 0,
-                        totalRatings: Number(storyRes?.totalRatings ?? 0) || 0,
+                        totalRatings: Number(storyRes?.totalRatings ?? storyRes?.TotalRatings ?? 0) || 0,
                         views: totalViews,
                         totalViews,
                         comments: totalComments,
@@ -193,9 +194,14 @@ export function StoryDetail() {
             .finally(() => setReviewsLoading(false));
     }, [storyId]);
 
+    // Load đánh giá ngay khi có storyId để tab hiển thị đúng số (0) trước khi user click tab
     useEffect(() => {
-        if (storyId && activeTab === 'reviews') loadReviews();
-    }, [storyId, activeTab, loadReviews]);
+        if (storyId) loadReviews();
+    }, [storyId, loadReviews]);
+
+    useEffect(() => {
+        if (activeTab === 'reviews') setVisibleReviewsCount(5);
+    }, [activeTab]);
 
     const handleAddComment = async (content, parentId) => {
         if (!storyId) return;
@@ -392,7 +398,7 @@ export function StoryDetail() {
                                             : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                                             }`}
                                     >
-                                        Đánh giá ({story.totalRatings.toLocaleString()})
+                                        Đánh giá ({(reviews.length > 0 ? reviews.length : (story.totalRatings ?? 0)).toLocaleString()})
                                     </button>
                                 </div>
                             </div>
@@ -424,35 +430,46 @@ export function StoryDetail() {
                                                 <p className="text-slate-500 dark:text-slate-400">Chưa có đánh giá nào</p>
                                             </div>
                                         ) : (
-                                            <div className="space-y-4">
-                                                {reviews.map((r) => {
-                                                    const name = r.userDisplayName ?? r.UserDisplayName ?? 'Ẩn danh';
-                                                    const stars = Number(r.starValue ?? r.StarValue ?? 0);
-                                                    const text = r.reviewText ?? r.ReviewText ?? '';
-                                                    const createdAt = r.createdAt ?? r.CreatedAt;
-                                                    return (
-                                                        <div key={r.id ?? r.Id} className="flex gap-3 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                                                            <div className="w-10 h-10 rounded-full bg-primary/20 shrink-0 flex items-center justify-center text-primary font-bold text-sm">
-                                                                {(name || '?').charAt(0).toUpperCase()}
-                                                            </div>
-                                                            <div className="flex-1 min-w-0">
-                                                                <div className="flex items-center gap-2 flex-wrap">
-                                                                    <span className="font-semibold text-slate-900 dark:text-white text-sm">{name}</span>
-                                                                    <span className="flex items-center gap-0.5">
-                                                                        {[1, 2, 3, 4, 5].map((i) => (
-                                                                            <Star key={i} className={`w-4 h-4 ${i <= stars ? 'fill-amber-400 text-amber-400' : 'text-slate-300 dark:text-slate-600'}`} />
-                                                                        ))}
-                                                                    </span>
-                                                                    {createdAt && (
-                                                                        <span className="text-xs text-slate-500 dark:text-slate-400">{formatTimeAgo(createdAt)}</span>
-                                                                    )}
+                                            <>
+                                                <div className="space-y-4">
+                                                    {reviews.slice(0, visibleReviewsCount).map((r) => {
+                                                        const name = r.userDisplayName ?? r.UserDisplayName ?? 'Ẩn danh';
+                                                        const stars = Number(r.starValue ?? r.StarValue ?? 0);
+                                                        const text = r.reviewText ?? r.ReviewText ?? '';
+                                                        const createdAt = r.createdAt ?? r.CreatedAt;
+                                                        return (
+                                                            <div key={r.id ?? r.Id} className="flex gap-3 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                                                                <div className="w-10 h-10 rounded-full bg-primary/20 shrink-0 flex items-center justify-center text-primary font-bold text-sm">
+                                                                    {(name || '?').charAt(0).toUpperCase()}
                                                                 </div>
-                                                                {text && <p className="text-slate-600 dark:text-slate-400 text-sm mt-1 whitespace-pre-wrap">{text}</p>}
+                                                                <div className="flex-1 min-w-0">
+                                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                                        <span className="font-semibold text-slate-900 dark:text-white text-sm">{name}</span>
+                                                                        <span className="flex items-center gap-0.5">
+                                                                            {[1, 2, 3, 4, 5].map((i) => (
+                                                                                <Star key={i} className={`w-4 h-4 ${i <= stars ? 'fill-amber-400 text-amber-400' : 'text-slate-300 dark:text-slate-600'}`} />
+                                                                            ))}
+                                                                        </span>
+                                                                        {createdAt && (
+                                                                            <span className="text-xs text-slate-500 dark:text-slate-400">{formatTimeAgo(createdAt)}</span>
+                                                                        )}
+                                                                    </div>
+                                                                    {text && <p className="text-slate-600 dark:text-slate-400 text-sm mt-1 whitespace-pre-wrap">{text}</p>}
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {reviews.length > visibleReviewsCount && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setVisibleReviewsCount((n) => n + 5)}
+                                                        className="mt-4 text-sm text-primary hover:underline"
+                                                    >
+                                                        Xem thêm đánh giá ({reviews.length - visibleReviewsCount})
+                                                    </button>
+                                                )}
+                                            </>
                                         )}
                                     </>
                                 )}

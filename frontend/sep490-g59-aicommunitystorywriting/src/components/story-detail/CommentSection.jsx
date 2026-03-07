@@ -158,7 +158,7 @@ export function CommentSection({
     onReportComment,
     formatTimeAgo,
 }) {
-    const [visibleCount, setVisibleCount] = useState(10);
+    const [visibleCount, setVisibleCount] = useState(5);
     const [newCommentText, setNewCommentText] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [replyingTo, setReplyingTo] = useState(null);
@@ -255,7 +255,7 @@ export function CommentSection({
                     {flatCount > visibleCount && (
                         <button
                             type="button"
-                            onClick={() => setVisibleCount((n) => n + 10)}
+                            onClick={() => setVisibleCount((n) => n + 5)}
                             className="text-sm text-primary hover:underline"
                         >
                             Xem thêm bình luận ({flatCount - visibleCount})
