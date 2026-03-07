@@ -52,12 +52,12 @@ export default function PolicyPage() {
     }, [type]);
 
     return (
-        <div className="w-full bg-white min-h-screen">
+        <div className="min-h-screen bg-background-light dark:bg-background-dark flex flex-col">
             <Header />
-            
+
             {/* Page Header */}
-            <div className="bg-gradient-to-r from-[#13EC5B] to-[#11D350] py-8">
-                <div className="max-w-4xl mx-auto px-4">
+            <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 py-8">
+                <div className="max-w-[1280px] mx-auto px-4">
                     <button
                         onClick={() => navigate(-1)}
                         className="mb-4 flex items-center gap-2 text-white hover:text-gray-100 transition-colors"
@@ -66,8 +66,8 @@ export default function PolicyPage() {
                         <span>Quay lại</span>
                     </button>
                     <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center">
-                            <Shield className="w-6 h-6 text-[#13EC5B]" />
+                        <div className="w-12 h-12 bg-white/95 rounded-xl flex items-center justify-center shadow-sm">
+                            <Shield className="w-6 h-6 text-emerald-500" />
                         </div>
                         <div>
                             <h1 className="text-3xl font-bold text-white">
@@ -82,78 +82,81 @@ export default function PolicyPage() {
             </div>
 
             {/* Content */}
-            <div className="max-w-4xl mx-auto px-4 py-8">
-                <div className="bg-white rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
-                    {/* Important Notice */}
-                    <div className="bg-gradient-to-r from-[#FFF4E6] to-[#FFF9F0] border-l-4 border-[#FFA500] p-4 rounded-lg">
-                        <div className="flex gap-3">
-                            <AlertCircle className="w-5 h-5 text-[#FFA500] flex-shrink-0 mt-0.5" />
-                            <div>
-                                <p className="font-semibold text-[#1A2332] mb-1">Thông Báo Quan Trọng</p>
-                                <p className="text-sm text-[#90A1B9] leading-relaxed">
-                                    Bằng việc tạo tài khoản và sử dụng dịch vụ CSW-AI, bạn xác nhận rằng bạn đã đọc kỹ, hiểu rõ
-                                    và đồng ý tuân thủ tất cả các điều khoản, chính sách và quy định được nêu trong tài liệu này.
-                                    Nếu bạn không đồng ý với bất kỳ điều khoản nào, vui lòng không sử dụng dịch vụ của chúng tôi.
-                                </p>
+            <div className="flex-1">
+                <div className="max-w-[1280px] mx-auto px-4 py-8">
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-200 dark:border-slate-700 p-6 md:p-8 space-y-6">
+                        {/* Important Notice */}
+                        <div className="bg-amber-50 dark:bg-amber-950/20 border-l-4 border-amber-500 p-4 rounded-lg">
+                            <div className="flex gap-3">
+                                <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="font-semibold text-slate-900 dark:text-white mb-1">Thông Báo Quan Trọng</p>
+                                    <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                                        Bằng việc tạo tài khoản và sử dụng dịch vụ CSW-AI, bạn xác nhận rằng bạn đã đọc kỹ, hiểu rõ
+                                        và đồng ý tuân thủ tất cả các điều khoản, chính sách và quy định được nêu trong tài liệu này.
+                                        Nếu bạn không đồng ý với bất kỳ điều khoản nào, vui lòng không sử dụng dịch vụ của chúng tôi.
+                                    </p>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    <div className="flex flex-wrap gap-2">
-                        {[
-                            { value: 'USER', label: 'Người dùng' },
-                            { value: 'AUTHOR', label: 'Tác giả' },
-                            { value: 'AI', label: 'AI' },
-                            { value: 'DEFAULT', label: 'Mặc định' },
-                        ].map((opt) => (
-                            <button
-                                key={opt.value}
-                                type="button"
-                                onClick={() => setSearchParams({ type: opt.value })}
-                                className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-colors ${
-                                    type === opt.value
-                                        ? 'bg-emerald-500 text-white'
-                                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                }`}
-                            >
-                                {opt.label}
-                            </button>
-                        ))}
-                    </div>
+                        <div className="flex flex-wrap gap-2">
+                            {[
+                                { value: 'USER', label: 'Người dùng' },
+                                { value: 'AUTHOR', label: 'Tác giả' },
+                                { value: 'AI', label: 'AI' },
+                                { value: 'DEFAULT', label: 'Mặc định' },
+                            ].map((opt) => (
+                                <button
+                                    key={opt.value}
+                                    type="button"
+                                    onClick={() => setSearchParams({ type: opt.value })}
+                                    className={`px-3 py-1.5 rounded-full text-sm font-semibold transition-colors ${
+                                        type === opt.value
+                                            ? 'bg-primary text-white'
+                                            : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                                    }`}
+                                >
+                                    {opt.label}
+                                </button>
+                            ))}
+                        </div>
 
-                    {loading ? (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                            Đang tải policy...
-                        </div>
-                    ) : error ? (
-                        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-                            {error}
-                        </div>
-                    ) : !policy ? (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                            Chưa có policy đang áp dụng cho loại <span className="font-semibold">{type}</span>. Vui lòng tạo policy (và bật active) trong database.
-                        </div>
-                    ) : (
-                        <>
-                            <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
-                                <span className="font-semibold text-slate-900">
-                                    {policy?.type ?? type}
-                                </span>
-                                {policy?.version ? (
-                                    <span className="rounded-full bg-slate-100 px-2 py-0.5">
-                                        v{policy.version}
-                                    </span>
-                                ) : null}
-                                {policy?.isActive === false ? (
-                                    <span className="rounded-full bg-amber-100 text-amber-900 px-2 py-0.5">
-                                        Không active
-                                    </span>
-                                ) : null}
+                        {loading ? (
+                            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-4 text-sm text-slate-600 dark:text-slate-300">
+                                Đang tải policy...
                             </div>
+                        ) : error ? (
+                            <div className="rounded-xl border border-red-200 dark:border-red-700 bg-red-50 dark:bg-red-950/40 p-4 text-sm text-red-800 dark:text-red-200">
+                                {error}
+                            </div>
+                        ) : !policy ? (
+                            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 p-4 text-sm text-slate-600 dark:text-slate-300">
+                                Chưa có policy đang áp dụng cho loại <span className="font-semibold">{type}</span>. Vui lòng tạo policy (và bật active) trong
+                                hệ thống quản trị.
+                            </div>
+                        ) : (
+                            <>
+                                <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                                    <span className="font-semibold text-slate-900 dark:text-white">
+                                        {policy?.type ?? type}
+                                    </span>
+                                    {policy?.version ? (
+                                        <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5">
+                                            v{policy.version}
+                                        </span>
+                                    ) : null}
+                                    {policy?.isActive === false ? (
+                                        <span className="rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 px-2 py-0.5">
+                                            Không active
+                                        </span>
+                                    ) : null}
+                                </div>
 
-                            <PolicyBody content={policy?.content} />
-                        </>
-                    )}
+                                <PolicyBody content={policy?.content} />
+                            </>
+                        )}
+                    </div>
                 </div>
             </div>
 
