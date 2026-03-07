@@ -367,3 +367,41 @@ export async function rateStory(storyId, payload) {
     });
     return response.data;
 }
+
+// --- Comments (GET/POST /api/stories/{id}/comments, POST like) ---
+
+/**
+ * Lấy danh sách comment của story (AllowAnonymous). Có đăng nhập thì mỗi comment có userHasLiked.
+ * @param {string} storyId - Guid
+ * @returns {Promise<Array>} StoryCommentDto[]
+ */
+export async function getStoryComments(storyId) {
+    const response = await axiosInstance.get(`/stories/${storyId}/comments`);
+    return Array.isArray(response.data) ? response.data : [];
+}
+
+/**
+ * Tạo comment hoặc reply (parentId). Bắt buộc login + đã đọc ít nhất 1 chapter.
+ * @param {string} storyId - Guid
+ * @param {Object} payload - { content: string, parentId?: string (Guid) }
+ * @returns {Promise<object>} Created comment DTO
+ */
+export async function addStoryComment(storyId, payload) {
+    const content = (payload.content ?? '').trim();
+    if (!content) throw new Error('Nội dung comment không được để trống.');
+    const body = { content };
+    if (payload.parentId) body.parentId = payload.parentId;
+    const response = await axiosInstance.post(`/stories/${storyId}/comments`, body);
+    return response.data;
+}
+
+/**
+ * Bật/tắt like comment. 1 user chỉ 1 lần/comment. [Authorize]
+ * @param {string} storyId - Guid
+ * @param {string} commentId - Guid
+ * @returns {Promise<{ liked: boolean, likesCount: number }>}
+ */
+export async function toggleCommentLike(storyId, commentId) {
+    const response = await axiosInstance.post(`/stories/${storyId}/comments/${commentId}/like`);
+    return response.data;
+}
