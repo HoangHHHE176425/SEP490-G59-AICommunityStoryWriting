@@ -35,6 +35,10 @@ function buildCommentTree(flatList) {
     return roots;
 }
 
+const INITIAL_COMMENTS = 3;
+const INITIAL_REPLIES = 3;
+const LOAD_MORE_STEP = 3;
+
 /** Block 1 comment + form trả lời. Định nghĩa ngoài CommentSection để không bị tạo lại mỗi lần render → tránh textarea reply mất focus khi gõ. */
 function CommentBlock({
     node,
@@ -49,6 +53,8 @@ function CommentBlock({
     isLoggedIn,
     onReportComment,
     formatTimeAgo,
+    visibleRepliesCount,
+    onShowMoreReplies,
 }) {
     const timeStr = node.createdAt ? (formatTimeAgo ? formatTimeAgo(node.createdAt) : new Date(node.createdAt).toLocaleString()) : '';
     return (
@@ -121,27 +127,41 @@ function CommentBlock({
                             </div>
                         </div>
                     )}
-                    {node.replies?.length > 0 && (
-                        <div className="mt-2 space-y-2">
-                            {node.replies.map((r) => (
-                                <CommentBlock
-                                    key={r.id}
-                                    node={r}
-                                    isReply
-                                    replyingTo={replyingTo}
-                                    onSetReplyingTo={onSetReplyingTo}
-                                    replyText={replyText}
-                                    onReplyTextChange={onReplyTextChange}
-                                    onSubmitReply={onSubmitReply}
-                                    submitting={submitting}
-                                    onLike={onLike}
-                                    isLoggedIn={isLoggedIn}
-                                    onReportComment={onReportComment}
-                                    formatTimeAgo={formatTimeAgo}
-                                />
-                            ))}
-                        </div>
-                    )}
+                    {node.replies?.length > 0 && (() => {
+                        const limit = visibleRepliesCount ?? node.replies.length;
+                        const visibleReplies = node.replies.slice(0, limit);
+                        const remaining = node.replies.length - limit;
+                        return (
+                            <div className="mt-2 space-y-2">
+                                {visibleReplies.map((r) => (
+                                    <CommentBlock
+                                        key={r.id}
+                                        node={r}
+                                        isReply
+                                        replyingTo={replyingTo}
+                                        onSetReplyingTo={onSetReplyingTo}
+                                        replyText={replyText}
+                                        onReplyTextChange={onReplyTextChange}
+                                        onSubmitReply={onSubmitReply}
+                                        submitting={submitting}
+                                        onLike={onLike}
+                                        isLoggedIn={isLoggedIn}
+                                        onReportComment={onReportComment}
+                                        formatTimeAgo={formatTimeAgo}
+                                    />
+                                ))}
+                                {remaining > 0 && onShowMoreReplies && (
+                                    <button
+                                        type="button"
+                                        onClick={() => onShowMoreReplies(node.id)}
+                                        className="text-sm text-primary hover:underline ml-10"
+                                    >
+                                        Xem thêm trả lời ({remaining})
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })()}
                 </div>
             </div>
         </div>
@@ -158,14 +178,14 @@ export function CommentSection({
     onReportComment,
     formatTimeAgo,
 }) {
-    const [visibleCount, setVisibleCount] = useState(5);
+    const [visibleCount, setVisibleCount] = useState(INITIAL_COMMENTS);
+    const [visibleRepliesByParent, setVisibleRepliesByParent] = useState({});
     const [newCommentText, setNewCommentText] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [replyingTo, setReplyingTo] = useState(null);
     const [replyText, setReplyText] = useState('');
 
     const tree = buildCommentTree(comments);
-    const flatCount = (comments ?? []).length;
     const visibleTree = tree.slice(0, visibleCount);
 
     const handleSubmitMain = async () => {
@@ -197,6 +217,10 @@ export function CommentSection({
         if (isLoggedIn && onLikeComment) onLikeComment(commentId);
     };
 
+    const showMoreReplies = (parentId) => {
+        setVisibleRepliesByParent((prev) => ({ ...prev, [parentId]: (prev[parentId] ?? INITIAL_REPLIES) + LOAD_MORE_STEP }));
+    };
+
     const commentBlockProps = {
         replyingTo,
         onSetReplyingTo: setReplyingTo,
@@ -208,6 +232,7 @@ export function CommentSection({
         isLoggedIn,
         onReportComment,
         formatTimeAgo,
+        onShowMoreReplies: showMoreReplies,
     };
 
     return (
@@ -249,16 +274,21 @@ export function CommentSection({
                 <>
                     <div className="space-y-4">
                         {visibleTree.map((node) => (
-                            <CommentBlock key={node.id} node={node} {...commentBlockProps} />
+                            <CommentBlock
+                                key={node.id}
+                                node={node}
+                                visibleRepliesCount={visibleRepliesByParent[node.id] ?? INITIAL_REPLIES}
+                                {...commentBlockProps}
+                            />
                         ))}
                     </div>
-                    {flatCount > visibleCount && (
+                    {tree.length > visibleCount && (
                         <button
                             type="button"
-                            onClick={() => setVisibleCount((n) => n + 5)}
+                            onClick={() => setVisibleCount((n) => n + LOAD_MORE_STEP)}
                             className="text-sm text-primary hover:underline"
                         >
-                            Xem thêm bình luận ({flatCount - visibleCount})
+                            Xem thêm bình luận ({tree.length - visibleCount})
                         </button>
                     )}
                 </>
