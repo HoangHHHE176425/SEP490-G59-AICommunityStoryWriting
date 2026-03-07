@@ -13,23 +13,27 @@ namespace Services.Implementations
 {
     public class AINextChapterService : IAINextChapterService
     {
-        private const int MaxChaptersToSend = 2;
-        private const int MaxCharsPerChapter = 2000;
         private const string ActionType = "SUGGEST_NEXT_CHAPTER";
 
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
+        private readonly IStoryRagService _ragService;
+        private readonly IStoryContextBuilder _contextBuilder;
         private readonly IAIUsageLogRepository _aiUsageLogRepository;
         private readonly IConfiguration _configuration;
 
         public AINextChapterService(
             IStoryRepository storyRepository,
             IChapterRepository chapterRepository,
+            IStoryRagService ragService,
+            IStoryContextBuilder contextBuilder,
             IAIUsageLogRepository aiUsageLogRepository,
             IConfiguration configuration)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
+            _ragService = ragService;
+            _contextBuilder = contextBuilder;
             _aiUsageLogRepository = aiUsageLogRepository;
             _configuration = configuration;
         }
@@ -58,14 +62,35 @@ namespace Services.Implementations
                     chaptersForContext = chapters.Where(c => c.order_index <= afterIdx.Value);
             }
 
-            var lastChapters = chaptersForContext.TakeLast(MaxChaptersToSend).ToList();
-            var contextBlock = BuildContextBlock(story, lastChapters);
+            // Memory Retrieval: RAG khi đã index, không thì Story Context (N chương)
+            string contextBlock;
+            await _ragService.TryEnsureIndexedAsync(request.StoryId, request.AfterChapterId, cancellationToken);
+            if (_ragService.IsRagAvailableForStory(request.StoryId))
+            {
+                var lastChapterContent = chaptersForContext.LastOrDefault()?.content ?? "";
+                var query = $"{story.summary ?? ""} {lastChapterContent}".Trim();
+                var ragBlock = await _ragService.RetrieveContextAsync(request.StoryId, query, maxChars: 8000, topK: 15, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(ragBlock))
+                    contextBlock = BuildContextBlockFromRag(story, ragBlock);
+                else
+                    contextBlock = _contextBuilder.BuildForSuggestNextChapter(request.StoryId, request.AfterChapterId);
+            }
+            else
+            {
+                contextBlock = _contextBuilder.BuildForSuggestNextChapter(request.StoryId, request.AfterChapterId);
+            }
+
+            if (string.IsNullOrWhiteSpace(contextBlock))
+                throw new InvalidOperationException("Truyện cần có ít nhất một chương đã có nội dung để gợi ý chương tiếp theo.");
+
+            var storyLanguage = StoryLanguageHelper.DetectFromStoryContext(contextBlock);
+            var languageInstruction = StoryLanguageHelper.GetLanguageInstruction(storyLanguage);
 
             var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfig(_configuration);
             var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
 
             var systemPrompt = GetSystemPrompt();
-            var userPrompt = GetUserPrompt(story, contextBlock);
+            var userPrompt = GetUserPrompt(story, contextBlock, languageInstruction);
             var messages = new List<ChatMessage>
             {
                 new SystemChatMessage(systemPrompt),
@@ -99,7 +124,7 @@ namespace Services.Implementations
             {
                 user_id = authorUserId,
                 story_id = request.StoryId,
-                chapter_id = lastChapters.LastOrDefault()?.id,
+                chapter_id = chaptersForContext.LastOrDefault()?.id,
                 action_type = ActionType,
                 model_name = model,
                 prompt_tokens = promptTokens,
@@ -120,37 +145,29 @@ namespace Services.Implementations
                 ContextUsed = new SuggestNextChapterContextDto
                 {
                     StoryTitle = story.title,
-                    ChaptersIncluded = lastChapters.Count
+                    ChaptersIncluded = 0
                 }
             };
         }
 
-        private static string BuildContextBlock(stories story, List<chapters> lastChapters)
+        private static string BuildContextBlockFromRag(stories story, string ragBlock)
         {
             var lines = new List<string>
             {
                 $"## Truyện: {story.title}",
-                string.IsNullOrWhiteSpace(story.summary) ? "" : $"Tóm tắt: {story.summary}"
+                string.IsNullOrWhiteSpace(story.summary) ? "" : $"Tóm tắt: {story.summary}",
+                "## Các đoạn liên quan từ truyện (RAG):",
+                ragBlock
             };
-
-            foreach (var ch in lastChapters)
-            {
-                var content = ch.content ?? "";
-                if (content.Length > MaxCharsPerChapter)
-                    content = content[..MaxCharsPerChapter] + "...";
-                lines.Add($"### Chương {ch.order_index}: {ch.title}");
-                lines.Add(content);
-            }
-
             return string.Join("\n\n", lines.Where(s => !string.IsNullOrWhiteSpace(s)));
         }
 
         private static string GetSystemPrompt()
         {
             return """
-Bạn là trợ lý sáng tác cho tác giả truyện. Nhiệm vụ: dựa trên thông tin truyện và các chương gần nhất, đưa ra đúng 3 hướng đi KHÁC NHAU cho chương tiếp theo (mỗi hướng có thể là tình tiết khác nhau, bước ngoặt khác nhau, hoặc cảm xúc/kết cục khác).
+Bạn là trợ lý sáng tác cho tác giả truyện. Dựa trên thông tin truyện và ngữ cảnh (Story memory hoặc RAG), đưa ra đúng 3 hướng đi KHÁC NHAU cho chương tiếp theo (tình tiết, bước ngoặt, cảm xúc/kết cục).
 
-Trả về DUY NHẤT một JSON hợp lệ, không kèm markdown hay giải thích, theo cấu trúc:
+Trả về DUY NHẤT một JSON hợp lệ, không markdown:
 {
   "suggestions": [
     {
@@ -167,9 +184,9 @@ Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau; ngôn ngữ trùng v
 """;
         }
 
-        private static string GetUserPrompt(stories story, string contextBlock)
+        private static string GetUserPrompt(stories story, string contextBlock, string languageInstruction)
         {
-            return $"Dưới đây là thông tin truyện và các chương gần nhất.\n\n{contextBlock}\n\nHãy gợi ý đúng 3 hướng đi khác nhau cho chương tiếp theo, trả về JSON theo đúng cấu trúc đã nêu.";
+            return $"Ngữ cảnh truyện:\n\n{contextBlock}\n\n{languageInstruction}\n\nGợi ý đúng 3 hướng đi khác nhau cho chương tiếp theo. Trả về JSON theo cấu trúc đã nêu.";
         }
 
         private static List<JsonSuggestion> ParseSuggestions(string text)

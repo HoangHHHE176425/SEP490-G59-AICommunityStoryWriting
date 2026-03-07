@@ -41,5 +41,7 @@ public partial class chapters
 
     public virtual ICollection<story_chapter_chunks> story_chapter_chunks { get; set; } = new List<story_chapter_chunks>();
 
+    public virtual ICollection<story_event_memory> story_event_memories { get; set; } = new List<story_event_memory>();
+
     public virtual stories? story { get; set; }
 }
