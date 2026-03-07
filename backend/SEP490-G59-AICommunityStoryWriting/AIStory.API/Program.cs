@@ -91,10 +91,24 @@ namespace AIStory.API
             builder.Services.AddScoped<IAdminUserService, AdminUserService>();
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
 
-            // AI: gợi ý chương tiếp theo + đồng sáng tác 3 agent
+            // AI: Story Memory Engine (RAG khi đã index, fallback N chương) + 4 Agent
+            builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
+            builder.Services.AddScoped<IContentGuardrailService, ContentGuardrailService>();
             builder.Services.AddScoped<IAIUsageLogRepository, AIUsageLogRepository>();
+            builder.Services.AddScoped<IStoryChapterChunkRepository, StoryChapterChunkRepository>();
+            builder.Services.AddScoped<IStoryCharacterMemoryRepository, StoryCharacterMemoryRepository>();
+            builder.Services.AddScoped<IStoryEventMemoryRepository, StoryEventMemoryRepository>();
+            builder.Services.AddScoped<IStoryStoryStateRepository, StoryStoryStateRepository>();
+            if (string.Equals(builder.Configuration["VectorStore:Provider"], "FAISS", StringComparison.OrdinalIgnoreCase))
+                builder.Services.AddSingleton<IVectorStore, FaissVectorStore>();
+            else
+                builder.Services.AddSingleton<IVectorStore, NullVectorStore>();
+            builder.Services.AddScoped<IStoryRagService, StoryRagService>();
+            builder.Services.AddScoped<IStoryMemoryEngine, StoryMemoryEngine>();
+            builder.Services.AddScoped<IPlotManagerService, PlotManagerService>();
             builder.Services.AddScoped<IAINextChapterService, AINextChapterService>();
             builder.Services.AddScoped<IAICoCreationService, AICoCreationService>();
+            builder.Services.AddScoped<IAIConsistencyCheckService, AIConsistencyCheckService>();
             builder.Services.AddSingleton<IAISuggestRateLimitService, AISuggestRateLimitService>();
 
             var jwtKey = builder.Configuration["Jwt:Key"];

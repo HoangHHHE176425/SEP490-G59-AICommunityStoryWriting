@@ -9,275 +9,300 @@ using Services.DTOs.AI;
 using Services.Helpers;
 using Services.Interfaces;
 
-namespace Services.Implementations
+namespace Services.Implementations;
+
+/// <summary>Đồng sáng tác: Dàn ý (JSON) → Viết → Guardrail → Kiểm duyệt (JSON + violations) + vòng sửa. Constitutional rules trong prompt.</summary>
+public class AICoCreationService : IAICoCreationService
 {
-    public class AICoCreationService : IAICoCreationService
+    private const int DefaultMaxRevisions = 2;
+    private const string ActionOutline = "CO_CREATE_OUTLINE";
+    private const string ActionWrite = "CO_CREATE_WRITE";
+    private const string ActionReview = "CO_CREATE_REVIEW";
+
+    /// <summary>Quy tắc bắt buộc (Constitutional): đưa vào system prompt mọi agent.</summary>
+    private const string ConstitutionalRules = """
+Quy tắc bắt buộc: Bám sát thông tin trong ngữ cảnh (Story memory, Character/Event/Story State, hoặc RAG). Không viết ngược lại sự kiện đã nêu. Chỉ trả về đúng định dạng yêu cầu, không thêm giải thích ngoài.
+""";
+
+    private readonly IStoryRepository _storyRepository;
+    private readonly IStoryMemoryEngine _memoryEngine;
+    private readonly IContentGuardrailService _guardrail;
+    private readonly IAIUsageLogRepository _aiUsageLogRepository;
+    private readonly IConfiguration _configuration;
+
+    public AICoCreationService(
+        IStoryRepository storyRepository,
+        IStoryMemoryEngine memoryEngine,
+        IContentGuardrailService guardrail,
+        IAIUsageLogRepository aiUsageLogRepository,
+        IConfiguration configuration)
     {
-        /// <summary>Tổng số ký tự tối đa dành cho nội dung tất cả chương (để vừa context window). AI được đọc toàn bộ chương, mỗi chương rút gọn nếu cần.</summary>
-        private const int MaxTotalContextCharsForChapters = 26000;
-        /// <summary>Số ký tự tối đa mỗi chương khi có ít chương.</summary>
-        private const int MaxCharsPerChapter = 2500;
-        private const int MaxRevisions = 2;
-        private const string ActionOutline = "CO_CREATE_OUTLINE";
-        private const string ActionWrite = "CO_CREATE_WRITE";
-        private const string ActionReview = "CO_CREATE_REVIEW";
+        _storyRepository = storyRepository;
+        _memoryEngine = memoryEngine;
+        _guardrail = guardrail;
+        _aiUsageLogRepository = aiUsageLogRepository;
+        _configuration = configuration;
+    }
 
-        private readonly IStoryRepository _storyRepository;
-        private readonly IChapterRepository _chapterRepository;
-        private readonly IAIUsageLogRepository _aiUsageLogRepository;
-        private readonly IConfiguration _configuration;
+    public async Task<CoCreationResponse> CoCreateAsync(
+        CoCreationRequest request,
+        Guid authorUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var story = _storyRepository.GetById(request.StoryId);
+        if (story == null)
+            throw new InvalidOperationException("Truyện không tồn tại.");
+        if (story.author_id != authorUserId)
+            throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được sử dụng tính năng đồng sáng tác.");
 
-        public AICoCreationService(
-            IStoryRepository storyRepository,
-            IChapterRepository chapterRepository,
-            IAIUsageLogRepository aiUsageLogRepository,
-            IConfiguration configuration)
+        string contextBlock = await _memoryEngine.BuildContextForCoCreateAsync(
+            request.StoryId, request.AuthorIdea, request.ContinuityNotes, request.AfterChapterId, cancellationToken);
+
+        var storyLanguage = StoryLanguageHelper.DetectFromStoryContext(contextBlock);
+        var languageInstruction = StoryLanguageHelper.GetLanguageInstruction(storyLanguage);
+
+        // --- Agent 1 (Planner): Dàn ý — model Qwen2.5 ---
+        var (p1, m1, k1, u1) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentPlanner);
+        var clientPlanner = AIClientHelper.CreateChatClient(p1, m1, k1, u1);
+        var outlineJson = await RunAgent1OutlineAsync(clientPlanner, contextBlock, request.AuthorIdea, languageInstruction, cancellationToken);
+        var outlineForPrompt = FormatOutlineForPrompt(outlineJson);
+        LogUsage(authorUserId, request.StoryId, null, ActionOutline, m1, 0, 0);
+
+        // --- Agent 2 (Writer): Viết nội dung — model Mistral ---
+        var (p2, m2, k2, u2) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentWriter);
+        var clientWriter = AIClientHelper.CreateChatClient(p2, m2, k2, u2);
+        string draft = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, feedback: null, languageInstruction, cancellationToken);
+        LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
+
+        // --- Guardrail: từ cấm ---
+        var guardrailResult = await _guardrail.CheckAsync(request.StoryId, draft, cancellationToken);
+        var guardrailFeedback = guardrailResult.Passed
+            ? null
+            : string.Join(" ", guardrailResult.Violations.Select(v => $"[{v.Type}] {v.Message}"));
+
+        bool skipReview = _configuration.GetValue<bool>("AI:CoCreateSkipReview");
+        int maxRevisions = _configuration.GetValue("AI:CoCreateMaxRevisions", DefaultMaxRevisions);
+        if (maxRevisions < 0) maxRevisions = 0;
+
+        if (skipReview)
         {
-            _storyRepository = storyRepository;
-            _chapterRepository = chapterRepository;
-            _aiUsageLogRepository = aiUsageLogRepository;
-            _configuration = configuration;
+            return new CoCreationResponse
+            {
+                Outline = outlineForPrompt,
+                FinalContent = draft,
+                Approved = guardrailResult.Passed,
+                RevisionCount = 0,
+                ReviewFeedback = guardrailFeedback
+            };
         }
 
-        public async Task<CoCreationResponse> CoCreateAsync(
-            CoCreationRequest request,
-            Guid authorUserId,
-            CancellationToken cancellationToken = default)
+        // --- Agent 3 (Consistency Checker): Kiểm duyệt — model Llama 3 ---
+        var (p3, m3, k3, u3) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentConsistencyChecker);
+        var clientChecker = AIClientHelper.CreateChatClient(p3, m3, k3, u3);
+        var (approved, feedback) = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, languageInstruction, cancellationToken);
+        LogUsage(authorUserId, request.StoryId, null, ActionReview, m3, 0, 0);
+
+        if (!guardrailResult.Passed)
         {
-            var story = _storyRepository.GetById(request.StoryId);
-            if (story == null)
-                throw new InvalidOperationException("Truyện không tồn tại.");
+            approved = false;
+            feedback = string.IsNullOrEmpty(feedback) ? guardrailFeedback : $"{guardrailFeedback}\n{feedback}";
+        }
 
-            if (story.author_id != authorUserId)
-                throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được sử dụng tính năng đồng sáng tác.");
+        int revisionCount = 0;
+        string? lastFeedback = feedback;
 
-            var chapters = _chapterRepository.GetByStoryId(request.StoryId)
-                .OrderBy(c => c.order_index)
-                .ToList();
+        while (!approved && revisionCount < maxRevisions)
+        {
+            revisionCount++;
+            draft = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, lastFeedback, languageInstruction, cancellationToken);
+            LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
 
-            IEnumerable<chapters> chaptersForContext = chapters;
-            if (request.AfterChapterId.HasValue)
+            guardrailResult = await _guardrail.CheckAsync(request.StoryId, draft, cancellationToken);
+            if (!guardrailResult.Passed)
+                lastFeedback = string.Join(" ", guardrailResult.Violations.Select(v => $"[{v.Type}] {v.Message}"));
+            else
             {
-                var afterIdx = chapters.FirstOrDefault(c => c.id == request.AfterChapterId.Value)?.order_index;
-                if (afterIdx.HasValue)
-                    chaptersForContext = chapters.Where(c => c.order_index <= afterIdx.Value);
-            }
-
-            var allChaptersForContext = chaptersForContext.ToList();
-            int charsPerChapter = ComputeCharsPerChapter(allChaptersForContext.Count);
-            var contextBlock = BuildContextBlock(story, allChaptersForContext, request.ContinuityNotes, charsPerChapter);
-
-            var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfig(_configuration);
-            var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
-
-            // --- Agent 1: Dàn ý ---
-            var outline = await RunAgent1OutlineAsync(client, model, contextBlock, request.AuthorIdea, cancellationToken);
-            LogUsage(authorUserId, request.StoryId, allChaptersForContext.LastOrDefault()?.id, ActionOutline, model, 0, 0);
-
-            // --- Agent 2 + 3 với vòng sửa ---
-            string draft = await RunAgent2WriteAsync(client, model, contextBlock, outline, feedback: null, cancellationToken);
-            LogUsage(authorUserId, request.StoryId, allChaptersForContext.LastOrDefault()?.id, ActionWrite, model, 0, 0);
-
-            var (approved, feedback) = await RunAgent3ReviewAsync(client, model, contextBlock, outline, draft, cancellationToken);
-            LogUsage(authorUserId, request.StoryId, allChaptersForContext.LastOrDefault()?.id, ActionReview, model, 0, 0);
-
-            int revisionCount = 0;
-            string? lastFeedback = feedback;
-
-            while (!approved && revisionCount < MaxRevisions)
-            {
-                revisionCount++;
-                draft = await RunAgent2WriteAsync(client, model, contextBlock, outline, lastFeedback, cancellationToken);
-                LogUsage(authorUserId, request.StoryId, allChaptersForContext.LastOrDefault()?.id, ActionWrite, model, 0, 0);
-
-                var (approvedAgain, feedbackAgain) = await RunAgent3ReviewAsync(client, model, contextBlock, outline, draft, cancellationToken);
-                LogUsage(authorUserId, request.StoryId, allChaptersForContext.LastOrDefault()?.id, ActionReview, model, 0, 0);
-
+                var (approvedAgain, feedbackAgain) = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, languageInstruction, cancellationToken);
+                LogUsage(authorUserId, request.StoryId, null, ActionReview, m3, 0, 0);
                 if (approvedAgain)
                 {
                     return new CoCreationResponse
                     {
-                        Outline = outline,
+                        Outline = outlineForPrompt,
                         FinalContent = draft,
                         Approved = true,
                         RevisionCount = revisionCount,
                         ReviewFeedback = null
                     };
                 }
-
                 lastFeedback = feedbackAgain;
             }
-
-            return new CoCreationResponse
-            {
-                Outline = outline,
-                FinalContent = draft,
-                Approved = approved,
-                RevisionCount = revisionCount,
-                ReviewFeedback = lastFeedback
-            };
         }
 
-        /// <summary>Tính số ký tự cho mỗi chương: chia đều budget, không vượt trần. Ví dụ 100 chương → 260 ký tự/chương; 200 → 130; 500 → 52.</summary>
-        private static int ComputeCharsPerChapter(int chapterCount)
+        return new CoCreationResponse
         {
-            if (chapterCount <= 0) return MaxCharsPerChapter;
-            int perChapter = MaxTotalContextCharsForChapters / chapterCount;
-            return Math.Min(MaxCharsPerChapter, Math.Max(1, perChapter));
-        }
+            Outline = outlineForPrompt,
+            FinalContent = draft,
+            Approved = approved,
+            RevisionCount = revisionCount,
+            ReviewFeedback = lastFeedback
+        };
+    }
 
-        private static string BuildContextBlock(stories story, List<chapters> allChapters, string? continuityNotes, int charsPerChapter)
+    private static string GetAgent1SystemPrompt() => """
+Bạn là trợ lý viết dàn ý cho tác giả truyện. Dựa trên ngữ cảnh truyện (Story memory hoặc RAG) và ý tưởng tác giả, viết dàn ý dạng các scene.
+
+Trả về DUY NHẤT một JSON hợp lệ, không markdown:
+{ "scenes": [ { "title": "Tiêu đề scene", "summary": "Tóm tắt ngắn", "characters": ["Nhân vật 1", "Nhân vật 2"] } ] }
+
+Ít nhất 1 scene; tối đa 10 scene. Bám sát ý tưởng và nhất quán với ngữ cảnh. Ngôn ngữ trùng truyện (Việt hoặc Anh).
+""" + "\n\n" + ConstitutionalRules;
+
+    private async Task<string> RunAgent1OutlineAsync(ChatClient client, string contextBlock, string authorIdea, string languageInstruction, CancellationToken ct)
+    {
+        var userPrompt = $"Ngữ cảnh truyện:\n\n{contextBlock}\n\nÝ tưởng tác giả:\n{authorIdea}\n\n{languageInstruction}\n\nTrả về JSON dàn ý (scenes) theo đúng cấu trúc.";
+        var messages = new List<ChatMessage>
         {
-            var lines = new List<string>
-            {
-                $"## Truyện: {story.title}",
-                string.IsNullOrWhiteSpace(story.summary) ? "" : $"Tóm tắt: {story.summary}"
-            };
+            new SystemChatMessage(GetAgent1SystemPrompt()),
+            new UserChatMessage(userPrompt)
+        };
+        var completion = await client.CompleteChatAsync(messages);
+        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
+        if (string.IsNullOrWhiteSpace(text))
+            throw new InvalidOperationException("Agent dàn ý không trả về nội dung.");
+        return text.Trim();
+    }
 
-            if (!string.IsNullOrWhiteSpace(continuityNotes))
+    /// <summary>Parse outline JSON thành text để đưa vào Agent 2; nếu parse lỗi thì trả về raw.</summary>
+    private static string FormatOutlineForPrompt(string outlineJson)
+    {
+        try
+        {
+            var raw = outlineJson.Trim();
+            if (raw.StartsWith("```"))
             {
-                lines.Add("## Điểm cần nhất quán (tác giả cung cấp)");
-                lines.Add(continuityNotes.Trim());
+                var start = raw.IndexOf('\n') + 1;
+                var end = raw.IndexOf("```", start, StringComparison.Ordinal);
+                if (end > start) raw = raw[start..end];
             }
-
-            lines.Add("## Nội dung các chương (theo thứ tự, có thể rút gọn để vừa giới hạn ngữ cảnh)");
-            foreach (var ch in allChapters)
+            var root = JsonDocument.Parse(raw).RootElement;
+            if (!root.TryGetProperty("scenes", out var scenes) || scenes.GetArrayLength() == 0)
+                return outlineJson;
+            var lines = new List<string>();
+            int i = 1;
+            foreach (var scene in scenes.EnumerateArray())
             {
-                var content = ch.content ?? "";
-                if (content.Length > charsPerChapter)
-                    content = content[..charsPerChapter] + "...";
-                lines.Add($"### Chương {ch.order_index}: {ch.title}");
-                lines.Add(content);
+                var title = scene.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "";
+                var summary = scene.TryGetProperty("summary", out var s) ? s.GetString() ?? "" : "";
+                var chars = scene.TryGetProperty("characters", out var c) ? c.EnumerateArray().Select(x => x.GetString()).Where(x => !string.IsNullOrEmpty(x)).ToArray() : Array.Empty<string>();
+                lines.Add($"Scene {i}: {title}\n{summary}" + (chars.Length > 0 ? $"\nNhân vật: {string.Join(", ", chars)}" : ""));
+                i++;
             }
-
-            return string.Join("\n\n", lines.Where(s => !string.IsNullOrWhiteSpace(s)));
+            return string.Join("\n\n", lines);
         }
-
-        private static string GetAgent1SystemPrompt()
+        catch
         {
-            return """
-Bạn là trợ lý viết dàn ý cho tác giả truyện. Nhiệm vụ: dựa trên thông tin truyện (bao gồm mục "Điểm cần nhất quán" nếu có), các chương gần nhất và ý tưởng của tác giả, viết một DÀN Ý (outline) rõ ràng cho nội dung cần viết.
-
-Dàn ý gồm: các ý chính, trình tự sự kiện hoặc cảm xúc, bám sát ý tưởng tác giả và nhất quán với cốt truyện. Bắt buộc tôn trọng mọi chi tiết quan trọng đã nêu trong ngữ cảnh: trạng thái nhân vật, sự kiện đã xảy ra, quan hệ — không được tạo nội dung mâu thuẫn với các thông tin đó. Trả về DUY NHẤT phần dàn ý bằng văn bản, không thêm markdown hay giải thích khác. Ngôn ngữ trùng với ngôn ngữ của truyện (Việt hoặc Anh).
-""";
+            return outlineJson;
         }
+    }
 
-        private async Task<string> RunAgent1OutlineAsync(ChatClient client, string model, string contextBlock, string authorIdea, CancellationToken ct)
+    private static string GetAgent2SystemPrompt() => """
+Bạn là trợ lý viết nội dung truyện. Viết đoạn/chương nháp theo ĐÚNG dàn ý (các scene) được cung cấp. Phong cách và giọng văn phù hợp truyện. Tôn trọng mọi thông tin trong ngữ cảnh (Story memory hoặc RAG): trạng thái nhân vật, sự kiện đã xảy ra — không mô tả ngược lại. Chỉ trả về nội dung văn bản, không tiêu đề hay giải thích. Ngôn ngữ trùng truyện.
+""" + "\n\n" + ConstitutionalRules;
+
+    private async Task<string> RunAgent2WriteAsync(ChatClient client, string contextBlock, string outline, string? feedback, string languageInstruction, CancellationToken ct)
+    {
+        var userPrompt = $"Ngữ cảnh truyện:\n\n{contextBlock}\n\nDàn ý cần viết:\n{outline}";
+        if (!string.IsNullOrWhiteSpace(feedback))
+            userPrompt += $"\n\nGóp ý cần sửa (bắt buộc tuân thủ):\n{feedback}";
+        userPrompt += $"\n\n{languageInstruction}\n\nViết nội dung theo dàn ý (và góp ý nếu có).";
+
+        var messages = new List<ChatMessage>
         {
-            var userPrompt = $"Ngữ cảnh truyện:\n\n{contextBlock}\n\nÝ tưởng của tác giả:\n{authorIdea}\n\nHãy viết dàn ý theo ý tưởng trên.";
-            var messages = new List<ChatMessage>
+            new SystemChatMessage(GetAgent2SystemPrompt()),
+            new UserChatMessage(userPrompt)
+        };
+        var completion = await client.CompleteChatAsync(messages);
+        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
+        if (string.IsNullOrWhiteSpace(text))
+            throw new InvalidOperationException("Agent viết nội dung không trả về nội dung.");
+        return text.Trim();
+    }
+
+    private static string GetAgent3SystemPrompt() => """
+Bạn là Consistency Checker: kiểm duyệt nội dung truyện. Đọc ngữ cảnh (Story memory, Character Memory, Event Memory, Story State hoặc RAG), dàn ý và bản nháp.
+
+Kiểm tra bắt buộc: (1) Timeline — sự kiện theo đúng thứ tự, không đảo ngược đã xảy ra. (2) Character personality — nhân vật hành xử đúng tính cách và trạng thái đã nêu (vd. đã chết thì không xuất hiện). (3) World rules — quy tắc thế giới truyện được tôn trọng. (4) Logic cốt truyện và mâu thuẫn nội bộ. Mâu thuẫn = chưa đạt.
+
+Trả về DUY NHẤT một JSON hợp lệ, không markdown:
+{ "approved": true } khi đạt.
+{ "approved": false, "feedback": "Mô tả ngắn vấn đề để AI/tác giả sửa", "violations": [ { "type": "timeline|character|world_rules|logic|contradiction|other", "quote": "đoạn trích (tùy chọn)" } ] } khi cần sửa.
+
+Ngôn ngữ feedback: cùng ngôn ngữ truyện.
+""" + "\n\n" + ConstitutionalRules;
+
+    private async Task<(bool approved, string? feedback)> RunAgent3ReviewAsync(ChatClient client, string contextBlock, string outline, string draft, string languageInstruction, CancellationToken ct)
+    {
+        var userPrompt = $"Ngữ cảnh:\n\n{contextBlock}\n\nDàn ý:\n{outline}\n\nBản nháp:\n{draft}\n\n{languageInstruction}\n\nTrả về JSON theo đúng cấu trúc.";
+        var messages = new List<ChatMessage>
+        {
+            new SystemChatMessage(GetAgent3SystemPrompt()),
+            new UserChatMessage(userPrompt)
+        };
+        var completion = await client.CompleteChatAsync(messages);
+        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
+        if (string.IsNullOrWhiteSpace(text))
+            return (false, "Không đọc được kết quả kiểm duyệt.");
+        return ParseReviewResult(text);
+    }
+
+    private static (bool approved, string? feedback) ParseReviewResult(string text)
+    {
+        text = text.Trim();
+        if (text.StartsWith("```"))
+        {
+            var start = text.IndexOf('\n') + 1;
+            var end = text.IndexOf("```", start, StringComparison.Ordinal);
+            if (end > start) text = text[start..end];
+        }
+        try
+        {
+            var root = JsonDocument.Parse(text).RootElement;
+            var approved = root.TryGetProperty("approved", out var a) && a.GetBoolean();
+            var feedback = root.TryGetProperty("feedback", out var f) ? f.GetString() : null;
+            if (!approved && string.IsNullOrWhiteSpace(feedback) && root.TryGetProperty("violations", out var v) && v.GetArrayLength() > 0)
             {
-                new SystemChatMessage(GetAgent1SystemPrompt()),
-                new UserChatMessage(userPrompt)
-            };
-
-            var completion = await client.CompleteChatAsync(messages);
-            var chat = completion.Value;
-            var text = chat.Content?.Count > 0 ? chat.Content[0].Text : null;
-            if (string.IsNullOrWhiteSpace(text))
-                throw new InvalidOperationException("Agent dàn ý không trả về nội dung.");
-            return text.Trim();
-        }
-
-        private static string GetAgent2SystemPrompt()
-        {
-            return """
-Bạn là trợ lý viết nội dung truyện. Nhiệm vụ: viết nội dung văn bản (đoạn/chương nháp) theo ĐÚNG dàn ý được cung cấp, phong cách và giọng văn phù hợp với truyện. Bắt buộc tôn trọng mọi chi tiết quan trọng trong ngữ cảnh (kể cả mục "Điểm cần nhất quán" nếu có): trạng thái nhân vật, sự kiện đã xảy ra — không được mô tả ngược lại. Chỉ trả về phần nội dung văn bản, không thêm tiêu đề hay giải thích. Ngôn ngữ trùng với truyện.
-""";
-        }
-
-        private async Task<string> RunAgent2WriteAsync(ChatClient client, string model, string contextBlock, string outline, string? feedback, CancellationToken ct)
-        {
-            var userPrompt = $"Ngữ cảnh truyện:\n\n{contextBlock}\n\nDàn ý cần viết:\n{outline}";
-            if (!string.IsNullOrWhiteSpace(feedback))
-                userPrompt += $"\n\nGóp ý từ kiểm duyệt (cần sửa theo đúng phần này):\n{feedback}";
-
-            userPrompt += "\n\nHãy viết nội dung theo dàn ý (và góp ý nếu có).";
-
-            var messages = new List<ChatMessage>
-            {
-                new SystemChatMessage(GetAgent2SystemPrompt()),
-                new UserChatMessage(userPrompt)
-            };
-
-            var completion = await client.CompleteChatAsync(messages);
-            var chat = completion.Value;
-            var text = chat.Content?.Count > 0 ? chat.Content[0].Text : null;
-            if (string.IsNullOrWhiteSpace(text))
-                throw new InvalidOperationException("Agent viết nội dung không trả về nội dung.");
-            return text.Trim();
-        }
-
-        private static string GetAgent3SystemPrompt()
-        {
-            return """
-Bạn là người kiểm duyệt nội dung truyện. Nhiệm vụ: đọc toàn bộ ngữ cảnh (kể cả mục "Điểm cần nhất quán" nếu có), dàn ý và bản nháp; kiểm tra (1) logic cốt truyện, (2) mâu thuẫn nội bộ, (3) tính nhất quán với mọi thông tin đã nêu trong ngữ cảnh — trạng thái nhân vật, sự kiện đã xảy ra, quan hệ. Bất kỳ mâu thuẫn nào giữa bản nháp và thông tin đã có đều phải bị đánh giá là chưa đạt.
-
-Trả về DUY NHẤT một JSON hợp lệ, không kèm markdown hay giải thích:
-{ "approved": true }  khi nội dung đạt.
-{ "approved": false, "feedback": "Mô tả ngắn, rõ ràng vấn đề (sai logic, mâu thuẫn với ngữ cảnh, hoặc phần chưa hợp lý) để tác giả/AI viết lại" }  khi cần sửa.
-
-Ngôn ngữ feedback: cùng ngôn ngữ truyện (Việt hoặc Anh).
-""";
-        }
-
-        private async Task<(bool approved, string? feedback)> RunAgent3ReviewAsync(ChatClient client, string model, string contextBlock, string outline, string draft, CancellationToken ct)
-        {
-            var userPrompt = $"Ngữ cảnh truyện:\n\n{contextBlock}\n\nDàn ý:\n{outline}\n\nBản nháp cần kiểm duyệt:\n{draft}\n\nTrả về JSON theo đúng cấu trúc đã nêu.";
-            var messages = new List<ChatMessage>
-            {
-                new SystemChatMessage(GetAgent3SystemPrompt()),
-                new UserChatMessage(userPrompt)
-            };
-
-            var completion = await client.CompleteChatAsync(messages);
-            var chat = completion.Value;
-            var text = chat.Content?.Count > 0 ? chat.Content[0].Text : null;
-            if (string.IsNullOrWhiteSpace(text))
-                return (false, "Không đọc được kết quả kiểm duyệt.");
-
-            return ParseReviewResult(text);
-        }
-
-        private static (bool approved, string? feedback) ParseReviewResult(string text)
-        {
-            text = text.Trim();
-            if (text.StartsWith("```"))
-            {
-                var start = text.IndexOf('\n') + 1;
-                var end = text.IndexOf("```", start, StringComparison.Ordinal);
-                if (end > start)
-                    text = text[start..end];
+                var parts = new List<string>();
+                foreach (var item in v.EnumerateArray())
+                {
+                    var type = item.TryGetProperty("type", out var t) ? t.GetString() : null;
+                    var quote = item.TryGetProperty("quote", out var q) ? q.GetString() : null;
+                    parts.Add(string.IsNullOrEmpty(quote) ? $"[{type}]" : $"[{type}] {quote}");
+                }
+                feedback = string.Join(" ", parts);
             }
-
-            try
-            {
-                var root = JsonDocument.Parse(text).RootElement;
-                var approved = root.TryGetProperty("approved", out var a) && a.GetBoolean();
-                var feedback = root.TryGetProperty("feedback", out var f) ? f.GetString() : null;
-                return (approved, feedback);
-            }
-            catch
-            {
-                return (false, "Định dạng phản hồi kiểm duyệt không hợp lệ.");
-            }
+            return (approved, feedback);
         }
-
-        private void LogUsage(Guid userId, Guid storyId, Guid? chapterId, string actionType, string modelName, int promptTokens, int completionTokens)
+        catch
         {
-            _aiUsageLogRepository.Log(new ai_usage_logs
-            {
-                user_id = userId,
-                story_id = storyId,
-                chapter_id = chapterId,
-                action_type = actionType,
-                model_name = modelName,
-                prompt_tokens = promptTokens,
-                completion_tokens = completionTokens,
-                total_tokens = promptTokens + completionTokens,
-                status = "SUCCESS",
-                created_at = DateTime.UtcNow
-            });
+            return (false, "Định dạng phản hồi kiểm duyệt không hợp lệ.");
         }
+    }
+
+    private void LogUsage(Guid userId, Guid storyId, Guid? chapterId, string actionType, string modelName, int promptTokens, int completionTokens)
+    {
+        _aiUsageLogRepository.Log(new ai_usage_logs
+        {
+            user_id = userId,
+            story_id = storyId,
+            chapter_id = chapterId,
+            action_type = actionType,
+            model_name = modelName,
+            prompt_tokens = promptTokens,
+            completion_tokens = completionTokens,
+            total_tokens = promptTokens + completionTokens,
+            status = "SUCCESS",
+            created_at = DateTime.UtcNow
+        });
     }
 }

@@ -5,9 +5,14 @@ using OpenAI.Chat;
 
 namespace Services.Helpers;
 
-/// <summary>Helper dùng chung cho 2 luồng AI: gợi ý chương tiếp theo và đồng sáng tác.</summary>
+/// <summary>Helper dùng chung cho 2 luồng AI: gợi ý chương tiếp theo và đồng sáng tác. Hỗ trợ model theo agent (Planner, Writer, ConsistencyChecker, PlotManager).</summary>
 public static class AIClientHelper
 {
+    public const string AgentPlanner = "Planner";
+    public const string AgentWriter = "Writer";
+    public const string AgentConsistencyChecker = "ConsistencyChecker";
+    public const string AgentPlotManager = "PlotManager";
+
     public static string GetDefaultModel(string provider)
     {
         if (provider.Equals("Ollama", StringComparison.OrdinalIgnoreCase)) return "llama3";
@@ -15,10 +20,27 @@ public static class AIClientHelper
         return "gpt-4o-mini";
     }
 
+    /// <summary>Lấy tên model cho từng agent. Fallback: AI:Model nếu không cấu hình riêng.</summary>
+    public static string GetModelForAgent(IConfiguration configuration, string agentName)
+    {
+        var key = agentName switch
+        {
+            AgentPlanner => "AI:PlannerModel",
+            AgentWriter => "AI:WriterModel",
+            AgentConsistencyChecker => "AI:ConsistencyCheckerModel",
+            AgentPlotManager => "AI:PlotManagerModel",
+            _ => null
+        };
+        var model = key != null ? configuration[key] : null;
+        if (!string.IsNullOrWhiteSpace(model)) return model.Trim();
+        var provider = configuration["AI:Provider"] ?? "Ollama";
+        return configuration["AI:Model"] ?? GetDefaultModel(provider);
+    }
+
     /// <summary>Đọc cấu hình AI và trả về (provider, model, apiKey, baseUrl). Ném exception nếu thiếu ApiKey khi cần.</summary>
     public static (string provider, string model, string apiKey, string? baseUrl) GetConfig(IConfiguration configuration)
     {
-        var provider = configuration["AI:Provider"] ?? "Groq";
+        var provider = configuration["AI:Provider"] ?? "Ollama";
         var model = configuration["AI:Model"] ?? GetDefaultModel(provider);
         var apiKey = configuration["AI:ApiKey"];
         var baseUrl = configuration["AI:BaseUrl"];
@@ -39,6 +61,14 @@ public static class AIClientHelper
         else if (string.IsNullOrWhiteSpace(apiKey))
             throw new InvalidOperationException("Cấu hình AI:ApiKey chưa được thiết lập. Vui lòng thêm vào appsettings.Local.json (hoặc dùng AI:Provider = Groq/Ollama).");
 
+        return (provider, model, apiKey!, baseUrl);
+    }
+
+    /// <summary>Cấu hình cho một agent: dùng model riêng (Planner/Writer/ConsistencyChecker/PlotManager) nếu có.</summary>
+    public static (string provider, string model, string apiKey, string? baseUrl) GetConfigForAgent(IConfiguration configuration, string agentName)
+    {
+        var (provider, _, apiKey, baseUrl) = GetConfig(configuration);
+        var model = GetModelForAgent(configuration, agentName);
         return (provider, model, apiKey!, baseUrl);
     }
 
