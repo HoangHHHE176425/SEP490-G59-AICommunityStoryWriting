@@ -65,7 +65,7 @@ export function StoryDetail() {
     const [commentError, setCommentError] = useState(null);
     const [reviews, setReviews] = useState([]);
     const [reviewsLoading, setReviewsLoading] = useState(false);
-    const [visibleReviewsCount, setVisibleReviewsCount] = useState(5);
+    const [visibleReviewsCount, setVisibleReviewsCount] = useState(3);
 
     useEffect(() => {
         let cancelled = false;
@@ -200,7 +200,7 @@ export function StoryDetail() {
     }, [storyId, loadReviews]);
 
     useEffect(() => {
-        if (activeTab === 'reviews') setVisibleReviewsCount(5);
+        if (activeTab === 'reviews') setVisibleReviewsCount(3);
     }, [activeTab]);
 
     const handleAddComment = async (content, parentId) => {
@@ -460,15 +460,26 @@ export function StoryDetail() {
                                                         );
                                                     })}
                                                 </div>
-                                                {reviews.length > visibleReviewsCount && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setVisibleReviewsCount((n) => n + 5)}
-                                                        className="mt-4 text-sm text-primary hover:underline"
-                                                    >
-                                                        Xem thêm đánh giá ({reviews.length - visibleReviewsCount})
-                                                    </button>
-                                                )}
+                                                <div className="flex flex-wrap gap-3 mt-4">
+                                                    {reviews.length > visibleReviewsCount && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setVisibleReviewsCount((n) => n + 3)}
+                                                            className="text-sm text-primary hover:underline"
+                                                        >
+                                                            Xem thêm đánh giá ({reviews.length - visibleReviewsCount})
+                                                        </button>
+                                                    )}
+                                                    {visibleReviewsCount > 3 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setVisibleReviewsCount((n) => Math.max(3, n - 3))}
+                                                            className="text-sm text-slate-500 dark:text-slate-400 hover:underline"
+                                                        >
+                                                            Ẩn bớt đánh giá
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </>
                                         )}
                                     </>
