@@ -130,11 +130,71 @@ export async function getStories(params = {}) {
 /**
  * Lấy truyện theo ID.
  * @param {string} id - Guid
+ * @param {Object} [options] - { recordView?: boolean } mặc định true. Khi false chỉ lấy dữ liệu, không ghi nhận lượt xem (BE vẫn chống spam 1/viewer/24h khi recordView=true).
  * @returns {Promise}
  */
-export async function getStoryById(id) {
-    const response = await axiosInstance.get(`/stories/${id}`);
+export async function getStoryById(id, options = {}) {
+    const recordView = options.recordView !== false;
+    const url = recordView ? `/stories/${id}` : `/stories/${id}?recordView=false`;
+    const response = await axiosInstance.get(url);
     return response.data;
+}
+
+const STORY_VIEW_CACHE_KEY = "story_view";
+const STORY_VIEW_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h
+
+/**
+ * Lấy viewer key cho cache lượt xem (FE): user id nếu đăng nhập, 'anon' nếu không.
+ * @param {string|null} userId - từ useAuth().user?.id
+ * @returns {string}
+ */
+export function getViewerKeyForViewCache(userId) {
+    return userId ? `u:${userId}` : "anon";
+}
+
+/**
+ * Kiểm tra đã ghi nhận lượt xem cho story trong 24h (cache FE).
+ * @param {string} storyId - Guid
+ * @param {string} viewerKey - từ getViewerKeyForViewCache(user?.id)
+ * @returns {boolean} true nếu đã xem trong 24h
+ */
+export function hasViewedStoryInCooldown(storyId, viewerKey) {
+    try {
+        const raw = localStorage.getItem(STORY_VIEW_CACHE_KEY);
+        if (!raw) return false;
+        const data = JSON.parse(raw);
+        const key = `${storyId}_${viewerKey}`;
+        const ts = data[key];
+        if (ts == null) return false;
+        return Date.now() - ts < STORY_VIEW_COOLDOWN_MS;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Đánh dấu đã ghi nhận lượt xem cho story (cache FE 24h).
+ * @param {string} storyId - Guid
+ * @param {string} viewerKey - từ getViewerKeyForViewCache(user?.id)
+ */
+export function setStoryViewCache(storyId, viewerKey) {
+    try {
+        const raw = localStorage.getItem(STORY_VIEW_CACHE_KEY);
+        const data = raw ? JSON.parse(raw) : {};
+        data[`${storyId}_${viewerKey}`] = Date.now();
+        localStorage.setItem(STORY_VIEW_CACHE_KEY, JSON.stringify(data));
+    } catch {
+        // ignore
+    }
+}
+
+/**
+ * Gọi API chỉ ghi nhận 1 lượt xem (BE chống spam: 1 lượt/viewer/24h). Nên gọi khi FE cache báo chưa xem trong 24h.
+ * @param {string} storyId - Guid
+ * @returns {Promise<void>}
+ */
+export async function recordStoryView(storyId) {
+    await axiosInstance.post(`/stories/${storyId}/record-view`);
 }
 
 /**

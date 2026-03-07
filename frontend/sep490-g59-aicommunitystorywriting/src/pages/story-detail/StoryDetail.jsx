@@ -10,10 +10,17 @@ import { RatingModal } from '../../components/story-detail/RatingModal';
 import { ReportModal } from '../../components/story-detail/ReportModal';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
-import { getStoryById } from '../../api/story/storyApi';
+import {
+    getStoryById,
+    recordStoryView,
+    getViewerKeyForViewCache,
+    hasViewedStoryInCooldown,
+    setStoryViewCache,
+} from '../../api/story/storyApi';
 import { getChapters } from '../../api/chapter/chapterApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { useAuth } from '../../contexts/AuthContext';
 
 function formatTimeAgo(dateStr) {
     if (!dateStr) return '';
@@ -32,6 +39,8 @@ function formatTimeAgo(dateStr) {
 export function StoryDetail() {
     const { storyId } = useParams();
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const viewerKey = getViewerKeyForViewCache(user?.id ?? null);
     const [story, setStory] = useState(null);
     const [chapters, setChapters] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -53,10 +62,13 @@ export function StoryDetail() {
             }
             setLoading(true);
             setError(null);
-            Promise.all([
-                getStoryById(storyId),
-                getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 })
-            ])
+            const inCooldown = hasViewedStoryInCooldown(storyId, viewerKey);
+            const loadData = () =>
+                Promise.all([
+                    getStoryById(storyId, { recordView: false }),
+                    getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
+                ]);
+            (inCooldown ? loadData() : recordStoryView(storyId).then(() => { setStoryViewCache(storyId, viewerKey); return loadData(); }))
                 .then(([storyRes, chaptersRes]) => {
                     if (cancelled) return;
                     const rawItems = Array.isArray(chaptersRes) ? chaptersRes : (chaptersRes?.items ?? chaptersRes?.Items ?? []);
@@ -141,7 +153,7 @@ export function StoryDetail() {
             cancelled = true;
             clearTimeout(id);
         };
-    }, [storyId]);
+    }, [storyId, viewerKey]);
 
     const relatedStories = Array.from({ length: 5 }, (_, i) => ({
         id: i + 2,
