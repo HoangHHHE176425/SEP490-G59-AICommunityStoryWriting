@@ -322,6 +322,26 @@ export async function unpublishStory(id) {
 }
 
 /**
+ * Theo dõi truyện (chỉ story PUBLISHED). Khi có chương mới sẽ nhận thông báo. [Authorize]
+ * @param {string} storyId - Guid
+ * @returns {Promise<{ following: boolean, message: string }>}
+ */
+export async function followStory(storyId) {
+    const response = await axiosInstance.post(`/stories/${storyId}/follow`);
+    return response.data;
+}
+
+/**
+ * Bỏ theo dõi truyện. [Authorize]
+ * @param {string} storyId - Guid
+ * @returns {Promise<{ following: boolean, message: string }>}
+ */
+export async function unfollowStory(storyId) {
+    const response = await axiosInstance.delete(`/stories/${storyId}/follow`);
+    return response.data;
+}
+
+/**
  * Duyệt truyện (phê duyệt / approve) – gọi POST /stories/{id}/publish, chuyển status sang PUBLISHED.
  * @param {string} id - Guid truyện
  * @returns {Promise}

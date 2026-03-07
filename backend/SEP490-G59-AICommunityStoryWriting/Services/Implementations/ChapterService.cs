@@ -231,6 +231,11 @@ namespace Services.Implementations
             return dto;
         }
 
+        public (string? reason, DateTime? rejectedAt) GetLatestRejectionForChapter(Guid chapterId)
+        {
+            return DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", chapterId);
+        }
+
         public IEnumerable<ChapterListItemDto> GetByStoryId(Guid storyId)
         {
             var chapterList = _chapterRepository.GetByStoryId(storyId)

@@ -21,6 +21,8 @@ import {
     getStoryComments,
     addStoryComment,
     toggleCommentLike,
+    followStory,
+    unfollowStory,
 } from '../../api/story/storyApi';
 import { getChapters } from '../../api/chapter/chapterApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
@@ -96,6 +98,7 @@ export function StoryDetail() {
                     const totalComments = Number(storyRes?.totalComments ?? storyRes?.TotalComments ?? 0);
                     const totalChapters = rawItems.length;
                     const authorId = storyRes?.authorId ?? storyRes?.AuthorId;
+                    setIsFollowing(!!(storyRes?.userIsFollowing ?? storyRes?.UserIsFollowing));
                     const storyPayload = {
                         id: storyRes?.id ?? storyRes?.Id,
                         title: storyRes?.title ?? storyRes?.Title ?? 'Không có tiêu đề',
@@ -305,6 +308,28 @@ export function StoryDetail() {
         setRatingError(null);
     };
 
+    const handleToggleFollow = async () => {
+        if (!storyId) return;
+        if (!user?.id) {
+            showToast('Vui lòng đăng nhập để theo dõi truyện.', 'warning');
+            return;
+        }
+        try {
+            if (isFollowing) {
+                await unfollowStory(storyId);
+                setIsFollowing(false);
+                showToast('Đã bỏ theo dõi.', 'success');
+            } else {
+                await followStory(storyId);
+                setIsFollowing(true);
+                showToast('Đã theo dõi truyện. Bạn sẽ nhận thông báo khi có chương mới.', 'success');
+            }
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? (isFollowing ? 'Không thể bỏ theo dõi.' : 'Không thể theo dõi.');
+            showToast(msg, 'error');
+        }
+    };
+
     const handleSubmitCommentReport = (reason, details) => {
         console.log('Comment report submitted:', reportingCommentId, reason, details);
         // Handle comment report submission
@@ -356,7 +381,7 @@ export function StoryDetail() {
                         <StoryHeader
                             story={story}
                             isFollowing={isFollowing}
-                            onToggleFollow={() => setIsFollowing(!isFollowing)}
+                            onToggleFollow={handleToggleFollow}
                             onOpenRating={handleOpenRating}
                             onOpenReport={() => setIsReportStoryModalOpen(true)}
                             onReadStory={() => {

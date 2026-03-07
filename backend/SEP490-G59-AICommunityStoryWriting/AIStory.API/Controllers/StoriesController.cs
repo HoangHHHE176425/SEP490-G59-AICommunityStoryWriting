@@ -729,9 +729,11 @@ namespace AIStory.API.Controllers
                 var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
                 if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
                     return Forbid();
-                if (story.Status != "REJECTED")
+                // Chỉ ẩn lịch sử từ chối khi truyện đã được duyệt (PUBLISHED). Khi gửi lại xuất bản (PENDING_REVIEW) vẫn hiển thị.
+                if (story.Status == "PUBLISHED")
                     return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
-                return Ok(new { reason = story.RejectionReason, rejectedAt = story.RejectedAt });
+                var (reason, rejectedAt) = _storyService.GetLatestRejectionForStory(id);
+                return Ok(new { reason, rejectedAt });
             }
             catch (Exception ex)
             {
