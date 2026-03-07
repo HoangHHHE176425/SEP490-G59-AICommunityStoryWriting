@@ -31,7 +31,7 @@ function buildCommentTree(flatList) {
         }
     });
     roots.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-    roots.forEach((r) => r.replies.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)));
+    roots.forEach((r) => r.replies.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)));
     return roots;
 }
 
@@ -55,6 +55,7 @@ function CommentBlock({
     formatTimeAgo,
     visibleRepliesCount,
     onShowMoreReplies,
+    onHideReplies,
 }) {
     const timeStr = node.createdAt ? (formatTimeAgo ? formatTimeAgo(node.createdAt) : new Date(node.createdAt).toLocaleString()) : '';
     return (
@@ -159,6 +160,15 @@ function CommentBlock({
                                         Xem thêm trả lời ({remaining})
                                     </button>
                                 )}
+                                {limit > INITIAL_REPLIES && onHideReplies && (
+                                    <button
+                                        type="button"
+                                        onClick={() => onHideReplies(node.id)}
+                                        className="text-sm text-slate-500 dark:text-slate-400 hover:underline ml-10"
+                                    >
+                                        Ẩn bớt trả lời
+                                    </button>
+                                )}
                             </div>
                         );
                     })()}
@@ -221,6 +231,10 @@ export function CommentSection({
         setVisibleRepliesByParent((prev) => ({ ...prev, [parentId]: (prev[parentId] ?? INITIAL_REPLIES) + LOAD_MORE_STEP }));
     };
 
+    const hideReplies = (parentId) => {
+        setVisibleRepliesByParent((prev) => ({ ...prev, [parentId]: Math.max(INITIAL_REPLIES, (prev[parentId] ?? INITIAL_REPLIES) - LOAD_MORE_STEP) }));
+    };
+
     const commentBlockProps = {
         replyingTo,
         onSetReplyingTo: setReplyingTo,
@@ -233,6 +247,7 @@ export function CommentSection({
         onReportComment,
         formatTimeAgo,
         onShowMoreReplies: showMoreReplies,
+        onHideReplies: hideReplies,
     };
 
     return (
@@ -282,15 +297,26 @@ export function CommentSection({
                             />
                         ))}
                     </div>
-                    {tree.length > visibleCount && (
-                        <button
-                            type="button"
-                            onClick={() => setVisibleCount((n) => n + LOAD_MORE_STEP)}
-                            className="text-sm text-primary hover:underline"
-                        >
-                            Xem thêm bình luận ({tree.length - visibleCount})
-                        </button>
-                    )}
+                    <div className="flex flex-wrap gap-3 mt-2">
+                        {tree.length > visibleCount && (
+                            <button
+                                type="button"
+                                onClick={() => setVisibleCount((n) => n + LOAD_MORE_STEP)}
+                                className="text-sm text-primary hover:underline"
+                            >
+                                Xem thêm bình luận ({tree.length - visibleCount})
+                            </button>
+                        )}
+                        {visibleCount > INITIAL_COMMENTS && (
+                            <button
+                                type="button"
+                                onClick={() => setVisibleCount((n) => Math.max(INITIAL_COMMENTS, n - LOAD_MORE_STEP))}
+                                className="text-sm text-slate-500 dark:text-slate-400 hover:underline"
+                            >
+                                Ẩn bớt bình luận
+                            </button>
+                        )}
+                    </div>
                 </>
             )}
         </div>
