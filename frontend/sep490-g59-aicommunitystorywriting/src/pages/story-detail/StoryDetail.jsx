@@ -78,6 +78,7 @@ export function StoryDetail() {
                         : [];
                     const coverPath = storyRes?.coverImage ?? storyRes?.CoverImage;
                     const totalViews = Number(storyRes?.totalViews ?? storyRes?.TotalViews ?? 0);
+                    const totalComments = Number(storyRes?.totalComments ?? storyRes?.TotalComments ?? 0);
                     const totalChapters = rawItems.length;
                     const authorId = storyRes?.authorId ?? storyRes?.AuthorId;
                     const storyPayload = {
@@ -95,7 +96,7 @@ export function StoryDetail() {
                         totalRatings: Number(storyRes?.totalRatings ?? 0) || 0,
                         views: totalViews,
                         totalViews,
-                        comments: 0,
+                        comments: totalComments,
                         chapters: totalChapters,
                         words: 0,
                         lastUpdate: storyRes?.updatedAt ? formatTimeAgo(storyRes.updatedAt) : 'Chưa cập nhật',
