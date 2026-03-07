@@ -145,24 +145,27 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy story theo ID (Guid) (cho phép xem không cần đăng nhập). Ghi nhận lượt xem (chống spam: 1 lượt/viewer/24h).</summary>
+        /// <summary>Lấy story theo ID (Guid) (cho phép xem không cần đăng nhập). Ghi nhận lượt xem khi recordView=true (chống spam: 1 lượt/viewer/24h).</summary>
         [HttpGet("{id:guid}")]
         [AllowAnonymous]
-        public IActionResult GetById(Guid id)
+        public IActionResult GetById(Guid id, [FromQuery] bool recordView = true)
         {
             try
             {
                 var story = _storyService.GetById(id);
                 if (story == null)
                     return NotFound(new { message = $"Story with ID {id} not found" });
-                var viewerKey = GetViewerKey();
-                _storyService.RecordViewIfAllowed(id, viewerKey);
-                var userId = GetCurrentUserId();
-                if (userId.HasValue)
+                if (recordView)
                 {
-                    var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-                    var ua = Request.Headers.UserAgent.ToString();
-                    _storyService.RecordReadStory(id, userId.Value, ip, ua);
+                    var viewerKey = GetViewerKey();
+                    _storyService.RecordViewIfAllowed(id, viewerKey);
+                    var userId = GetCurrentUserId();
+                    if (userId.HasValue)
+                    {
+                        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+                        var ua = Request.Headers.UserAgent.ToString();
+                        _storyService.RecordReadStory(id, userId.Value, ip, ua);
+                    }
                 }
                 story.UserIsFollowing = GetCurrentUserId() is Guid uid ? UserLibraryDAO.IsFollowing(uid, id) : null;
                 return Ok(story);
@@ -173,24 +176,27 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy story theo slug (cho phép xem không cần đăng nhập). Ghi nhận lượt xem (chống spam: 1 lượt/viewer/24h).</summary>
+        /// <summary>Lấy story theo slug (cho phép xem không cần đăng nhập). Ghi nhận lượt xem khi recordView=true (chống spam: 1 lượt/viewer/24h).</summary>
         [HttpGet("slug/{slug}")]
         [AllowAnonymous]
-        public IActionResult GetBySlug(string slug)
+        public IActionResult GetBySlug(string slug, [FromQuery] bool recordView = true)
         {
             try
             {
                 var story = _storyService.GetBySlug(slug);
                 if (story == null)
                     return NotFound(new { message = $"Story with slug '{slug}' not found" });
-                var viewerKey = GetViewerKey();
-                _storyService.RecordViewIfAllowed(story.Id, viewerKey);
-                var userId = GetCurrentUserId();
-                if (userId.HasValue)
+                if (recordView)
                 {
-                    var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-                    var ua = Request.Headers.UserAgent.ToString();
-                    _storyService.RecordReadStory(story.Id, userId.Value, ip, ua);
+                    var viewerKey = GetViewerKey();
+                    _storyService.RecordViewIfAllowed(story.Id, viewerKey);
+                    var userId = GetCurrentUserId();
+                    if (userId.HasValue)
+                    {
+                        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+                        var ua = Request.Headers.UserAgent.ToString();
+                        _storyService.RecordReadStory(story.Id, userId.Value, ip, ua);
+                    }
                 }
                 story.UserIsFollowing = GetCurrentUserId() is Guid uid ? UserLibraryDAO.IsFollowing(uid, story.Id) : null;
                 return Ok(story);
@@ -198,6 +204,26 @@ namespace AIStory.API.Controllers
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while fetching the story", error = ex.Message });
+            }
+        }
+
+        /// <summary>Chỉ ghi nhận 1 lượt xem (chống spam: BE cache 1 lượt/viewer/24h). Dùng khi FE đã cache 24h để tránh gọi GET story nhiều lần.</summary>
+        [HttpPost("{id:guid}/record-view")]
+        [AllowAnonymous]
+        public IActionResult RecordView(Guid id)
+        {
+            try
+            {
+                var story = _storyService.GetById(id);
+                if (story == null)
+                    return NotFound(new { message = $"Story with ID {id} not found" });
+                var viewerKey = GetViewerKey();
+                _storyService.RecordViewIfAllowed(id, viewerKey);
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "An error occurred while recording view", error = ex.Message });
             }
         }
 
