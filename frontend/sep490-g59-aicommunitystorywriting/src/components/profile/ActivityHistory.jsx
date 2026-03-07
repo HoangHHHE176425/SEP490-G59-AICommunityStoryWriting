@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
-import { Coins, Calendar, ArrowDown, ArrowUp, Search, X, Info, Copy } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Coins, Calendar, ArrowDown, ArrowUp, Search, X, Info, Copy, RefreshCcw } from 'lucide-react';
+import * as coinApi from '../../api/coins/coinApi';
 
 export default function ActivityHistory() {
     const [filter, setFilter] = useState('all');
@@ -7,83 +8,94 @@ export default function ActivityHistory() {
     const [search, setSearch] = useState('');
     const [selectedActivity, setSelectedActivity] = useState(null);
 
-    // Mock data - replace with actual API data
-    const activities = [
-        {
-            id: 1,
-            type: 'recharge',
-            title: 'Nạp coin',
-            amount: 1000,
-            date: '2026-01-20',
-            time: '14:30',
-            status: 'success',
-        },
-        {
-            id: 2,
-            type: 'unlock',
-            title: 'Mở khóa truyện "Kiếm Thánh"',
-            amount: -50,
-            date: '2026-01-19',
-            time: '10:15',
-            status: 'success',
-        },
-        {
-            id: 3,
-            type: 'payment',
-            title: 'Thanh toán đăng truyện',
-            amount: -100,
-            date: '2026-01-18',
-            time: '16:45',
-            status: 'success',
-        },
-        {
-            id: 4,
-            type: 'recharge',
-            title: 'Nạp coin',
-            amount: 500,
-            date: '2026-01-15',
-            time: '09:20',
-            status: 'success',
-        },
-    ];
+    const [rechargeActivities, setRechargeActivities] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+
+    const formatApiDateTimeParts = (value) => {
+        if (!value) return { date: '', time: '' };
+        const s = String(value);
+        const hasTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(s);
+        const iso = hasTimezone ? s : `${s}Z`;
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return { date: s, time: '' };
+        return {
+            date: d.toLocaleDateString(),
+            time: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+    };
+
+    const parseApiDate = (value) => {
+        if (!value) return null;
+        const s = String(value);
+        const hasTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(s);
+        const iso = hasTimezone ? s : `${s}Z`;
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return null;
+        return d;
+    };
+
+    const loadRechargeActivities = useCallback(async () => {
+        setError('');
+        setLoading(true);
+        try {
+            const res = await coinApi.getMyCoinOrders({ take: 50 });
+            if (!res?.success) throw new Error(res?.message || 'Không thể tải lịch sử nạp coin');
+            const items = Array.isArray(res.data) ? res.data : [];
+            const mapped = items.map((o) => {
+                const createdAtDate = parseApiDate(o.createdAt);
+                const { date, time } = formatApiDateTimeParts(o.createdAt);
+                return {
+                    id: o.id,
+                    type: 'recharge',
+                    title: `Nạp coin (${o.paymentGateway || 'PAYOS'})`,
+                    amount: o.coinsGranted ?? 0,
+                    date,
+                    time,
+                    status: o.status || 'PENDING',
+                    createdAtDate,
+                };
+            });
+            setRechargeActivities(mapped);
+        } catch (e) {
+            setError(e?.message || 'Không thể tải lịch sử nạp coin');
+            setRechargeActivities([]);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadRechargeActivities();
+    }, [loadRechargeActivities]);
 
     const filteredActivities = useMemo(() => {
-        let result = [...activities];
+        let result = (filter === 'all' || filter === 'recharge') ? [...rechargeActivities] : [];
 
-        // Loại giao dịch
-        if (filter !== 'all') {
-            result = result.filter((a) => a.type === filter);
-        }
-
-        // Khoảng thời gian
         if (dateFilter !== 'all') {
             const now = new Date();
-            const checkDays = (days) => {
-                return result.filter((a) => {
-                    const d = new Date(a.date);
-                    const diffMs = now - d;
+            const days = dateFilter === '7d' ? 7 : dateFilter === '30d' ? 30 : dateFilter === '90d' ? 90 : null;
+            if (days != null) {
+                result = result.filter((a) => {
+                    if (!a.createdAtDate) return true;
+                    const diffMs = now - a.createdAtDate;
                     const diffDays = diffMs / (1000 * 60 * 60 * 24);
                     return diffDays <= days;
                 });
-            };
-
-            if (dateFilter === '7d') result = checkDays(7);
-            if (dateFilter === '30d') result = checkDays(30);
-            if (dateFilter === '90d') result = checkDays(90);
+            }
         }
 
-        // Tìm kiếm theo tiêu đề / mã
         if (search.trim()) {
             const q = search.trim().toLowerCase();
             result = result.filter(
                 (a) =>
-                    a.title.toLowerCase().includes(q) ||
+                    String(a.title || '').toLowerCase().includes(q) ||
                     String(a.id).toLowerCase().includes(q)
             );
         }
 
         return result;
-    }, [activities, filter, dateFilter, search]);
+    }, [rechargeActivities, filter, dateFilter, search]);
 
     const getIcon = (type) => {
         switch (type) {
@@ -149,6 +161,14 @@ export default function ActivityHistory() {
                     >
                         Thanh toán
                     </button>
+                    <button
+                        onClick={loadRechargeActivities}
+                        disabled={loading}
+                        className="ml-2 inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
+                    >
+                        <RefreshCcw className="w-4 h-4" />
+                        Làm mới
+                    </button>
                 </div>
             </div>
 
@@ -190,7 +210,21 @@ export default function ActivityHistory() {
             </div>
 
             <div className="space-y-4">
-                {filteredActivities.length === 0 ? (
+                {error && (
+                    <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
+                        {error}
+                    </div>
+                )}
+
+                {filter !== 'all' && filter !== 'recharge' ? (
+                    <div className="text-center py-12 text-slate-500 dark:text-slate-400">
+                        Chức năng này đang được phát triển.
+                    </div>
+                ) : loading ? (
+                    <div className="text-center py-12 text-slate-500 dark:text-slate-400">
+                        Đang tải dữ liệu...
+                    </div>
+                ) : filteredActivities.length === 0 ? (
                     <div className="text-center py-12 text-slate-500 dark:text-slate-400">
                         Không tìm thấy giao dịch phù hợp với bộ lọc hiện tại
                     </div>
@@ -207,6 +241,17 @@ export default function ActivityHistory() {
                             <div className="flex-1">
                                 <div className="font-semibold text-slate-900 dark:text-white">
                                     {activity.title}
+                                    <span
+                                        className={`ml-2 inline-block px-2 py-0.5 rounded text-xs font-bold ${
+                                            activity.status === 'PAID'
+                                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                                                : activity.status === 'PENDING'
+                                                  ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                                                  : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                                        }`}
+                                    >
+                                        {activity.status}
+                                    </span>
                                 </div>
                                 <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                                     <Calendar className="w-4 h-4" />
@@ -301,8 +346,16 @@ export default function ActivityHistory() {
                             </div>
                             <div>
                                 <span className="block text-slate-500 dark:text-slate-400 mb-0.5">Trạng thái</span>
-                                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-900/60">
-                                    Thành công
+                                <span
+                                    className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold border ${
+                                        selectedActivity.status === 'PAID'
+                                            ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border-green-100 dark:border-green-900/60'
+                                            : selectedActivity.status === 'PENDING'
+                                              ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 border-amber-100 dark:border-amber-900/60'
+                                              : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-100 dark:border-slate-700'
+                                    }`}
+                                >
+                                    {selectedActivity.status || 'PENDING'}
                                 </span>
                             </div>
                         </div>

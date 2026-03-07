@@ -96,6 +96,60 @@ namespace AIStory.API.Controllers
             }
         }
 
+        /// <summary>Lịch sử truyện đã duyệt (PUBLISHED) hoặc từ chối (REJECTED). Moderator chỉ thấy truyện do mình duyệt/từ chối; ADMIN thấy theo category.</summary>
+        [HttpGet("stories/reviewed")]
+        public async Task<IActionResult> GetReviewedStories(
+            [FromQuery] string status = "PUBLISHED",
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] string? search = null,
+            [FromQuery] string? sortBy = null,
+            [FromQuery] string? sortOrder = null)
+        {
+            try
+            {
+                IReadOnlyList<Guid>? categoryIdsFilter = null;
+                var moderatorId = GetCurrentUserId();
+                var isAdmin = IsAdmin();
+                if (!isAdmin && moderatorId.HasValue)
+                    categoryIdsFilter = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
+                var result = _moderationService.GetReviewedStories(page, pageSize, status, search, sortBy, sortOrder, categoryIdsFilter, moderatorId, isAdmin);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetReviewedStories failed");
+                return StatusCode(500, new { message = "Lỗi lấy danh sách truyện đã duyệt/từ chối", error = ex.Message });
+            }
+        }
+
+        /// <summary>Lịch sử chapter đã duyệt (PUBLISHED) hoặc từ chối (REJECTED). Moderator chỉ thấy chapter do mình duyệt/từ chối; ADMIN thấy theo category.</summary>
+        [HttpGet("chapters/reviewed")]
+        public async Task<IActionResult> GetReviewedChapters(
+            [FromQuery] string status = "PUBLISHED",
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] string? search = null,
+            [FromQuery] string? sortBy = null,
+            [FromQuery] string? sortOrder = null)
+        {
+            try
+            {
+                IReadOnlyList<Guid>? categoryIdsFilter = null;
+                var moderatorId = GetCurrentUserId();
+                var isAdmin = IsAdmin();
+                if (!isAdmin && moderatorId.HasValue)
+                    categoryIdsFilter = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
+                var result = _moderationService.GetReviewedChapters(page, pageSize, status, search, sortBy, sortOrder, categoryIdsFilter, moderatorId, isAdmin);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetReviewedChapters failed");
+                return StatusCode(500, new { message = "Lỗi lấy danh sách chapter đã duyệt/từ chối", error = ex.Message });
+            }
+        }
+
         /// <summary>Moderator "nhận duyệt" truyện → lock, người khác không thấy trong queue. Queue: ai gửi trước duyệt trước (FIFO).</summary>
         [HttpPost("stories/{id:guid}/claim")]
         public async Task<IActionResult> ClaimStory(Guid id)

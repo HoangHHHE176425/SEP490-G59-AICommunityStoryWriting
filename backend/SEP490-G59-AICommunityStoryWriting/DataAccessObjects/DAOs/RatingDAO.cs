@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -51,6 +51,18 @@ namespace DataAccessObjects.DAOs
             var sum = query.Sum(r => r.star_value!.Value);
             var avg = Math.Round((decimal)sum / count, 2, MidpointRounding.AwayFromZero);
             return (avg, count);
+        }
+
+        /// <summary>Lấy danh sách đánh giá của story (status = VISIBLE), có user display name. Sắp xếp mới nhất trước.</summary>
+        public static IReadOnlyList<ratings> GetByStoryId(Guid storyId, string status = "VISIBLE")
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.ratings.AsNoTracking()
+                .Include(r => r.user)
+                .ThenInclude(u => u!.user_profiles)
+                .Where(r => r.story_id == storyId && r.status == status && r.star_value.HasValue)
+                .OrderByDescending(r => r.created_at)
+                .ToList();
         }
     }
 }
