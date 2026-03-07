@@ -3,6 +3,7 @@ using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Logging;
 using Repositories;
 using Services.DTOs.Chapters;
+using Services.DTOs.Notifications;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 
@@ -15,6 +16,7 @@ namespace Services.Implementations
         private readonly IStoryService _storyService;
         private readonly IChapterService _chapterService;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
+        private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly ILogger<ModerationService> _logger;
 
         public ModerationService(
@@ -23,7 +25,8 @@ namespace Services.Implementations
             IStoryService storyService,
             IChapterService chapterService,
             ILogger<ModerationService> logger,
-            IModerationHubNotifier? moderationHubNotifier = null)
+            IModerationHubNotifier? moderationHubNotifier = null,
+            INotificationHubNotifier? notificationHubNotifier = null)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
@@ -31,6 +34,7 @@ namespace Services.Implementations
             _chapterService = chapterService;
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
+            _notificationHubNotifier = notificationHubNotifier;
         }
 
         public PagedResultDto<StoryListItemDto> GetPendingStories(int page = 1, int pageSize = 20, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null)
@@ -359,7 +363,8 @@ namespace Services.Implementations
                 }
                 Console.WriteLine($"[CONSOLE] ApproveChapter calling NotifyStoryFollowersNewChapter StoryId={chapter.story_id.Value} ChapterId={chapterId} StoryTitle={story?.title ?? "(null)"}");
                 _logger.LogWarning("[NOTIFY] ApproveChapter calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id.Value, chapterId);
-                NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapterId, chapter.title, story?.title, _logger);
+                var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapterId, chapter.title, story?.title, _logger);
+                _ = PushStoryFollowNotificationsAsync(createdNotifications);
             }
             else
             {
@@ -453,6 +458,34 @@ namespace Services.Implementations
                 is_read = false,
                 created_at = DateTime.Now
             });
+        }
+
+        private async Task PushStoryFollowNotificationsAsync(List<notifications> created)
+        {
+            if (created == null || created.Count == 0 || _notificationHubNotifier == null)
+                return;
+            foreach (var n in created)
+            {
+                if (n.user_id == null) continue;
+                try
+                {
+                    var dto = new NotificationDto
+                    {
+                        Id = n.id,
+                        Type = n.type,
+                        Title = n.title,
+                        Content = n.content,
+                        LinkUrl = n.link_url,
+                        IsRead = n.is_read == true,
+                        CreatedAt = n.created_at
+                    };
+                    await _notificationHubNotifier.NotifyUserAsync(n.user_id.Value, dto);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Push notification to follower failed. UserId={UserId} NotificationId={NotificationId}", n.user_id, n.id);
+                }
+            }
         }
 
         private static void LogModeration(string targetType, Guid targetId, string action, Guid moderatorId, string? rejectionReason)

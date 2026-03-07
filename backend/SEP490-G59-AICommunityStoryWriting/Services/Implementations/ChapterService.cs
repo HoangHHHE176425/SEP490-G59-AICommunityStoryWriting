@@ -3,6 +3,7 @@ using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Logging;
 using Repositories;
 using Services.DTOs.Chapters;
+using Services.DTOs.Notifications;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 
@@ -12,13 +13,15 @@ namespace Services.Implementations
     {
         private readonly IChapterRepository _chapterRepository;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
+        private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly ILogger<ChapterService> _logger;
 
-        public ChapterService(IChapterRepository chapterRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null)
+        public ChapterService(IChapterRepository chapterRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
         {
             _chapterRepository = chapterRepository;
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
+            _notificationHubNotifier = notificationHubNotifier;
         }
 
         public ChapterResponseDto Create(CreateChapterRequestDto request)
@@ -92,14 +95,15 @@ namespace Services.Implementations
             {
                 UpdateStoryChapterStats(request.StoryId);
 
-                // If chapter is published, update story's last_published_at and notify followers
+                // If chapter is published, update story's last_published_at and notify followers (DB + real-time)
                 if (status == "PUBLISHED" && story != null)
                 {
                     story.last_published_at = DateTime.Now;
                     StoryDAO.Update(story);
                     Console.WriteLine($"[CONSOLE] ChapterService.Create PUBLISHED -> NotifyStoryFollowersNewChapter StoryId={request.StoryId} ChapterId={chapter.id}");
                     _logger.LogInformation("ChapterService.Create calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", request.StoryId, chapter.id);
-                    NotificationDAO.NotifyStoryFollowersNewChapter(request.StoryId, chapter.id, request.Title, story.title, _logger);
+                    var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(request.StoryId, chapter.id, request.Title, story.title, _logger);
+                    _ = PushNotificationsToFollowersAsync(createdNotifications);
                 }
             }
             catch (Exception)
@@ -379,7 +383,8 @@ namespace Services.Implementations
                         }
                         Console.WriteLine($"[CONSOLE] ChapterService.Update PUBLISHED -> NotifyStoryFollowersNewChapter StoryId={chapter.story_id} ChapterId={chapter.id}");
                         _logger.LogInformation("ChapterService.Update calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id, chapter.id);
-                        NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapter.id, chapter.title, story?.title, _logger);
+                        var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapter.id, chapter.title, story?.title, _logger);
+                        _ = PushNotificationsToFollowersAsync(createdNotifications);
                     }
                 }
                 catch (Exception)
@@ -476,6 +481,35 @@ namespace Services.Implementations
             }
 
             return true;
+        }
+
+        /// <summary>Gửi real-time (SignalR) từng thông báo tới user theo dõi truyện. Gọi fire-and-forget từ Create/Update.</summary>
+        private async Task PushNotificationsToFollowersAsync(List<notifications> created)
+        {
+            if (created == null || created.Count == 0 || _notificationHubNotifier == null)
+                return;
+            foreach (var n in created)
+            {
+                if (n.user_id == null) continue;
+                try
+                {
+                    var dto = new NotificationDto
+                    {
+                        Id = n.id,
+                        Type = n.type,
+                        Title = n.title,
+                        Content = n.content,
+                        LinkUrl = n.link_url,
+                        IsRead = n.is_read == true,
+                        CreatedAt = n.created_at
+                    };
+                    await _notificationHubNotifier.NotifyUserAsync(n.user_id.Value, dto);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Push notification to follower failed. UserId={UserId} NotificationId={NotificationId}", n.user_id, n.id);
+                }
+            }
         }
 
         private int CalculateWordCount(string? content)

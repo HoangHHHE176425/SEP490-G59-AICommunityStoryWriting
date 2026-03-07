@@ -113,9 +113,10 @@ namespace DataAccessObjects.DAOs
             });
         }
 
-        /// <summary>Gửi thông báo cho tất cả user đang follow story khi có chapter mới được publish. Dùng một context và SaveChanges một lần.</summary>
+        /// <summary>Gửi thông báo cho tất cả user đang follow story khi có chapter mới được publish. Dùng một context và SaveChanges một lần. Trả về danh sách thông báo đã tạo để caller gửi real-time (SignalR).</summary>
         /// <param name="logger">Nếu có thì ghi log vào host (cùng luồng với EF/core).</param>
-        public static void NotifyStoryFollowersNewChapter(Guid storyId, Guid chapterId, string? chapterTitle, string? storyTitle, ILogger? logger = null)
+        /// <returns>Danh sách notification đã lưu (mỗi item có user_id, id, ...) để gửi push real-time.</returns>
+        public static List<notifications> NotifyStoryFollowersNewChapter(Guid storyId, Guid chapterId, string? chapterTitle, string? storyTitle, ILogger? logger = null)
         {
             Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter ENTER StoryId={storyId} ChapterId={chapterId} ChapterTitle={chapterTitle ?? "(null)"} StoryTitle={storyTitle ?? "(null)"}");
             logger?.LogWarning("[NOTIFY] NotifyStoryFollowersNewChapter ENTER StoryId={StoryId} ChapterId={ChapterId} ChapterTitle={ChapterTitle} StoryTitle={StoryTitle}",
@@ -127,7 +128,7 @@ namespace DataAccessObjects.DAOs
             {
                 Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter SKIP: no followers for StoryId={storyId} (kiem tra user_library: story_id, relation_type='FOLLOW')");
                 logger?.LogWarning("[NOTIFY] NotifyStoryFollowersNewChapter SKIP: no followers for StoryId={StoryId} (check user_library.relation_type='FOLLOW')", storyId);
-                return;
+                return new List<notifications>();
             }
             logger?.LogWarning("[NOTIFY] NotifyStoryFollowersNewChapter StoryId={StoryId} FollowerCount={Count} UserIds={UserIds}",
                 storyId, followerIds.Count, string.Join(", ", followerIds));
@@ -137,34 +138,40 @@ namespace DataAccessObjects.DAOs
                 ? "Truyện bạn theo dõi vừa ra chương mới."
                 : $"«{storyTitle.Trim()}» vừa ra chương mới" + (string.IsNullOrWhiteSpace(chapterTitle) ? "." : $": {chapterTitle.Trim()}");
             var linkUrl = $"/Chapters/Read/{chapterId}";
-            using var context = new StoryPlatformDbContext();
             var now = DateTime.Now;
-            foreach (var userId in followerIds)
+            var created = new List<notifications>();
+            using (var context = new StoryPlatformDbContext())
             {
-                context.notifications.Add(new notifications
+                foreach (var userId in followerIds)
                 {
-                    id = Guid.NewGuid(),
-                    user_id = userId,
-                    type = "STORY_CHAPTER_PUBLISHED",
-                    title = title,
-                    content = content,
-                    link_url = linkUrl,
-                    is_read = false,
-                    created_at = now
-                });
+                    var n = new notifications
+                    {
+                        id = Guid.NewGuid(),
+                        user_id = userId,
+                        type = "STORY_CHAPTER_PUBLISHED",
+                        title = title,
+                        content = content,
+                        link_url = linkUrl,
+                        is_read = false,
+                        created_at = now
+                    };
+                    created.Add(n);
+                    context.notifications.Add(n);
+                }
+                try
+                {
+                    context.SaveChanges();
+                    Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter OK: saved {created.Count} notifications for StoryId={storyId}");
+                    logger?.LogWarning("[NOTIFY] NotifyStoryFollowersNewChapter OK: saved {Count} notifications for StoryId={StoryId}", created.Count, storyId);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter ERROR StoryId={storyId} ex={ex.Message}");
+                    logger?.LogError(ex, "NotifyStoryFollowersNewChapter ERROR StoryId={StoryId}", storyId);
+                    throw;
+                }
             }
-            try
-            {
-                context.SaveChanges();
-                Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter OK: saved {followerIds.Count} notifications for StoryId={storyId}");
-                logger?.LogWarning("[NOTIFY] NotifyStoryFollowersNewChapter OK: saved {Count} notifications for StoryId={StoryId}", followerIds.Count, storyId);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter ERROR StoryId={storyId} ex={ex.Message}");
-                logger?.LogError(ex, "NotifyStoryFollowersNewChapter ERROR StoryId={StoryId}", storyId);
-                throw;
-            }
+            return created;
         }
     }
 }
