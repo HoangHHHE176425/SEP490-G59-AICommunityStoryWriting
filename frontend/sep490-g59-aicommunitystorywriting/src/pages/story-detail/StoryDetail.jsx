@@ -17,6 +17,7 @@ import {
     hasViewedStoryInCooldown,
     setStoryViewCache,
     rateStory,
+    getStoryRatings,
     getStoryComments,
     addStoryComment,
     toggleCommentLike,
@@ -62,6 +63,8 @@ export function StoryDetail() {
     const [comments, setComments] = useState([]);
     const [commentsLoading, setCommentsLoading] = useState(false);
     const [commentError, setCommentError] = useState(null);
+    const [reviews, setReviews] = useState([]);
+    const [reviewsLoading, setReviewsLoading] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -181,6 +184,19 @@ export function StoryDetail() {
         if (storyId && activeTab === 'comments') loadComments();
     }, [storyId, activeTab, loadComments]);
 
+    const loadReviews = useCallback(() => {
+        if (!storyId) return;
+        setReviewsLoading(true);
+        getStoryRatings(storyId)
+            .then((list) => setReviews(Array.isArray(list) ? list : []))
+            .catch(() => setReviews([]))
+            .finally(() => setReviewsLoading(false));
+    }, [storyId]);
+
+    useEffect(() => {
+        if (storyId && activeTab === 'reviews') loadReviews();
+    }, [storyId, activeTab, loadReviews]);
+
     const handleAddComment = async (content, parentId) => {
         if (!storyId) return;
         setCommentError(null);
@@ -258,6 +274,7 @@ export function StoryDetail() {
             const data = await rateStory(storyId, { starValue, reviewText });
             setStory((prev) => (prev ? { ...prev, rating: data.avgRating ?? data.avg, totalRatings: data.ratingCount ?? data.count ?? 0 } : prev));
             setIsRatingModalOpen(false);
+            loadReviews();
             showToast('Đánh giá thành công!', 'success');
         } catch (err) {
             const status = err?.response?.status;
@@ -398,10 +415,46 @@ export function StoryDetail() {
                                 )}
 
                                 {activeTab === 'reviews' && (
-                                    <div className="text-center py-12">
-                                        <Star className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto mb-4" />
-                                        <p className="text-slate-500 dark:text-slate-400">Chưa có đánh giá nào</p>
-                                    </div>
+                                    <>
+                                        {reviewsLoading ? (
+                                            <p className="text-slate-500 dark:text-slate-400 text-sm py-4">Đang tải đánh giá...</p>
+                                        ) : reviews.length === 0 ? (
+                                            <div className="text-center py-12">
+                                                <Star className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto mb-4" />
+                                                <p className="text-slate-500 dark:text-slate-400">Chưa có đánh giá nào</p>
+                                            </div>
+                                        ) : (
+                                            <div className="space-y-4">
+                                                {reviews.map((r) => {
+                                                    const name = r.userDisplayName ?? r.UserDisplayName ?? 'Ẩn danh';
+                                                    const stars = Number(r.starValue ?? r.StarValue ?? 0);
+                                                    const text = r.reviewText ?? r.ReviewText ?? '';
+                                                    const createdAt = r.createdAt ?? r.CreatedAt;
+                                                    return (
+                                                        <div key={r.id ?? r.Id} className="flex gap-3 p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                                                            <div className="w-10 h-10 rounded-full bg-primary/20 shrink-0 flex items-center justify-center text-primary font-bold text-sm">
+                                                                {(name || '?').charAt(0).toUpperCase()}
+                                                            </div>
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <span className="font-semibold text-slate-900 dark:text-white text-sm">{name}</span>
+                                                                    <span className="flex items-center gap-0.5">
+                                                                        {[1, 2, 3, 4, 5].map((i) => (
+                                                                            <Star key={i} className={`w-4 h-4 ${i <= stars ? 'fill-amber-400 text-amber-400' : 'text-slate-300 dark:text-slate-600'}`} />
+                                                                        ))}
+                                                                    </span>
+                                                                    {createdAt && (
+                                                                        <span className="text-xs text-slate-500 dark:text-slate-400">{formatTimeAgo(createdAt)}</span>
+                                                                    )}
+                                                                </div>
+                                                                {text && <p className="text-slate-600 dark:text-slate-400 text-sm mt-1 whitespace-pre-wrap">{text}</p>}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </div>

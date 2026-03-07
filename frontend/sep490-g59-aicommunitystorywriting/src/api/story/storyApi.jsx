@@ -368,6 +368,16 @@ export async function rateStory(storyId, payload) {
     return response.data;
 }
 
+/**
+ * Lấy lịch sử đánh giá của story (AllowAnonymous).
+ * @param {string} storyId - Guid
+ * @returns {Promise<Array<{ id, userId?, userDisplayName, starValue, reviewText?, createdAt? }>>}
+ */
+export async function getStoryRatings(storyId) {
+    const response = await axiosInstance.get(`/stories/${storyId}/ratings`);
+    return Array.isArray(response.data) ? response.data : [];
+}
+
 // --- Comments (GET/POST /api/stories/{id}/comments, POST like) ---
 
 /**
