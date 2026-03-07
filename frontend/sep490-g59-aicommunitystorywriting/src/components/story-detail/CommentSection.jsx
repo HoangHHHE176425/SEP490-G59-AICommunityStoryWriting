@@ -35,6 +35,119 @@ function buildCommentTree(flatList) {
     return roots;
 }
 
+/** Block 1 comment + form trả lời. Định nghĩa ngoài CommentSection để không bị tạo lại mỗi lần render → tránh textarea reply mất focus khi gõ. */
+function CommentBlock({
+    node,
+    isReply = false,
+    replyingTo,
+    onSetReplyingTo,
+    replyText,
+    onReplyTextChange,
+    onSubmitReply,
+    submitting,
+    onLike,
+    isLoggedIn,
+    onReportComment,
+    formatTimeAgo,
+}) {
+    const timeStr = node.createdAt ? (formatTimeAgo ? formatTimeAgo(node.createdAt) : new Date(node.createdAt).toLocaleString()) : '';
+    return (
+        <div className={isReply ? 'ml-10 mt-2' : ''}>
+            <div className="flex gap-3">
+                <div className="w-10 h-10 rounded-full bg-primary/20 shrink-0 flex items-center justify-center text-primary font-bold text-sm">
+                    {(node.userDisplayName || '?').charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                    <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">
+                        <p className="font-semibold text-slate-900 dark:text-white text-sm mb-1">
+                            {node.userDisplayName}
+                        </p>
+                        <p className="text-slate-600 dark:text-slate-400 text-sm whitespace-pre-wrap">
+                            {node.content}
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-4 mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        <span>{timeStr}</span>
+                        <button
+                            type="button"
+                            onClick={() => onLike(node.id)}
+                            className={`flex items-center gap-1 transition-colors ${node.userHasLiked ? 'text-primary' : 'hover:text-primary'}`}
+                        >
+                            <ThumbsUp className={`w-3.5 h-3.5 ${node.userHasLiked ? 'fill-primary' : ''}`} />
+                            {node.likesCount}
+                        </button>
+                        {isLoggedIn && (
+                            <button
+                                type="button"
+                                onClick={() => { onSetReplyingTo(node.id); onReplyTextChange(''); }}
+                                className="hover:text-primary transition-colors"
+                            >
+                                Trả lời
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => onReportComment?.(node.id)}
+                            className="hover:text-red-500 transition-colors"
+                        >
+                            <Flag className="w-3.5 h-3.5 inline" />
+                        </button>
+                    </div>
+                    {replyingTo === node.id && (
+                        <div className="mt-2">
+                            <textarea
+                                value={replyText}
+                                onChange={(e) => onReplyTextChange(e.target.value)}
+                                placeholder="Viết trả lời..."
+                                className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+                                rows={2}
+                            />
+                            <div className="flex justify-end gap-2 mt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => { onSetReplyingTo(null); onReplyTextChange(''); }}
+                                    className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-bold rounded-full hover:bg-slate-200 dark:hover:bg-slate-700"
+                                >
+                                    Hủy
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => onSubmitReply(node.id)}
+                                    disabled={!replyText.trim() || submitting}
+                                    className="px-4 py-2 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 disabled:opacity-50"
+                                >
+                                    Gửi trả lời
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                    {node.replies?.length > 0 && (
+                        <div className="mt-2 space-y-2">
+                            {node.replies.map((r) => (
+                                <CommentBlock
+                                    key={r.id}
+                                    node={r}
+                                    isReply
+                                    replyingTo={replyingTo}
+                                    onSetReplyingTo={onSetReplyingTo}
+                                    replyText={replyText}
+                                    onReplyTextChange={onReplyTextChange}
+                                    onSubmitReply={onSubmitReply}
+                                    submitting={submitting}
+                                    onLike={onLike}
+                                    isLoggedIn={isLoggedIn}
+                                    onReportComment={onReportComment}
+                                    formatTimeAgo={formatTimeAgo}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export function CommentSection({
     comments,
     isLoggedIn,
@@ -84,90 +197,18 @@ export function CommentSection({
         if (isLoggedIn && onLikeComment) onLikeComment(commentId);
     };
 
-    function CommentBlock({ node, isReply = false }) {
-        const timeStr = node.createdAt ? (formatTimeAgo ? formatTimeAgo(node.createdAt) : new Date(node.createdAt).toLocaleString()) : '';
-        return (
-            <div className={isReply ? 'ml-10 mt-2' : ''}>
-                <div className="flex gap-3">
-                    <div className="w-10 h-10 rounded-full bg-primary/20 shrink-0 flex items-center justify-center text-primary font-bold text-sm">
-                        {(node.userDisplayName || '?').charAt(0).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                        <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">
-                            <p className="font-semibold text-slate-900 dark:text-white text-sm mb-1">
-                                {node.userDisplayName}
-                            </p>
-                            <p className="text-slate-600 dark:text-slate-400 text-sm whitespace-pre-wrap">
-                                {node.content}
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-4 mt-2 text-xs text-slate-500 dark:text-slate-400">
-                            <span>{timeStr}</span>
-                            <button
-                                type="button"
-                                onClick={() => handleLike(node.id)}
-                                className={`flex items-center gap-1 transition-colors ${node.userHasLiked ? 'text-primary' : 'hover:text-primary'}`}
-                            >
-                                <ThumbsUp className={`w-3.5 h-3.5 ${node.userHasLiked ? 'fill-primary' : ''}`} />
-                                {node.likesCount}
-                            </button>
-                            {isLoggedIn && (
-                                <button
-                                    type="button"
-                                    onClick={() => { setReplyingTo(node.id); setReplyText(''); }}
-                                    className="hover:text-primary transition-colors"
-                                >
-                                    Trả lời
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={() => onReportComment?.(node.id)}
-                                className="hover:text-red-500 transition-colors"
-                            >
-                                <Flag className="w-3.5 h-3.5 inline" />
-                            </button>
-                        </div>
-                        {replyingTo === node.id && (
-                            <div className="mt-2">
-                                <textarea
-                                    value={replyText}
-                                    onChange={(e) => setReplyText(e.target.value)}
-                                    placeholder="Viết trả lời..."
-                                    className="w-full p-3 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-                                    rows={2}
-                                />
-                                <div className="flex justify-end gap-2 mt-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => { setReplyingTo(null); setReplyText(''); }}
-                                        className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white text-sm font-bold rounded-full hover:bg-slate-200 dark:hover:bg-slate-700"
-                                    >
-                                        Hủy
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => handleSubmitReply(node.id)}
-                                        disabled={!replyText.trim() || submitting}
-                                        className="px-4 py-2 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 disabled:opacity-50"
-                                    >
-                                        Gửi trả lời
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                        {node.replies?.length > 0 && (
-                            <div className="mt-2 space-y-2">
-                                {node.replies.map((r) => (
-                                    <CommentBlock key={r.id} node={r} isReply />
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
-        );
-    }
+    const commentBlockProps = {
+        replyingTo,
+        onSetReplyingTo: setReplyingTo,
+        replyText,
+        onReplyTextChange: setReplyText,
+        onSubmitReply: handleSubmitReply,
+        submitting,
+        onLike: handleLike,
+        isLoggedIn,
+        onReportComment,
+        formatTimeAgo,
+    };
 
     return (
         <div className="space-y-4">
@@ -208,7 +249,7 @@ export function CommentSection({
                 <>
                     <div className="space-y-4">
                         {visibleTree.map((node) => (
-                            <CommentBlock key={node.id} node={node} />
+                            <CommentBlock key={node.id} node={node} {...commentBlockProps} />
                         ))}
                     </div>
                     {flatCount > visibleCount && (
