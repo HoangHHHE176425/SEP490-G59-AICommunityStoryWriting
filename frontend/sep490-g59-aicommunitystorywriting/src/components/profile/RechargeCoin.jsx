@@ -238,6 +238,25 @@ export default function RechargeCoin() {
                             className="block w-full pl-10 pr-4 py-3 bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white opacity-70 cursor-not-allowed outline-none"
                         />
                     </div>
+                    {customPrice && (
+                        <div className="mt-3 p-4 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/80 dark:bg-emerald-950/30">
+                            <p className="text-sm font-semibold text-slate-900 dark:text-white mb-1">
+                                Số tiền cần thanh toán
+                            </p>
+                            <p className="text-xl font-bold text-primary">
+                                {customPrice.totalVnd.toLocaleString('vi-VN')} VNĐ
+                            </p>
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
+                                Tỷ giá áp dụng: <span className="font-semibold">{customPrice.ratePerCoin.toLocaleString('vi-VN')} VNĐ</span>/coin
+                                <span className="ml-1 px-1.5 py-0.5 rounded bg-emerald-200/80 dark:bg-emerald-800/50 text-emerald-800 dark:text-emerald-200 text-[10px] font-medium">
+                                    Bậc {customPrice.label}
+                                </span>
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
+                                Nạp càng nhiều coin, tỷ giá càng ưu đãi (từ 1.000 VNĐ/coin xuống 700 VNĐ/coin).
+                            </p>
+                        </div>
+                    )}
                 </div>
 
                 {/* Payment Method */}
