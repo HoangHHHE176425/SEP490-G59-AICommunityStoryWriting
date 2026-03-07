@@ -1,5 +1,5 @@
 import { ChevronRight, Star } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import StoryHeader from '../../components/story-detail/StoryHeader';
 import { ChapterList } from '../../components/story-detail/ChapterList';
@@ -17,6 +17,9 @@ import {
     hasViewedStoryInCooldown,
     setStoryViewCache,
     rateStory,
+    getStoryComments,
+    addStoryComment,
+    toggleCommentLike,
 } from '../../api/story/storyApi';
 import { getChapters } from '../../api/chapter/chapterApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
@@ -56,6 +59,9 @@ export function StoryDetail() {
     const [ratingError, setRatingError] = useState(null);
     const [ratingSubmitting, setRatingSubmitting] = useState(false);
     const { showToast, ToastContainer } = useToast();
+    const [comments, setComments] = useState([]);
+    const [commentsLoading, setCommentsLoading] = useState(false);
+    const [commentError, setCommentError] = useState(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -161,6 +167,50 @@ export function StoryDetail() {
         };
     }, [storyId, viewerKey]);
 
+    const loadComments = useCallback(() => {
+        if (!storyId) return;
+        setCommentsLoading(true);
+        setCommentError(null);
+        getStoryComments(storyId)
+            .then((list) => setComments(Array.isArray(list) ? list : []))
+            .catch((err) => setCommentError(err?.response?.data?.message ?? 'Không tải được bình luận.'))
+            .finally(() => setCommentsLoading(false));
+    }, [storyId]);
+
+    useEffect(() => {
+        if (storyId && activeTab === 'comments') loadComments();
+    }, [storyId, activeTab, loadComments]);
+
+    const handleAddComment = async (content, parentId) => {
+        if (!storyId) return;
+        setCommentError(null);
+        try {
+            await addStoryComment(storyId, { content: content.trim(), parentId: parentId || undefined });
+            loadComments();
+            setStory((prev) => (prev ? { ...prev, comments: (prev.comments ?? 0) + 1 } : prev));
+            showToast('Đã gửi bình luận.', 'success');
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể gửi bình luận.';
+            setCommentError(msg);
+        }
+    };
+
+    const handleLikeComment = async (commentId) => {
+        if (!storyId || !user?.id) return;
+        try {
+            const res = await toggleCommentLike(storyId, commentId);
+            setComments((prev) =>
+                prev.map((c) =>
+                    (c.id === commentId || c.Id === commentId)
+                        ? { ...c, userHasLiked: res.liked, likesCount: res.likesCount ?? res.likes_count ?? c.likesCount ?? c.likes_count ?? 0 }
+                        : c
+                )
+            );
+        } catch {
+            // ignore
+        }
+    };
+
     const relatedStories = Array.from({ length: 5 }, (_, i) => ({
         id: i + 2,
         title: ['Đấu Phá Thương Khung', 'Vũ Luyện Đỉnh Phong', 'Thần Ấn Vương Tọa', 'Tuyệt Thế Đường Môn', 'Đấu La Đại Lục'][i],
@@ -190,93 +240,6 @@ export function StoryDetail() {
         chapters: 200,
         genre: ['Tiên hiệp', 'Huyền huyễn', 'Tu tiên'][i % 3],
     }));
-
-    const comments = [
-        {
-            id: 1,
-            user: { name: 'Độc Giả 123', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=50&h=50&fit=crop' },
-            content: 'Truyện hay quá! Cốt truyện chặt chẽ, nhân vật phát triển hợp lý. Đọc mà không thể rời mắt!',
-            time: '3 giờ trước',
-            likes: 234,
-        },
-        {
-            id: 2,
-            user: { name: 'Fan Tiên Hiệp', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=50&h=50&fit=crop' },
-            content: 'Chap mới ra nhanh quá, tác giả siêng cập nhật ghê! Hóng chap sau!',
-            time: '5 giờ trước',
-            likes: 156,
-        },
-        {
-            id: 3,
-            user: { name: 'Nguyễn Văn A', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=50&h=50&fit=crop' },
-            content: 'Cảm ơn tác giả đã cho ra một tác phẩm tuyệt vời như vậy. Mong tác giả giữ vững phim độ cập nhật nhé!',
-            time: '1 ngày trước',
-            likes: 89,
-        },
-        {
-            id: 4,
-            user: { name: 'Phương Mai', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=50&h=50&fit=crop' },
-            content: 'Phần này hơi chậm rồi, mong tác giả đẩy nhanh nhịp độ hơn. Nhưng nhìn chung vẫn ổn!',
-            time: '1 ngày trước',
-            likes: 45,
-        },
-        {
-            id: 5,
-            user: { name: 'Trần Minh', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=50&h=50&fit=crop' },
-            content: 'Nhân vật chính quá bá đạo luôn! Thích quá đi mất!!!',
-            time: '2 ngày trước',
-            likes: 178,
-        },
-        {
-            id: 6,
-            user: { name: 'Linh Ngọc', avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=50&h=50&fit=crop' },
-            content: 'Có ai giống mình không? Đọc xong chap này mà muốn đọc luôn chap tiếp theo quá!',
-            time: '2 ngày trước',
-            likes: 201,
-        },
-        {
-            id: 7,
-            user: { name: 'Hoàng Long', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=50&h=50&fit=crop' },
-            content: 'Plot twist ở chương này quá hay! Không ngờ tác giả lại viết như vậy.',
-            time: '3 ngày trước',
-            likes: 67,
-        },
-        {
-            id: 8,
-            user: { name: 'Thu Hà', avatar: 'https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=50&h=50&fit=crop' },
-            content: 'Mình follow từ chap 1 đến giờ, chưa bao giờ thất vọng. Tác giả quá đỉnh!',
-            time: '3 ngày trước',
-            likes: 312,
-        },
-        {
-            id: 9,
-            user: { name: 'Quang Huy', avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=50&h=50&fit=crop' },
-            content: 'Các nhân vật phụ cũng được phát triển rất tốt, không bị lãng quên như nhiều truyện khác.',
-            time: '4 ngày trước',
-            likes: 93,
-        },
-        {
-            id: 10,
-            user: { name: 'Bảo Trâm', avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=50&h=50&fit=crop' },
-            content: 'Đọc truyện này mà cảm giác thời gian trôi quá nhanh. Tác giả viết hay lắm!',
-            time: '4 ngày trước',
-            likes: 156,
-        },
-        {
-            id: 11,
-            user: { name: 'Đức Anh', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=50&h=50&fit=crop' },
-            content: 'Mong tác giả cập nhật nhiều hơn nữa. Đợi mỗi ngày một chap thật là khó chịu quá!',
-            time: '5 ngày trước',
-            likes: 128,
-        },
-        {
-            id: 12,
-            user: { name: 'Khánh Linh', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=50&h=50&fit=crop' },
-            content: 'Hệ thống tu luyện trong truyện rất logic và dễ hiểu. Thích lắm!',
-            time: '5 ngày trước',
-            likes: 74,
-        },
-    ];
 
     const handleReportComment = (commentId) => {
         setReportingCommentId(commentId);
@@ -421,7 +384,17 @@ export function StoryDetail() {
                                 {activeTab === 'chapters' && <ChapterList chapters={chapters} storyId={storyId} />}
 
                                 {activeTab === 'comments' && (
-                                    <CommentSection comments={comments} onReportComment={handleReportComment} />
+                                    <CommentSection
+                                        storyId={storyId}
+                                        comments={comments}
+                                        isLoggedIn={!!user?.id}
+                                        commentError={commentError}
+                                        commentsLoading={commentsLoading}
+                                        onSubmitComment={handleAddComment}
+                                        onLikeComment={handleLikeComment}
+                                        onReportComment={handleReportComment}
+                                        formatTimeAgo={formatTimeAgo}
+                                    />
                                 )}
 
                                 {activeTab === 'reviews' && (
