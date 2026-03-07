@@ -297,6 +297,40 @@ namespace AIStory.API.Controllers
             }
         }
 
+        /// <summary>Lấy lịch sử đánh giá của story (status VISIBLE). AllowAnonymous.</summary>
+        [HttpGet("{id:guid}/ratings")]
+        [AllowAnonymous]
+        public IActionResult GetStoryRatings(Guid id)
+        {
+            try
+            {
+                var story = StoryDAO.GetById(id);
+                if (story == null)
+                    return NotFound(new { message = $"Story with ID {id} not found" });
+                var list = RatingDAO.GetByStoryId(id);
+                var dtos = list.Select(r =>
+                {
+                    var nickname = r.user?.user_profiles?.nickname?.Trim();
+                    var email = r.user?.email?.Trim();
+                    var display = !string.IsNullOrWhiteSpace(nickname) ? nickname : !string.IsNullOrWhiteSpace(email) ? email : "Ẩn danh";
+                    return new StoryRatingItemDto
+                    {
+                        Id = r.id,
+                        UserId = r.user_id,
+                        UserDisplayName = display ?? "Ẩn danh",
+                        StarValue = r.star_value ?? 0,
+                        ReviewText = r.review_text,
+                        CreatedAt = r.created_at
+                    };
+                }).ToList();
+                return Ok(dtos);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "An error occurred while fetching ratings", error = ex.Message });
+            }
+        }
+
         /// <summary>Lấy danh sách người đã reaction comment (để hiển thị modal xem tất cả). Cho phép xem không cần đăng nhập.</summary>
         [HttpGet("{storyId:guid}/comments/{commentId:guid}/reactions", Order = 0)]
         [AllowAnonymous]
