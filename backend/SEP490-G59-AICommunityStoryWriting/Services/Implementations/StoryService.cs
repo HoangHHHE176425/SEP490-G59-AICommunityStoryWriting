@@ -451,6 +451,11 @@ namespace Services.Implementations
             return (avg, count);
         }
 
+        public (string? reason, DateTime? rejectedAt) GetLatestRejectionForStory(Guid storyId)
+        {
+            return ModerationLogDAO.GetLatestRejection("STORY", storyId);
+        }
+
         private string GenerateSlug(string title)
         {
             return title

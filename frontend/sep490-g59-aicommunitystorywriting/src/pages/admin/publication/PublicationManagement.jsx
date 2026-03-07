@@ -1086,6 +1086,7 @@ export function PublicationManagement() {
                     onRefresh={() => {
                         loadPublications(currentPage);
                         loadStats();
+                        loadRejectedCache();
                     }}
                     onClaimStory={handleClaimStory}
                     claimingId={claimingId}
