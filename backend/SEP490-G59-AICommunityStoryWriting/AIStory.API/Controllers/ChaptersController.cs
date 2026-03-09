@@ -20,7 +20,7 @@ namespace AIStory.API.Controllers
             _storyService = storyService;
         }
 
-        /// <summary>Tạo chapter mới - Chỉ AUTHOR</summary>
+        /// <summary>Tạo chapter mới - Chỉ AUTHOR. Sau khi lưu, Plot Manager (Agent 4) cập nhật memory nếu có nội dung.</summary>
         [HttpPost]
         [Authorize(Roles = "AUTHOR")]
         public IActionResult Create([FromBody] CreateChapterRequestDto request)
@@ -28,6 +28,8 @@ namespace AIStory.API.Controllers
             try
             {
                 var chapter = _chapterService.Create(request);
+                if (!string.IsNullOrWhiteSpace(request.Content) && chapter.StoryId.HasValue)
+                    TriggerPlotManagerUpdate(chapter.StoryId.Value, chapter.Id, request.Content);
                 return Created($"api/chapters/{chapter.Id}", chapter);
             }
             catch (InvalidOperationException ex)
@@ -128,6 +130,12 @@ namespace AIStory.API.Controllers
             try
             {
                 var updated = _chapterService.Update(id, request);
+                if (updated && (request.Content != null || (request.Status?.ToUpper() == "PUBLISHED")))
+                {
+                    var chapter = _chapterService.GetById(id);
+                    if (chapter != null && !string.IsNullOrWhiteSpace(chapter.Content) && chapter.StoryId.HasValue)
+                        TriggerPlotManagerUpdate(chapter.StoryId.Value, id, chapter.Content);
+                }
                 return updated ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
             catch (InvalidOperationException ex)
@@ -168,6 +176,12 @@ namespace AIStory.API.Controllers
             try
             {
                 var published = _chapterService.Publish(id);
+                if (published)
+                {
+                    var chapter = _chapterService.GetById(id);
+                    if (chapter != null && !string.IsNullOrWhiteSpace(chapter.Content) && chapter.StoryId.HasValue)
+                        TriggerPlotManagerUpdate(chapter.StoryId.Value, id, chapter.Content);
+                }
                 return published ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
             catch (Exception ex)
@@ -209,36 +223,6 @@ namespace AIStory.API.Controllers
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while reordering the chapter", error = ex.Message });
-            }
-        }
-
-        /// <summary>Xem lý do từ chối chapter - Chỉ AUTHOR (chỉ chapter thuộc truyện của mình).</summary>
-        [HttpGet("{id:guid}/rejection-reason")]
-        [Authorize(Roles = "AUTHOR")]
-        public IActionResult GetRejectionReason(Guid id)
-        {
-            try
-            {
-                var chapter = _chapterService.GetById(id);
-                if (chapter == null)
-                    return NotFound(new { message = "Chapter không tồn tại." });
-                if (!chapter.StoryId.HasValue)
-                    return Forbid();
-                var story = _storyService.GetById(chapter.StoryId.Value);
-                if (story == null)
-                    return Forbid();
-                var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
-                if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
-                    return Forbid();
-                // Chỉ ẩn lịch sử từ chối khi chapter đã được duyệt (PUBLISHED). Khi gửi lại (PENDING_REVIEW) vẫn hiển thị.
-                if (chapter.Status == "PUBLISHED")
-                    return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
-                var (reason, rejectedAt) = _chapterService.GetLatestRejectionForChapter(id);
-                return Ok(new { reason, rejectedAt });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { message = "Lỗi lấy lý do từ chối", error = ex.Message });
             }
         }
     }

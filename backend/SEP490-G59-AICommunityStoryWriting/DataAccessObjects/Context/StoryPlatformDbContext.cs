@@ -86,7 +86,15 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<stories> stories { get; set; }
 
+    public virtual DbSet<story_chapter_chunks> story_chapter_chunks { get; set; }
+
+    public virtual DbSet<story_character_memory> story_character_memories { get; set; }
+
     public virtual DbSet<story_commitments> story_commitments { get; set; }
+
+    public virtual DbSet<story_event_memory> story_event_memories { get; set; }
+
+    public virtual DbSet<story_story_state> story_story_states { get; set; }
 
     public virtual DbSet<story_versions> story_versions { get; set; }
 
@@ -116,6 +124,8 @@ public partial class StoryPlatformDbContext : DbContext
     {
         if (!optionsBuilder.IsConfigured)
         {
+            optionsBuilder.UseSqlServer("Server=QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;");
+
             optionsBuilder.UseSqlServer(
                 "Server= localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
@@ -372,6 +382,79 @@ public partial class StoryPlatformDbContext : DbContext
             entity.HasOne(d => d.story).WithMany(p => p.chapters)
                 .HasForeignKey(d => d.story_id)
                 .HasConstraintName("fk_chapters_story");
+        });
+
+        modelBuilder.Entity<story_chapter_chunks>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("PK_story_chapter_chunks");
+
+            entity.ToTable("story_chapter_chunks");
+
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
+            entity.Property(e => e.content).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.embedding_json).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.embedding_model).HasMaxLength(128);
+            entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
+
+            entity.HasOne(d => d.chapter).WithMany(p => p.story_chapter_chunks)
+                .HasForeignKey(d => d.chapter_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_rag_chunks_chapter");
+
+            entity.HasOne(d => d.story).WithMany(p => p.story_chapter_chunks)
+                .HasForeignKey(d => d.story_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_rag_chunks_story");
+
+            entity.HasIndex(e => e.story_id).HasDatabaseName("IX_story_chapter_chunks_story_id");
+            entity.HasIndex(e => new { e.story_id, e.chapter_id, e.chunk_index }).IsUnique().HasDatabaseName("UQ_story_chapter_chunks_story_chapter_index");
+        });
+
+        modelBuilder.Entity<story_character_memory>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("PK_story_character_memory");
+            entity.ToTable("story_character_memory");
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
+            entity.Property(e => e.character_name).HasMaxLength(255);
+            entity.Property(e => e.state_json).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.updated_at).HasDefaultValueSql("(getdate())");
+            entity.HasOne(d => d.story).WithMany(p => p.story_character_memories)
+                .HasForeignKey(d => d.story_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_character_memory_story");
+            entity.HasIndex(e => e.story_id).HasDatabaseName("IX_story_character_memory_story_id");
+        });
+
+        modelBuilder.Entity<story_event_memory>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("PK_story_event_memory");
+            entity.ToTable("story_event_memory");
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
+            entity.Property(e => e.description).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
+            entity.HasOne(d => d.story).WithMany(p => p.story_event_memories)
+                .HasForeignKey(d => d.story_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_event_memory_story");
+            entity.HasOne(d => d.chapter).WithMany(p => p.story_event_memories)
+                .HasForeignKey(d => d.chapter_id)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("fk_event_memory_chapter");
+            entity.HasIndex(e => e.story_id).HasDatabaseName("IX_story_event_memory_story_id");
+        });
+
+        modelBuilder.Entity<story_story_state>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("PK_story_story_state");
+            entity.ToTable("story_story_state");
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
+            entity.Property(e => e.state_snapshot_json).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.updated_at).HasDefaultValueSql("(getdate())");
+            entity.HasOne(d => d.story).WithMany(p => p.story_story_states)
+                .HasForeignKey(d => d.story_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("fk_story_state_story");
+            entity.HasIndex(e => e.story_id).HasDatabaseName("IX_story_story_state_story_id");
         });
 
         modelBuilder.Entity<coin_orders>(entity =>

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
@@ -45,6 +45,8 @@ public partial class stories
 
     public virtual ICollection<chapters> chapters { get; set; } = new List<chapters>();
 
+    public virtual ICollection<story_chapter_chunks> story_chapter_chunks { get; set; } = new List<story_chapter_chunks>();
+
     public virtual ICollection<comments> comments { get; set; } = new List<comments>();
 
     public virtual ICollection<idea_posts> idea_posts { get; set; } = new List<idea_posts>();
@@ -54,6 +56,12 @@ public partial class stories
     public virtual ICollection<ratings> ratings { get; set; } = new List<ratings>();
 
     public virtual ICollection<story_commitments> story_commitments { get; set; } = new List<story_commitments>();
+
+    public virtual ICollection<story_character_memory> story_character_memories { get; set; } = new List<story_character_memory>();
+
+    public virtual ICollection<story_event_memory> story_event_memories { get; set; } = new List<story_event_memory>();
+
+    public virtual ICollection<story_story_state> story_story_states { get; set; } = new List<story_story_state>();
 
     public virtual ICollection<story_versions> story_versions { get; set; } = new List<story_versions>();
 
