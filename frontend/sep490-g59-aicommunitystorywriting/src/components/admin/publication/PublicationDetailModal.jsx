@@ -68,14 +68,22 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         else if (pubStatus === 'pending') params.status = 'PENDING_REVIEW';
         const promise = getChapters(params);
         if (pubStatus === 'pending') {
-            Promise.all([promise, getChapters({ storyId: sid, status: 'PUBLISHED', pageSize: 500 })])
-                .then(([res, pubRes]) => {
-                    const items = res?.items ?? res?.Items ?? [];
-                    const mapped = items.map(mapChapterItem);
-                    setChapters(mapped);
-                    setSelectedChapter((prev) => (prev && mapped.some((c) => c.id === prev.id)) ? prev : (mapped[0] ?? null));
-                    const pubList = pubRes?.items ?? pubRes?.Items ?? [];
-                    setPublishedOrderIndices(new Set(pubList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
+            const publishedPromise = getChapters({ storyId: sid, status: 'PUBLISHED', page: 1, pageSize: 500 });
+            Promise.allSettled([promise, publishedPromise])
+                .then(([pendingResult, publishedResult]) => {
+                    if (pendingResult.status === 'fulfilled') {
+                        const res = pendingResult.value;
+                        const items = res?.items ?? res?.Items ?? res?.data ?? [];
+                        const mapped = (Array.isArray(items) ? items : []).map(mapChapterItem);
+                        setChapters(mapped);
+                        setSelectedChapter((prev) => (prev && mapped.some((c) => c.id === prev.id)) ? prev : (mapped[0] ?? null));
+                    }
+                    if (publishedResult.status === 'fulfilled') {
+                        const pubRes = publishedResult.value;
+                        const pubList = pubRes?.items ?? pubRes?.Items ?? pubRes?.data ?? [];
+                        const arr = Array.isArray(pubList) ? pubList : [];
+                        setPublishedOrderIndices(new Set(arr.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0))));
+                    }
                 })
                 .catch(() => setChapters([]))
                 .finally(() => setChaptersLoading(false));
@@ -298,8 +306,14 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         });
     };
 
-    const selectedOrderIndex = selectedChapter?.orderIndex ?? (selectedChapter?.chapterNumber != null ? selectedChapter.chapterNumber - 1 : -1);
-    const canApproveReject = selectedChapter && (selectedOrderIndex === 0 || publishedOrderIndices.has(selectedOrderIndex - 1));
+    const selectedOrderIndex = Number(selectedChapter?.orderIndex ?? (selectedChapter?.chapterNumber != null ? selectedChapter.chapterNumber - 1 : -1));
+    const minOrderInList = chapters.length > 0 ? Math.min(...chapters.map((c) => Number(c.orderIndex ?? (c.chapterNumber != null ? c.chapterNumber - 1 : 0)))) : -1;
+    const isFirstInPendingQueue = selectedOrderIndex >= 0 && minOrderInList >= 0 && selectedOrderIndex === minOrderInList;
+    const canApproveReject = selectedChapter && (
+        selectedOrderIndex === 0
+        || publishedOrderIndices.has(Number(selectedOrderIndex - 1))
+        || (minOrderInList >= 1 && isFirstInPendingQueue)
+    );
     const orderHint = !canApproveReject && selectedChapter
         ? `Phải duyệt hoặc từ chối chương ${selectedOrderIndex} trước khi xử lý chương ${selectedOrderIndex + 1}.`
         : '';

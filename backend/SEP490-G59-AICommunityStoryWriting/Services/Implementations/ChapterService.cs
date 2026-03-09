@@ -492,18 +492,18 @@ namespace Services.Implementations
             return true;
         }
 
-        /// <summary>Tác giả chỉ được gửi xuất bản chương theo thứ tự 1, 2, 3... Chương trước phải đã PUBLISHED.</summary>
+        /// <summary>Tác giả chỉ được gửi xuất bản chương theo thứ tự 1, 2, 3... Chương trước phải đã gửi (PUBLISHED hoặc PENDING_REVIEW) thì mới gửi được chương tiếp theo.</summary>
         private void EnsureCanSubmitForReview(chapters chapter)
         {
             if (chapter.order_index <= 0)
                 return;
             var storyId = chapter.story_id ?? Guid.Empty;
             var previous = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, chapter.order_index - 1);
-            if (previous == null || (previous.status ?? "").ToUpper() != "PUBLISHED")
+            var prevStatus = (previous?.status ?? "").ToUpper();
+            if (previous == null || (prevStatus != "PUBLISHED" && prevStatus != "PENDING_REVIEW"))
             {
-                var prevNumber = chapter.order_index; // 0-based -> chương thứ (order_index + 1), nên chương trước là order_index
                 throw new InvalidOperationException(
-                    "Phải xuất bản chương theo thứ tự. Chương " + (chapter.order_index) + " chưa được xuất bản, không thể gửi chương " + (chapter.order_index + 1) + ".");
+                    "Phải gửi xuất bản chương theo thứ tự. Chương " + (chapter.order_index) + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
             }
         }
 

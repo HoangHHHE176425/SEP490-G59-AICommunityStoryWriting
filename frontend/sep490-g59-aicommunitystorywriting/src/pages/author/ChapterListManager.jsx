@@ -63,8 +63,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     const [totalCount, setTotalCount] = useState(0);
     const [hasPublishedChapter, setHasPublishedChapter] = useState(false);
     const [hasPendingReviewChapter, setHasPendingReviewChapter] = useState(false);
-    /** Set of orderIndex (0-based) của các chương đã PUBLISHED — dùng để chỉ cho phép gửi xuất bản theo thứ tự 1,2,3... */
+    /** Set orderIndex (0-based) chương đã PUBLISHED — dùng để hiển thị trạng thái. */
     const [publishedOrderIndices, setPublishedOrderIndices] = useState(new Set());
+    /** Set orderIndex (0-based) chương đang PENDING_REVIEW — cho phép gửi chương tiếp theo khi chương trước đã gửi (published hoặc pending). */
+    const [pendingOrderIndices, setPendingOrderIndices] = useState(new Set());
 
     const loadChapters = useCallback((page = 1, options = {}) => {
         if (!storyId) return;
@@ -85,13 +87,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                 if (silent) {
                     Promise.all([
                         getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
-                        getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                        getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 })
                     ]).then(([publishedRes, pendingRes]) => {
                         const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
                         const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
                         setHasPublishedChapter(publishedList.length > 0);
                         setHasPendingReviewChapter(pendingList.length > 0);
                         setPublishedOrderIndices(new Set(publishedList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
+                        setPendingOrderIndices(new Set(pendingList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
                     }).catch(() => { });
                 }
             })
@@ -124,7 +127,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
             Promise.all([
                 getChapters({ storyId, page: 1, pageSize: CHAPTERS_PAGE_SIZE }),
                 getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
-                getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 })
             ])
                 .then(([res, publishedRes, pendingRes]) => {
                     const rawItems = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
@@ -133,6 +136,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                     const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
                     const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
                     const publishedSet = new Set(publishedList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0));
+                    const pendingSet = new Set(pendingList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0));
                     if (!cancelled) {
                         setChapters(rawItems.map((item) => ({ ...mapChapterFromApi(item), content: item.content ?? item.Content ?? '' })));
                         setTotalCount(total);
@@ -141,6 +145,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                         setHasPublishedChapter(publishedList.length > 0);
                         setHasPendingReviewChapter(pendingList.length > 0);
                         setPublishedOrderIndices(publishedSet);
+                        setPendingOrderIndices(pendingSet);
                     }
                 })
                 .catch((err) => {
@@ -229,13 +234,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                         if (!storyId) return;
                         return Promise.all([
                             getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
-                            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 })
                         ]).then(([rPub, rPend]) => {
                             const pubList = Array.isArray(rPub) ? rPub : (rPub?.items ?? rPub?.Items ?? []);
                             const pendList = Array.isArray(rPend) ? rPend : (rPend?.items ?? rPend?.Items ?? []);
                             setHasPublishedChapter(pubList.length > 0);
                             setHasPendingReviewChapter(pendList.length > 0);
                             setPublishedOrderIndices(new Set(pubList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
+                            setPendingOrderIndices(new Set(pendList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
                         });
                     })
                     .then(() => {
@@ -277,13 +283,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                     if (!storyId) return;
                     return Promise.all([
                         getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
-                        getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                        getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 })
                     ]).then(([rPub, rPend]) => {
                         const pubList = Array.isArray(rPub) ? rPub : (rPub?.items ?? rPub?.Items ?? []);
                         const pendList = Array.isArray(rPend) ? rPend : (rPend?.items ?? rPend?.Items ?? []);
                         setHasPublishedChapter(pubList.length > 0);
                         setHasPendingReviewChapter(pendList.length > 0);
                         setPublishedOrderIndices(new Set(pubList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
+                        setPendingOrderIndices(new Set(pendList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
                     });
                 })
                 .catch((err) => {
@@ -665,12 +672,12 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                             {(chapter.status === 'draft' || chapter.status === 'pending_review' || chapter.status === 'rejected') && (
                                                 <div style={{ display: 'flex', width: '100%' }}>
                                                     {(chapter.status === 'draft' || chapter.status === 'rejected') && (() => {
-                                                        const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(chapter.number - 2);
+                                                        const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(chapter.number - 2) || pendingOrderIndices.has(chapter.number - 2);
                                                         return (
                                                             <button
                                                                 onClick={() => canSubmitForPublish && handlePublishChapter(chapter.id)}
                                                                 disabled={actioningChapterId === chapter.id || !canSubmitForPublish}
-                                                                title={!canSubmitForPublish ? `Phải xuất bản chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.` : 'Gửi chương lên để duyệt xuất bản'}
+                                                                title={!canSubmitForPublish ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.` : 'Gửi chương lên để duyệt xuất bản'}
                                                                 style={{
                                                                     display: 'inline-flex',
                                                                     alignItems: 'center',
