@@ -24,16 +24,21 @@ namespace DataAccessObjects.DAOs
             return context.stories.FirstOrDefault(s => s.slug == slug);
         }
 
-        /// <summary>L?y danh s·ch story id cÛ Ìt nh?t m?t category n?m trong categoryIds (d˘ng cho moderator).</summary>
+        /// <summary>L?y danh sùch story id cù ùt nh?t m?t category n?m trong categoryIds (dùng cho moderator).</summary>
         public static List<Guid> GetIdsByCategoryIds(IReadOnlyCollection<Guid> categoryIds)
         {
             if (categoryIds == null || categoryIds.Count == 0)
                 return new List<Guid>();
             using var context = new StoryPlatformDbContext();
-            return context.stories
-                .Where(s => s.category.Any(c => categoryIds.Contains(c.id)))
-                .Select(s => s.id)
-                .ToList();
+            var ids = new List<Guid>();
+            foreach (var catId in categoryIds)
+            {
+                var storyIds = context.Database.SqlQueryRaw<Guid>(
+                    "SELECT story_id FROM story_categories WHERE category_id = {0}", catId).ToList();
+                foreach (var sid in storyIds)
+                    if (!ids.Contains(sid)) ids.Add(sid);
+            }
+            return ids;
         }
 
         public static void Add(stories story)
@@ -118,7 +123,7 @@ namespace DataAccessObjects.DAOs
             }
         }
 
-        /// <summary>T„ng total_views c?a story lÍn 1 (d˘ng khi ghi nh?n l˝?t xem h?p l?, ch?ng spam ? t?ng service).</summary>
+        /// <summary>Tùng total_views c?a story lùn 1 (dùng khi ghi nh?n lù?t xem h?p l?, ch?ng spam ? t?ng service).</summary>
         public static void IncrementViewCount(Guid storyId)
         {
             using var context = new StoryPlatformDbContext();
