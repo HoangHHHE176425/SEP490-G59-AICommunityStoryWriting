@@ -63,6 +63,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     const [totalCount, setTotalCount] = useState(0);
     const [hasPublishedChapter, setHasPublishedChapter] = useState(false);
     const [hasPendingReviewChapter, setHasPendingReviewChapter] = useState(false);
+    /** Set of orderIndex (0-based) của các chương đã PUBLISHED — dùng để chỉ cho phép gửi xuất bản theo thứ tự 1,2,3... */
+    const [publishedOrderIndices, setPublishedOrderIndices] = useState(new Set());
 
     const loadChapters = useCallback((page = 1, options = {}) => {
         if (!storyId) return;
@@ -82,13 +84,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                 setCurrentPage(res?.page ?? page);
                 if (silent) {
                     Promise.all([
-                        getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                        getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
                         getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
                     ]).then(([publishedRes, pendingRes]) => {
                         const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
                         const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
                         setHasPublishedChapter(publishedList.length > 0);
                         setHasPendingReviewChapter(pendingList.length > 0);
+                        setPublishedOrderIndices(new Set(publishedList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
                     }).catch(() => { });
                 }
             })
@@ -113,13 +116,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                 setTotalPages(1);
                 setHasPublishedChapter(false);
                 setHasPendingReviewChapter(false);
+                setPublishedOrderIndices(new Set());
                 return;
             }
             setLoading(true);
             setError(null);
             Promise.all([
                 getChapters({ storyId, page: 1, pageSize: CHAPTERS_PAGE_SIZE }),
-                getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
                 getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
             ])
                 .then(([res, publishedRes, pendingRes]) => {
@@ -128,6 +132,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                     const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / CHAPTERS_PAGE_SIZE));
                     const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
                     const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
+                    const publishedSet = new Set(publishedList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0));
                     if (!cancelled) {
                         setChapters(rawItems.map((item) => ({ ...mapChapterFromApi(item), content: item.content ?? item.Content ?? '' })));
                         setTotalCount(total);
@@ -135,6 +140,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                         setCurrentPage(res?.page ?? 1);
                         setHasPublishedChapter(publishedList.length > 0);
                         setHasPendingReviewChapter(pendingList.length > 0);
+                        setPublishedOrderIndices(publishedSet);
                     }
                 })
                 .catch((err) => {
@@ -222,13 +228,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                     .then(() => {
                         if (!storyId) return;
                         return Promise.all([
-                            getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                            getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
                             getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
                         ]).then(([rPub, rPend]) => {
                             const pubList = Array.isArray(rPub) ? rPub : (rPub?.items ?? rPub?.Items ?? []);
                             const pendList = Array.isArray(rPend) ? rPend : (rPend?.items ?? rPend?.Items ?? []);
                             setHasPublishedChapter(pubList.length > 0);
                             setHasPendingReviewChapter(pendList.length > 0);
+                            setPublishedOrderIndices(new Set(pubList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
                         });
                     })
                     .then(() => {
@@ -269,13 +276,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                 .then(() => {
                     if (!storyId) return;
                     return Promise.all([
-                        getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
+                        getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
                         getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
                     ]).then(([rPub, rPend]) => {
                         const pubList = Array.isArray(rPub) ? rPub : (rPub?.items ?? rPub?.Items ?? []);
                         const pendList = Array.isArray(rPend) ? rPend : (rPend?.items ?? rPend?.Items ?? []);
                         setHasPublishedChapter(pubList.length > 0);
                         setHasPendingReviewChapter(pendList.length > 0);
+                        setPublishedOrderIndices(new Set(pubList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
                     });
                 })
                 .catch((err) => {
@@ -656,33 +664,37 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                             {/* Hàng 2: Xuất bản hoặc Hủy xuất bản (draft/rejected = Xuất bản; pending_review = Hủy xuất bản) */}
                                             {(chapter.status === 'draft' || chapter.status === 'pending_review' || chapter.status === 'rejected') && (
                                                 <div style={{ display: 'flex', width: '100%' }}>
-                                                    {(chapter.status === 'draft' || chapter.status === 'rejected') && (
-                                                        <button
-                                                            onClick={() => handlePublishChapter(chapter.id)}
-                                                            disabled={actioningChapterId === chapter.id}
-                                                            style={{
-                                                                display: 'inline-flex',
-                                                                alignItems: 'center',
-                                                                justifyContent: 'center',
-                                                                gap: '0.25rem',
-                                                                width: '100%',
-                                                                padding: '0.4rem 0.75rem',
-                                                                backgroundColor: '#13ec5b',
-                                                                border: 'none',
-                                                                borderRadius: '9999px',
-                                                                fontSize: '0.75rem',
-                                                                fontWeight: 600,
-                                                                color: '#fff',
-                                                                cursor: actioningChapterId === chapter.id ? 'not-allowed' : 'pointer',
-                                                                opacity: actioningChapterId === chapter.id ? 0.7 : 1,
-                                                                transition: 'all 0.2s',
-                                                                whiteSpace: 'nowrap'
-                                                            }}
-                                                        >
-                                                            <Send size={12} />
-                                                            {actioningChapterId === chapter.id ? '...' : 'Xuất bản'}
-                                                        </button>
-                                                    )}
+                                                    {(chapter.status === 'draft' || chapter.status === 'rejected') && (() => {
+                                                        const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(chapter.number - 2);
+                                                        return (
+                                                            <button
+                                                                onClick={() => canSubmitForPublish && handlePublishChapter(chapter.id)}
+                                                                disabled={actioningChapterId === chapter.id || !canSubmitForPublish}
+                                                                title={!canSubmitForPublish ? `Phải xuất bản chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.` : 'Gửi chương lên để duyệt xuất bản'}
+                                                                style={{
+                                                                    display: 'inline-flex',
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                    gap: '0.25rem',
+                                                                    width: '100%',
+                                                                    padding: '0.4rem 0.75rem',
+                                                                    backgroundColor: canSubmitForPublish ? '#13ec5b' : '#e2e8f0',
+                                                                    border: 'none',
+                                                                    borderRadius: '9999px',
+                                                                    fontSize: '0.75rem',
+                                                                    fontWeight: 600,
+                                                                    color: canSubmitForPublish ? '#fff' : '#94a3b8',
+                                                                    cursor: actioningChapterId === chapter.id || !canSubmitForPublish ? 'not-allowed' : 'pointer',
+                                                                    opacity: actioningChapterId === chapter.id ? 0.7 : 1,
+                                                                    transition: 'all 0.2s',
+                                                                    whiteSpace: 'nowrap'
+                                                                }}
+                                                            >
+                                                                <Send size={12} />
+                                                                {actioningChapterId === chapter.id ? '...' : 'Xuất bản'}
+                                                            </button>
+                                                        );
+                                                    })()}
                                                     {chapter.status === 'pending_review' && (
                                                         <button
                                                             onClick={() => handleUnpublishChapter(chapter.id)}

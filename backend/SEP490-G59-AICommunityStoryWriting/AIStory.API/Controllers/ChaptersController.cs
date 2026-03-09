@@ -190,6 +190,10 @@ namespace AIStory.API.Controllers
                 }
                 return published ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while publishing the chapter", error = ex.Message });
