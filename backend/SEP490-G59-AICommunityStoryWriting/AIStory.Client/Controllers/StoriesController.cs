@@ -28,5 +28,16 @@ namespace AIStory.Client.Controllers
             ViewBag.StoryId = id.Value;
             return View();
         }
+
+        /// Màn hình test stats + rating (không khóa AUTHOR).
+        public IActionResult Stats(Guid? id)
+        {
+            if (!id.HasValue)
+            {
+                return RedirectToAction("Index");
+            }
+            ViewBag.StoryId = id.Value;
+            return View();
+        }
     }
 }

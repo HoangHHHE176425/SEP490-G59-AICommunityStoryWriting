@@ -24,6 +24,18 @@ namespace DataAccessObjects.DAOs
             return context.stories.FirstOrDefault(s => s.slug == slug);
         }
 
+        /// <summary>L?y danh sách story id có ít nh?t m?t category n?m trong categoryIds (dùng cho moderator).</summary>
+        public static List<Guid> GetIdsByCategoryIds(IReadOnlyCollection<Guid> categoryIds)
+        {
+            if (categoryIds == null || categoryIds.Count == 0)
+                return new List<Guid>();
+            using var context = new StoryPlatformDbContext();
+            return context.stories
+                .Where(s => s.category.Any(c => categoryIds.Contains(c.id)))
+                .Select(s => s.id)
+                .ToList();
+        }
+
         public static void Add(stories story)
         {
             using var context = new StoryPlatformDbContext();
@@ -102,6 +114,30 @@ namespace DataAccessObjects.DAOs
             if (story != null)
             {
                 context.stories.Remove(story);
+                context.SaveChanges();
+            }
+        }
+
+        /// <summary>Tãng total_views c?a story lên 1 (dùng khi ghi nh?n lý?t xem h?p l?, ch?ng spam ? t?ng service).</summary>
+        public static void IncrementViewCount(Guid storyId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var story = context.stories.FirstOrDefault(s => s.id == storyId);
+            if (story != null)
+            {
+                story.total_views = (story.total_views ?? 0) + 1;
+                context.SaveChanges();
+            }
+        }
+
+        /// <summary>C?p nh?t avg_rating cho story.</summary>
+        public static void UpdateAvgRating(Guid storyId, decimal avgRating)
+        {
+            using var context = new StoryPlatformDbContext();
+            var story = context.stories.FirstOrDefault(s => s.id == storyId);
+            if (story != null)
+            {
+                story.avg_rating = avgRating;
                 context.SaveChanges();
             }
         }

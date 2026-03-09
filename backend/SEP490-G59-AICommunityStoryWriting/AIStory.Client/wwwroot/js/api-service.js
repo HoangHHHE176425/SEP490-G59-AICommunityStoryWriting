@@ -1,5 +1,5 @@
-﻿// API Base URL
-const API_BASE_URL = 'http://localhost:5000/api';
+﻿// API Base URL: từ server config (Layout) hoặc mặc định khi chạy API trên port 5000
+const API_BASE_URL = (typeof window !== 'undefined' && window.__API_BASE_URL) ? window.__API_BASE_URL : 'http://localhost:5000/api';
 
 // API Service Class
 class ApiService {
@@ -226,6 +226,59 @@ class ApiService {
         });
     }
 
+    static async getStoryRejectionReason(id) {
+        return this.request(`/stories/${id}/rejection-reason`);
+    }
+
+    static async rateStory(storyId, data) {
+        return this.request(`/stories/${storyId}/ratings`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    static async followStory(storyId) {
+        return this.request(`/stories/${storyId}/follow`, { method: 'POST' });
+    }
+
+    static async unfollowStory(storyId) {
+        return this.request(`/stories/${storyId}/follow`, { method: 'DELETE' });
+    }
+
+    static async getStoryComments(storyId) {
+        return this.request(`/stories/${storyId}/comments`);
+    }
+
+    static async addStoryComment(storyId, data) {
+        return this.request(`/stories/${storyId}/comments`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    static async toggleCommentLike(storyId, commentId) {
+        return this.request(`/stories/${storyId}/comments/${commentId}/like`, {
+            method: 'POST'
+        });
+    }
+
+    /** reactionType: 'LIKE'|'DISLIKE'|'FUNNY'|'SAD'|'ANGRY'|'LOVE'|'WOW' hoặc null để bỏ reaction */
+    static async setCommentReaction(storyId, commentId, reactionType) {
+        return this.request(`/stories/${storyId}/comments/${commentId}/reaction`, {
+            method: 'POST',
+            body: JSON.stringify({ reactionType: reactionType || null })
+        });
+    }
+
+    /** Danh sách người đã reaction comment (để hiển thị modal). */
+    static async getCommentReactions(storyId, commentId) {
+        return this.request(`/stories/${storyId}/comments/${commentId}/reactions`);
+    }
+
+    static async getChapterRejectionReason(id) {
+        return this.request(`/chapters/${id}/rejection-reason`);
+    }
+
     // Chapters API
     static async getChapters(query = {}) {
         const params = new URLSearchParams();
@@ -287,6 +340,80 @@ class ApiService {
             method: 'POST',
             body: JSON.stringify(newOrderIndex)
         });
+    }
+
+    // Moderator API (kiểm duyệt - cần role MODERATOR hoặc ADMIN)
+    static async getPendingStories(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.claimFilter) params.append('claimFilter', options.claimFilter);
+        return this.request(`/moderator/stories/pending?${params.toString()}`);
+    }
+
+    static async getPendingChapters(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.storyId) params.append('storyId', options.storyId);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.claimFilter) params.append('claimFilter', options.claimFilter);
+        return this.request(`/moderator/chapters/pending?${params.toString()}`);
+    }
+
+    static async moderatorClaimStory(id) {
+        return this.request(`/moderator/stories/${id}/claim`, { method: 'POST' });
+    }
+
+    static async moderatorApproveStory(id) {
+        return this.request(`/moderator/stories/${id}/approve`, { method: 'POST' });
+    }
+
+    static async moderatorRejectStory(id, reason) {
+        return this.request(`/moderator/stories/${id}/reject`, {
+            method: 'POST',
+            body: JSON.stringify({ reason: reason })
+        });
+    }
+
+    static async moderatorClaimChapter(id) {
+        return this.request(`/moderator/chapters/${id}/claim`, { method: 'POST' });
+    }
+
+    static async moderatorApproveChapter(id) {
+        return this.request(`/moderator/chapters/${id}/approve`, { method: 'POST' });
+    }
+
+    static async moderatorRejectChapter(id, reason) {
+        return this.request(`/moderator/chapters/${id}/reject`, {
+            method: 'POST',
+            body: JSON.stringify({ reason: reason })
+        });
+    }
+
+    // Notifications API
+    static async getNotifications(options = {}) {
+        const params = new URLSearchParams();
+        if (options.limit != null) params.append('limit', options.limit);
+        if (options.onlyUnread) params.append('onlyUnread', 'true');
+        return this.request(`/notifications?${params.toString()}`);
+    }
+
+    static async getUnreadNotificationCount() {
+        return this.request('/notifications/unread-count');
+    }
+
+    static async markNotificationRead(id) {
+        return this.request(`/notifications/${id}/read`, { method: 'PATCH' });
+    }
+
+    static async markAllNotificationsRead() {
+        return this.request('/notifications/mark-all-read', { method: 'POST' });
     }
 
     // Authentication API

@@ -1,9 +1,10 @@
-import { Search, Bell, Edit, BookOpen, Menu, X, ChevronDown, Coins, User, Library, LogOut, FileText, List } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { Search, Bell, Edit, BookOpen, Menu, X, ChevronDown, Wallet, User, Library, LogOut } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { getAllCategories } from '../../api/category/categoryApi';
+import { getNotifications, getUnreadCount, markNotificationAsRead, markAllNotificationsAsRead } from '../../api/notification/notificationApi';
 
 export function Header() {
     const navigate = useNavigate();
@@ -11,10 +12,42 @@ export function Header() {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isGenreOpen, setIsGenreOpen] = useState(false);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+    const [isNotificationOpen, setIsNotificationOpen] = useState(false);
     const [categories, setCategories] = useState([]);
     const [categoriesLoading, setCategoriesLoading] = useState(true);
+    const [notifications, setNotifications] = useState([]);
+    const [unreadCount, setUnreadCount] = useState(0);
+    const [notificationsLoading, setNotificationsLoading] = useState(false);
 
     const userCoins = user?.stats?.currentCoins ?? 0;
+
+    const fetchNotifications = useCallback(() => {
+        if (!isAuthenticated) return;
+        setNotificationsLoading(true);
+        Promise.all([getNotifications({ limit: 30 }), getUnreadCount()])
+            .then(([list, countRes]) => {
+                setNotifications(Array.isArray(list) ? list : []);
+                setUnreadCount(countRes?.count ?? 0);
+            })
+            .catch(() => {
+                setNotifications([]);
+                setUnreadCount(0);
+            })
+            .finally(() => setNotificationsLoading(false));
+    }, [isAuthenticated]);
+
+    useEffect(() => {
+        if (!isAuthenticated) return;
+        const t = setTimeout(() => fetchNotifications(), 0);
+        return () => clearTimeout(t);
+    }, [isAuthenticated, fetchNotifications]);
+
+    useEffect(() => {
+        if (!isAuthenticated) return;
+        const handler = () => fetchNotifications();
+        window.addEventListener('app:notification', handler);
+        return () => window.removeEventListener('app:notification', handler);
+    }, [isAuthenticated, fetchNotifications]);
 
     const handleLogout = async () => {
         await logout();
@@ -124,16 +157,83 @@ export function Header() {
                     <div className="flex items-center gap-3">
                         {isAuthenticated ? (
                             <>
-                                {/* Coin Balance */}
-                                <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 border border-amber-700/50 rounded-full">
-                                    <Coins className="w-4 h-4 text-amber-400" />
+                                {/* Wallet - click to go to wallet page */}
+                                <Link
+                                    to="/wallet"
+                                    className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 border border-amber-700/50 rounded-full hover:bg-amber-950/60 transition-colors"
+                                >
+                                    <Wallet className="w-4 h-4 text-amber-400" />
                                     <span className="text-sm font-bold text-amber-400">{userCoins.toLocaleString()}</span>
-                                </div>
+                                </Link>
 
-                                <button className="p-2 text-slate-300 hover:bg-slate-800 rounded-full transition-colors relative">
-                                    <Bell className="w-5 h-5" />
-                                    <span className="absolute top-2 right-2 size-2 bg-primary border-2 border-slate-900 rounded-full"></span>
-                                </button>
+                                <div className="relative">
+                                    <button
+                                        className="p-2 text-slate-300 hover:bg-slate-800 rounded-full transition-colors relative flex items-center justify-center"
+                                        onClick={() => {
+                                            const opening = !isNotificationOpen;
+                                            setIsNotificationOpen((prev) => !prev);
+                                            if (opening && unreadCount > 0) {
+                                                markAllNotificationsAsRead()
+                                                    .then(() => {
+                                                        setUnreadCount(0);
+                                                        setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+                                                    })
+                                                    .catch(() => { });
+                                            }
+                                        }}
+                                        onBlur={() => setTimeout(() => setIsNotificationOpen(false), 200)}
+                                    >
+                                        <Bell className="w-5 h-5 shrink-0" />
+                                        {unreadCount > 0 && (
+                                            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-primary text-white text-[10px] font-bold rounded-full border-2 border-slate-900 shadow-sm">
+                                                {unreadCount > 99 ? '99+' : unreadCount}
+                                            </span>
+                                        )}
+                                    </button>
+                                    {isNotificationOpen && (
+                                        <div
+                                            className="absolute top-full right-0 mt-2 w-80 max-h-[400px] bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden z-50 flex flex-col"
+                                            onMouseDown={(e) => e.preventDefault()}
+                                        >
+                                            <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                                                <span className="font-semibold text-white">Thông báo</span>
+                                                {unreadCount > 0 && (
+                                                    <span className="text-xs text-slate-400">{unreadCount} chưa đọc</span>
+                                                )}
+                                            </div>
+                                            <div className="overflow-y-auto flex-1">
+                                                {notificationsLoading ? (
+                                                    <div className="px-4 py-6 text-center text-slate-400 text-sm">Đang tải...</div>
+                                                ) : notifications.length === 0 ? (
+                                                    <div className="px-4 py-6 text-center text-slate-400 text-sm">Chưa có thông báo</div>
+                                                ) : (
+                                                    notifications.map((n) => (
+                                                        <Link
+                                                            key={n.id}
+                                                            to={n.linkUrl && n.linkUrl.startsWith('/') ? n.linkUrl : '/home'}
+                                                            className="block px-4 py-3 border-b border-slate-700/50 hover:bg-slate-700/50 transition-colors"
+                                                            onClick={async () => {
+                                                                if (!n.isRead) {
+                                                                    try {
+                                                                        await markNotificationAsRead(n.id);
+                                                                        setUnreadCount((c) => Math.max(0, c - 1));
+                                                                        setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)));
+                                                                    } catch {
+                                                                        // ignore
+                                                                    }
+                                                                }
+                                                                setIsNotificationOpen(false);
+                                                            }}
+                                                        >
+                                                            <p className={`text-sm font-medium ${n.isRead ? 'text-slate-400' : 'text-white'}`}>{n.title}</p>
+                                                            <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.content}</p>
+                                                        </Link>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
 
                                 <Link
                                     to="/author"
@@ -183,13 +283,14 @@ export function Header() {
                                                     <User className="w-4 h-4" />
                                                     Thông tin cá nhân
                                                 </Link>
-                                                <a
-                                                    href="#"
+                                                <Link
+                                                    to="/library"
                                                     className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
+                                                    onClick={() => setIsUserMenuOpen(false)}
                                                 >
                                                     <Library className="w-4 h-4" />
                                                     Tủ sách
-                                                </a>
+                                                </Link>
                                                 <div className="border-t border-slate-700 mt-1 pt-1">
                                                     <button
                                                         onClick={handleLogout}
@@ -235,15 +336,19 @@ export function Header() {
             {isMenuOpen && (
                 <div className="lg:hidden border-t border-slate-700 bg-slate-900">
                     <div className="max-w-[1280px] mx-auto px-4 py-4 flex flex-col gap-4">
-                        {/* Coin Balance Mobile */}
+                        {/* Wallet Mobile - link to wallet page */}
                         {isAuthenticated && (
-                            <div className="flex items-center justify-between p-3 bg-amber-950/40 border border-amber-700/50 rounded-lg">
+                            <Link
+                                to="/wallet"
+                                onClick={() => setIsMenuOpen(false)}
+                                className="flex items-center justify-between p-3 bg-amber-950/40 border border-amber-700/50 rounded-lg hover:bg-amber-950/60 transition-colors"
+                            >
                                 <div className="flex items-center gap-2">
-                                    <Coins className="w-5 h-5 text-amber-400" />
-                                    <span className="font-semibold text-white">Số dư xu</span>
+                                    <Wallet className="w-5 h-5 text-amber-400" />
+                                    <span className="font-semibold text-white">Ví</span>
                                 </div>
                                 <span className="text-lg font-bold text-amber-400">{userCoins.toLocaleString()}</span>
-                            </div>
+                            </Link>
                         )}
 
                         <div className="relative mb-2">
@@ -306,10 +411,14 @@ export function Header() {
                                         <User className="w-4 h-4" />
                                         Thông tin cá nhân
                                     </Link>
-                                    <a className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold" href="#">
+                                    <Link
+                                        to="/library"
+                                        className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold"
+                                        onClick={() => setIsMenuOpen(false)}
+                                    >
                                         <Library className="w-4 h-4" />
                                         Tủ sách
-                                    </a>
+                                    </Link>
                                     <button
                                         onClick={handleLogout}
                                         className="flex items-center gap-3 text-red-600 dark:text-red-400 hover:text-red-700 transition-colors font-semibold"

@@ -14,6 +14,9 @@ namespace Repositories
         public stories? GetBySlug(string slug)
             => StoryDAO.GetBySlug(slug);
 
+        public IReadOnlyList<Guid> GetStoryIdsByCategoryIds(IReadOnlyCollection<Guid> categoryIds)
+            => StoryDAO.GetIdsByCategoryIds(categoryIds ?? Array.Empty<Guid>());
+
         public void Add(stories story)
             => StoryDAO.Add(story);
 
@@ -25,5 +28,8 @@ namespace Repositories
 
         public void Delete(Guid id)
             => StoryDAO.Delete(id);
+
+        public void IncrementViewCount(Guid storyId)
+            => StoryDAO.IncrementViewCount(storyId);
     }
 }
