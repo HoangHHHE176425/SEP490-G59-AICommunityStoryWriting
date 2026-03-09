@@ -1,9 +1,16 @@
+<<<<<<< HEAD
+
+=======
+>>>>>>> ce6a8b3cffa7124e5aed3e84c7bd01eeb39aa983
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Chapters;
 using Services.Interfaces;
+<<<<<<< HEAD
+=======
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+>>>>>>> ce6a8b3cffa7124e5aed3e84c7bd01eeb39aa983
 
 namespace AIStory.API.Controllers
 {
@@ -12,15 +19,24 @@ namespace AIStory.API.Controllers
     public class ChaptersController : ControllerBase
     {
         private readonly IChapterService _chapterService;
+<<<<<<< HEAD
+        private readonly IServiceScopeFactory _scopeFactory;
+
+        public ChaptersController(IChapterService chapterService, IServiceScopeFactory scopeFactory)
+        {
+            _chapterService = chapterService;
+            _scopeFactory = scopeFactory;
+=======
         private readonly IStoryService _storyService;
 
         public ChaptersController(IChapterService chapterService, IStoryService storyService)
         {
             _chapterService = chapterService;
             _storyService = storyService;
+>>>>>>> ce6a8b3cffa7124e5aed3e84c7bd01eeb39aa983
         }
 
-        /// <summary>Tạo chapter mới - Chỉ AUTHOR</summary>
+        /// <summary>Tạo chapter mới - Chỉ AUTHOR. Sau khi lưu, Plot Manager (Agent 4) cập nhật memory nếu có nội dung.</summary>
         [HttpPost]
         [Authorize(Roles = "AUTHOR")]
         public IActionResult Create([FromBody] CreateChapterRequestDto request)
@@ -28,6 +44,8 @@ namespace AIStory.API.Controllers
             try
             {
                 var chapter = _chapterService.Create(request);
+                if (!string.IsNullOrWhiteSpace(request.Content) && chapter.StoryId.HasValue)
+                    TriggerPlotManagerUpdate(chapter.StoryId.Value, chapter.Id, request.Content);
                 return Created($"api/chapters/{chapter.Id}", chapter);
             }
             catch (InvalidOperationException ex)
@@ -128,6 +146,12 @@ namespace AIStory.API.Controllers
             try
             {
                 var updated = _chapterService.Update(id, request);
+                if (updated && (request.Content != null || (request.Status?.ToUpper() == "PUBLISHED")))
+                {
+                    var chapter = _chapterService.GetById(id);
+                    if (chapter != null && !string.IsNullOrWhiteSpace(chapter.Content) && chapter.StoryId.HasValue)
+                        TriggerPlotManagerUpdate(chapter.StoryId.Value, id, chapter.Content);
+                }
                 return updated ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
             catch (InvalidOperationException ex)
@@ -168,6 +192,12 @@ namespace AIStory.API.Controllers
             try
             {
                 var published = _chapterService.Publish(id);
+                if (published)
+                {
+                    var chapter = _chapterService.GetById(id);
+                    if (chapter != null && !string.IsNullOrWhiteSpace(chapter.Content) && chapter.StoryId.HasValue)
+                        TriggerPlotManagerUpdate(chapter.StoryId.Value, id, chapter.Content);
+                }
                 return published ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
             catch (Exception ex)
@@ -212,6 +242,24 @@ namespace AIStory.API.Controllers
             }
         }
 
+<<<<<<< HEAD
+        /// <summary>Gọi Plot Manager (Agent 4) cập nhật memory trong background; không chặn response.</summary>
+        private void TriggerPlotManagerUpdate(Guid storyId, Guid chapterId, string content)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var plotManager = scope.ServiceProvider.GetRequiredService<IPlotManagerService>();
+                    await plotManager.UpdateMemoryFromChapterAsync(storyId, chapterId, content, reIndexRagAfter: true);
+                }
+                catch
+                {
+                    // Best-effort; không làm fail request
+                }
+            });
+=======
         /// <summary>Xem lý do từ chối chapter - Chỉ AUTHOR (chỉ chapter thuộc truyện của mình).</summary>
         [HttpGet("{id:guid}/rejection-reason")]
         [Authorize(Roles = "AUTHOR")]
@@ -240,6 +288,7 @@ namespace AIStory.API.Controllers
             {
                 return StatusCode(500, new { message = "Lỗi lấy lý do từ chối", error = ex.Message });
             }
+>>>>>>> ce6a8b3cffa7124e5aed3e84c7bd01eeb39aa983
         }
     }
 }
