@@ -3,7 +3,7 @@ import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'luc
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
-import { suggestNextChapter } from '../../api/ai/aiApi';
+import { indexRag, suggestNextChapter } from '../../api/ai/aiApi';
 
 // Helper function to count words
 const countWords = (text) => {
@@ -90,6 +90,8 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
             setSuggestions([]);
             setShowSuggestPopup(true);
             try {
+                // Gọi index-rag nền (không chờ). Gợi ý chạy ngay; BE dùng RAG nếu đã index, không thì dùng Story Context.
+                indexRag(storyId);
                 const afterChapterId = chapter?.id ?? chapter?.Id ?? null;
                 const data = await suggestNextChapter(storyId, afterChapterId);
                 const list = data?.suggestions ?? data?.Suggestions ?? [];
