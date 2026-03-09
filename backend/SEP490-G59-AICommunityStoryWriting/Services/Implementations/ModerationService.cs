@@ -296,7 +296,8 @@ namespace Services.Implementations
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeStory, storyId);
             LogModeration("STORY", storyId, "APPROVED", moderatorId, null);
-            NotifyStoryResult(story, "APPROVED", null);
+            var storyNotif = NotifyStoryResult(story, "APPROVED", null);
+            if (storyNotif != null) _ = PushAuthorNotificationAsync(storyNotif);
             _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
@@ -324,7 +325,8 @@ namespace Services.Implementations
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeStory, storyId);
             LogModeration("STORY", storyId, "REJECTED", moderatorId, reason.Trim());
-            NotifyStoryResult(story, "REJECTED", reason.Trim());
+            var storyNotif = NotifyStoryResult(story, "REJECTED", reason.Trim());
+            if (storyNotif != null) _ = PushAuthorNotificationAsync(storyNotif);
             _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
@@ -394,7 +396,8 @@ namespace Services.Implementations
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
             LogModeration("CHAPTER", chapterId, "APPROVED", moderatorId, null);
-            NotifyChapterResult(chapter, "APPROVED", null);
+            var chapterNotif = NotifyChapterResult(chapter, "APPROVED", null);
+            if (chapterNotif != null) _ = PushAuthorNotificationAsync(chapterNotif);
             _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
@@ -426,14 +429,15 @@ namespace Services.Implementations
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
             LogModeration("CHAPTER", chapterId, "REJECTED", moderatorId, reason.Trim());
-            NotifyChapterResult(chapter, "REJECTED", reason.Trim());
+            var chapterNotif = NotifyChapterResult(chapter, "REJECTED", reason.Trim());
+            if (chapterNotif != null) _ = PushAuthorNotificationAsync(chapterNotif);
             _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
 
-        private static void NotifyStoryResult(stories story, string action, string? rejectionReason)
+        private static notifications? NotifyStoryResult(stories story, string action, string? rejectionReason)
         {
-            if (story.author_id == null) return;
+            if (story.author_id == null) return null;
             var title = action == "APPROVED"
                 ? "Truyện đã được duyệt"
                 : "Truyện bị từ chối";
@@ -442,7 +446,7 @@ namespace Services.Implementations
                 : $"Truyện \"{story.title}\" không được phê duyệt. Lý do: {rejectionReason}";
             var linkUrl = $"/Stories/Details/{story.id}";
             if (action == "REJECTED") linkUrl = $"/Stories/Details/{story.id}"; // Author xem truyện để thấy lý do
-            NotificationDAO.Add(new notifications
+            var n = new notifications
             {
                 id = Guid.NewGuid(),
                 user_id = story.author_id,
@@ -452,13 +456,15 @@ namespace Services.Implementations
                 link_url = linkUrl,
                 is_read = false,
                 created_at = DateTime.Now
-            });
+            };
+            NotificationDAO.Add(n);
+            return n;
         }
 
-        private static void NotifyChapterResult(chapters chapter, string action, string? rejectionReason)
+        private static notifications? NotifyChapterResult(chapters chapter, string action, string? rejectionReason)
         {
             var story = chapter.story_id.HasValue ? StoryDAO.GetById(chapter.story_id.Value) : null;
-            if (story?.author_id == null) return;
+            if (story?.author_id == null) return null;
             var title = action == "APPROVED"
                 ? "Chapter đã được duyệt"
                 : "Chapter bị từ chối";
@@ -467,7 +473,7 @@ namespace Services.Implementations
                 : $"Chapter \"{chapter.title}\" không được phê duyệt. Lý do: {rejectionReason}";
             var linkUrl = chapter.story_id.HasValue ? $"/Stories/Details/{chapter.story_id}" : "/Chapters/Index";
             if (action == "REJECTED") linkUrl = $"/Chapters/Index?storyId={chapter.story_id}";
-            NotificationDAO.Add(new notifications
+            var n = new notifications
             {
                 id = Guid.NewGuid(),
                 user_id = story.author_id,
@@ -477,7 +483,33 @@ namespace Services.Implementations
                 link_url = linkUrl,
                 is_read = false,
                 created_at = DateTime.Now
-            });
+            };
+            NotificationDAO.Add(n);
+            return n;
+        }
+
+        /// <summary>Push real-time notification tới tác giả (khi duyệt/từ chối truyện hoặc chương) để UI cập nhật ngay không cần reload.</summary>
+        private async Task PushAuthorNotificationAsync(notifications n)
+        {
+            if (n?.user_id == null || _notificationHubNotifier == null) return;
+            try
+            {
+                var dto = new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = n.is_read == true,
+                    CreatedAt = n.created_at
+                };
+                await _notificationHubNotifier.NotifyUserAsync(n.user_id.Value, dto);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Push author notification failed. UserId={UserId} NotificationId={NotificationId}", n.user_id, n.id);
+            }
         }
 
         private async Task PushStoryFollowNotificationsAsync(List<notifications> created)

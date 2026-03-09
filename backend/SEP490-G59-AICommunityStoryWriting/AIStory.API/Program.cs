@@ -96,6 +96,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
             builder.Services.AddScoped<IModerationService, ModerationService>();
             builder.Services.AddSignalR();
+            builder.Services.AddSingleton<IUserIdProvider, SignalRUserIdProvider>();
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
 
