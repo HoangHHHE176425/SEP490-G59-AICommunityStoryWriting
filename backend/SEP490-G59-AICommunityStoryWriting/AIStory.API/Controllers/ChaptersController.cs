@@ -225,5 +225,23 @@ namespace AIStory.API.Controllers
                 return StatusCode(500, new { message = "An error occurred while reordering the chapter", error = ex.Message });
             }
         }
+
+        /// <summary>Gọi Plot Manager (Agent 4) cập nhật memory trong background; không chặn response.</summary>
+        private void TriggerPlotManagerUpdate(Guid storyId, Guid chapterId, string content)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var plotManager = scope.ServiceProvider.GetRequiredService<IPlotManagerService>();
+                    await plotManager.UpdateMemoryFromChapterAsync(storyId, chapterId, content, reIndexRagAfter: true);
+                }
+                catch
+                {
+                    // Best-effort; không làm fail request
+                }
+            });
+        }
     }
 }
