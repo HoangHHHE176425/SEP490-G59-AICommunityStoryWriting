@@ -105,6 +105,25 @@ function mergeContentRemoveScenes(content) {
         .trim();
 }
 
+/** Chỉ lấy phần nội dung văn bản chương để đưa vào ô nội dung (bỏ hết dàn ý, Bối cảnh N:, JSON, v.v.) */
+function contentOnlyForChapter(raw) {
+    if (!raw || !raw.trim()) return '';
+    let s = raw.trim();
+    // Bỏ block markdown/JSON (dàn ý mẫu hoặc JSON)
+    s = s.replace(/```[\s\S]*?```/g, '');
+    s = s.replace(/\{\s*["']?(?:scenes|Scenes)["']?\s*:[\s\S]*?\}\s*\}/g, '');
+    // Bỏ đoạn bắt đầu bằng **Dàn ý** hoặc Dàn ý: đến hết đoạn (đến \n\n hoặc hết)
+    s = s.replace(/(?:\*\*)?\s*Dàn ý\s*\*\*[^\n]*(?:\n(?![ \t]*\n)[^\n]*)*/gi, '');
+    s = s.replace(/\n?\s*Dàn ý\s*:?[^\n]*(?:\n(?![ \t]*\n)[^\n]*)*/gi, '');
+    // Bỏ dòng chỉ có "Bối cảnh N:" (tiêu đề dàn ý)
+    s = s.replace(/^\s*Bối cảnh\s*\d+\s*:\s*$/gm, '');
+    s = s.replace(/^\s*Bối cảnh\s*\d+\s*:\s*\n/gm, '');
+    // Bỏ nhãn Scene / Bối cảnh trong nội dung, gộp đoạn
+    s = mergeContentRemoveScenes(s);
+    s = s.replace(/\bBối cảnh\s*\d+\s*:\s*/gi, '\n\n');
+    return s.replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
     const { showToast, ToastContainer } = useToast();
     const [chapterData, setChapterData] = useState({
@@ -252,9 +271,9 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
 
     const handleCoCreateApply = () => {
         const raw = coCreateResult?.finalContent ?? coCreateResult?.FinalContent ?? '';
-        const content = mergeContentRemoveScenes(raw);
+        const content = contentOnlyForChapter(raw);
         if (content) {
-            setChapterData(prev => ({ ...prev, content }));
+            setChapterData(prev => ({ ...prev, content, isAiClean: true }));
             showToast('Đã áp dụng nội dung. Bạn có thể chỉnh sửa và nhấn Lưu / Xuất bản.', 'success');
         }
         setShowCoCreateResultPopup(false);
