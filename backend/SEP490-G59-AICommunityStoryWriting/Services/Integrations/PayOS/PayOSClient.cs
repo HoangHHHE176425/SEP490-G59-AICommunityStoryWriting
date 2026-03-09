@@ -43,6 +43,7 @@ namespace Services.Integrations.PayOS
             string description,
             string cancelUrl,
             string returnUrl,
+            int? expiredAt = null,
             CancellationToken cancellationToken = default)
         {
             var baseUrl = Require("PayOS:BaseUrl").TrimEnd('/');
@@ -67,15 +68,29 @@ namespace Services.Integrations.PayOS
             var rawData = string.Join("&", sorted.Select(kv => $"{kv.Key}={kv.Value}"));
             var signature = ComputeHmacSha256(rawData, checksumKey);
 
-            var body = new
-            {
-                orderCode,
-                amount = long.Parse(amount),
-                description,
-                cancelUrl,
-                returnUrl,
-                signature
-            };
+            // NOTE: Per PayOS docs, signature is computed from:
+            // amount, cancelUrl, description, orderCode, returnUrl (sorted by alphabet).
+            // expiredAt is NOT part of the signature payload.
+            object body = expiredAt.HasValue
+                ? new
+                {
+                    orderCode,
+                    amount = long.Parse(amount),
+                    description,
+                    cancelUrl,
+                    returnUrl,
+                    expiredAt = expiredAt.Value,
+                    signature
+                }
+                : new
+                {
+                    orderCode,
+                    amount = long.Parse(amount),
+                    description,
+                    cancelUrl,
+                    returnUrl,
+                    signature
+                };
 
             using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/payment-requests");
             req.Headers.Add("x-client-id", clientId);
