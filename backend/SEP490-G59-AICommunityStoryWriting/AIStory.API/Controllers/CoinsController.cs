@@ -33,8 +33,16 @@ namespace AIStory.API.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> GetPackages(CancellationToken cancellationToken)
         {
-            var list = await _coinPaymentService.GetActivePackagesAsync(cancellationToken);
-            return Ok(list);
+            try
+            {
+                var list = await _coinPaymentService.GetActivePackagesAsync(cancellationToken);
+                return Ok(list);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetPackages failed");
+                return StatusCode(500, new { message = ex.Message });
+            }
         }
 
         /// <summary>Lấy ví coin của tôi</summary>

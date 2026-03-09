@@ -43,6 +43,8 @@ public partial class users
 
     public virtual ICollection<coin_orders> coin_orders { get; set; } = new List<coin_orders>();
 
+    public virtual ICollection<comment_reactions> comment_reactions { get; set; } = new List<comment_reactions>();
+
     public virtual ICollection<comments> comments { get; set; } = new List<comments>();
 
     public virtual ICollection<donations> donationsreceiver { get; set; } = new List<donations>();

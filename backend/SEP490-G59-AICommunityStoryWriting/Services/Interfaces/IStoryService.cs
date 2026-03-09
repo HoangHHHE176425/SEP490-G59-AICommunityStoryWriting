@@ -1,4 +1,4 @@
-﻿using Services.DTOs.Stories;
+using Services.DTOs.Stories;
 
 public interface IStoryService
 {
@@ -19,4 +19,6 @@ public interface IStoryService
     void RecordReadChapter(Guid storyId, Guid chapterId, Guid userId, string? ipAddress = null, string? deviceInfo = null);
     /// <summary>Đánh giá story (1..5 sao). Chặn nếu user chưa đọc story.</summary>
     (decimal avgRating, int ratingCount) RateStory(Guid storyId, Guid userId, int starValue, string? reviewText);
+    /// <summary>Lấy lý do từ chối gần nhất của truyện (từ moderation_logs), bất kể status hiện tại.</summary>
+    (string? reason, DateTime? rejectedAt) GetLatestRejectionForStory(Guid storyId);
 }

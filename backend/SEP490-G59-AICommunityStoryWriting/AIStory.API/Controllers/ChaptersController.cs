@@ -1,9 +1,9 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Chapters;
 using Services.Interfaces;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
 
 namespace AIStory.API.Controllers
 {
@@ -12,15 +12,17 @@ namespace AIStory.API.Controllers
     public class ChaptersController : ControllerBase
     {
         private readonly IChapterService _chapterService;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly IStoryService _storyService;
 
-        public ChaptersController(IChapterService chapterService, IStoryService storyService)
+        public ChaptersController(IChapterService chapterService, IServiceScopeFactory scopeFactory, IStoryService storyService)
         {
             _chapterService = chapterService;
+            _scopeFactory = scopeFactory;
             _storyService = storyService;
         }
 
-        /// <summary>Tạo chapter mới - Chỉ AUTHOR</summary>
+        /// <summary>Tạo chapter mới - Chỉ AUTHOR. Sau khi lưu, Plot Manager (Agent 4) cập nhật memory nếu có nội dung.</summary>
         [HttpPost]
         [Authorize(Roles = "AUTHOR")]
         public IActionResult Create([FromBody] CreateChapterRequestDto request)
@@ -28,6 +30,8 @@ namespace AIStory.API.Controllers
             try
             {
                 var chapter = _chapterService.Create(request);
+                if (!string.IsNullOrWhiteSpace(request.Content) && chapter.StoryId.HasValue)
+                    TriggerPlotManagerUpdate(chapter.StoryId.Value, chapter.Id, request.Content);
                 return Created($"api/chapters/{chapter.Id}", chapter);
             }
             catch (InvalidOperationException ex)
@@ -128,6 +132,12 @@ namespace AIStory.API.Controllers
             try
             {
                 var updated = _chapterService.Update(id, request);
+                if (updated && (request.Content != null || (request.Status?.ToUpper() == "PUBLISHED")))
+                {
+                    var chapter = _chapterService.GetById(id);
+                    if (chapter != null && !string.IsNullOrWhiteSpace(chapter.Content) && chapter.StoryId.HasValue)
+                        TriggerPlotManagerUpdate(chapter.StoryId.Value, id, chapter.Content);
+                }
                 return updated ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
             catch (InvalidOperationException ex)
@@ -168,6 +178,12 @@ namespace AIStory.API.Controllers
             try
             {
                 var published = _chapterService.Publish(id);
+                if (published)
+                {
+                    var chapter = _chapterService.GetById(id);
+                    if (chapter != null && !string.IsNullOrWhiteSpace(chapter.Content) && chapter.StoryId.HasValue)
+                        TriggerPlotManagerUpdate(chapter.StoryId.Value, id, chapter.Content);
+                }
                 return published ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
             catch (Exception ex)
@@ -230,14 +246,33 @@ namespace AIStory.API.Controllers
                 var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
                 if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
                     return Forbid();
-                if (chapter.Status != "REJECTED")
+                if (chapter.Status == "PUBLISHED")
                     return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
-                return Ok(new { reason = chapter.RejectionReason, rejectedAt = chapter.RejectedAt });
+                var (reason, rejectedAt) = _chapterService.GetLatestRejectionForChapter(id);
+                return Ok(new { reason, rejectedAt });
             }
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "Lỗi lấy lý do từ chối", error = ex.Message });
             }
+        }
+
+        /// <summary>Gọi Plot Manager (Agent 4) cập nhật memory trong background; không chặn response.</summary>
+        private void TriggerPlotManagerUpdate(Guid storyId, Guid chapterId, string content)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var plotManager = scope.ServiceProvider.GetRequiredService<IPlotManagerService>();
+                    await plotManager.UpdateMemoryFromChapterAsync(storyId, chapterId, content, reIndexRagAfter: true);
+                }
+                catch
+                {
+                    // Best-effort; không làm fail request
+                }
+            });
         }
     }
 }
