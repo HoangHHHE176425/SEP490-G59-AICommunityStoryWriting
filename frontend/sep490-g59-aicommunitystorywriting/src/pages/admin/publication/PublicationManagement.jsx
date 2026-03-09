@@ -241,16 +241,28 @@ export function PublicationManagement() {
             .finally(() => setClaimModalLoading(false));
     }, []);
 
-    /** Số đơn chưa nhận (truyện + chương UNCLAIMED) — dùng để hiển thị badge bên cạnh "Nhận duyệt đơn". */
+    /** Số đơn chưa nhận = số truyện có đơn chờ nhận (mỗi truyện tính 1 đơn, trùng với số dòng trong modal "Chọn truyện hoặc chương để nhận duyệt"). */
     const loadUnclaimedCount = useCallback(() => {
         Promise.all([
-            getPendingStories({ claimFilter: 'UNCLAIMED', pageSize: 1 }),
-            getPendingChapters({ claimFilter: 'UNCLAIMED', pageSize: 1 }),
+            getPendingStories({ claimFilter: 'UNCLAIMED', pageSize: 100 }),
+            getPendingChapters({ claimFilter: 'UNCLAIMED', pageSize: 100 }),
         ])
             .then(([storiesRes, chaptersRes]) => {
-                const sTotal = storiesRes?.totalCount ?? storiesRes?.TotalCount ?? 0;
-                const cTotal = chaptersRes?.totalCount ?? chaptersRes?.TotalCount ?? 0;
-                setUnclaimedCount((Number(sTotal) || 0) + (Number(cTotal) || 0));
+                const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
+                const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
+                const stories = storyItems.map(mapPendingStoryToItem).filter((s) => s.status === 'pending');
+                const chapters = chapterItems.map(mapPendingChapterToItem);
+                const norm = (id) => (id != null ? String(id).toLowerCase() : '');
+                const unclaimedStoryIds = new Set(stories.map((s) => norm(s.storyId ?? s.id)).filter(Boolean));
+                const chaptersByStory = new Map();
+                for (const ch of chapters) {
+                    const sid = norm(ch.storyId);
+                    if (!sid) continue;
+                    if (!chaptersByStory.has(sid)) chaptersByStory.set(sid, []);
+                    chaptersByStory.get(sid).push(ch);
+                }
+                const storyIdsWithUnclaimed = new Set([...unclaimedStoryIds, ...chaptersByStory.keys()]);
+                setUnclaimedCount(storyIdsWithUnclaimed.size);
             })
             .catch(() => setUnclaimedCount(0));
     }, []);
@@ -426,19 +438,25 @@ export function PublicationManagement() {
                     });
                     // Tab Chờ duyệt chỉ hiển thị item đang thực sự chờ duyệt (pending). API CLAIMED đã trả về chỉ đơn đã nhận.
                     const combined = [...storyList, ...chapterList].filter((p) => p.status === 'pending');
+                    const norm = (id) => (id != null ? String(id).toLowerCase() : '');
                     // Nếu đã có chương của một truyện trong list thì không hiện dòng truyện (tránh 2 phần cùng truyện).
-                    const storyIdsWithChapters = combined.filter((p) => p.type === 'chapter').map((p) => p.storyId).filter(Boolean);
-                    const combinedDeduped = combined.filter(
-                        (p) => p.type !== 'story' || !storyIdsWithChapters.includes(p.storyId ?? p.id)
+                    const storyIdsWithChapters = new Set(
+                        combined.filter((p) => p.type === 'chapter').map((p) => norm(p.storyId)).filter(Boolean)
                     );
-                    // Gộp theo truyện: một khối mỗi truyện (chứa 1 truyện hoặc nhiều chương).
+                    const combinedDeduped = combined.filter(
+                        (p) => p.type !== 'story' || !storyIdsWithChapters.has(norm(p.storyId ?? p.id))
+                    );
+                    // Gộp theo truyện: một khối mỗi truyện (chứa 1 truyện hoặc nhiều chương). Chuẩn hóa storyId để tránh đếm trùng.
                     const byStory = new Map();
                     for (const p of combinedDeduped) {
-                        const sid = p.storyId ?? p.id;
-                        if (!byStory.has(sid)) byStory.set(sid, { storyId: sid, storyTitle: p.storyTitle, storyCover: p.storyCover ?? '', author: p.author, categories: p.categories ?? [], chapters: [], storyItem: null });
+                        const sid = norm(p.storyId ?? p.id) || null;
+                        if (!sid) continue;
+                        if (!byStory.has(sid)) byStory.set(sid, { storyId: p.storyId ?? p.id, storyTitle: p.storyTitle, storyCover: p.storyCover ?? '', author: p.author, categories: p.categories ?? [], chapters: [], storyItem: null });
                         const g = byStory.get(sid);
-                        if (p.type === 'chapter') g.chapters.push(p);
-                        else g.storyItem = p;
+                        if (p.type === 'chapter') {
+                            const chId = p.id ?? p.chapterId;
+                            if (!g.chapters.some((c) => (c.id ?? c.chapterId) === chId)) g.chapters.push(p);
+                        } else g.storyItem = p;
                     }
                     const groupedList = [];
                     for (const g of byStory.values()) {
@@ -602,14 +620,23 @@ export function PublicationManagement() {
                 const pendingStoryList = pendingStoryItems.map(mapPendingStoryToItem);
                 const pendingChapterList = pendingChapterItems.map(mapPendingChapterToItem);
                 const combined = [...pendingStoryList, ...pendingChapterList].filter((p) => p.status === 'pending');
-                const storyIdsWithChapters = combined.filter((p) => p.type === 'chapter').map((p) => p.storyId).filter(Boolean);
-                const combinedDeduped = combined.filter((p) => p.type !== 'story' || !storyIdsWithChapters.includes(p.storyId ?? p.id));
+                const norm = (id) => (id != null ? String(id).toLowerCase() : '');
+                const storyIdsWithChapters = new Set(
+                    combined.filter((p) => p.type === 'chapter').map((p) => norm(p.storyId)).filter(Boolean)
+                );
+                const combinedDeduped = combined.filter(
+                    (p) => p.type !== 'story' || !storyIdsWithChapters.has(norm(p.storyId ?? p.id))
+                );
                 const byStory = new Map();
                 for (const p of combinedDeduped) {
-                    const sid = p.storyId ?? p.id;
+                    const sid = norm(p.storyId ?? p.id) || 'none';
+                    if (!sid || sid === 'none') continue;
                     if (!byStory.has(sid)) byStory.set(sid, { chapters: [] });
                     const g = byStory.get(sid);
-                    if (p.type === 'chapter') g.chapters.push(p);
+                    if (p.type === 'chapter') {
+                        const chId = p.id ?? p.chapterId;
+                        if (!g.chapters.some((c) => (c.id ?? c.chapterId) === chId)) g.chapters.push(p);
+                    }
                 }
                 const pendingCount = [...byStory.values()].filter((g) => g.chapters.length > 0).length;
                 setStatsData({
