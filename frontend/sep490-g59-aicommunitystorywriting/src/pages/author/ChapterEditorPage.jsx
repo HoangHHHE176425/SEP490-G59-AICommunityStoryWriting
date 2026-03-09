@@ -3,13 +3,107 @@ import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'luc
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
-import { indexRag, suggestNextChapter } from '../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate } from '../../api/ai/aiApi';
 
 // Helper function to count words
 const countWords = (text) => {
     if (!text || !text.trim()) return 0;
     return text.trim().split(/\s+/).filter(word => word.length > 0).length;
 };
+
+/** Lấy chuỗi JSON dàn ý thực từ outline (bỏ hướng dẫn + ví dụ mẫu). Ưu tiên khối có "scenes" ở cuối chuỗi. */
+function extractOutlineJson(raw) {
+    if (!raw || !raw.trim()) return raw;
+    const s = raw.trim();
+    const regex = /\{\s*"(?:scenes|Scenes)"\s*:/g;
+    const candidates = [];
+    let m;
+    while ((m = regex.exec(s)) !== null) {
+        const start = m.index;
+        let depth = 0;
+        let i = start;
+        while (i < s.length) {
+            if (s[i] === '{') depth++;
+            else if (s[i] === '}') { depth--; if (depth === 0) { candidates.push(s.slice(start, i + 1)); break; } }
+            i++;
+        }
+    }
+    // Nếu có nhiều khối (ví dụ + thật), lấy khối cuối (thường là dàn ý thật)
+    if (candidates.length > 0) return candidates[candidates.length - 1];
+    // Có block markdown ```json ... ```
+    const codeBlock = /```(?:json)?\s*([\s\S]*?)```/.exec(s);
+    if (codeBlock) {
+        const inner = codeBlock[1].trim();
+        const firstBrace = inner.indexOf('{');
+        if (firstBrace >= 0) return inner.slice(firstBrace);
+        return inner;
+    }
+    const firstBrace = s.indexOf('{');
+    if (firstBrace >= 0) {
+        let depth = 0;
+        let i = firstBrace;
+        while (i < s.length) {
+            if (s[i] === '{') depth++;
+            else if (s[i] === '}') { depth--; if (depth === 0) return s.slice(firstBrace, i + 1); }
+            i++;
+        }
+    }
+    return s;
+}
+
+/** Kiểm tra có phải dàn ý ví dụ mẫu (Holmes, Tới hiện trường...) thì không hiển thị */
+function isExampleOutline(scenes) {
+    if (!Array.isArray(scenes) || scenes.length === 0) return false;
+    const first = scenes[0];
+    const title = (first?.title ?? first?.Title ?? '').toString();
+    const summary = (first?.summary ?? first?.Summary ?? '').toString();
+    const hasExampleTitle = /Tới hiện trường|Khám phá căn phòng|Phỏng vấn nhân chứng/i.test(title) || /Holmes và Watson tới căn nhà riêng/i.test(summary);
+    const hasHolmes = JSON.stringify(scenes).includes('Holmes');
+    return hasExampleTitle && hasHolmes;
+}
+
+/** Dàn ý: đổi "Scene 1/2/3" thành "Bối cảnh 1/2/3"; nếu là JSON scenes thì render Bối cảnh 1, 2, 3... (bỏ hướng dẫn/ví dụ) */
+function formatOutlineForDisplay(outline) {
+    if (!outline || !outline.trim()) return '';
+    const raw = outline.trim();
+    const toParse = extractOutlineJson(raw);
+    try {
+        const parsed = JSON.parse(toParse);
+        const scenes = parsed?.scenes ?? parsed?.Scenes;
+        if (Array.isArray(scenes) && scenes.length > 0) {
+            if (isExampleOutline(scenes)) return '';
+            return scenes.map((s, i) => {
+                const title = s?.title ?? s?.Title ?? '';
+                const summary = s?.summary ?? s?.Summary ?? '';
+                const characters = s?.characters ?? s?.Characters ?? '';
+                const parts = [];
+                if (title) parts.push(title);
+                if (summary) parts.push(summary);
+                if (Array.isArray(characters) && characters.length) parts.push(`Nhân vật: ${characters.join(', ')}`);
+                else if (typeof characters === 'string' && characters.trim()) parts.push(`Nhân vật: ${characters}`);
+                return parts.length ? `Bối cảnh ${i + 1}:\n${parts.join('\n')}` : `Bối cảnh ${i + 1}`;
+            }).join('\n\n');
+        }
+    } catch {
+        // Không phải JSON, xử lý plain text (chỉ phần không phải block hướng dẫn)
+    }
+    // Plain text: bỏ đoạn "Trả về JSON dàn ý" và block code mẫu, chỉ giữ nội dung thật
+    let text = raw
+        .replace(/\*\*Trả về JSON dàn ý\*\*[\s\S]*?^\{[\s\S]*?"scenes"\s*:[\s\S]*?\}\s*\}/im, '')
+        .replace(/```(?:json)?[\s\S]*?```/g, '')
+        .trim();
+    if (text) return text.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1');
+    return raw.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1');
+}
+
+/** Nội dung: bỏ nhãn "Scene 1:", "Scene 2:"... để ghép thành một khối văn hoàn chỉnh */
+function mergeContentRemoveScenes(content) {
+    if (!content || !content.trim()) return '';
+    return content
+        .replace(/\s*Scene\s*\d+\s*[-:]?\s*/gi, '\n\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
 
 export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
     const { showToast, ToastContainer } = useToast();
@@ -36,6 +130,13 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
     const [showSuggestPopup, setShowSuggestPopup] = useState(false);
     const [suggestLoading, setSuggestLoading] = useState(false);
     const [suggestions, setSuggestions] = useState([]);
+
+    // Popup đồng sáng tác (AI gợi ý chương): bước 1 = nhập ý tưởng, bước 2 = xem kết quả + đồng ý
+    const [showCoCreateIdeaPopup, setShowCoCreateIdeaPopup] = useState(false);
+    const [showCoCreateResultPopup, setShowCoCreateResultPopup] = useState(false);
+    const [coCreateIdea, setCoCreateIdea] = useState('');
+    const [coCreateLoading, setCoCreateLoading] = useState(false);
+    const [coCreateResult, setCoCreateResult] = useState(null);
 
     // Reload chapter data when chapter prop changes
     useEffect(() => {
@@ -111,15 +212,53 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
                 setSuggestLoading(false);
             }
         } else {
-            // Mock AI suggestion for full chapter (giữ hành vi cũ nếu chưa có API tương ứng)
-            const chapterSuggestions = [
-                `Chương ${chapterData.number} - ${chapterData.title || 'Tiếp theo'}\n\nDựa trên nội dung trước, câu chuyện tiếp tục...\n\n[AI sẽ gợi ý nội dung dựa trên ngữ cảnh truyện]`,
-            ];
-            setChapterData(prev => ({
-                ...prev,
-                content: prev.content + '\n\n' + chapterSuggestions[0]
-            }));
+            // AI gợi ý chương (đồng sáng tác): mở popup nhập ý tưởng
+            const storyId = story?.id ?? story?.Id;
+            if (!storyId) {
+                showToast('Không xác định được truyện. Vui lòng thử lại.', 'error');
+                return;
+            }
+            setCoCreateIdea('');
+            setCoCreateResult(null);
+            setShowCoCreateResultPopup(false);
+            setShowCoCreateIdeaPopup(true);
         }
+    };
+
+    const handleCoCreateSubmit = async () => {
+        const storyId = story?.id ?? story?.Id;
+        if (!storyId) return;
+        const idea = (coCreateIdea || '').trim();
+        if (!idea) {
+            showToast('Vui lòng nhập ý tưởng của bạn.', 'error');
+            return;
+        }
+        setCoCreateLoading(true);
+        try {
+            const data = await coCreate(storyId, idea);
+            setCoCreateResult(data);
+            setShowCoCreateIdeaPopup(false);
+            setShowCoCreateResultPopup(true);
+        } catch (err) {
+            const status = err?.response?.status;
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi đồng sáng tác với AI.';
+            if (status === 429) showToast('Bạn đã gọi AI quá nhiều lần. Vui lòng thử lại sau.', 'error');
+            else if (status === 403) showToast(msg || 'Chỉ tác giả của truyện mới được sử dụng.', 'error');
+            else showToast(msg, 'error');
+        } finally {
+            setCoCreateLoading(false);
+        }
+    };
+
+    const handleCoCreateApply = () => {
+        const raw = coCreateResult?.finalContent ?? coCreateResult?.FinalContent ?? '';
+        const content = mergeContentRemoveScenes(raw);
+        if (content) {
+            setChapterData(prev => ({ ...prev, content }));
+            showToast('Đã áp dụng nội dung. Bạn có thể chỉnh sửa và nhấn Lưu / Xuất bản.', 'success');
+        }
+        setShowCoCreateResultPopup(false);
+        setCoCreateResult(null);
     };
 
     const handleSave = async (saveStatus) => {
@@ -255,6 +394,232 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
                     </div>
                 </div>
             )}
+
+            {/* Popup 1: Đồng sáng tác - Nhập ý tưởng */}
+            {showCoCreateIdeaPopup && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        zIndex: 9999,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                    }}
+                    onClick={() => !coCreateLoading && setShowCoCreateIdeaPopup(false)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '12px',
+                            maxWidth: '520px',
+                            width: '90%',
+                            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>
+                                Đồng sáng tác với AI
+                            </h3>
+                            <p style={{ margin: '0.5rem 0 0', fontSize: '0.8125rem', color: '#6b7280' }}>
+                                Nhập ý tưởng của bạn, AI sẽ tạo dàn ý và nội dung chương.
+                            </p>
+                        </div>
+                        <div style={{ padding: '1.25rem 1.5rem' }}>
+                            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#374151', marginBottom: '0.5rem' }}>
+                                Ý TƯỞNG CỦA BẠN
+                            </label>
+                            <textarea
+                                value={coCreateIdea}
+                                onChange={(e) => setCoCreateIdea(e.target.value)}
+                                placeholder="Ví dụ: Nhân vật A gặp lại B sau 5 năm, xung đột nổ ra..."
+                                rows={4}
+                                style={{
+                                    width: '100%',
+                                    padding: '0.75rem',
+                                    border: '1px solid #e5e7eb',
+                                    borderRadius: '8px',
+                                    fontSize: '0.875rem',
+                                    outline: 'none',
+                                    resize: 'vertical',
+                                }}
+                            />
+                        </div>
+                        <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button
+                                type="button"
+                                onClick={() => !coCreateLoading && setShowCoCreateIdeaPopup(false)}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 500,
+                                    color: '#6b7280',
+                                    backgroundColor: '#f3f4f6',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: coCreateLoading ? 'not-allowed' : 'pointer',
+                                }}
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleCoCreateSubmit}
+                                disabled={coCreateLoading || !(coCreateIdea || '').trim()}
+                                style={{
+                                    padding: '0.5rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#ffffff',
+                                    backgroundColor: (coCreateLoading || !(coCreateIdea || '').trim()) ? '#9ca3af' : '#13ec5b',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: (coCreateLoading || !(coCreateIdea || '').trim()) ? 'not-allowed' : 'pointer',
+                                }}
+                            >
+                                {coCreateLoading ? 'Đang tạo...' : 'Tạo nội dung'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Popup 2: Kết quả đồng sáng tác - Nội dung AI + feedback + nút Đồng ý sử dụng */}
+            {showCoCreateResultPopup && coCreateResult && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        zIndex: 9999,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                    }}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '12px',
+                            maxWidth: '720px',
+                            width: '95%',
+                            maxHeight: '90vh',
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
+                        }}
+                    >
+                        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>
+                                Nội dung AI đã tạo
+                            </h3>
+                        </div>
+                        <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
+                            {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
+                                <div style={{ padding: '1rem', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b' }}>
+                                    {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback}
+                                </div>
+                            ) : (
+                                <>
+                                    {((coCreateResult.outline ?? coCreateResult.Outline) || '').trim() && (
+                                        <div style={{ marginBottom: '1rem' }}>
+                                            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Dàn ý</div>
+                                            <div style={{ fontSize: '0.875rem', color: '#374151', whiteSpace: 'pre-wrap' }}>
+                                                {formatOutlineForDisplay(coCreateResult.outline ?? coCreateResult.Outline)}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {(coCreateResult.reviewFeedback ?? coCreateResult.ReviewFeedback) && (
+                                        <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px' }}>
+                                            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#1e40af', marginBottom: '0.25rem' }}>Nhận xét của AI</div>
+                                            <div style={{ fontSize: '0.8125rem', color: '#1e3a8a', whiteSpace: 'pre-wrap' }}>
+                                                {coCreateResult.reviewFeedback ?? coCreateResult.ReviewFeedback}
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div>
+                                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Nội dung chương</div>
+                                        <div
+                                            style={{
+                                                fontSize: '0.875rem',
+                                                color: '#111827',
+                                                whiteSpace: 'pre-wrap',
+                                                maxHeight: '40vh',
+                                                overflowY: 'auto',
+                                                padding: '0.75rem',
+                                                border: '1px solid #e5e7eb',
+                                                borderRadius: '8px',
+                                                backgroundColor: '#f9fafb',
+                                            }}
+                                        >
+                                            {mergeContentRemoveScenes(coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '')}
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
+                                <button
+                                    type="button"
+                                    onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); }}
+                                    style={{
+                                        padding: '0.5rem 1.25rem',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 600,
+                                        color: '#ffffff',
+                                        backgroundColor: '#13ec5b',
+                                        border: 'none',
+                                        borderRadius: '8px',
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    Đóng
+                                </button>
+                            ) : (
+                                <>
+                                    <button
+                                        type="button"
+                                        onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); }}
+                                        style={{
+                                            padding: '0.5rem 1rem',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 500,
+                                            color: '#6b7280',
+                                            backgroundColor: '#f3f4f6',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        Đóng
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleCoCreateApply}
+                                        style={{
+                                            padding: '0.5rem 1.25rem',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            color: '#ffffff',
+                                            backgroundColor: '#13ec5b',
+                                            border: 'none',
+                                            borderRadius: '8px',
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        ĐỒNG Ý SỬ DỤNG NỘI DUNG NÀY
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
                 {/* Header */}
                 <div style={{

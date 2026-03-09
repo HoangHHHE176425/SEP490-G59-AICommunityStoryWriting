@@ -31,3 +31,17 @@ export async function suggestNextChapter(storyId, afterChapterId = null) {
     const response = await axiosInstance.post("ai/suggest-next-chapter", body);
     return response.data;
 }
+
+/**
+ * Đồng sáng tác: ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → Guardrail → Agent 3 (kiểm duyệt). Có rate limit.
+ * @param {string} storyId - ID truyện (Guid)
+ * @param {string} authorIdea - Ý tưởng của tác giả (1–2 câu hoặc đoạn ngắn)
+ * @returns {Promise<{ ideaContradictionFeedback?: string, outline: string, finalContent: string, approved: boolean, revisionCount: number, reviewFeedback?: string }>}
+ */
+export async function coCreate(storyId, authorIdea) {
+    if (!storyId) throw new Error("StoryId là bắt buộc.");
+    const trimmed = (authorIdea || "").trim();
+    if (!trimmed) throw new Error("Ý tưởng (AuthorIdea) là bắt buộc.");
+    const response = await axiosInstance.post("ai/co-create", { storyId, authorIdea: trimmed });
+    return response.data;
+}
