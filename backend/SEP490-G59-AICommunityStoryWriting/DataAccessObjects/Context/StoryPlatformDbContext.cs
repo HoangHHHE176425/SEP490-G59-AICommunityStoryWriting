@@ -93,6 +93,7 @@ public partial class StoryPlatformDbContext : DbContext
     public virtual DbSet<story_event_memory> story_event_memories { get; set; }
 
     public virtual DbSet<story_story_state> story_story_states { get; set; }
+
     public virtual DbSet<story_versions> story_versions { get; set; }
 
     public virtual DbSet<system_policies> system_policies { get; set; }
@@ -122,7 +123,6 @@ public partial class StoryPlatformDbContext : DbContext
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer("Server=QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;");
-
         }
     }
 

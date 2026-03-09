@@ -1,5 +1,5 @@
-using AIStory.API.Services;
 using AIStory.API.Hubs;
+using AIStory.API.Services;
 using AIStory.Services.Helpers;
 using AIStory.Services.Implementations;
 using BusinessObjects;
@@ -44,17 +44,15 @@ namespace AIStory.API
                     options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
                     options.JsonSerializerOptions.WriteIndented = true;
                 });
-            // Connection chỉ cấu hình trong StoryPlatformDbContext.OnConfiguring
-            // builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
-            //     options.UseSqlServer(
-            //         builder.Configuration.GetConnectionString("DefaultConnection")
-            //         ?? "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
-            //         sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
-            //             maxRetryCount: 5,
-            //             maxRetryDelay: TimeSpan.FromSeconds(30),
-            //             errorNumbersToAdd: null)
-            //     ));
-            builder.Services.AddDbContext<StoryPlatformDbContext>();
+            builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
+                options.UseSqlServer(
+                    builder.Configuration.GetConnectionString("DefaultConnection")
+                    ?? "Server=QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                    sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(30),
+                        errorNumbersToAdd: null)
+                ));
             // CORS Configuration
             builder.Services.AddCors(options =>
             {
@@ -101,7 +99,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
 
-            // AI: Story Memory Engine (RAG khi đã index, fallback N chương) + 4 Agent
+            // AI: Story Memory Engine (RAG khi đã index) + 4 Agent
             builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
             builder.Services.AddScoped<IContentGuardrailService, ContentGuardrailService>();
             builder.Services.AddScoped<IAIUsageLogRepository, AIUsageLogRepository>();
@@ -116,6 +114,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IAICoCreationService, AICoCreationService>();
             builder.Services.AddScoped<IAIConsistencyCheckService, AIConsistencyCheckService>();
             builder.Services.AddSingleton<IAISuggestRateLimitService, AISuggestRateLimitService>();
+
             // Coin / PayOS
             builder.Services.AddHttpClient<PayOSClient>();
             builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();

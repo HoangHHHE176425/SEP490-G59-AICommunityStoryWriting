@@ -1,10 +1,9 @@
-
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Chapters;
 using Services.Interfaces;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
 
 namespace AIStory.API.Controllers
 {
@@ -13,11 +12,13 @@ namespace AIStory.API.Controllers
     public class ChaptersController : ControllerBase
     {
         private readonly IChapterService _chapterService;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly IStoryService _storyService;
 
-        public ChaptersController(IChapterService chapterService, IStoryService storyService)
+        public ChaptersController(IChapterService chapterService, IServiceScopeFactory scopeFactory, IStoryService storyService)
         {
             _chapterService = chapterService;
+            _scopeFactory = scopeFactory;
             _storyService = storyService;
         }
 
@@ -227,22 +228,6 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Gọi Plot Manager (Agent 4) cập nhật memory trong background; không chặn response.</summary>
-        private void TriggerPlotManagerUpdate(Guid storyId, Guid chapterId, string content)
-        {
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    using var scope = _scopeFactory.CreateScope();
-                    var plotManager = scope.ServiceProvider.GetRequiredService<IPlotManagerService>();
-                    await plotManager.UpdateMemoryFromChapterAsync(storyId, chapterId, content, reIndexRagAfter: true);
-                }
-                catch
-                {
-                    // Best-effort; không làm fail request
-                }
-            });
         /// <summary>Xem lý do từ chối chapter - Chỉ AUTHOR (chỉ chapter thuộc truyện của mình).</summary>
         [HttpGet("{id:guid}/rejection-reason")]
         [Authorize(Roles = "AUTHOR")]
@@ -261,7 +246,6 @@ namespace AIStory.API.Controllers
                 var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
                 if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
                     return Forbid();
-                // Chỉ ẩn lịch sử từ chối khi chapter đã được duyệt (PUBLISHED). Khi gửi lại (PENDING_REVIEW) vẫn hiển thị.
                 if (chapter.Status == "PUBLISHED")
                     return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
                 var (reason, rejectedAt) = _chapterService.GetLatestRejectionForChapter(id);
@@ -271,6 +255,24 @@ namespace AIStory.API.Controllers
             {
                 return StatusCode(500, new { message = "Lỗi lấy lý do từ chối", error = ex.Message });
             }
+        }
+
+        /// <summary>Gọi Plot Manager (Agent 4) cập nhật memory trong background; không chặn response.</summary>
+        private void TriggerPlotManagerUpdate(Guid storyId, Guid chapterId, string content)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var plotManager = scope.ServiceProvider.GetRequiredService<IPlotManagerService>();
+                    await plotManager.UpdateMemoryFromChapterAsync(storyId, chapterId, content, reIndexRagAfter: true);
+                }
+                catch
+                {
+                    // Best-effort; không làm fail request
+                }
+            });
         }
     }
 }
