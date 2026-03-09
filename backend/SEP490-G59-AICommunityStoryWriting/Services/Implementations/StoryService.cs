@@ -320,6 +320,10 @@ namespace Services.Implementations
             if (story == null)
                 return false;
 
+            var statusUpper = (story.status ?? "").Trim().ToUpperInvariant();
+            if (statusUpper != "DRAFT")
+                throw new InvalidOperationException("Chỉ được xóa truyện khi ở trạng thái Bản nháp. Truyện hiện tại: " + (story.status ?? "—"));
+
             // Delete all associated chapters first
             try
             {
