@@ -13,11 +13,11 @@ using Repositories;
 using Repositories.Implementations;
 using Repositories.Interfaces;
 using Services.Implementations;
+using Services.Integrations.PayOS;
 using Services.Interfaces;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
-using Services.Integrations.PayOS;
 
 namespace AIStory.API
 {
@@ -98,10 +98,6 @@ namespace AIStory.API
             builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
             builder.Services.AddScoped<IChapterService, ChapterService>();
 
-            // Payments / Coin recharge
-            builder.Services.AddHttpClient<PayOSClient>();
-            builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
-
             // Policies
             builder.Services.AddScoped<IPolicyRepository, PolicyRepository>();
             builder.Services.AddScoped<IAuthorPolicyAcceptanceRepository, AuthorPolicyAcceptanceRepository>();
@@ -114,6 +110,9 @@ namespace AIStory.API
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
 
+            // Coin / PayOS
+            builder.Services.AddHttpClient<PayOSClient>();
+            builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
             // AI: Story Memory Engine (RAG khi đã index, fallback N chương) + 4 Agent
             builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
             builder.Services.AddScoped<IContentGuardrailService, ContentGuardrailService>();
@@ -236,6 +235,7 @@ namespace AIStory.API
 
             if (app.Environment.IsDevelopment())
             {
+                app.UseDeveloperExceptionPage();
                 app.UseSwagger();
                 app.UseSwaggerUI(c =>
                 {

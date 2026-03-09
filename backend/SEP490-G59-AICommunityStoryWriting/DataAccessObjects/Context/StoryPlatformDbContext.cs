@@ -50,9 +50,9 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<coin_packages> coin_packages { get; set; }
 
-    public virtual DbSet<comment_reactions> comment_reactions { get; set; }
-
     public virtual DbSet<comments> comments { get; set; }
+
+    public virtual DbSet<comment_reactions> comment_reactions { get; set; }
 
     public virtual DbSet<daily_statistics> daily_statistics { get; set; }
 
@@ -496,24 +496,6 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.price_amount).HasColumnType("decimal(15, 2)");
         });
 
-        modelBuilder.Entity<comment_reactions>(entity =>
-        {
-            entity.HasKey(e => new { e.user_id, e.comment_id }).HasName("PK__comment___D7C7606794177090");
-
-            entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
-            entity.Property(e => e.reaction_type).HasMaxLength(20);
-
-            entity.HasOne(d => d.comment).WithMany(p => p.comment_reactions)
-                .HasForeignKey(d => d.comment_id)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("fk_creact_comment");
-
-            entity.HasOne(d => d.user).WithMany(p => p.comment_reactions)
-                .HasForeignKey(d => d.user_id)
-                .OnDelete(DeleteBehavior.ClientSetNull)
-                .HasConstraintName("fk_creact_user");
-        });
-
         modelBuilder.Entity<comments>(entity =>
         {
             entity.HasKey(e => e.id).HasName("PK__comments__3213E83FFD4C6266");
@@ -537,6 +519,21 @@ public partial class StoryPlatformDbContext : DbContext
             entity.HasOne(d => d.userNavigation).WithMany(p => p.comments)
                 .HasForeignKey(d => d.user_id)
                 .HasConstraintName("fk_comm_user");
+        });
+
+        modelBuilder.Entity<comment_reactions>(entity =>
+        {
+            entity.HasKey(e => new { e.user_id, e.comment_id }).HasName("PK_comment_reactions");
+
+            entity.Property(e => e.reaction_type).HasMaxLength(20);
+
+            entity.HasOne(d => d.comment).WithMany()
+                .HasForeignKey(d => d.comment_id)
+                .HasConstraintName("fk_comment_reaction_comment");
+
+            entity.HasOne(d => d.user).WithMany()
+                .HasForeignKey(d => d.user_id)
+                .HasConstraintName("fk_comment_reaction_user");
         });
 
         modelBuilder.Entity<daily_statistics>(entity =>

@@ -3,6 +3,7 @@ import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'luc
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
+import { suggestNextChapter } from '../../api/ai/aiApi';
 
 // Helper function to count words
 const countWords = (text) => {
@@ -30,6 +31,11 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
     });
 
     const [isSaving, setIsSaving] = useState(false);
+
+    // Popup gợi ý chương tiếp theo (AI)
+    const [showSuggestPopup, setShowSuggestPopup] = useState(false);
+    const [suggestLoading, setSuggestLoading] = useState(false);
+    const [suggestions, setSuggestions] = useState([]);
 
     // Reload chapter data when chapter prop changes
     useEffect(() => {
@@ -73,23 +79,37 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
         { name: 'Be', value: '#f5f5dc' },
     ];
 
-    const handleAISuggestion = (type) => {
+    const handleAISuggestion = async (type) => {
         if (type === 'paragraph') {
-            // Mock AI suggestion for paragraph
-            const suggestions = [
-                'Ánh nắng buổi sáng len lỏi qua những tán cây, rọi xuống con đường đất nhỏ hẹp. Không khí trong lành, mát mẻ khiến tâm trí anh trở nên thư thái.',
-                'Tiếng gió rít qua khe cửa sổ, mang theo làn hương thơm ngát của hoa sen từ ao sen phía sau nhà. Cô ngồi bên bàn, tay cầm cây bút đang lặng lẽ viết nhật ký.',
-                'Bầu trời đêm đầy sao, ánh trăng như dát bạc trải khắp mặt hồ. Tiếng ve kêu ran rát, xen lẫn tiếng hát của dân làng xa xa.',
-            ];
-            const randomSuggestion = suggestions[Math.floor(Math.random() * suggestions.length)];
-
-            // Insert at cursor position or append
-            setChapterData(prev => ({
-                ...prev,
-                content: prev.content + '\n\n' + randomSuggestion
-            }));
+            const storyId = story?.id ?? story?.Id;
+            if (!storyId) {
+                showToast('Không xác định được truyện. Vui lòng thử lại.', 'error');
+                return;
+            }
+            setSuggestLoading(true);
+            setSuggestions([]);
+            setShowSuggestPopup(true);
+            try {
+                const afterChapterId = chapter?.id ?? chapter?.Id ?? null;
+                const data = await suggestNextChapter(storyId, afterChapterId);
+                const list = data?.suggestions ?? data?.Suggestions ?? [];
+                setSuggestions(Array.isArray(list) ? list : []);
+            } catch (err) {
+                const status = err?.response?.status;
+                const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi gợi ý AI.';
+                if (status === 429) {
+                    showToast('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.', 'error');
+                } else if (status === 403) {
+                    showToast(msg || 'Chỉ tác giả của truyện mới được sử dụng tính năng này.', 'error');
+                } else {
+                    showToast(msg, 'error');
+                }
+                setSuggestions([]);
+            } finally {
+                setSuggestLoading(false);
+            }
         } else {
-            // Mock AI suggestion for full chapter
+            // Mock AI suggestion for full chapter (giữ hành vi cũ nếu chưa có API tương ứng)
             const chapterSuggestions = [
                 `Chương ${chapterData.number} - ${chapterData.title || 'Tiếp theo'}\n\nDựa trên nội dung trước, câu chuyện tiếp tục...\n\n[AI sẽ gợi ý nội dung dựa trên ngữ cảnh truyện]`,
             ];
@@ -138,6 +158,101 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
         <div>
             <Header />
             <ToastContainer />
+            {/* Popup gợi ý chương tiếp theo (AI) */}
+            {showSuggestPopup && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        zIndex: 9999,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                    }}
+                    onClick={() => !suggestLoading && setShowSuggestPopup(false)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '12px',
+                            maxWidth: '560px',
+                            width: '90%',
+                            maxHeight: '85vh',
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>
+                                Gợi ý chương tiếp theo
+                            </h3>
+                        </div>
+                        <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
+                            {suggestLoading ? (
+                                <p style={{ margin: 0, color: '#6b7280', textAlign: 'center' }}>Đang tải gợi ý...</p>
+                            ) : suggestions.length === 0 ? (
+                                <p style={{ margin: 0, color: '#6b7280', textAlign: 'center' }}>Không có gợi ý.</p>
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                    {suggestions.map((item, index) => {
+                                        const title = item?.title ?? item?.Title ?? '';
+                                        const summary = item?.summary ?? item?.Summary ?? '';
+                                        const direction = item?.direction ?? item?.Direction ?? '';
+                                        return (
+                                            <div
+                                                key={index}
+                                                style={{
+                                                    padding: '1rem',
+                                                    backgroundColor: '#f9fafb',
+                                                    borderRadius: '8px',
+                                                    border: '1px solid #e5e7eb',
+                                                }}
+                                            >
+                                                <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827', marginBottom: '0.5rem' }}>
+                                                    {title || `Gợi ý ${index + 1}`}
+                                                </div>
+                                                {summary && (
+                                                    <div style={{ fontSize: '0.8125rem', color: '#4b5563', marginBottom: '0.5rem' }}>
+                                                        {summary}
+                                                    </div>
+                                                )}
+                                                {direction && (
+                                                    <div style={{ fontSize: '0.8125rem', color: '#6b7280', whiteSpace: 'pre-wrap' }}>
+                                                        {direction}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                        <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb' }}>
+                            <button
+                                type="button"
+                                onClick={() => setShowSuggestPopup(false)}
+                                style={{
+                                    width: '100%',
+                                    padding: '0.625rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#ffffff',
+                                    backgroundColor: '#13ec5b',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                ĐÓNG
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
                 {/* Header */}
                 <div style={{
