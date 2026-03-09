@@ -67,6 +67,7 @@ Bạn là Plot Manager: từ ngữ cảnh truyện và nội dung chương mới
   "characterStateUpdates": [ { "characterName": "Tên nhân vật", "stateJson": "Mô tả trạng thái/tính cách" } ],
   "storyStateUpdate": "Mô tả ngắn trạng thái truyện / quy tắc thế giới (hoặc null nếu không đổi)"
 }
+Quan trọng: Với nhân vật đã chết, đã qua đời, hoặc đã rời đi/mất tích trong chương, bắt buộc ghi rõ vào characterStateUpdates (vd. stateJson: "đã chết", "đã qua đời", "đã rời đi") để lần sau AI không viết nhân vật đó xuất hiện trở lại. Sự kiện chết/qua đời cũng ghi vào timelineUpdates.
 Nếu không có gì mới: timelineUpdates/characterStateUpdates dùng [], storyStateUpdate null.
 """;
 
@@ -78,7 +79,8 @@ Nếu không có gì mới: timelineUpdates/characterStateUpdates dùng [], stor
             new UserChatMessage(userPrompt)
         };
 
-        var completion = await client.CompleteChatAsync(messages);
+        var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentPlotManager);
+        var completion = await client.CompleteChatAsync(messages, options);
         var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
         if (string.IsNullOrWhiteSpace(text))
             return;
@@ -146,6 +148,6 @@ Nếu không có gì mới: timelineUpdates/characterStateUpdates dùng [], stor
         }
 
         if (reIndexRagAfter)
-            await _ragService.TryEnsureIndexedAsync(storyId, null, cancellationToken);
+            await _ragService.EnsureIndexedAsync(storyId, null, cancellationToken);
     }
 }

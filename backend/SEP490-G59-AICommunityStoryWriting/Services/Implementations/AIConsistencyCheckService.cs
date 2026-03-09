@@ -75,7 +75,8 @@ Nếu không có mâu thuẫn, trả về: {{ ""hasIssues"": false, ""issues"": 
             new UserChatMessage(userPrompt)
         };
 
-        var completion = await client.CompleteChatAsync(messages);
+        var options = AIClientHelper.GetCompletionOptions(_configuration, null);
+        var completion = await client.CompleteChatAsync(messages, options);
         var chat = completion.Value;
         var text = chat.Content?.Count > 0 ? chat.Content[0].Text : null;
         if (string.IsNullOrWhiteSpace(text))

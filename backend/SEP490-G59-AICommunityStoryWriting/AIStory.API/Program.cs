@@ -95,14 +95,10 @@ namespace AIStory.API
             builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
             builder.Services.AddScoped<IContentGuardrailService, ContentGuardrailService>();
             builder.Services.AddScoped<IAIUsageLogRepository, AIUsageLogRepository>();
-            builder.Services.AddScoped<IStoryChapterChunkRepository, StoryChapterChunkRepository>();
             builder.Services.AddScoped<IStoryCharacterMemoryRepository, StoryCharacterMemoryRepository>();
             builder.Services.AddScoped<IStoryEventMemoryRepository, StoryEventMemoryRepository>();
             builder.Services.AddScoped<IStoryStoryStateRepository, StoryStoryStateRepository>();
-            if (string.Equals(builder.Configuration["VectorStore:Provider"], "FAISS", StringComparison.OrdinalIgnoreCase))
-                builder.Services.AddSingleton<IVectorStore, FaissVectorStore>();
-            else
-                builder.Services.AddSingleton<IVectorStore, NullVectorStore>();
+            builder.Services.AddSingleton<IVectorStore, FaissVectorStore>();
             builder.Services.AddScoped<IStoryRagService, StoryRagService>();
             builder.Services.AddScoped<IStoryMemoryEngine, StoryMemoryEngine>();
             builder.Services.AddScoped<IPlotManagerService, PlotManagerService>();

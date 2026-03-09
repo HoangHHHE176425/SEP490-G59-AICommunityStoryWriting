@@ -1,15 +1,17 @@
 using System.Collections.Concurrent;
+using System.Text;
 using Microsoft.Extensions.Configuration;
 using Services.Interfaces;
 
 namespace Services.Implementations;
 
-/// <summary>Vector store tương thích FAISS: lưu vector ra file (một file mỗi story), tìm kiếm cosine trong memory. Có thể thay bằng FAISS native sau.</summary>
+/// <summary>Vector store FAISS: một file mỗi story, lưu header (chapter đã index) + (chunkId, chapterId, vector, content). Chỉ dùng file, không DB.</summary>
 public class FaissVectorStore : IVectorStore
 {
+    private const int FileFormatVersion = 2;
     private readonly string _basePath;
     private static readonly string FileExtension = ".faiss.bin";
-    private readonly ConcurrentDictionary<Guid, (Guid[] Ids, float[][] Vectors)> _cache = new();
+    private readonly ConcurrentDictionary<Guid, CachedStory> _cache = new();
 
     public FaissVectorStore(IConfiguration configuration)
     {
@@ -23,9 +25,12 @@ public class FaissVectorStore : IVectorStore
 
     public bool HasIndex(Guid storyId)
     {
-        if (_cache.TryGetValue(storyId, out _))
+        if (_cache.TryGetValue(storyId, out var c) && c.Ids.Length > 0)
             return true;
-        return File.Exists(GetFilePath(storyId));
+        if (!File.Exists(GetFilePath(storyId)))
+            return false;
+        var count = GetChunkCount(storyId);
+        return count > 0;
     }
 
     public void DeleteStory(Guid storyId)
@@ -36,9 +41,9 @@ public class FaissVectorStore : IVectorStore
             File.Delete(path);
     }
 
-    public void AddVectors(Guid storyId, IReadOnlyList<Guid> chunkIds, IReadOnlyList<float[]> vectors)
+    public void AddVectors(Guid storyId, IReadOnlyList<Guid> chunkIds, IReadOnlyList<Guid> chapterIds, IReadOnlyList<float[]> vectors, IReadOnlyList<string> contents, IReadOnlyList<Guid> indexedChapterIds)
     {
-        if (chunkIds.Count != vectors.Count || chunkIds.Count == 0)
+        if (chunkIds.Count == 0 || chunkIds.Count != vectors.Count || chunkIds.Count != contents.Count || chunkIds.Count != chapterIds.Count)
             return;
         var path = GetFilePath(storyId);
         var dir = Path.GetDirectoryName(path);
@@ -46,69 +51,168 @@ public class FaissVectorStore : IVectorStore
             Directory.CreateDirectory(dir);
 
         using (var fs = File.Create(path))
-        using (var bw = new BinaryWriter(fs))
+        using (var bw = new BinaryWriter(fs, Encoding.UTF8, leaveOpen: false))
         {
+            bw.Write(FileFormatVersion);
+            bw.Write(indexedChapterIds.Count);
+            foreach (var id in indexedChapterIds)
+                bw.Write(id.ToByteArray());
             bw.Write(chunkIds.Count);
             for (int i = 0; i < chunkIds.Count; i++)
             {
-                var id = chunkIds[i];
+                bw.Write(chunkIds[i].ToByteArray());
+                bw.Write(chapterIds[i].ToByteArray());
                 var vec = vectors[i];
-                bw.Write(id.ToByteArray());
                 bw.Write(vec.Length);
                 for (int j = 0; j < vec.Length; j++)
                     bw.Write(vec[j]);
+                var content = contents[i] ?? "";
+                var contentBytes = Encoding.UTF8.GetBytes(content);
+                bw.Write(contentBytes.Length);
+                bw.Write(contentBytes);
             }
         }
 
         LoadIntoCache(storyId);
     }
 
+    public IReadOnlyList<Guid> GetIndexedChapterIds(Guid storyId)
+    {
+        var path = GetFilePath(storyId);
+        if (!File.Exists(path))
+            return Array.Empty<Guid>();
+        try
+        {
+            using var fs = File.OpenRead(path);
+            using var br = new BinaryReader(fs, Encoding.UTF8);
+            var version = br.ReadInt32();
+            if (version != FileFormatVersion)
+                return Array.Empty<Guid>();
+            var n = br.ReadInt32();
+            var list = new List<Guid>(n);
+            for (int i = 0; i < n; i++)
+                list.Add(new Guid(br.ReadBytes(16)));
+            return list;
+        }
+        catch
+        {
+            return Array.Empty<Guid>();
+        }
+    }
+
+    public int GetChunkCount(Guid storyId)
+    {
+        if (_cache.TryGetValue(storyId, out var c))
+            return c.Ids.Length;
+        var path = GetFilePath(storyId);
+        if (!File.Exists(path))
+            return 0;
+        try
+        {
+            using var fs = File.OpenRead(path);
+            using var br = new BinaryReader(fs, Encoding.UTF8);
+            var version = br.ReadInt32();
+            if (version != FileFormatVersion)
+                return 0;
+            var numChapters = br.ReadInt32();
+            br.ReadBytes(16 * numChapters);
+            return br.ReadInt32();
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    public IReadOnlyList<(Guid ChunkId, Guid ChapterId, string Content)> GetChunkInfos(Guid storyId, IReadOnlyList<Guid> chunkIds)
+    {
+        if (chunkIds == null || chunkIds.Count == 0)
+            return Array.Empty<(Guid, Guid, string)>();
+        var c = GetOrLoadFull(storyId);
+        var dict = new Dictionary<Guid, (Guid ChapterId, string Content)>();
+        for (int i = 0; i < c.Ids.Length; i++)
+            dict[c.Ids[i]] = (c.ChapterIds[i], c.Contents[i]);
+        return chunkIds
+            .Where(id => dict.ContainsKey(id))
+            .Select(id => (id, dict[id].ChapterId, dict[id].Content))
+            .ToList();
+    }
+
+    public (IReadOnlyList<Guid> Ids, IReadOnlyList<Guid> ChapterIds, IReadOnlyList<float[]> Vectors, IReadOnlyList<string> Contents) GetIdsVectorsAndContents(Guid storyId)
+    {
+        var c = GetOrLoadFull(storyId);
+        return (c.Ids, c.ChapterIds, c.Vectors, c.Contents);
+    }
+
     public IReadOnlyList<(Guid ChunkId, float Score)> Search(Guid storyId, float[] queryVector, int topK)
     {
-        var (ids, vectors) = GetOrLoad(storyId);
-        if (ids.Length == 0 || queryVector.Length == 0)
+        var c = GetOrLoadFull(storyId);
+        if (c.Ids.Length == 0 || queryVector.Length == 0)
             return Array.Empty<(Guid, float)>();
-
         var scored = new List<(Guid id, float score)>();
-        for (int i = 0; i < vectors.Length; i++)
+        for (int i = 0; i < c.Vectors.Length; i++)
         {
-            var score = CosineSimilarity(vectors[i], queryVector);
-            scored.Add((ids[i], score));
+            var score = CosineSimilarity(c.Vectors[i], queryVector);
+            scored.Add((c.Ids[i], score));
         }
         return scored.OrderByDescending(x => x.score).Take(topK).ToList();
     }
 
-    private (Guid[] Ids, float[][] Vectors) GetOrLoad(Guid storyId)
+    private CachedStory GetOrLoadFull(Guid storyId)
     {
         if (_cache.TryGetValue(storyId, out var c))
             return c;
         return LoadIntoCache(storyId);
     }
 
-    private (Guid[] Ids, float[][] Vectors) LoadIntoCache(Guid storyId)
+    private CachedStory LoadIntoCache(Guid storyId)
     {
         var path = GetFilePath(storyId);
         if (!File.Exists(path))
         {
-            _cache.TryAdd(storyId, (Array.Empty<Guid>(), Array.Empty<float[]>()));
-            return (Array.Empty<Guid>(), Array.Empty<float[]>());
+            var empty = new CachedStory(Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<float[]>(), Array.Empty<string>());
+            _cache.TryAdd(storyId, empty);
+            return empty;
         }
-        using var fs = File.OpenRead(path);
-        using var br = new BinaryReader(fs);
-        var count = br.ReadInt32();
-        var ids = new Guid[count];
-        var vectors = new float[count][];
-        for (int i = 0; i < count; i++)
+        try
         {
-            ids[i] = new Guid(br.ReadBytes(16));
-            var len = br.ReadInt32();
-            vectors[i] = new float[len];
-            for (int j = 0; j < len; j++)
-                vectors[i][j] = br.ReadSingle();
+            using var fs = File.OpenRead(path);
+            using var br = new BinaryReader(fs, Encoding.UTF8);
+            var version = br.ReadInt32();
+            if (version != FileFormatVersion)
+            {
+                var empty = new CachedStory(Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<float[]>(), Array.Empty<string>());
+                _cache.TryAdd(storyId, empty);
+                return empty;
+            }
+            var numChapters = br.ReadInt32();
+            br.ReadBytes(16 * numChapters);
+            var numChunks = br.ReadInt32();
+            var ids = new Guid[numChunks];
+            var chapterIds = new Guid[numChunks];
+            var vectors = new float[numChunks][];
+            var contents = new string[numChunks];
+            for (int i = 0; i < numChunks; i++)
+            {
+                ids[i] = new Guid(br.ReadBytes(16));
+                chapterIds[i] = new Guid(br.ReadBytes(16));
+                var vecLen = br.ReadInt32();
+                vectors[i] = new float[vecLen];
+                for (int j = 0; j < vecLen; j++)
+                    vectors[i][j] = br.ReadSingle();
+                var contentLen = br.ReadInt32();
+                contents[i] = Encoding.UTF8.GetString(br.ReadBytes(contentLen));
+            }
+            var cached = new CachedStory(ids, chapterIds, vectors, contents);
+            _cache.AddOrUpdate(storyId, cached, (_, _) => cached);
+            return cached;
         }
-        var pair = (ids, vectors);
-        _cache.AddOrUpdate(storyId, pair, (_, _) => pair);
-        return pair;
+        catch
+        {
+            var empty = new CachedStory(Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<float[]>(), Array.Empty<string>());
+            _cache.TryAdd(storyId, empty);
+            return empty;
+        }
     }
 
     private static float CosineSimilarity(float[] a, float[] b)
@@ -124,5 +228,21 @@ public class FaissVectorStore : IVectorStore
         }
         var denom = (float)(Math.Sqrt(normA) * Math.Sqrt(normB));
         return denom < 1e-9f ? 0f : dot / denom;
+    }
+
+    private sealed class CachedStory
+    {
+        public readonly Guid[] Ids;
+        public readonly Guid[] ChapterIds;
+        public readonly float[][] Vectors;
+        public readonly string[] Contents;
+
+        public CachedStory(Guid[] ids, Guid[] chapterIds, float[][] vectors, string[] contents)
+        {
+            Ids = ids;
+            ChapterIds = chapterIds;
+            Vectors = vectors;
+            Contents = contents;
+        }
     }
 }
