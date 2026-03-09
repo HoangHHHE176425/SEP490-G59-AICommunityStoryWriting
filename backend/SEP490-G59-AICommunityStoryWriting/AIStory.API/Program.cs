@@ -1,4 +1,5 @@
 using AIStory.API.Hubs;
+using AIStory.API.Services;
 using AIStory.Services.Helpers;
 using AIStory.Services.Implementations;
 using BusinessObjects;
@@ -12,11 +13,11 @@ using Repositories;
 using Repositories.Implementations;
 using Repositories.Interfaces;
 using Services.Implementations;
+using Services.Integrations.PayOS;
 using Services.Interfaces;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
-using Services.Integrations.PayOS;
 
 namespace AIStory.API
 {
@@ -43,17 +44,15 @@ namespace AIStory.API
                     options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
                     options.JsonSerializerOptions.WriteIndented = true;
                 });
-            // Connection chỉ cấu hình trong StoryPlatformDbContext.OnConfiguring
-            // builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
-            //     options.UseSqlServer(
-            //         builder.Configuration.GetConnectionString("DefaultConnection")
-            //         ?? "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
-            //         sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
-            //             maxRetryCount: 5,
-            //             maxRetryDelay: TimeSpan.FromSeconds(30),
-            //             errorNumbersToAdd: null)
-            //     ));
-            builder.Services.AddDbContext<StoryPlatformDbContext>();
+            builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
+                options.UseSqlServer(
+                    builder.Configuration.GetConnectionString("DefaultConnection")
+                    ?? "Server=QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                    sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(30),
+                        errorNumbersToAdd: null)
+                ));
             // CORS Configuration
             builder.Services.AddCors(options =>
             {
@@ -88,10 +87,6 @@ namespace AIStory.API
             builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
             builder.Services.AddScoped<IChapterService, ChapterService>();
 
-            // Payments / Coin recharge
-            builder.Services.AddHttpClient<PayOSClient>();
-            builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
-
             // Policies
             builder.Services.AddScoped<IPolicyRepository, PolicyRepository>();
             builder.Services.AddScoped<IAuthorPolicyAcceptanceRepository, AuthorPolicyAcceptanceRepository>();
@@ -104,6 +99,25 @@ namespace AIStory.API
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
 
+            // AI: Story Memory Engine (RAG khi đã index) + 4 Agent
+            builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
+            builder.Services.AddScoped<IContentGuardrailService, ContentGuardrailService>();
+            builder.Services.AddScoped<IAIUsageLogRepository, AIUsageLogRepository>();
+            builder.Services.AddScoped<IStoryCharacterMemoryRepository, StoryCharacterMemoryRepository>();
+            builder.Services.AddScoped<IStoryEventMemoryRepository, StoryEventMemoryRepository>();
+            builder.Services.AddScoped<IStoryStoryStateRepository, StoryStoryStateRepository>();
+            builder.Services.AddSingleton<IVectorStore, FaissVectorStore>();
+            builder.Services.AddScoped<IStoryRagService, StoryRagService>();
+            builder.Services.AddScoped<IStoryMemoryEngine, StoryMemoryEngine>();
+            builder.Services.AddScoped<IPlotManagerService, PlotManagerService>();
+            builder.Services.AddScoped<IAINextChapterService, AINextChapterService>();
+            builder.Services.AddScoped<IAICoCreationService, AICoCreationService>();
+            builder.Services.AddScoped<IAIConsistencyCheckService, AIConsistencyCheckService>();
+            builder.Services.AddSingleton<IAISuggestRateLimitService, AISuggestRateLimitService>();
+
+            // Coin / PayOS
+            builder.Services.AddHttpClient<PayOSClient>();
+            builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
 
             var jwtKey = builder.Configuration["Jwt:Key"];
             var jwtIssuer = builder.Configuration["Jwt:Issuer"];
@@ -207,6 +221,7 @@ namespace AIStory.API
 
             if (app.Environment.IsDevelopment())
             {
+                app.UseDeveloperExceptionPage();
                 app.UseSwagger();
                 app.UseSwaggerUI(c =>
                 {

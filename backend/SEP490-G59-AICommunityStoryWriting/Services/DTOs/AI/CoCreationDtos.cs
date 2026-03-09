@@ -1,0 +1,33 @@
+namespace Services.DTOs.AI;
+
+/// <summary>Request đồng sáng tác: tác giả chỉ nhập ý tưởng; hệ thống tự lấy ngữ cảnh từ chương mới nhất.</summary>
+public class CoCreationRequest
+{
+    /// <summary>ID truyện (bắt buộc).</summary>
+    public Guid StoryId { get; set; }
+
+    /// <summary>Ý tưởng của tác giả (1–2 câu hoặc đoạn ngắn mô tả hướng nội dung muốn viết tiếp).</summary>
+    public string AuthorIdea { get; set; } = null!;
+}
+
+/// <summary>Response đồng sáng tác: dàn ý + nội dung cuối + trạng thái kiểm duyệt. Có thể kèm feedback khi ý tưởng tác giả mâu thuẫn với truyện.</summary>
+public class CoCreationResponse
+{
+    /// <summary>Nếu có: ý tưởng tác giả mâu thuẫn với ngữ cảnh (vd. nhân vật đã chết nhưng ý tưởng nhắc nhân vật đó). Khi đó không tạo dàn ý/nội dung.</summary>
+    public string? IdeaContradictionFeedback { get; set; }
+
+    /// <summary>Dàn ý do Agent 1 tạo (rỗng nếu IdeaContradictionFeedback có giá trị).</summary>
+    public string Outline { get; set; } = null!;
+
+    /// <summary>Nội dung cuối (đã qua kiểm duyệt hoặc bản cuối sau khi hết số lần sửa). Rỗng nếu IdeaContradictionFeedback có giá trị.</summary>
+    public string FinalContent { get; set; } = null!;
+
+    /// <summary>Nội dung đã được Agent 3 duyệt đạt hay chưa.</summary>
+    public bool Approved { get; set; }
+
+    /// <summary>Số lần Agent 2 viết lại theo feedback (0 = không sửa).</summary>
+    public int RevisionCount { get; set; }
+
+    /// <summary>Feedback cuối từ Agent 3 nếu vẫn chưa đạt (để tác giả tham khảo).</summary>
+    public string? ReviewFeedback { get; set; }
+}

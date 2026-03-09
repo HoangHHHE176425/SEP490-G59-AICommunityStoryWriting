@@ -1,7 +1,7 @@
 import { Star, X } from 'lucide-react';
 import { useState } from 'react';
 
-export function RatingModal({ isOpen, onClose, onSubmit }) {
+export function RatingModal({ isOpen, onClose, onSubmit, errorMessage = null, submitting = false }) {
     const [userRating, setUserRating] = useState(0);
     const [hoverRating, setHoverRating] = useState(0);
     const [reviewContent, setReviewContent] = useState('');
@@ -9,11 +9,10 @@ export function RatingModal({ isOpen, onClose, onSubmit }) {
     if (!isOpen) return null;
 
     const handleSubmit = () => {
-        if (userRating > 0) {
+        if (userRating > 0 && !submitting) {
             onSubmit(userRating, reviewContent);
             setUserRating(0);
             setReviewContent('');
-            onClose();
         }
     };
 
@@ -31,6 +30,11 @@ export function RatingModal({ isOpen, onClose, onSubmit }) {
                 </div>
 
                 <div className="p-6">
+                    {errorMessage && (
+                        <div className="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm">
+                            {errorMessage}
+                        </div>
+                    )}
                     <div className="text-center mb-6">
                         <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
                             Đánh giá của bạn về truyện này
@@ -82,10 +86,10 @@ export function RatingModal({ isOpen, onClose, onSubmit }) {
                         </button>
                         <button
                             onClick={handleSubmit}
-                            disabled={userRating === 0}
+                            disabled={userRating === 0 || submitting}
                             className="flex-1 px-4 py-2.5 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            Gửi đánh giá
+                            {submitting ? 'Đang gửi...' : 'Gửi đánh giá'}
                         </button>
                     </div>
                 </div>

@@ -5,7 +5,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { getAllCategories } from '../../api/category/categoryApi';
 import { getNotifications, getUnreadCount, markNotificationAsRead, markAllNotificationsAsRead } from '../../api/notification/notificationApi';
-import * as coinApi from '../../api/coins/coinApi';
 
 export function Header() {
     const navigate = useNavigate();
@@ -20,10 +19,7 @@ export function Header() {
     const [unreadCount, setUnreadCount] = useState(0);
     const [notificationsLoading, setNotificationsLoading] = useState(false);
 
-    const userCoinsFallback = user?.stats?.currentCoins ?? 0;
-    const [walletCoins, setWalletCoins] = useState(null);
-
-    const displayedCoins = (walletCoins ?? userCoinsFallback);
+    const userCoins = user?.stats?.currentCoins ?? 0;
 
     const fetchNotifications = useCallback(() => {
         if (!isAuthenticated) return;
@@ -84,31 +80,6 @@ export function Header() {
             cancelled = true;
         };
     }, []);
-
-    // Fetch wallet coin balance from backend API
-    useEffect(() => {
-        let cancelled = false;
-
-        const run = async () => {
-            if (!isAuthenticated) {
-                setWalletCoins(null);
-                return;
-            }
-            const res = await coinApi.getMyWallet();
-            if (cancelled) return;
-            if (res?.success) {
-                setWalletCoins(res?.data?.balanceCoin ?? 0);
-            }
-        };
-
-        run().catch(() => {
-            // Silent fail: keep showing fallback coins from profile stats
-        });
-
-        return () => {
-            cancelled = true;
-        };
-    }, [isAuthenticated]);
 
     return (
         <header className="sticky top-0 z-50 w-full bg-slate-900/95 backdrop-blur-md border-b border-slate-700/50">
@@ -192,7 +163,7 @@ export function Header() {
                                     className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 border border-amber-700/50 rounded-full hover:bg-amber-950/60 transition-colors"
                                 >
                                     <Wallet className="w-4 h-4 text-amber-400" />
-                                    <span className="text-sm font-bold text-amber-400">{displayedCoins.toLocaleString()}</span>
+                                    <span className="text-sm font-bold text-amber-400">{userCoins.toLocaleString()}</span>
                                 </Link>
 
                                 <div className="relative">
@@ -312,13 +283,14 @@ export function Header() {
                                                     <User className="w-4 h-4" />
                                                     Thông tin cá nhân
                                                 </Link>
-                                                <a
-                                                    href="#"
+                                                <Link
+                                                    to="/library"
                                                     className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
+                                                    onClick={() => setIsUserMenuOpen(false)}
                                                 >
                                                     <Library className="w-4 h-4" />
                                                     Tủ sách
-                                                </a>
+                                                </Link>
                                                 <div className="border-t border-slate-700 mt-1 pt-1">
                                                     <button
                                                         onClick={handleLogout}
@@ -375,7 +347,7 @@ export function Header() {
                                     <Wallet className="w-5 h-5 text-amber-400" />
                                     <span className="font-semibold text-white">Ví</span>
                                 </div>
-                                <span className="text-lg font-bold text-amber-400">{displayedCoins.toLocaleString()}</span>
+                                <span className="text-lg font-bold text-amber-400">{userCoins.toLocaleString()}</span>
                             </Link>
                         )}
 
@@ -439,10 +411,14 @@ export function Header() {
                                         <User className="w-4 h-4" />
                                         Thông tin cá nhân
                                     </Link>
-                                    <a className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold" href="#">
+                                    <Link
+                                        to="/library"
+                                        className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold"
+                                        onClick={() => setIsMenuOpen(false)}
+                                    >
                                         <Library className="w-4 h-4" />
                                         Tủ sách
-                                    </a>
+                                    </Link>
                                     <button
                                         onClick={handleLogout}
                                         className="flex items-center gap-3 text-red-600 dark:text-red-400 hover:text-red-700 transition-colors font-semibold"

@@ -1,5 +1,5 @@
-﻿// API Base URL
-const API_BASE_URL = 'http://localhost:5000/api';
+﻿// API Base URL: từ server config (Layout) hoặc mặc định khi chạy API trên port 5000
+const API_BASE_URL = (typeof window !== 'undefined' && window.__API_BASE_URL) ? window.__API_BASE_URL : 'http://localhost:5000/api';
 
 // API Service Class
 class ApiService {
@@ -260,6 +260,19 @@ class ApiService {
         return this.request(`/stories/${storyId}/comments/${commentId}/like`, {
             method: 'POST'
         });
+    }
+
+    /** reactionType: 'LIKE'|'DISLIKE'|'FUNNY'|'SAD'|'ANGRY'|'LOVE'|'WOW' hoặc null để bỏ reaction */
+    static async setCommentReaction(storyId, commentId, reactionType) {
+        return this.request(`/stories/${storyId}/comments/${commentId}/reaction`, {
+            method: 'POST',
+            body: JSON.stringify({ reactionType: reactionType || null })
+        });
+    }
+
+    /** Danh sách người đã reaction comment (để hiển thị modal). */
+    static async getCommentReactions(storyId, commentId) {
+        return this.request(`/stories/${storyId}/comments/${commentId}/reactions`);
     }
 
     static async getChapterRejectionReason(id) {
