@@ -47,7 +47,27 @@ export function Header() {
 
     useEffect(() => {
         if (!isAuthenticated) return;
-        const handler = () => fetchNotifications();
+        const handler = (e) => {
+            const n = e?.detail;
+            if (n && (n.id ?? n.Id)) {
+                setNotifications((prev) => {
+                    const id = n.id ?? n.Id;
+                    if (prev.some((x) => (x.id ?? x.Id) === id)) return prev;
+                    const item = {
+                        id,
+                        title: n.title ?? n.Title ?? '',
+                        content: n.content ?? n.Content ?? '',
+                        linkUrl: n.linkUrl ?? n.LinkUrl,
+                        isRead: n.isRead ?? n.IsRead ?? false,
+                        createdAt: n.createdAt ?? n.CreatedAt,
+                        type: n.type ?? n.Type,
+                    };
+                    return [item, ...prev];
+                });
+                setUnreadCount((c) => c + 1);
+            }
+            fetchNotifications();
+        };
         window.addEventListener('app:notification', handler);
         return () => window.removeEventListener('app:notification', handler);
     }, [isAuthenticated, fetchNotifications]);

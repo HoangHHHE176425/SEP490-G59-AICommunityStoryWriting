@@ -77,10 +77,11 @@ export function AuthProvider({ children }) {
             }
             return;
         }
-        const { stop } = createNotificationHubConnection((notification) => {
+        const { stop, startPromise } = createNotificationHubConnection((notification) => {
             window.dispatchEvent(new CustomEvent('app:notification', { detail: notification }));
         });
         notificationHubStopRef.current = stop;
+        startPromise?.catch(() => { });
         return () => {
             if (notificationHubStopRef.current) {
                 notificationHubStopRef.current();

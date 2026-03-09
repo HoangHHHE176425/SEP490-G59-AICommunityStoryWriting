@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { getChapters, getChapterById, updateChapter, unpublishChapter, getChapterRejectionReason } from '../../api/chapter/chapterApi';
+import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason } from '../../api/chapter/chapterApi';
 import { getStoryRejectionReason } from '../../api/story/storyApi';
 import { updateStory } from '../../api/story/storyApi';
 import { Pagination } from '../../components/pagination/Pagination';
@@ -63,6 +63,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     const [totalCount, setTotalCount] = useState(0);
     const [hasPublishedChapter, setHasPublishedChapter] = useState(false);
     const [hasPendingReviewChapter, setHasPendingReviewChapter] = useState(false);
+    /** Set orderIndex (0-based) chương đã PUBLISHED — dùng để hiển thị trạng thái. */
+    const [publishedOrderIndices, setPublishedOrderIndices] = useState(new Set());
+    /** Set orderIndex (0-based) chương đang PENDING_REVIEW — cho phép gửi chương tiếp theo khi chương trước đã gửi (published hoặc pending). */
+    const [pendingOrderIndices, setPendingOrderIndices] = useState(new Set());
 
     const loadChapters = useCallback((page = 1, options = {}) => {
         if (!storyId) return;
@@ -82,13 +86,15 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                 setCurrentPage(res?.page ?? page);
                 if (silent) {
                     Promise.all([
-                        getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
-                        getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                        getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
+                        getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 })
                     ]).then(([publishedRes, pendingRes]) => {
                         const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
                         const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
                         setHasPublishedChapter(publishedList.length > 0);
                         setHasPendingReviewChapter(pendingList.length > 0);
+                        setPublishedOrderIndices(new Set(publishedList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
+                        setPendingOrderIndices(new Set(pendingList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
                     }).catch(() => { });
                 }
             })
@@ -113,14 +119,15 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                 setTotalPages(1);
                 setHasPublishedChapter(false);
                 setHasPendingReviewChapter(false);
+                setPublishedOrderIndices(new Set());
                 return;
             }
             setLoading(true);
             setError(null);
             Promise.all([
                 getChapters({ storyId, page: 1, pageSize: CHAPTERS_PAGE_SIZE }),
-                getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
-                getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
+                getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 })
             ])
                 .then(([res, publishedRes, pendingRes]) => {
                     const rawItems = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
@@ -128,6 +135,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                     const pages = res?.totalPages ?? Math.max(1, Math.ceil(total / CHAPTERS_PAGE_SIZE));
                     const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
                     const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
+                    const publishedSet = new Set(publishedList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0));
+                    const pendingSet = new Set(pendingList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0));
                     if (!cancelled) {
                         setChapters(rawItems.map((item) => ({ ...mapChapterFromApi(item), content: item.content ?? item.Content ?? '' })));
                         setTotalCount(total);
@@ -135,6 +144,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                         setCurrentPage(res?.page ?? 1);
                         setHasPublishedChapter(publishedList.length > 0);
                         setHasPendingReviewChapter(pendingList.length > 0);
+                        setPublishedOrderIndices(publishedSet);
+                        setPendingOrderIndices(pendingSet);
                     }
                 })
                 .catch((err) => {
@@ -186,9 +197,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     const [rejectionReasonModal, setRejectionReasonModal] = useState({ open: false, title: '', reason: null, rejectedAt: null, loading: false });
 
     const handleDeleteChapter = (chapterId) => {
-        if (window.confirm('Bạn có chắc chắn muốn xóa chương này?')) {
-            setChapters((prev) => prev.filter((ch) => ch.id !== chapterId));
-        }
+        if (!chapterId) return;
+        deleteChapter(chapterId)
+            .then(() => loadChapters(currentPage))
+            .catch((err) => {
+                const msg = err?.response?.data?.message ?? err?.message ?? 'Xóa chương thất bại';
+                alert(msg);
+            })
+            .finally(() => setActioningChapterId(null));
     };
 
     const openPublishConfirm = (chapterId) => {
@@ -196,6 +212,9 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     };
     const openUnpublishConfirm = (chapterId) => {
         setConfirmDialog({ open: true, action: 'unpublish', chapterId });
+    };
+    const openDeleteConfirm = (chapterId) => {
+        setConfirmDialog({ open: true, action: 'delete', chapterId });
     };
     const closeConfirmDialog = () => {
         if (!actioningChapterId) setConfirmDialog({ open: false, action: null, chapterId: null });
@@ -214,13 +233,15 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                     .then(() => {
                         if (!storyId) return;
                         return Promise.all([
-                            getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
-                            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                            getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
+                            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 })
                         ]).then(([rPub, rPend]) => {
                             const pubList = Array.isArray(rPub) ? rPub : (rPub?.items ?? rPub?.Items ?? []);
                             const pendList = Array.isArray(rPend) ? rPend : (rPend?.items ?? rPend?.Items ?? []);
                             setHasPublishedChapter(pubList.length > 0);
                             setHasPendingReviewChapter(pendList.length > 0);
+                            setPublishedOrderIndices(new Set(pubList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
+                            setPendingOrderIndices(new Set(pendList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
                         });
                     })
                     .then(() => {
@@ -236,7 +257,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                         });
                     })
                     .catch((err) => {
-                        alert(err?.message ?? 'Xuất bản thất bại');
+                        const msg = err?.response?.data?.message ?? err?.message ?? 'Xuất bản thất bại';
+                        alert(msg);
                     })
                     .finally(() => setActioningChapterId(null));
             getChapterById(chapterId)
@@ -250,7 +272,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                     if (chapterFromList?.title) {
                         return doUpdate(chapterFromList.title, chapterFromList.content ?? '');
                     }
-                    alert(err?.message ?? 'Xuất bản thất bại');
+                    const msg = err?.response?.data?.message ?? err?.message ?? 'Xuất bản thất bại';
+                    alert(msg);
                     setActioningChapterId(null);
                 });
         } else if (action === 'unpublish') {
@@ -259,19 +282,23 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                 .then(() => {
                     if (!storyId) return;
                     return Promise.all([
-                        getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
-                        getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
+                        getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
+                        getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 })
                     ]).then(([rPub, rPend]) => {
                         const pubList = Array.isArray(rPub) ? rPub : (rPub?.items ?? rPub?.Items ?? []);
                         const pendList = Array.isArray(rPend) ? rPend : (rPend?.items ?? rPend?.Items ?? []);
                         setHasPublishedChapter(pubList.length > 0);
                         setHasPendingReviewChapter(pendList.length > 0);
+                        setPublishedOrderIndices(new Set(pubList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
+                        setPendingOrderIndices(new Set(pendList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
                     });
                 })
                 .catch((err) => {
                     alert(err?.message ?? 'Hủy xuất bản thất bại');
                 })
                 .finally(() => setActioningChapterId(null));
+        } else if (action === 'delete') {
+            handleDeleteChapter(chapterId);
         }
     };
 
@@ -586,7 +613,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                             width: 'fit-content',
                                             margin: '0 auto'
                                         }}>
-                                            {/* Hàng 1: Chỉnh sửa, Xóa — không cho phép khi chương đang Chờ duyệt (PENDING_REVIEW) */}
+                                            {/* Hàng 1: Chỉnh sửa, Xóa — Chỉnh sửa: không cho khi Chờ duyệt; Xóa: chỉ cho khi Bản nháp */}
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                 <button
                                                     onClick={() => chapter.status !== 'pending_review' && onEditChapter(chapter)}
@@ -615,27 +642,27 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                                     Chỉnh sửa
                                                 </button>
                                                 <button
-                                                    onClick={() => chapter.status !== 'pending_review' && handleDeleteChapter(chapter.id)}
-                                                    disabled={chapter.status === 'pending_review'}
-                                                    title={chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể xóa' : ''}
+                                                    onClick={() => chapter.status === 'draft' && openDeleteConfirm(chapter.id)}
+                                                    disabled={chapter.status !== 'draft'}
+                                                    title={chapter.status === 'draft' ? 'Xóa chương' : 'Chỉ được xóa chương khi ở trạng thái Bản nháp'}
                                                     style={{
                                                         display: 'inline-flex',
                                                         alignItems: 'center',
                                                         gap: '0.25rem',
                                                         padding: '0.4rem 0.75rem',
-                                                        backgroundColor: chapter.status === 'pending_review' ? '#f1f5f9' : '#fff',
-                                                        border: `1px solid ${chapter.status === 'pending_review' ? '#e2e8f0' : '#fecaca'}`,
+                                                        backgroundColor: chapter.status === 'draft' ? '#fff' : '#f1f5f9',
+                                                        border: `1px solid ${chapter.status === 'draft' ? '#fecaca' : '#e2e8f0'}`,
                                                         borderRadius: '9999px',
                                                         fontSize: '0.75rem',
                                                         fontWeight: 600,
-                                                        color: chapter.status === 'pending_review' ? '#94a3b8' : '#dc2626',
-                                                        cursor: chapter.status === 'pending_review' ? 'not-allowed' : 'pointer',
+                                                        color: chapter.status === 'draft' ? '#dc2626' : '#94a3b8',
+                                                        cursor: chapter.status === 'draft' ? 'pointer' : 'not-allowed',
                                                         transition: 'all 0.2s',
                                                         whiteSpace: 'nowrap',
-                                                        opacity: chapter.status === 'pending_review' ? 0.8 : 1
+                                                        opacity: chapter.status === 'draft' ? 1 : 0.8
                                                     }}
-                                                    onMouseEnter={(e) => { if (chapter.status !== 'pending_review') e.currentTarget.style.backgroundColor = '#fef2f2'; }}
-                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'pending_review' ? '#f1f5f9' : '#fff'; }}
+                                                    onMouseEnter={(e) => { if (chapter.status === 'draft') e.currentTarget.style.backgroundColor = '#fef2f2'; }}
+                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'draft' ? '#fff' : '#f1f5f9'; }}
                                                 >
                                                     <Trash2 size={12} />
                                                     Xóa
@@ -644,33 +671,37 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                             {/* Hàng 2: Xuất bản hoặc Hủy xuất bản (draft/rejected = Xuất bản; pending_review = Hủy xuất bản) */}
                                             {(chapter.status === 'draft' || chapter.status === 'pending_review' || chapter.status === 'rejected') && (
                                                 <div style={{ display: 'flex', width: '100%' }}>
-                                                    {(chapter.status === 'draft' || chapter.status === 'rejected') && (
-                                                        <button
-                                                            onClick={() => handlePublishChapter(chapter.id)}
-                                                            disabled={actioningChapterId === chapter.id}
-                                                            style={{
-                                                                display: 'inline-flex',
-                                                                alignItems: 'center',
-                                                                justifyContent: 'center',
-                                                                gap: '0.25rem',
-                                                                width: '100%',
-                                                                padding: '0.4rem 0.75rem',
-                                                                backgroundColor: '#13ec5b',
-                                                                border: 'none',
-                                                                borderRadius: '9999px',
-                                                                fontSize: '0.75rem',
-                                                                fontWeight: 600,
-                                                                color: '#fff',
-                                                                cursor: actioningChapterId === chapter.id ? 'not-allowed' : 'pointer',
-                                                                opacity: actioningChapterId === chapter.id ? 0.7 : 1,
-                                                                transition: 'all 0.2s',
-                                                                whiteSpace: 'nowrap'
-                                                            }}
-                                                        >
-                                                            <Send size={12} />
-                                                            {actioningChapterId === chapter.id ? '...' : 'Xuất bản'}
-                                                        </button>
-                                                    )}
+                                                    {(chapter.status === 'draft' || chapter.status === 'rejected') && (() => {
+                                                        const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(chapter.number - 2) || pendingOrderIndices.has(chapter.number - 2);
+                                                        return (
+                                                            <button
+                                                                onClick={() => canSubmitForPublish && handlePublishChapter(chapter.id)}
+                                                                disabled={actioningChapterId === chapter.id || !canSubmitForPublish}
+                                                                title={!canSubmitForPublish ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.` : 'Gửi chương lên để duyệt xuất bản'}
+                                                                style={{
+                                                                    display: 'inline-flex',
+                                                                    alignItems: 'center',
+                                                                    justifyContent: 'center',
+                                                                    gap: '0.25rem',
+                                                                    width: '100%',
+                                                                    padding: '0.4rem 0.75rem',
+                                                                    backgroundColor: canSubmitForPublish ? '#13ec5b' : '#e2e8f0',
+                                                                    border: 'none',
+                                                                    borderRadius: '9999px',
+                                                                    fontSize: '0.75rem',
+                                                                    fontWeight: 600,
+                                                                    color: canSubmitForPublish ? '#fff' : '#94a3b8',
+                                                                    cursor: actioningChapterId === chapter.id || !canSubmitForPublish ? 'not-allowed' : 'pointer',
+                                                                    opacity: actioningChapterId === chapter.id ? 0.7 : 1,
+                                                                    transition: 'all 0.2s',
+                                                                    whiteSpace: 'nowrap'
+                                                                }}
+                                                            >
+                                                                <Send size={12} />
+                                                                {actioningChapterId === chapter.id ? '...' : 'Xuất bản'}
+                                                            </button>
+                                                        );
+                                                    })()}
                                                     {chapter.status === 'pending_review' && (
                                                         <button
                                                             onClick={() => handleUnpublishChapter(chapter.id)}
@@ -783,12 +814,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                         onClick={(e) => e.stopPropagation()}
                     >
                         <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#1e293b', margin: '0 0 1rem 0' }}>
-                            {confirmDialog.action === 'publish' ? 'Xác nhận xuất bản' : 'Xác nhận hủy xuất bản'}
+                            {confirmDialog.action === 'publish' && 'Xác nhận xuất bản'}
+                            {confirmDialog.action === 'unpublish' && 'Xác nhận hủy xuất bản'}
+                            {confirmDialog.action === 'delete' && 'Xác nhận xóa chương'}
                         </h3>
                         <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
-                            {confirmDialog.action === 'publish'
-                                ? 'Bạn có chắc chắn muốn gửi chương này lên để duyệt xuất bản?'
-                                : 'Bạn có chắc chắn muốn hủy xuất bản và đưa chương về bản nháp?'}
+                            {confirmDialog.action === 'publish' && 'Bạn có chắc chắn muốn gửi chương này lên để duyệt xuất bản?'}
+                            {confirmDialog.action === 'unpublish' && 'Bạn có chắc chắn muốn hủy xuất bản và đưa chương về bản nháp?'}
+                            {confirmDialog.action === 'delete' && 'Bạn có chắc chắn muốn xóa chương này? Hành động này không thể hoàn tác.'}
                         </p>
                         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                             <button
@@ -813,13 +846,13 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
                                     color: '#ffffff',
-                                    backgroundColor: '#13ec5b',
+                                    backgroundColor: confirmDialog.action === 'delete' ? '#dc2626' : '#13ec5b',
                                     border: 'none',
                                     borderRadius: '8px',
                                     cursor: 'pointer'
                                 }}
                             >
-                                Xác nhận
+                                {confirmDialog.action === 'delete' ? 'Xóa' : 'Xác nhận'}
                             </button>
                         </div>
                     </div>

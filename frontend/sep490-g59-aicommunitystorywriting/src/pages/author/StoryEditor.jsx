@@ -244,6 +244,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                             <ChapterEditor
                                 chapter={chapters[currentChapterIndex]}
                                 onChange={handleChapterChange}
+                                story={story}
                             />
                         </div>
                     )}
