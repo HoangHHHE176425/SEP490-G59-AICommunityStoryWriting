@@ -59,7 +59,7 @@ export function ChapterSidebar({ show, chapters, currentChapter, onClose, onChap
                     {chapters.map((ch) => (
                         <button
                             key={ch.number}
-                            onClick={() => !ch.isLocked && onChapterSelect(ch)}
+                            onClick={() => onChapterSelect(ch)}
                             style={{
                                 width: '100%',
                                 display: 'flex',
@@ -70,17 +70,17 @@ export function ChapterSidebar({ show, chapters, currentChapter, onClose, onChap
                                 border: 'none',
                                 borderBottom: '1px solid #f1f5f9',
                                 textAlign: 'left',
-                                cursor: ch.isLocked ? 'not-allowed' : 'pointer',
+                                cursor: 'pointer',
                                 transition: 'background-color 0.2s',
-                                opacity: ch.isLocked ? 0.5 : 1
+                                opacity: 1
                             }}
                             onMouseEnter={(e) => {
-                                if (!ch.isLocked && ch.number !== currentChapter) {
+                                if (ch.number !== currentChapter) {
                                     e.currentTarget.style.backgroundColor = '#f8fafc';
                                 }
                             }}
                             onMouseLeave={(e) => {
-                                if (!ch.isLocked && ch.number !== currentChapter) {
+                                if (ch.number !== currentChapter) {
                                     e.currentTarget.style.backgroundColor = 'transparent';
                                 }
                             }}
@@ -92,6 +92,11 @@ export function ChapterSidebar({ show, chapters, currentChapter, onClose, onChap
                                 <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.125rem 0 0 0' }}>
                                     {ch.title}
                                 </p>
+                                {ch.isLocked && (ch.coinPrice ?? 0) > 0 && (
+                                    <p style={{ fontSize: '0.6875rem', color: '#d97706', margin: '0.125rem 0 0 0' }}>
+                                        🔒 {ch.coinPrice} xu
+                                    </p>
+                                )}
                             </div>
                             {ch.isLocked && (
                                 <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>🔒</span>

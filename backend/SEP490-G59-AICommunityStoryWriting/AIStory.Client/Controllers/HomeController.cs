@@ -18,6 +18,14 @@ namespace AIStory.Client.Controllers
             return View();
         }
 
+        public IActionResult Story(Guid? id)
+        {
+            if (!id.HasValue)
+                return RedirectToAction(nameof(Index));
+            ViewBag.StoryId = id.Value;
+            return View();
+        }
+
         public IActionResult Privacy()
         {
             return View();

@@ -1,8 +1,16 @@
+<<<<<<< HEAD
 
+=======
+>>>>>>> ce6a8b3cffa7124e5aed3e84c7bd01eeb39aa983
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Chapters;
 using Services.Interfaces;
+<<<<<<< HEAD
+=======
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+>>>>>>> ce6a8b3cffa7124e5aed3e84c7bd01eeb39aa983
 
 namespace AIStory.API.Controllers
 {
@@ -11,12 +19,21 @@ namespace AIStory.API.Controllers
     public class ChaptersController : ControllerBase
     {
         private readonly IChapterService _chapterService;
+<<<<<<< HEAD
         private readonly IServiceScopeFactory _scopeFactory;
 
         public ChaptersController(IChapterService chapterService, IServiceScopeFactory scopeFactory)
         {
             _chapterService = chapterService;
             _scopeFactory = scopeFactory;
+=======
+        private readonly IStoryService _storyService;
+
+        public ChaptersController(IChapterService chapterService, IStoryService storyService)
+        {
+            _chapterService = chapterService;
+            _storyService = storyService;
+>>>>>>> ce6a8b3cffa7124e5aed3e84c7bd01eeb39aa983
         }
 
         /// <summary>Tạo chapter mới - Chỉ AUTHOR. Sau khi lưu, Plot Manager (Agent 4) cập nhật memory nếu có nội dung.</summary>
@@ -61,15 +78,27 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy chapter theo ID (Guid) (cho phép xem không cần đăng nhập)</summary>
+        /// <summary>Lấy chapter theo ID (Guid) (bắt buộc đăng nhập để đọc)</summary>
         [HttpGet("{id:guid}")]
-        [AllowAnonymous]
+        [Authorize]
         public IActionResult GetById(Guid id)
         {
             try
             {
                 var chapter = _chapterService.GetById(id);
-                return chapter == null ? NotFound(new { message = $"Chapter with ID {id} not found" }) : Ok(chapter);
+                if (chapter == null)
+                    return NotFound(new { message = $"Chapter with ID {id} not found" });
+
+                var sub = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                          ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (chapter.StoryId.HasValue && Guid.TryParse(sub, out var userId) && userId != Guid.Empty)
+                {
+                    var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+                    var ua = Request.Headers.UserAgent.ToString();
+                    _storyService.RecordReadChapter(chapter.StoryId.Value, id, userId, ip, ua);
+                }
+
+                return Ok(chapter);
             }
             catch (Exception ex)
             {
@@ -213,6 +242,7 @@ namespace AIStory.API.Controllers
             }
         }
 
+<<<<<<< HEAD
         /// <summary>Gọi Plot Manager (Agent 4) cập nhật memory trong background; không chặn response.</summary>
         private void TriggerPlotManagerUpdate(Guid storyId, Guid chapterId, string content)
         {
@@ -229,6 +259,36 @@ namespace AIStory.API.Controllers
                     // Best-effort; không làm fail request
                 }
             });
+=======
+        /// <summary>Xem lý do từ chối chapter - Chỉ AUTHOR (chỉ chapter thuộc truyện của mình).</summary>
+        [HttpGet("{id:guid}/rejection-reason")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult GetRejectionReason(Guid id)
+        {
+            try
+            {
+                var chapter = _chapterService.GetById(id);
+                if (chapter == null)
+                    return NotFound(new { message = "Chapter không tồn tại." });
+                if (!chapter.StoryId.HasValue)
+                    return Forbid();
+                var story = _storyService.GetById(chapter.StoryId.Value);
+                if (story == null)
+                    return Forbid();
+                var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+                if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
+                    return Forbid();
+                // Chỉ ẩn lịch sử từ chối khi chapter đã được duyệt (PUBLISHED). Khi gửi lại (PENDING_REVIEW) vẫn hiển thị.
+                if (chapter.Status == "PUBLISHED")
+                    return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
+                var (reason, rejectedAt) = _chapterService.GetLatestRejectionForChapter(id);
+                return Ok(new { reason, rejectedAt });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Lỗi lấy lý do từ chối", error = ex.Message });
+            }
+>>>>>>> ce6a8b3cffa7124e5aed3e84c7bd01eeb39aa983
         }
     }
 }

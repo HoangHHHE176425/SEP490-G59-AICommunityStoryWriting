@@ -31,14 +31,82 @@
                         </div>
                         <div class="btn-group" role="group">
                             <button class="btn btn-success" id="publishStoryBtn" onclick="publishStoryFromDetails()" style="display: none;">
-                                <i class="bi bi-check-circle"></i> Publish Truyện
+                                <i class="bi bi-send-check"></i> Gửi duyệt
                             </button>
                             <button class="btn btn-warning" id="unpublishStoryBtn" onclick="unpublishStoryFromDetails()" style="display: none;">
-                                <i class="bi bi-x-circle"></i> Unpublish Truyện
+                                <i class="bi bi-x-circle"></i> Rút lại / Hủy xuất bản
                             </button>
                             <button class="btn btn-info" onclick="window.location.href='/Stories'">
                                 <i class="bi bi-list"></i> Danh sách Truyện
                             </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Thống kê + Đánh giá (Stats & Rating) -->
+            <div class="card mb-4" id="storyStatsRatingCard" style="display: none;">
+                <div class="card-header"><strong>Thống kê &amp; Đánh giá</strong></div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-7">
+                            <h6 class="text-muted mb-2">Thống kê</h6>
+                            <div class="row g-2">
+                                <div class="col-6 col-md-4">
+                                    <div class="p-2 border rounded bg-light">
+                                        <div class="small text-muted">Lượt xem</div>
+                                        <div class="fw-bold" id="statViews">0</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-4">
+                                    <div class="p-2 border rounded bg-light">
+                                        <div class="small text-muted">Bình luận</div>
+                                        <div class="fw-bold" id="statComments">0</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-4">
+                                    <div class="p-2 border rounded bg-light">
+                                        <div class="small text-muted">Số chương</div>
+                                        <div class="fw-bold" id="statChapters">0</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-4">
+                                    <div class="p-2 border rounded bg-light">
+                                        <div class="small text-muted">Cập nhật gần nhất</div>
+                                        <div class="small fw-bold" id="statLatestUpdated">-</div>
+                                    </div>
+                                </div>
+                                <div class="col-6 col-md-4">
+                                    <div class="p-2 border rounded bg-light">
+                                        <div class="small text-muted">Đánh giá TB</div>
+                                        <div class="fw-bold" id="statAvgRating">0.00</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-5 border-start">
+                            <h6 class="text-muted mb-2">Đánh giá (1–5 sao)</h6>
+                            <div class="mb-2">
+                                <div class="btn-group w-100" role="group">
+                                    <input type="radio" class="btn-check" name="detailStarValue" id="detailStar1" value="1">
+                                    <label class="btn btn-outline-warning" for="detailStar1">1</label>
+                                    <input type="radio" class="btn-check" name="detailStarValue" id="detailStar2" value="2">
+                                    <label class="btn btn-outline-warning" for="detailStar2">2</label>
+                                    <input type="radio" class="btn-check" name="detailStarValue" id="detailStar3" value="3">
+                                    <label class="btn btn-outline-warning" for="detailStar3">3</label>
+                                    <input type="radio" class="btn-check" name="detailStarValue" id="detailStar4" value="4">
+                                    <label class="btn btn-outline-warning" for="detailStar4">4</label>
+                                    <input type="radio" class="btn-check" name="detailStarValue" id="detailStar5" value="5" checked>
+                                    <label class="btn btn-outline-warning" for="detailStar5">5</label>
+                                </div>
+                            </div>
+                            <div class="mb-2">
+                                <textarea class="form-control form-control-sm" id="detailReviewText" rows="2" placeholder="Review (tùy chọn)"></textarea>
+                            </div>
+                            <button type="button" class="btn btn-primary btn-sm" id="submitRatingBtn" onclick="submitRatingFromDetails()">
+                                <i class="bi bi-star-fill"></i> Gửi đánh giá
+                            </button>
+                            <div class="mt-2 small" id="ratingResultDetail"></div>
                         </div>
                     </div>
                 </div>
@@ -132,8 +200,8 @@
                 <button type="button" class="btn btn-outline-secondary" onclick="saveChapter('DRAFT')" id="saveDraftBtn">
                     <i class="bi bi-save"></i> Lưu nháp
                 </button>
-                <button type="button" class="btn btn-primary" onclick="saveChapter('PUBLISHED')" id="publishBtn">
-                    <i class="bi bi-check-circle"></i> Xuất bản
+                <button type="button" class="btn btn-primary" onclick="saveChapter('PENDING_REVIEW')" id="publishBtn">
+                    <i class="bi bi-send-check"></i> Gửi duyệt
                 </button>
             </div>
         </div>
@@ -231,20 +299,30 @@
                         <h2>${story.title}</h2>
                         <p class="text-muted">${story.summary || 'Chưa có mô tả'}</p>
                         <div class="mb-3">
-                            <span class="badge bg-primary">${story.categoryName || 'N/A'}</span>
-                            <span class="badge ${story.status === 'PUBLISHED' ? 'bg-success' : 'bg-secondary'}" id="storyStatusDisplay">${story.status || 'DRAFT'}</span>
-                            <span class="badge bg-info">${story.totalChapters || 0} chương</span>
-                            <span class="badge bg-warning">${Utils.formatNumber(story.totalViews || 0)} lượt xem</span>
+                            <span class="badge bg-primary">${story.categoryNames || story.categoryName || 'N/A'}</span>
+                            <span class="badge ${story.status === 'PUBLISHED' ? 'bg-success' : story.status === 'REJECTED' ? 'bg-danger' : 'bg-secondary'}" id="storyStatusDisplay">${story.status || 'DRAFT'}</span>
+                            <span class="badge bg-info">${(story.totalChapters ?? story.TotalChapters) || 0} chương</span>
+                            <span class="badge bg-warning">${Utils.formatNumber((story.totalViews ?? story.TotalViews) || 0)} lượt xem</span>
+                            <span class="badge bg-secondary">${Utils.formatNumber((story.totalComments ?? story.TotalComments) || 0)} bình luận</span>
                             <span class="badge bg-danger">${Utils.formatNumber(story.totalFavorites || 0)} yêu thích</span>
+                            <span class="badge bg-success">${(story.avgRating ?? story.AvgRating) ? (story.avgRating ?? story.AvgRating).toFixed(1) : '0.0'}/5 sao</span>
                         </div>
+                        ${story.status === 'REJECTED' ? `
+                        <div class="alert alert-danger mb-3">
+                            <h6 class="alert-heading"><i class="bi bi-chat-left-quote"></i> Lý do từ chối</h6>
+                            <p class="mb-1">${story.rejectionReason || 'Không có lý do.'}</p>
+                            ${story.rejectedAt ? `<small class="text-muted">Ngày từ chối: ${Utils.formatDate(story.rejectedAt)}</small>` : ''}
+                        </div>
+                        ` : ''}
                         <div class="row">
                             <div class="col-md-6">
                                 <p><strong>Độ tuổi:</strong> ${story.ageRating || 'ALL'}</p>
+                                <p><strong>Ngày tạo:</strong> ${Utils.formatDate(story.createdAt)}</p>
+                                <p><strong>Cập nhật gần nhất:</strong> ${(story.latestUpdatedAt || story.LatestUpdatedAt || story.updatedAt || story.UpdatedAt) ? Utils.formatDate(story.latestUpdatedAt || story.LatestUpdatedAt || story.updatedAt || story.UpdatedAt) : 'N/A'}</p>
                             </div>
                             <div class="col-md-6">
                                 <p><strong>Tổng số từ:</strong> ${Utils.formatNumber(story.wordCount || 0)}</p>
-                                <p><strong>Đánh giá trung bình:</strong> ${story.avgRating ? story.avgRating.toFixed(2) : '0.00'}/5.00</p>
-                                <p><strong>Ngày tạo:</strong> ${Utils.formatDate(story.createdAt)}</p>
+                                <p><strong>Đánh giá trung bình:</strong> ${(story.avgRating ?? story.AvgRating) ? (story.avgRating ?? story.AvgRating).toFixed(2) : '0.00'}/5.00</p>
                             </div>
                         </div>
                     </div>
@@ -261,14 +339,58 @@
 
             if (story.status === 'PUBLISHED') {
                 statusBadge.className = 'badge bg-success';
-                statusBadge.textContent = 'Đã Publish';
+                statusBadge.textContent = 'Đã xuất bản';
                 publishBtn.style.display = 'none';
                 unpublishBtn.style.display = 'inline-block';
-            } else {
-                statusBadge.className = 'badge bg-secondary';
-                statusBadge.textContent = 'Draft';
+            } else if (story.status === 'PENDING_REVIEW') {
+                statusBadge.className = 'badge bg-warning text-dark';
+                statusBadge.textContent = 'Chờ duyệt';
+                publishBtn.style.display = 'none';
+                unpublishBtn.style.display = 'inline-block';
+            } else if (story.status === 'REJECTED') {
+                statusBadge.className = 'badge bg-danger';
+                statusBadge.textContent = 'Bị từ chối';
                 publishBtn.style.display = 'inline-block';
                 unpublishBtn.style.display = 'none';
+            } else {
+                statusBadge.className = 'badge bg-secondary';
+                statusBadge.textContent = 'Nháp';
+                publishBtn.style.display = 'inline-block';
+                unpublishBtn.style.display = 'none';
+            }
+
+            // Hiển thị thống kê & đánh giá
+            const statsCard = document.getElementById('storyStatsRatingCard');
+            if (statsCard) {
+                statsCard.style.display = 'block';
+                const v = story.totalViews ?? story.TotalViews ?? 0;
+                const c = story.totalComments ?? story.TotalComments ?? 0;
+                const ch = story.totalChapters ?? story.TotalChapters ?? 0;
+                const lat = story.latestUpdatedAt ?? story.LatestUpdatedAt ?? story.updatedAt ?? story.UpdatedAt;
+                const avg = story.avgRating ?? story.AvgRating ?? 0;
+                document.getElementById('statViews').textContent = Utils.formatNumber(v);
+                document.getElementById('statComments').textContent = Utils.formatNumber(c);
+                document.getElementById('statChapters').textContent = Utils.formatNumber(ch);
+                document.getElementById('statLatestUpdated').textContent = lat ? Utils.formatDate(lat) : 'N/A';
+                document.getElementById('statAvgRating').textContent = avg ? Number(avg).toFixed(2) + '/5' : '0.00/5';
+            }
+        }
+
+        function getDetailStarValue() {
+            const el = document.querySelector('input[name="detailStarValue"]:checked');
+            return el ? parseInt(el.value, 10) : 5;
+        }
+
+        async function submitRatingFromDetails() {
+            const resultEl = document.getElementById('ratingResultDetail');
+            if (resultEl) resultEl.innerHTML = '';
+            try {
+                const payload = { starValue: getDetailStarValue(), reviewText: document.getElementById('detailReviewText').value || null };
+                const res = await ApiService.rateStory(storyId, payload);
+                if (resultEl) resultEl.innerHTML = '<span class="text-success">Đã gửi đánh giá. Điểm TB: ' + Number(res.avgRating).toFixed(2) + ' (' + res.ratingCount + ' lượt).</span>';
+                await loadStoryDetails();
+            } catch (e) {
+                if (resultEl) resultEl.innerHTML = '<span class="text-danger">' + (e && e.message ? e.message : e) + '</span>';
             }
         }
 
@@ -317,9 +439,10 @@
                                     </small>
                                 </p>
                                 <div>
-                                    <span class="badge ${chapter.status === 'PUBLISHED' ? 'bg-success' : 'bg-secondary'}">${chapter.status || 'DRAFT'}</span>
+                                    <span class="badge ${chapter.status === 'PUBLISHED' ? 'bg-success' : chapter.status === 'PENDING_REVIEW' ? 'bg-warning text-dark' : chapter.status === 'REJECTED' ? 'bg-danger' : 'bg-secondary'}">${chapter.status === 'PENDING_REVIEW' ? 'Chờ duyệt' : chapter.status === 'REJECTED' ? 'Bị từ chối' : (chapter.status || 'DRAFT')}</span>
                                     <span class="badge ${chapter.accessType === 'FREE' ? 'bg-info' : 'bg-warning'}">${chapter.accessType || 'FREE'}</span>
                                     ${chapter.coinPrice > 0 ? `<span class="badge bg-danger">${chapter.coinPrice} coin</span>` : ''}
+                                    ${chapter.status === 'REJECTED' ? ` <button class="btn btn-sm btn-outline-danger" onclick="showChapterRejectionReason('${chapter.id}')" title="Xem lý do từ chối"><i class="bi bi-chat-left-quote"></i> Lý do</button>` : ''}
                                 </div>
                             </div>
                             <div class="ms-3">
@@ -329,8 +452,8 @@
                                 <button class="btn btn-sm btn-primary" onclick="editChapter('${chapter.id}')" title="Sửa">
                                     <i class="bi bi-pencil"></i>
                                 </button>
-                                <button class="btn btn-sm btn-success" onclick="publishChapter('${chapter.id}')" title="Publish" ${chapter.status === 'PUBLISHED' ? 'disabled' : ''}>
-                                    <i class="bi bi-check-circle"></i>
+                                <button class="btn btn-sm btn-success" onclick="publishChapter('${chapter.id}')" title="Gửi duyệt" ${(chapter.status === 'PUBLISHED' || chapter.status === 'PENDING_REVIEW') ? 'disabled' : ''}>
+                                    <i class="bi bi-send-check"></i> Gửi duyệt
                                 </button>
                                 <button class="btn btn-sm btn-danger" onclick="deleteChapter('${chapter.id}')" title="Xóa">
                                     <i class="bi bi-trash"></i>
@@ -403,12 +526,11 @@
 
                 // Show buttons based on current status
                 const currentStatus = chapter.status || 'DRAFT';
-                if (currentStatus === 'PUBLISHED') {
-                    // If already published, only show "Lưu nháp" button
+                if (currentStatus === 'PUBLISHED' || currentStatus === 'PENDING_REVIEW') {
+                    // Đã gửi duyệt hoặc đã xuất bản: chỉ hiện "Lưu nháp" (sửa nội dung)
                     document.getElementById('saveDraftBtn').style.display = 'inline-block';
                     document.getElementById('publishBtn').style.display = 'none';
                 } else {
-                    // If draft, show both buttons
                     document.getElementById('saveDraftBtn').style.display = 'inline-block';
                     document.getElementById('publishBtn').style.display = 'inline-block';
                 }
@@ -489,14 +611,18 @@
 
                 if (editingChapterId) {
                     await ApiService.updateChapter(editingChapterId, data);
-                    if (status === 'PUBLISHED') {
+                    if (status === 'PENDING_REVIEW') {
+                        Utils.showAlert('Đã gửi chapter chờ duyệt. Moderator sẽ xem xét và duyệt khi đạt yêu cầu.', 'success');
+                    } else if (status === 'PUBLISHED') {
                         Utils.showAlert('Xuất bản chapter thành công!', 'success');
                     } else {
                         Utils.showAlert('Cập nhật chapter thành công!', 'success');
                     }
                 } else {
                     await ApiService.createChapter(data);
-                    if (status === 'PUBLISHED') {
+                    if (status === 'PENDING_REVIEW') {
+                        Utils.showAlert('Đã gửi chapter chờ duyệt. Moderator sẽ xem xét và duyệt khi đạt yêu cầu.', 'success');
+                    } else if (status === 'PUBLISHED') {
                         Utils.showAlert('Tạo và xuất bản chapter thành công!', 'success');
                     } else {
                         Utils.showAlert('Tạo chapter nháp thành công!', 'success');
@@ -539,7 +665,7 @@
 
             try {
                 await ApiService.publishChapter(id);
-                Utils.showAlert('Publish chapter thành công!', 'success');
+                Utils.showAlert('Đã gửi chapter chờ duyệt. Moderator sẽ xem xét và duyệt khi đạt yêu cầu.', 'success');
                 loadChapters();
                 loadStoryDetails();
             } catch (error) {
@@ -560,7 +686,7 @@
 
             try {
                 await ApiService.publishStory(storyId);
-                Utils.showAlert('Publish truyện thành công!', 'success');
+                Utils.showAlert('Đã gửi truyện chờ duyệt. Moderator sẽ xem xét và duyệt khi đạt yêu cầu.', 'success');
                 await loadStoryDetails();
             } catch (error) {
                 Utils.showAlert('Lỗi: ' + error.message, 'danger');

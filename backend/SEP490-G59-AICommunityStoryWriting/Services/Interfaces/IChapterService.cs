@@ -1,4 +1,4 @@
-﻿using Services.DTOs.Chapters;
+using Services.DTOs.Chapters;
 using Services.DTOs.Stories;
 
 public interface IChapterService
@@ -13,4 +13,6 @@ public interface IChapterService
     bool Publish(Guid id);
     bool Unpublish(Guid id);
     bool Reorder(Guid id, int newOrderIndex);
+    /// <summary>Lấy lý do từ chối gần nhất của chapter (từ moderation_logs), bất kể status hiện tại.</summary>
+    (string? reason, DateTime? rejectedAt) GetLatestRejectionForChapter(Guid chapterId);
 }

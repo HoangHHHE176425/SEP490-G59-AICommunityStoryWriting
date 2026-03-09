@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
@@ -19,8 +19,7 @@ public partial class author_policy_acceptances
 
     public string accepted_for { get; set; } = null!;
 
-    public virtual users user { get; set; } = null!;
-
     public virtual system_policies policy { get; set; } = null!;
-}
 
+    public virtual users user { get; set; } = null!;
+}
