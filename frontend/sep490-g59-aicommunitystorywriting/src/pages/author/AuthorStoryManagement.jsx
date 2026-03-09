@@ -59,7 +59,7 @@ function mapStoryFromApi(item) {
         ageRating,
         categories,
         status: status.toLowerCase(),
-        chapters: item.totalChapters ?? item.TotalChapters ?? 0,
+        chapters: item.publishedChaptersCount ?? item.PublishedChaptersCount ?? item.totalChapters ?? item.TotalChapters ?? 0,
         totalViews: Number(item.totalViews ?? item.TotalViews ?? 0),
         follows: Number(item.totalFavorites ?? item.TotalFavorites ?? 0),
         rating: item.avgRating ?? item.AvgRating ?? 0,
