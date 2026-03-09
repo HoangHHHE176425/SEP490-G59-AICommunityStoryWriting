@@ -1,3 +1,4 @@
+
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Chapters;
@@ -242,6 +243,34 @@ namespace AIStory.API.Controllers
                     // Best-effort; không làm fail request
                 }
             });
+        /// <summary>Xem lý do từ chối chapter - Chỉ AUTHOR (chỉ chapter thuộc truyện của mình).</summary>
+        [HttpGet("{id:guid}/rejection-reason")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult GetRejectionReason(Guid id)
+        {
+            try
+            {
+                var chapter = _chapterService.GetById(id);
+                if (chapter == null)
+                    return NotFound(new { message = "Chapter không tồn tại." });
+                if (!chapter.StoryId.HasValue)
+                    return Forbid();
+                var story = _storyService.GetById(chapter.StoryId.Value);
+                if (story == null)
+                    return Forbid();
+                var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+                if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
+                    return Forbid();
+                // Chỉ ẩn lịch sử từ chối khi chapter đã được duyệt (PUBLISHED). Khi gửi lại (PENDING_REVIEW) vẫn hiển thị.
+                if (chapter.Status == "PUBLISHED")
+                    return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
+                var (reason, rejectedAt) = _chapterService.GetLatestRejectionForChapter(id);
+                return Ok(new { reason, rejectedAt });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Lỗi lấy lý do từ chối", error = ex.Message });
+            }
         }
     }
 }

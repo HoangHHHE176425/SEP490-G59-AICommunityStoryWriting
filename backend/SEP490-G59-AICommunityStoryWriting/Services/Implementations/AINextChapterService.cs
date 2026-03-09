@@ -18,7 +18,6 @@ namespace Services.Implementations
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
         private readonly IStoryRagService _ragService;
-        private readonly IStoryContextBuilder _contextBuilder;
         private readonly IAIUsageLogRepository _aiUsageLogRepository;
         private readonly IConfiguration _configuration;
 
@@ -26,14 +25,12 @@ namespace Services.Implementations
             IStoryRepository storyRepository,
             IChapterRepository chapterRepository,
             IStoryRagService ragService,
-            IStoryContextBuilder contextBuilder,
             IAIUsageLogRepository aiUsageLogRepository,
             IConfiguration configuration)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
             _ragService = ragService;
-            _contextBuilder = contextBuilder;
             _aiUsageLogRepository = aiUsageLogRepository;
             _configuration = configuration;
         }
@@ -53,35 +50,17 @@ namespace Services.Implementations
             var chapters = _chapterRepository.GetByStoryId(request.StoryId)
                 .OrderBy(c => c.order_index)
                 .ToList();
+            var lastChapterContent = chapters.LastOrDefault()?.content ?? "";
+            var query = $"{story.summary ?? ""} {lastChapterContent}".Trim();
 
-            IEnumerable<chapters> chaptersForContext = chapters;
-            if (request.AfterChapterId.HasValue)
-            {
-                var afterIdx = chapters.FirstOrDefault(c => c.id == request.AfterChapterId.Value)?.order_index;
-                if (afterIdx.HasValue)
-                    chaptersForContext = chapters.Where(c => c.order_index <= afterIdx.Value);
-            }
+            if (!_ragService.IsRagAvailableForStory(request.StoryId))
+                throw new InvalidOperationException("RAG chưa sẵn sàng cho truyện này. Hãy gọi POST /api/ai/index-rag với storyId trước khi gợi ý chương.");
 
-            // Memory Retrieval: RAG khi đã index, không thì Story Context (N chương)
-            string contextBlock;
-            await _ragService.TryEnsureIndexedAsync(request.StoryId, request.AfterChapterId, cancellationToken);
-            if (_ragService.IsRagAvailableForStory(request.StoryId))
-            {
-                var lastChapterContent = chaptersForContext.LastOrDefault()?.content ?? "";
-                var query = $"{story.summary ?? ""} {lastChapterContent}".Trim();
-                var ragBlock = await _ragService.RetrieveContextAsync(request.StoryId, query, maxChars: 8000, topK: 15, cancellationToken);
-                if (!string.IsNullOrWhiteSpace(ragBlock))
-                    contextBlock = BuildContextBlockFromRag(story, ragBlock);
-                else
-                    contextBlock = _contextBuilder.BuildForSuggestNextChapter(request.StoryId, request.AfterChapterId);
-            }
-            else
-            {
-                contextBlock = _contextBuilder.BuildForSuggestNextChapter(request.StoryId, request.AfterChapterId);
-            }
+            var ragBlock = await _ragService.RetrieveContextAsync(request.StoryId, query, maxChars: 8000, topK: 15, cancellationToken);
+            if (string.IsNullOrWhiteSpace(ragBlock))
+                throw new InvalidOperationException("Không lấy được ngữ cảnh từ RAG. Đảm bảo truyện đã có chương có nội dung và đã gọi POST /api/ai/index-rag.");
 
-            if (string.IsNullOrWhiteSpace(contextBlock))
-                throw new InvalidOperationException("Truyện cần có ít nhất một chương đã có nội dung để gợi ý chương tiếp theo.");
+            var contextBlock = BuildContextBlockFromRag(story, ragBlock);
 
             var storyLanguage = StoryLanguageHelper.DetectFromStoryContext(contextBlock);
             var languageInstruction = StoryLanguageHelper.GetLanguageInstruction(storyLanguage);
@@ -97,10 +76,11 @@ namespace Services.Implementations
                 new UserChatMessage(userPrompt)
             };
 
+            var options = AIClientHelper.GetCompletionOptions(_configuration, null);
             ChatCompletion completion;
             try
             {
-                completion = await client.CompleteChatAsync(messages);
+                completion = await client.CompleteChatAsync(messages, options);
             }
             catch (Exception ex)
             {
@@ -124,7 +104,7 @@ namespace Services.Implementations
             {
                 user_id = authorUserId,
                 story_id = request.StoryId,
-                chapter_id = chaptersForContext.LastOrDefault()?.id,
+                chapter_id = chapters.LastOrDefault()?.id,
                 action_type = ActionType,
                 model_name = model,
                 prompt_tokens = promptTokens,

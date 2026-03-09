@@ -1,8 +1,8 @@
-using System.Text.Json;
 using BusinessObjects.Entities;
 using Microsoft.Extensions.Configuration;
 using Repositories;
 using Repositories.Interfaces;
+using Services.DTOs.AI;
 using Services.Helpers;
 using Services.Interfaces;
 
@@ -17,34 +17,42 @@ public class StoryRagService : IStoryRagService
 
     private readonly IStoryRepository _storyRepository;
     private readonly IChapterRepository _chapterRepository;
-    private readonly IStoryChapterChunkRepository _chunkRepository;
-    private readonly IVectorStore? _vectorStore;
+    private readonly IVectorStore _vectorStore;
     private readonly IConfiguration _configuration;
 
     public StoryRagService(
         IStoryRepository storyRepository,
         IChapterRepository chapterRepository,
-        IStoryChapterChunkRepository chunkRepository,
         IConfiguration configuration,
-        IVectorStore? vectorStore = null)
+        IVectorStore vectorStore)
     {
         _storyRepository = storyRepository;
         _chapterRepository = chapterRepository;
-        _chunkRepository = chunkRepository;
-        _vectorStore = vectorStore;
         _configuration = configuration;
+        _vectorStore = vectorStore;
     }
-
-    private bool UseVectorStore => _vectorStore != null && _configuration["VectorStore:Provider"]?.Equals("FAISS", StringComparison.OrdinalIgnoreCase) == true;
 
     public bool IsRagAvailableForStory(Guid storyId)
     {
         if (EmbeddingHelper.GetEmbeddingConfig(_configuration) == null)
             return false;
-        if (UseVectorStore)
-            return _vectorStore!.HasIndex(storyId) && _chunkRepository.CountByStoryId(storyId) > 0;
-        var withEmbeddings = _chunkRepository.GetByStoryIdWithEmbeddings(storyId);
-        return withEmbeddings.Count > 0;
+        return _vectorStore.HasIndex(storyId) && _vectorStore.GetChunkCount(storyId) > 0;
+    }
+
+    public RagStatusResponse GetRagStatus(Guid storyId)
+    {
+        var embeddingConfigured = EmbeddingHelper.GetEmbeddingConfig(_configuration) != null;
+        var chunkCount = _vectorStore.GetChunkCount(storyId);
+        var hasVectorIndex = _vectorStore.HasIndex(storyId);
+        var available = IsRagAvailableForStory(storyId);
+        return new RagStatusResponse
+        {
+            StoryId = storyId,
+            Available = available,
+            EmbeddingConfigured = embeddingConfigured,
+            ChunkCount = chunkCount,
+            HasVectorIndex = hasVectorIndex
+        };
     }
 
     public async Task EnsureIndexedAsync(Guid storyId, Guid? afterChapterId, CancellationToken cancellationToken = default)
@@ -58,17 +66,29 @@ public class StoryRagService : IStoryRagService
             .OrderBy(c => c.order_index)
             .ToList();
 
-        IEnumerable<chapters> toIndex = chapters;
-        if (afterChapterId.HasValue)
-        {
-            var idx = chapters.FirstOrDefault(c => c.id == afterChapterId.Value)?.order_index;
-            if (idx.HasValue)
-                toIndex = chapters.Where(c => c.order_index <= idx.Value);
-        }
+        var indexedChapterIds = _vectorStore.GetIndexedChapterIds(storyId).ToHashSet();
+        bool hasExistingIndex = indexedChapterIds.Count > 0;
+        bool doIncremental = hasExistingIndex && !afterChapterId.HasValue;
 
-        if (UseVectorStore)
-            _vectorStore!.DeleteStory(storyId);
-        _chunkRepository.DeleteByStoryId(storyId);
+        List<chapters> toIndex;
+        if (doIncremental)
+        {
+            toIndex = chapters.Where(c => !indexedChapterIds.Contains(c.id)).OrderBy(c => c.order_index).ToList();
+            if (toIndex.Count == 0)
+                return;
+        }
+        else
+        {
+            if (afterChapterId.HasValue)
+            {
+                var idx = chapters.FirstOrDefault(c => c.id == afterChapterId.Value)?.order_index;
+                toIndex = idx.HasValue ? chapters.Where(c => c.order_index <= idx.Value).OrderBy(c => c.order_index).ToList() : chapters;
+            }
+            else
+                toIndex = chapters;
+
+            _vectorStore.DeleteStory(storyId);
+        }
 
         int batchSize = _configuration.GetValue("AI:EmbeddingBatchSize", DefaultEmbeddingBatchSize);
         if (batchSize < 1) batchSize = 1;
@@ -87,9 +107,11 @@ public class StoryRagService : IStoryRagService
             }
         }
 
-        var chunksToAdd = new List<story_chapter_chunks>();
-        var allVectorsForFaiss = new List<float[]>();
-        int chunkIndex = 0;
+        var chunkIds = new List<Guid>();
+        var chapterIds = new List<Guid>();
+        var allVectors = new List<float[]>();
+        var allContents = new List<string>();
+
         for (int i = 0; i < orderedItems.Count; i += batchSize)
         {
             var batch = orderedItems.Skip(i).Take(batchSize).ToList();
@@ -98,30 +120,30 @@ public class StoryRagService : IStoryRagService
             for (int j = 0; j < batch.Count && j < embeddings.Count; j++)
             {
                 var (text, chapterId) = batch[j];
-                var chunkId = Guid.NewGuid();
-                chunksToAdd.Add(new story_chapter_chunks
-                {
-                    id = chunkId,
-                    story_id = storyId,
-                    chapter_id = chapterId,
-                    chunk_index = chunkIndex++,
-                    content = text,
-                    embedding_json = UseVectorStore ? null : JsonSerializer.Serialize(embeddings[j]),
-                    embedding_model = model,
-                    created_at = DateTime.UtcNow
-                });
-                if (UseVectorStore)
-                    allVectorsForFaiss.Add(embeddings[j]);
+                chunkIds.Add(Guid.NewGuid());
+                chapterIds.Add(chapterId);
+                allVectors.Add(embeddings[j]);
+                allContents.Add(text);
             }
             if (delayBetweenBatchesMs > 0 && i + batchSize < orderedItems.Count)
                 await Task.Delay(delayBetweenBatchesMs, cancellationToken);
         }
 
-        if (chunksToAdd.Count > 0)
+        if (chunkIds.Count > 0)
         {
-            _chunkRepository.AddRange(chunksToAdd);
-            if (UseVectorStore && allVectorsForFaiss.Count == chunksToAdd.Count)
-                _vectorStore!.AddVectors(storyId, chunksToAdd.Select(c => c.id).ToList(), allVectorsForFaiss);
+            var newIndexedChapterIds = toIndex.Select(c => c.id).Distinct().ToList();
+            if (doIncremental)
+            {
+                var (existingIds, existingChapterIds, existingVectors, existingContents) = _vectorStore.GetIdsVectorsAndContents(storyId);
+                var combinedIds = existingIds.Concat(chunkIds).ToList();
+                var combinedChapterIds = existingChapterIds.Concat(chapterIds).ToList();
+                var combinedVectors = existingVectors.Concat(allVectors).ToList();
+                var combinedContents = existingContents.Concat(allContents).ToList();
+                var combinedIndexedChapters = indexedChapterIds.Union(newIndexedChapterIds).Distinct().ToList();
+                _vectorStore.AddVectors(storyId, combinedIds, combinedChapterIds, combinedVectors, combinedContents, combinedIndexedChapters);
+            }
+            else
+                _vectorStore.AddVectors(storyId, chunkIds, chapterIds, allVectors, allContents, newIndexedChapterIds);
         }
     }
 
@@ -129,9 +151,7 @@ public class StoryRagService : IStoryRagService
     {
         if (EmbeddingHelper.GetEmbeddingConfig(_configuration) == null)
             return;
-        if (UseVectorStore && _vectorStore!.HasIndex(storyId) && _chunkRepository.CountByStoryId(storyId) > 0)
-            return;
-        if (!UseVectorStore && _chunkRepository.CountByStoryId(storyId) > 0)
+        if (_vectorStore.HasIndex(storyId) && _vectorStore.GetChunkCount(storyId) > 0)
             return;
         await EnsureIndexedAsync(storyId, afterChapterId, cancellationToken);
     }
@@ -147,45 +167,21 @@ public class StoryRagService : IStoryRagService
         var chapters = _chapterRepository.GetByStoryId(storyId).OrderBy(c => c.order_index).ToList();
         var chapterMap = chapters.ToDictionary(c => c.id, c => (c.order_index, c.title ?? $"Chương {c.order_index}"));
 
-        List<story_chapter_chunks> scoredChunks;
-        if (UseVectorStore)
-        {
-            if (!_vectorStore!.HasIndex(storyId))
-                return null;
-            var searchResults = _vectorStore.Search(storyId, queryEmbedding, topK);
-            if (searchResults.Count == 0)
-                return null;
-            var chunkIds = searchResults.Select(r => r.ChunkId).ToList();
-            var chunksById = _chunkRepository.GetChunksByIds(chunkIds).ToDictionary(c => c.id);
-            scoredChunks = searchResults
-                .Select(r => (chunk: chunksById.GetValueOrDefault(r.ChunkId), score: r.Score))
-                .Where(x => x.chunk != null)
-                .OrderByDescending(x => x.score)
-                .Select(x => x.chunk!)
-                .Take(topK)
-                .ToList();
-        }
-        else
-        {
-            var chunks = _chunkRepository.GetByStoryIdWithEmbeddings(storyId);
-            if (chunks.Count == 0)
-                return null;
-            scoredChunks = chunks
-                .Select(c => (chunk: c, score: CosineSimilarity(ParseEmbedding(c.embedding_json), queryEmbedding)))
-                .OrderByDescending(x => x.score)
-                .Take(topK)
-                .Select(x => x.chunk)
-                .ToList();
-        }
-
+        if (!_vectorStore.HasIndex(storyId))
+            return null;
+        var searchResults = _vectorStore.Search(storyId, queryEmbedding, topK);
+        if (searchResults.Count == 0)
+            return null;
+        var chunkIds = searchResults.Select(r => r.ChunkId).ToList();
+        var infos = _vectorStore.GetChunkInfos(storyId, chunkIds);
         var lines = new List<string>();
         int totalChars = 0;
-        foreach (var chunk in scoredChunks)
+        foreach (var (_, chapterId, content) in infos.OrderBy(x => chunkIds.IndexOf(x.ChunkId)))
         {
             if (totalChars >= maxChars)
                 break;
-            var (order, title) = chapterMap.GetValueOrDefault(chunk.chapter_id, (0, ""));
-            var block = $"[Chương {order}: {title}]\n{chunk.content}";
+            var (order, title) = chapterMap.GetValueOrDefault(chapterId, (0, ""));
+            var block = $"[Chương {order}: {title}]\n{content}";
             if (totalChars + block.Length > maxChars)
                 block = block[..(maxChars - totalChars)] + "...";
             lines.Add(block);
@@ -232,34 +228,5 @@ public class StoryRagService : IStoryRagService
         }
 
         return chunks;
-    }
-
-    private static float[] ParseEmbedding(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-            return Array.Empty<float>();
-        try
-        {
-            return JsonSerializer.Deserialize<float[]>(json) ?? Array.Empty<float>();
-        }
-        catch
-        {
-            return Array.Empty<float>();
-        }
-    }
-
-    private static float CosineSimilarity(float[] a, float[] b)
-    {
-        if (a.Length == 0 || b.Length != a.Length)
-            return 0f;
-        float dot = 0, normA = 0, normB = 0;
-        for (int i = 0; i < a.Length; i++)
-        {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-        }
-        var denom = (float)(Math.Sqrt(normA) * Math.Sqrt(normB));
-        return denom < 1e-9f ? 0f : dot / denom;
     }
 }

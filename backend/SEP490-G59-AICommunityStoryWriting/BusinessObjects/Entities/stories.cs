@@ -45,8 +45,6 @@ public partial class stories
 
     public virtual ICollection<chapters> chapters { get; set; } = new List<chapters>();
 
-    public virtual ICollection<story_chapter_chunks> story_chapter_chunks { get; set; } = new List<story_chapter_chunks>();
-
     public virtual ICollection<comments> comments { get; set; } = new List<comments>();
 
     public virtual ICollection<idea_posts> idea_posts { get; set; } = new List<idea_posts>();
@@ -62,7 +60,6 @@ public partial class stories
     public virtual ICollection<story_event_memory> story_event_memories { get; set; } = new List<story_event_memory>();
 
     public virtual ICollection<story_story_state> story_story_states { get; set; } = new List<story_story_state>();
-
     public virtual ICollection<story_versions> story_versions { get; set; } = new List<story_versions>();
 
     public virtual ICollection<user_library> user_library { get; set; } = new List<user_library>();

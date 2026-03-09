@@ -1,28 +1,25 @@
 namespace Services.DTOs.AI;
 
-/// <summary>Request đồng sáng tác: ý tưởng tác giả → dàn ý → nội dung → kiểm duyệt.</summary>
+/// <summary>Request đồng sáng tác: tác giả chỉ nhập ý tưởng; hệ thống tự lấy ngữ cảnh từ chương mới nhất.</summary>
 public class CoCreationRequest
 {
     /// <summary>ID truyện (bắt buộc).</summary>
     public Guid StoryId { get; set; }
 
-    /// <summary>Ý tưởng của tác giả (1–2 câu hoặc đoạn ngắn mô tả hướng nội dung muốn viết).</summary>
+    /// <summary>Ý tưởng của tác giả (1–2 câu hoặc đoạn ngắn mô tả hướng nội dung muốn viết tiếp).</summary>
     public string AuthorIdea { get; set; } = null!;
-
-    /// <summary>ID chương sau đó lấy ngữ cảnh (tùy chọn). Null = dùng đến chương mới nhất.</summary>
-    public Guid? AfterChapterId { get; set; }
-
-    /// <summary>Điểm cần nhất quán: trạng thái nhân vật, sự kiện quan trọng từ các chương xa (tùy chọn). Luôn được đưa vào ngữ cảnh để tránh mâu thuẫn dù nhân vật không xuất hiện trong N chương gần nhất.</summary>
-    public string? ContinuityNotes { get; set; }
 }
 
-/// <summary>Response đồng sáng tác: dàn ý + nội dung cuối + trạng thái kiểm duyệt.</summary>
+/// <summary>Response đồng sáng tác: dàn ý + nội dung cuối + trạng thái kiểm duyệt. Có thể kèm feedback khi ý tưởng tác giả mâu thuẫn với truyện.</summary>
 public class CoCreationResponse
 {
-    /// <summary>Dàn ý do Agent 1 tạo.</summary>
+    /// <summary>Nếu có: ý tưởng tác giả mâu thuẫn với ngữ cảnh (vd. nhân vật đã chết nhưng ý tưởng nhắc nhân vật đó). Khi đó không tạo dàn ý/nội dung.</summary>
+    public string? IdeaContradictionFeedback { get; set; }
+
+    /// <summary>Dàn ý do Agent 1 tạo (rỗng nếu IdeaContradictionFeedback có giá trị).</summary>
     public string Outline { get; set; } = null!;
 
-    /// <summary>Nội dung cuối (đã qua kiểm duyệt hoặc bản cuối sau khi hết số lần sửa).</summary>
+    /// <summary>Nội dung cuối (đã qua kiểm duyệt hoặc bản cuối sau khi hết số lần sửa). Rỗng nếu IdeaContradictionFeedback có giá trị.</summary>
     public string FinalContent { get; set; } = null!;
 
     /// <summary>Nội dung đã được Agent 3 duyệt đạt hay chưa.</summary>
