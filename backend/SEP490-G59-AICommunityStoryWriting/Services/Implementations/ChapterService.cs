@@ -403,6 +403,10 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
 
+            var statusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
+            if (statusUpper != "DRAFT")
+                throw new InvalidOperationException("Chỉ được xóa chương khi ở trạng thái Bản nháp. Chương hiện tại: " + (chapter.status ?? "—"));
+
             var storyId = chapter.story_id;
 
             _chapterRepository.Delete(id);

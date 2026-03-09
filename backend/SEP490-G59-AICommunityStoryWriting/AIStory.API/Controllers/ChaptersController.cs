@@ -164,6 +164,10 @@ namespace AIStory.API.Controllers
                 var deleted = _chapterService.Delete(id);
                 return deleted ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while deleting the chapter", error = ex.Message });

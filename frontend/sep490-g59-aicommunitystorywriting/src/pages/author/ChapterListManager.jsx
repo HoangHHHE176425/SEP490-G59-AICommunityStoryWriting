@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { getChapters, getChapterById, updateChapter, unpublishChapter, getChapterRejectionReason } from '../../api/chapter/chapterApi';
+import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason } from '../../api/chapter/chapterApi';
 import { getStoryRejectionReason } from '../../api/story/storyApi';
 import { updateStory } from '../../api/story/storyApi';
 import { Pagination } from '../../components/pagination/Pagination';
@@ -186,9 +186,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     const [rejectionReasonModal, setRejectionReasonModal] = useState({ open: false, title: '', reason: null, rejectedAt: null, loading: false });
 
     const handleDeleteChapter = (chapterId) => {
-        if (window.confirm('Bạn có chắc chắn muốn xóa chương này?')) {
-            setChapters((prev) => prev.filter((ch) => ch.id !== chapterId));
-        }
+        if (!chapterId) return;
+        deleteChapter(chapterId)
+            .then(() => loadChapters(currentPage))
+            .catch((err) => {
+                const msg = err?.response?.data?.message ?? err?.message ?? 'Xóa chương thất bại';
+                alert(msg);
+            })
+            .finally(() => setActioningChapterId(null));
     };
 
     const openPublishConfirm = (chapterId) => {
@@ -196,6 +201,9 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     };
     const openUnpublishConfirm = (chapterId) => {
         setConfirmDialog({ open: true, action: 'unpublish', chapterId });
+    };
+    const openDeleteConfirm = (chapterId) => {
+        setConfirmDialog({ open: true, action: 'delete', chapterId });
     };
     const closeConfirmDialog = () => {
         if (!actioningChapterId) setConfirmDialog({ open: false, action: null, chapterId: null });
@@ -274,6 +282,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                     alert(err?.message ?? 'Hủy xuất bản thất bại');
                 })
                 .finally(() => setActioningChapterId(null));
+        } else if (action === 'delete') {
+            handleDeleteChapter(chapterId);
         }
     };
 
@@ -588,7 +598,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                             width: 'fit-content',
                                             margin: '0 auto'
                                         }}>
-                                            {/* Hàng 1: Chỉnh sửa, Xóa — không cho phép khi chương đang Chờ duyệt (PENDING_REVIEW) */}
+                                            {/* Hàng 1: Chỉnh sửa, Xóa — Chỉnh sửa: không cho khi Chờ duyệt; Xóa: chỉ cho khi Bản nháp */}
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                 <button
                                                     onClick={() => chapter.status !== 'pending_review' && onEditChapter(chapter)}
@@ -617,27 +627,27 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                                     Chỉnh sửa
                                                 </button>
                                                 <button
-                                                    onClick={() => chapter.status !== 'pending_review' && handleDeleteChapter(chapter.id)}
-                                                    disabled={chapter.status === 'pending_review'}
-                                                    title={chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể xóa' : ''}
+                                                    onClick={() => chapter.status === 'draft' && openDeleteConfirm(chapter.id)}
+                                                    disabled={chapter.status !== 'draft'}
+                                                    title={chapter.status === 'draft' ? 'Xóa chương' : 'Chỉ được xóa chương khi ở trạng thái Bản nháp'}
                                                     style={{
                                                         display: 'inline-flex',
                                                         alignItems: 'center',
                                                         gap: '0.25rem',
                                                         padding: '0.4rem 0.75rem',
-                                                        backgroundColor: chapter.status === 'pending_review' ? '#f1f5f9' : '#fff',
-                                                        border: `1px solid ${chapter.status === 'pending_review' ? '#e2e8f0' : '#fecaca'}`,
+                                                        backgroundColor: chapter.status === 'draft' ? '#fff' : '#f1f5f9',
+                                                        border: `1px solid ${chapter.status === 'draft' ? '#fecaca' : '#e2e8f0'}`,
                                                         borderRadius: '9999px',
                                                         fontSize: '0.75rem',
                                                         fontWeight: 600,
-                                                        color: chapter.status === 'pending_review' ? '#94a3b8' : '#dc2626',
-                                                        cursor: chapter.status === 'pending_review' ? 'not-allowed' : 'pointer',
+                                                        color: chapter.status === 'draft' ? '#dc2626' : '#94a3b8',
+                                                        cursor: chapter.status === 'draft' ? 'pointer' : 'not-allowed',
                                                         transition: 'all 0.2s',
                                                         whiteSpace: 'nowrap',
-                                                        opacity: chapter.status === 'pending_review' ? 0.8 : 1
+                                                        opacity: chapter.status === 'draft' ? 1 : 0.8
                                                     }}
-                                                    onMouseEnter={(e) => { if (chapter.status !== 'pending_review') e.currentTarget.style.backgroundColor = '#fef2f2'; }}
-                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'pending_review' ? '#f1f5f9' : '#fff'; }}
+                                                    onMouseEnter={(e) => { if (chapter.status === 'draft') e.currentTarget.style.backgroundColor = '#fef2f2'; }}
+                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'draft' ? '#fff' : '#f1f5f9'; }}
                                                 >
                                                     <Trash2 size={12} />
                                                     Xóa
@@ -785,12 +795,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                         onClick={(e) => e.stopPropagation()}
                     >
                         <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#1e293b', margin: '0 0 1rem 0' }}>
-                            {confirmDialog.action === 'publish' ? 'Xác nhận xuất bản' : 'Xác nhận hủy xuất bản'}
+                            {confirmDialog.action === 'publish' && 'Xác nhận xuất bản'}
+                            {confirmDialog.action === 'unpublish' && 'Xác nhận hủy xuất bản'}
+                            {confirmDialog.action === 'delete' && 'Xác nhận xóa chương'}
                         </h3>
                         <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
-                            {confirmDialog.action === 'publish'
-                                ? 'Bạn có chắc chắn muốn gửi chương này lên để duyệt xuất bản?'
-                                : 'Bạn có chắc chắn muốn hủy xuất bản và đưa chương về bản nháp?'}
+                            {confirmDialog.action === 'publish' && 'Bạn có chắc chắn muốn gửi chương này lên để duyệt xuất bản?'}
+                            {confirmDialog.action === 'unpublish' && 'Bạn có chắc chắn muốn hủy xuất bản và đưa chương về bản nháp?'}
+                            {confirmDialog.action === 'delete' && 'Bạn có chắc chắn muốn xóa chương này? Hành động này không thể hoàn tác.'}
                         </p>
                         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                             <button
@@ -815,13 +827,13 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
                                     color: '#ffffff',
-                                    backgroundColor: '#13ec5b',
+                                    backgroundColor: confirmDialog.action === 'delete' ? '#dc2626' : '#13ec5b',
                                     border: 'none',
                                     borderRadius: '8px',
                                     cursor: 'pointer'
                                 }}
                             >
-                                Xác nhận
+                                {confirmDialog.action === 'delete' ? 'Xóa' : 'Xác nhận'}
                             </button>
                         </div>
                     </div>
