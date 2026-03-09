@@ -151,9 +151,18 @@ namespace Services.Implementations
                 return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
 
             List<Guid>? includeStoryIds = null;
-            if (!isAdmin && moderatorId.HasValue)
+            List<string>? statusIn = null;
+            if (statusUpper == "REJECTED")
             {
-                var action = statusUpper == "PUBLISHED" ? "APPROVED" : "REJECTED";
+                // Tab "Từ chối": hiển thị theo hành động cuối = REJECTED (vẫn hiển thị sau khi tác giả gửi lại PENDING_REVIEW cho đến khi moderator duyệt).
+                includeStoryIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsWhereLastActionIs("STORY", "REJECTED", isAdmin ? null : moderatorId);
+                if (includeStoryIds == null || includeStoryIds.Count == 0)
+                    return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+                statusIn = new List<string> { "REJECTED", "PENDING_REVIEW" };
+            }
+            else if (!isAdmin && moderatorId.HasValue)
+            {
+                var action = "APPROVED";
                 includeStoryIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "STORY", action);
                 if (includeStoryIds == null || includeStoryIds.Count == 0)
                     return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
@@ -161,7 +170,8 @@ namespace Services.Implementations
 
             var query = new StoryQueryDto
             {
-                Status = statusUpper,
+                Status = statusIn == null ? statusUpper : null,
+                StatusIn = statusIn,
                 Page = page,
                 PageSize = pageSize,
                 Search = search,
@@ -183,12 +193,21 @@ namespace Services.Implementations
 
             List<Guid>? storyIdsFilter = null;
             List<Guid>? includeChapterIds = null;
+            List<string>? statusIn = null;
 
             if (isAdmin && categoryIdsFilter != null && categoryIdsFilter.Count > 0)
                 storyIdsFilter = _storyRepository.GetStoryIdsByCategoryIds(categoryIdsFilter).ToList();
-            if (!isAdmin && moderatorId.HasValue)
+            if (statusUpper == "REJECTED")
             {
-                var action = statusUpper == "PUBLISHED" ? "APPROVED" : "REJECTED";
+                // Tab "Từ chối": hiển thị theo hành động cuối = REJECTED (vẫn hiển thị sau khi tác giả gửi lại PENDING_REVIEW cho đến khi moderator duyệt).
+                includeChapterIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsWhereLastActionIs("CHAPTER", "REJECTED", isAdmin ? null : moderatorId);
+                if (includeChapterIds == null || includeChapterIds.Count == 0)
+                    return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+                statusIn = new List<string> { "REJECTED", "PENDING_REVIEW" };
+            }
+            else if (!isAdmin && moderatorId.HasValue)
+            {
+                var action = "APPROVED";
                 includeChapterIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "CHAPTER", action);
                 if (includeChapterIds == null || includeChapterIds.Count == 0)
                     return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
@@ -204,7 +223,8 @@ namespace Services.Implementations
 
             var query = new ChapterQueryDto
             {
-                Status = statusUpper,
+                Status = statusIn == null ? statusUpper : null,
+                StatusIn = statusIn,
                 StoryIds = storyIdsFilter,
                 IncludeChapterIds = includeChapterIds,
                 Page = page,

@@ -236,7 +236,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                         });
                     })
                     .catch((err) => {
-                        alert(err?.message ?? 'Xuất bản thất bại');
+                        const msg = err?.response?.data?.message ?? err?.message ?? 'Xuất bản thất bại';
+                        alert(msg);
                     })
                     .finally(() => setActioningChapterId(null));
             getChapterById(chapterId)
@@ -250,7 +251,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                     if (chapterFromList?.title) {
                         return doUpdate(chapterFromList.title, chapterFromList.content ?? '');
                     }
-                    alert(err?.message ?? 'Xuất bản thất bại');
+                    const msg = err?.response?.data?.message ?? err?.message ?? 'Xuất bản thất bại';
+                    alert(msg);
                     setActioningChapterId(null);
                 });
         } else if (action === 'unpublish') {

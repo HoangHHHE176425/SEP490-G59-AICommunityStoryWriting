@@ -16,6 +16,8 @@ namespace Services.DTOs.Stories
         public List<Guid>? AlsoIncludeStoryIds { get; set; }
         public Guid? AuthorId { get; set; }
         public string? Status { get; set; }
+        /// <summary>Khi set: chỉ lấy truyện có status nằm trong list (ví dụ: REJECTED, PENDING_REVIEW cho tab "Từ chối" vẫn hiển thị sau khi tác giả gửi lại).</summary>
+        public List<string>? StatusIn { get; set; }
         public string? SortBy { get; set; } = "created_at"; // created_at, updated_at, total_views, avg_rating
         public string? SortOrder { get; set; } = "desc"; // asc, desc
     }
