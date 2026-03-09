@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Coins, AlertCircle } from 'lucide-react';
-import { getCoinPackages, createPayOSPayment } from '../../api/coins/coinApi';
+import * as coinApi from '../../api/coins/coinApi';
 
 export default function RechargeCoin() {
     const [packages, setPackages] = useState([]);
@@ -10,11 +10,32 @@ export default function RechargeCoin() {
     const [status, setStatus] = useState(null); // 'success' | 'error' | null
     const [statusMessage, setStatusMessage] = useState('');
     const [submitting, setSubmitting] = useState(false);
+    const [wallet, setWallet] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const autoSyncRef = useRef(false);
+    const autoHideTimerRef = useRef(null);
+
+    const loadWallet = useCallback(async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const walletRes = await coinApi.getMyWallet();
+            if (!walletRes.success) throw new Error(walletRes.message);
+
+            setWallet(walletRes.data ?? null);
+        } catch (e) {
+            setWallet(null);
+            setError(e?.message || 'Không thể tải ví coin');
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
     const loadPackages = () => {
         setPackagesLoading(true);
         setStatusMessage('');
-        getCoinPackages()
+        coinApi.getCoinPackages()
             .then((r) => {
                 if (!r.success) {
                     setPackages([]);
@@ -41,6 +62,23 @@ export default function RechargeCoin() {
     useEffect(() => {
         loadPackages();
     }, []);
+
+    useEffect(() => {
+        loadWallet();
+    }, [loadWallet]);
+
+    useEffect(() => {
+        if (!status) return;
+        if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
+        autoHideTimerRef.current = setTimeout(() => {
+            setStatus(null);
+            setStatusMessage('');
+        }, 4000);
+
+        return () => {
+            if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
+        };
+    }, [status]);
 
     const coinPackages = packages.length > 0
         ? packages.map((p) => {
@@ -86,6 +124,16 @@ export default function RechargeCoin() {
 
     const EXCHANGE_RATE = 1000; // tỉ giá tham khảo mặc định (1 Coin ≈ 1.000 VNĐ)
 
+    const formatApiDateTime = (value) => {
+        if (!value) return '';
+        const s = String(value);
+        const hasTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(s);
+        const iso = hasTimezone ? s : `${s}Z`;
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return s;
+        return d.toLocaleString();
+    };
+
     const resolvePackageId = () => {
         const id = selectedPackageId != null && selectedPackageId !== '' ? String(selectedPackageId) : null;
         if (id) return id;
@@ -98,6 +146,43 @@ export default function RechargeCoin() {
     const isPackageSelected = (pkg) =>
         selectedPackageId != null && pkg.id != null && String(selectedPackageId) === String(pkg.id);
 
+    const syncOrder = useCallback(async (orderId) => {
+        setError('');
+        try {
+            const res = await coinApi.syncMyPayOSOrder(orderId);
+            if (!res.success) throw new Error(res.message);
+            await loadWallet();
+            window.dispatchEvent(new Event('wallet:changed'));
+            // No success toast; just refresh silently
+            setStatus(null);
+            setStatusMessage('');
+        } catch (e) {
+            setStatus('error');
+            setStatusMessage(e?.message || 'Không thể đồng bộ trạng thái giao dịch.');
+        }
+    }, [loadWallet]);
+
+    // Auto-sync when PayOS redirects back with ?orderId=...&payos=return|cancel
+    useEffect(() => {
+        if (autoSyncRef.current) return;
+        const sp = new URLSearchParams(window.location.search);
+        const payos = sp.get('payos');
+        const orderId = sp.get('orderId');
+
+        if (!orderId) return;
+        if (!['return', 'cancel', 'success'].includes(String(payos || '').toLowerCase())) return;
+
+        autoSyncRef.current = true;
+        (async () => {
+            await syncOrder(orderId);
+            sp.delete('orderId');
+            sp.delete('payos');
+            const next = `${window.location.pathname}${sp.toString() ? `?${sp.toString()}` : ''}`;
+            window.history.replaceState({}, '', next);
+        })();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     const handleRecharge = async () => {
         setStatus(null);
         const packageId = resolvePackageId();
@@ -109,10 +194,10 @@ export default function RechargeCoin() {
 
         setSubmitting(true);
         const origin = window.location.origin;
-        const returnUrl = `${origin}/wallet?payos=success`;
+        const returnUrl = `${origin}/wallet?payos=return`;
         const cancelUrl = `${origin}/wallet?payos=cancel`;
 
-        const result = await createPayOSPayment({ packageId, returnUrl, cancelUrl });
+        const result = await coinApi.createPayOSPayment({ packageId, returnUrl, cancelUrl });
         setSubmitting(false);
 
         if (result.success && result.data?.checkoutUrl) {
@@ -140,21 +225,42 @@ export default function RechargeCoin() {
                 </div>
             </div>
 
-            {/* Status message */}
-            {status && (
+            {/* Status message (errors only) */}
+            {status === 'error' && (
                 <div
-                    className={`mt-4 mb-2 rounded-lg px-4 py-3 text-sm flex items-start gap-2 ${
-                        status === 'success'
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-900/60'
-                            : 'bg-red-50 text-red-700 border border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-900/60'
-                    }`}
+                    className="mt-4 mb-2 rounded-lg px-4 py-3 text-sm flex items-start gap-2 bg-red-50 text-red-700 border border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-900/60"
                 >
                     <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                    <p>{statusMessage}</p>
+                    <p className="flex-1">{statusMessage}</p>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setStatus(null);
+                            setStatusMessage('');
+                        }}
+                        className="ml-2 text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white font-bold"
+                        aria-label="Đóng thông báo"
+                        title="Đóng"
+                    >
+                        ×
+                    </button>
                 </div>
             )}
 
             <div className="space-y-6">
+                {error && (
+                    <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
+                        {error}
+                    </div>
+                )}
+
+                <div className="p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg flex items-center justify-between">
+                    <div className="text-sm font-semibold text-amber-800 dark:text-amber-200">Số dư coin</div>
+                    <div className="text-lg font-bold text-amber-800 dark:text-amber-200">
+                        {(wallet?.balanceCoin ?? 0).toLocaleString()}
+                    </div>
+                </div>
+
                 {/* Coin Packages */}
                 <div>
                     <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">
@@ -327,6 +433,8 @@ export default function RechargeCoin() {
                         {submitting ? 'Đang chuyển...' : 'Thanh toán qua PayOS'}
                     </button>
                 </div>
+
+                {/* Lịch sử nạp coin đã được tách sang tab Lịch sử */}
             </div>
         </div>
     );
