@@ -1,3 +1,5 @@
+using Services.DTOs.AI;
+
 namespace Services.Interfaces;
 
 /// <summary>RAG cho truyện: chunk + embedding + retrieve theo query. Dùng để lấy ngữ cảnh liên quan (nhân vật, sự kiện) thay vì cắt đều mọi chương.</summary>
@@ -5,6 +7,9 @@ public interface IStoryRagService
 {
     /// <summary>Kiểm tra RAG đã bật (có cấu hình embedding) và truyện đã được index (có chunks có embedding).</summary>
     bool IsRagAvailableForStory(Guid storyId);
+
+    /// <summary>Lấy trạng thái RAG của truyện: available, chunkCount, hasVectorIndex, embeddingConfigured.</summary>
+    RagStatusResponse GetRagStatus(Guid storyId);
 
     /// <summary>Đảm bảo truyện đã được index: chunk các chương (theo afterChapterId nếu có), gọi embedding, lưu vào DB. Nếu chưa cấu hình embedding thì không làm gì.</summary>
     Task EnsureIndexedAsync(Guid storyId, Guid? afterChapterId, CancellationToken cancellationToken = default);

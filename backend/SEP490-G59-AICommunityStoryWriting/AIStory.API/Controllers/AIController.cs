@@ -197,6 +197,19 @@ namespace AIStory.API.Controllers
             }
         }
 
+        /// <summary>Kiểm tra trạng thái RAG của truyện: available, chunkCount, hasVectorIndex, embeddingConfigured.</summary>
+        [HttpGet("rag-status")]
+        public IActionResult GetRagStatus([FromQuery] Guid storyId)
+        {
+            if (storyId == Guid.Empty)
+                return BadRequest(new { message = "storyId là bắt buộc." });
+            var story = _storyRepository.GetById(storyId);
+            if (story == null)
+                return NotFound(new { message = "Truyện không tồn tại." });
+            var status = _ragService.GetRagStatus(storyId);
+            return Ok(status);
+        }
+
         /// <summary>Index truyện cho RAG (chunk + embedding). Gọi sau khi thêm/sửa chương để đồng sáng tác tìm đúng đoạn liên quan. Cần cấu hình AI:EmbeddingBaseUrl và AI:EmbeddingApiKey.</summary>
         [HttpPost("index-rag")]
         public async Task<IActionResult> IndexRag([FromBody] IndexRagRequest request, CancellationToken cancellationToken)

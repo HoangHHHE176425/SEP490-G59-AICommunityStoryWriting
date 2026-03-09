@@ -8,7 +8,7 @@ namespace Services.Interfaces
         /// <summary>
         /// Pipeline: Agent 1 (dàn ý JSON) → Agent 2 (nội dung) → Guardrail → Agent 3 (kiểm duyệt JSON). Nếu chưa đạt thì sửa theo feedback, tối đa CoCreateMaxRevisions lần.
         /// </summary>
-        /// <param name="request">StoryId, AuthorIdea bắt buộc; AfterChapterId tùy chọn.</param>
+        /// <param name="request">StoryId và AuthorIdea (ý tưởng). Ngữ cảnh luôn lấy đến chương mới nhất.</param>
         /// <param name="authorUserId">ID user (phải là tác giả truyện).</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>Dàn ý, nội dung cuối, trạng thái kiểm duyệt và số lần sửa.</returns>

@@ -87,4 +87,22 @@ public static class AIClientHelper
         }
         return new ChatClient(model, apiKey);
     }
+
+    /// <summary>Options cho chat completion. Khi dùng OpenAI/Azure/Groq nên set MaxOutputTokenCount (vd. Writer 8192) để không bị cắt output.</summary>
+    /// <param name="agentName">AgentPlanner, AgentWriter, AgentConsistencyChecker, AgentPlotManager hoặc null → dùng AI:MaxOutputTokens.</param>
+    public static ChatCompletionOptions? GetCompletionOptions(IConfiguration configuration, string? agentName)
+    {
+        int maxTokens;
+        if (agentName == AgentWriter)
+        {
+            maxTokens = configuration.GetValue("AI:WriterMaxOutputTokens", 8192);
+            if (maxTokens < 256) maxTokens = 8192;
+        }
+        else
+        {
+            maxTokens = configuration.GetValue("AI:MaxOutputTokens", 4096);
+            if (maxTokens < 256) maxTokens = 4096;
+        }
+        return new ChatCompletionOptions { MaxOutputTokenCount = maxTokens };
+    }
 }
