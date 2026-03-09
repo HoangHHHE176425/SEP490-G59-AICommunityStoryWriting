@@ -10,6 +10,7 @@ function mapChapterItem(item) {
     const orderIndex = item.orderIndex ?? item.OrderIndex ?? 0;
     return {
         id: item.id ?? item.Id,
+        orderIndex,
         chapterNumber: orderIndex + 1,
         title: item.title ?? item.Title ?? '',
         content: null,
@@ -24,6 +25,7 @@ function mapStoryGroupChapterToModal(ch) {
     const orderIndex = ch.orderIndex ?? 0;
     return {
         id: ch.id ?? ch.chapterId,
+        orderIndex,
         chapterNumber: orderIndex + 1,
         title: ch.chapterTitle ?? '',
         content: null,
@@ -52,6 +54,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const justRejectedInSessionRef = useRef(false);
     /** Lý do từ chối lấy từ API GET /chapters/:id/rejection-reason khi chưa có trong danh sách (tab Từ chối). */
     const [fetchedRejectionByChapter, setFetchedRejectionByChapter] = useState({});
+    /** Set orderIndex (0-based) các chương đã PUBLISHED — để chỉ cho phép duyệt/từ chối theo thứ tự 1,2,3... */
+    const [publishedOrderIndices, setPublishedOrderIndices] = useState(new Set());
 
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
@@ -62,21 +66,37 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         const params = { storyId: sid, pageSize: 100 };
         if (pubStatus === 'approved') params.status = 'PUBLISHED';
         else if (pubStatus === 'pending') params.status = 'PENDING_REVIEW';
-        getChapters(params)
-            .then((res) => {
-                const items = res?.items ?? res?.Items ?? [];
-                const mapped = items.map(mapChapterItem);
-                setChapters(mapped);
-                setSelectedChapter((prev) => (prev && mapped.some((c) => c.id === prev.id)) ? prev : (mapped[0] ?? null));
-            })
-            .catch(() => setChapters([]))
-            .finally(() => setChaptersLoading(false));
+        const promise = getChapters(params);
+        if (pubStatus === 'pending') {
+            Promise.all([promise, getChapters({ storyId: sid, status: 'PUBLISHED', pageSize: 500 })])
+                .then(([res, pubRes]) => {
+                    const items = res?.items ?? res?.Items ?? [];
+                    const mapped = items.map(mapChapterItem);
+                    setChapters(mapped);
+                    setSelectedChapter((prev) => (prev && mapped.some((c) => c.id === prev.id)) ? prev : (mapped[0] ?? null));
+                    const pubList = pubRes?.items ?? pubRes?.Items ?? [];
+                    setPublishedOrderIndices(new Set(pubList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
+                })
+                .catch(() => setChapters([]))
+                .finally(() => setChaptersLoading(false));
+        } else {
+            promise
+                .then((res) => {
+                    const items = res?.items ?? res?.Items ?? [];
+                    const mapped = items.map(mapChapterItem);
+                    setChapters(mapped);
+                    setSelectedChapter((prev) => (prev && mapped.some((c) => c.id === prev.id)) ? prev : (mapped[0] ?? null));
+                })
+                .catch(() => setChapters([]))
+                .finally(() => setChaptersLoading(false));
+        }
     }, []);
 
     useEffect(() => {
         storyApprovedInSessionRef.current = false;
         justRejectedInSessionRef.current = false;
         setFetchedRejectionByChapter({});
+        setPublishedOrderIndices(new Set());
         const id = setTimeout(() => {
             if (!storyId) {
                 setChapters([]);
@@ -175,6 +195,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             }
             await approveChapter(selectedChapter.id);
             showToast('Duyệt chương thành công!', 'success');
+            setPublishedOrderIndices((prev) => new Set([...prev, selectedChapter.orderIndex ?? (selectedChapter.chapterNumber - 1)]));
             const remaining = chapters.filter(c => c.id !== selectedChapter.id);
             setChapters(remaining);
             setSelectedChapter(remaining[0] ?? null);
@@ -276,6 +297,12 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             minute: '2-digit'
         });
     };
+
+    const selectedOrderIndex = selectedChapter?.orderIndex ?? (selectedChapter?.chapterNumber != null ? selectedChapter.chapterNumber - 1 : -1);
+    const canApproveReject = selectedChapter && (selectedOrderIndex === 0 || publishedOrderIndices.has(selectedOrderIndex - 1));
+    const orderHint = !canApproveReject && selectedChapter
+        ? `Phải duyệt hoặc từ chối chương ${selectedOrderIndex} trước khi xử lý chương ${selectedOrderIndex + 1}.`
+        : '';
 
     return (
         <>
@@ -554,30 +581,31 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                             backgroundColor: '#f8fafc'
                         }}>
                             <button
-                                onClick={() => setShowRejectForm(true)}
-                                disabled={isSubmitting}
+                                onClick={() => canApproveReject && setShowRejectForm(true)}
+                                disabled={isSubmitting || !canApproveReject}
+                                title={orderHint || 'Từ chối chương (kèm lý do)'}
                                 style={{
                                     padding: '0.75rem 1.5rem',
-                                    backgroundColor: '#ffffff',
-                                    color: '#ef4444',
+                                    backgroundColor: canApproveReject ? '#ffffff' : '#f1f5f9',
+                                    color: canApproveReject ? '#ef4444' : '#94a3b8',
                                     fontSize: '0.875rem',
                                     fontWeight: 700,
                                     borderRadius: '8px',
-                                    border: '2px solid #ef4444',
-                                    cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                                    border: `2px solid ${canApproveReject ? '#ef4444' : '#e2e8f0'}`,
+                                    cursor: (isSubmitting || !canApproveReject) ? 'not-allowed' : 'pointer',
                                     transition: 'all 0.2s',
-                                    opacity: isSubmitting ? 0.5 : 1,
+                                    opacity: (isSubmitting || !canApproveReject) ? 0.5 : 1,
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.5rem'
                                 }}
                                 onMouseEnter={(e) => {
-                                    if (!isSubmitting) {
+                                    if (!isSubmitting && canApproveReject) {
                                         e.currentTarget.style.backgroundColor = '#fef2f2';
                                     }
                                 }}
                                 onMouseLeave={(e) => {
-                                    if (!isSubmitting) {
+                                    if (canApproveReject) {
                                         e.currentTarget.style.backgroundColor = '#ffffff';
                                     }
                                 }}
@@ -587,30 +615,31 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                             </button>
 
                             <button
-                                onClick={openApproveConfirm}
-                                disabled={isSubmitting || !selectedChapter}
+                                onClick={() => canApproveReject && openApproveConfirm()}
+                                disabled={isSubmitting || !selectedChapter || !canApproveReject}
+                                title={orderHint || 'Duyệt chương xuất bản'}
                                 style={{
                                     padding: '0.75rem 1.5rem',
-                                    backgroundColor: '#13ec5b',
-                                    color: '#ffffff',
+                                    backgroundColor: canApproveReject ? '#13ec5b' : '#e2e8f0',
+                                    color: canApproveReject ? '#ffffff' : '#94a3b8',
                                     fontSize: '0.875rem',
                                     fontWeight: 700,
                                     borderRadius: '8px',
                                     border: 'none',
-                                    cursor: (isSubmitting || !selectedChapter) ? 'not-allowed' : 'pointer',
+                                    cursor: (isSubmitting || !selectedChapter || !canApproveReject) ? 'not-allowed' : 'pointer',
                                     transition: 'all 0.2s',
-                                    opacity: (isSubmitting || !selectedChapter) ? 0.5 : 1,
+                                    opacity: (isSubmitting || !selectedChapter || !canApproveReject) ? 0.5 : 1,
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.5rem'
                                 }}
                                 onMouseEnter={(e) => {
-                                    if (!isSubmitting && selectedChapter) {
+                                    if (!isSubmitting && selectedChapter && canApproveReject) {
                                         e.currentTarget.style.backgroundColor = '#10d954';
                                     }
                                 }}
                                 onMouseLeave={(e) => {
-                                    if (!isSubmitting && selectedChapter) {
+                                    if (canApproveReject) {
                                         e.currentTarget.style.backgroundColor = '#13ec5b';
                                     }
                                 }}
@@ -692,26 +721,27 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
 
                                 <button
                                     onClick={openRejectConfirm}
-                                    disabled={isSubmitting || !rejectionReason.trim()}
+                                    disabled={isSubmitting || !rejectionReason.trim() || !canApproveReject}
+                                    title={!canApproveReject ? orderHint : undefined}
                                     style={{
                                         padding: '0.75rem 1.5rem',
-                                        backgroundColor: '#ef4444',
-                                        color: '#ffffff',
+                                        backgroundColor: (isSubmitting || !rejectionReason.trim() || !canApproveReject) ? '#e2e8f0' : '#ef4444',
+                                        color: (isSubmitting || !rejectionReason.trim() || !canApproveReject) ? '#94a3b8' : '#ffffff',
                                         fontSize: '0.875rem',
                                         fontWeight: 700,
                                         borderRadius: '8px',
                                         border: 'none',
-                                        cursor: (isSubmitting || !rejectionReason.trim()) ? 'not-allowed' : 'pointer',
+                                        cursor: (isSubmitting || !rejectionReason.trim() || !canApproveReject) ? 'not-allowed' : 'pointer',
                                         transition: 'all 0.2s',
-                                        opacity: (isSubmitting || !rejectionReason.trim()) ? 0.5 : 1
+                                        opacity: (isSubmitting || !rejectionReason.trim() || !canApproveReject) ? 0.5 : 1
                                     }}
                                     onMouseEnter={(e) => {
-                                        if (!isSubmitting && rejectionReason.trim()) {
+                                        if (!isSubmitting && rejectionReason.trim() && canApproveReject) {
                                             e.currentTarget.style.backgroundColor = '#dc2626';
                                         }
                                     }}
                                     onMouseLeave={(e) => {
-                                        if (!isSubmitting && rejectionReason.trim()) {
+                                        if (rejectionReason.trim() && canApproveReject) {
                                             e.currentTarget.style.backgroundColor = '#ef4444';
                                         }
                                     }}

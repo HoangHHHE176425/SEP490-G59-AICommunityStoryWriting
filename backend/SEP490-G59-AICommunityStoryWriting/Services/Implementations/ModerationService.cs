@@ -366,6 +366,15 @@ namespace Services.Implementations
                 return false;
             }
 
+            // Duyệt theo thứ tự: chương trước (order_index - 1) phải đã PUBLISHED.
+            if (chapter.order_index > 0)
+            {
+                var storyId = chapter.story_id ?? Guid.Empty;
+                var previous = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, chapter.order_index - 1);
+                if (previous == null || (previous.status ?? "").ToUpper() != "PUBLISHED")
+                    throw new InvalidOperationException($"Phải duyệt chương theo thứ tự. Chương {chapter.order_index} chưa được duyệt xuất bản, không thể duyệt chương {chapter.order_index + 1}.");
+            }
+
             chapter.status = "PUBLISHED";
             chapter.published_at = DateTime.Now;
             chapter.updated_at = DateTime.Now;
@@ -422,6 +431,15 @@ namespace Services.Implementations
             }
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId))
                 return false;
+
+            // Từ chối cũng theo thứ tự: chương trước (order_index - 1) phải đã PUBLISHED thì mới được xử lý (từ chối) chương này.
+            if (chapter.order_index > 0)
+            {
+                var storyId = chapter.story_id ?? Guid.Empty;
+                var previous = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, chapter.order_index - 1);
+                if (previous == null || (previous.status ?? "").ToUpper() != "PUBLISHED")
+                    throw new InvalidOperationException($"Phải duyệt/từ chối chương theo thứ tự. Chương {chapter.order_index} chưa được duyệt xuất bản, không thể xử lý chương {chapter.order_index + 1}.");
+            }
 
             chapter.status = "REJECTED";
             chapter.updated_at = DateTime.Now;
