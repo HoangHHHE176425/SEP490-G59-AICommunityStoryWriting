@@ -4,6 +4,7 @@ import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
 import { indexRag, suggestNextChapter, coCreate } from '../../api/ai/aiApi';
+import { getChapters } from '../../api/chapter/chapterApi';
 
 // Helper function to count words
 const countWords = (text) => {
@@ -126,8 +127,9 @@ function contentOnlyForChapter(raw) {
 
 export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
     const { showToast, ToastContainer } = useToast();
+    const storyId = story?.id ?? story?.Id;
     const [chapterData, setChapterData] = useState({
-        number: chapter?.number || (story?.chapters || 0) + 1,
+        number: chapter?.number ?? 1,
         title: chapter?.title || '',
         content: chapter?.content || '',
         status: chapter?.status || 'draft',
@@ -135,6 +137,9 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
         price: chapter?.price || 0,
         changeSummary: '', // Mô tả thay đổi (ghi chú version) - chỉ khi chỉnh sửa
     });
+    /** Số chương (1-based) đã tồn tại — dùng để gợi ý số tiếp theo và validate không nhập trùng */
+    const [existingChapterNumbers, setExistingChapterNumbers] = useState(new Set());
+    const [chapterNumberError, setChapterNumberError] = useState('');
 
     const [showSettings, setShowSettings] = useState(false);
     const [editorSettings, setEditorSettings] = useState({
@@ -157,11 +162,34 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
     const [coCreateLoading, setCoCreateLoading] = useState(false);
     const [coCreateResult, setCoCreateResult] = useState(null);
 
-    // Reload chapter data when chapter prop changes
+    const isNewChapter = !chapter;
+    // Load danh sách chương để tính số chương tiếp theo (thêm mới) và validate trùng (số 1-based)
+    useEffect(() => {
+        if (!storyId) {
+            setExistingChapterNumbers(new Set());
+            return;
+        }
+        getChapters({ storyId, page: 1, pageSize: 500 })
+            .then((res) => {
+                const items = res?.items ?? res?.Items ?? [];
+                const arr = Array.isArray(items) ? items : [];
+                const numbers = new Set(arr.map((c) => Number((c.orderIndex ?? c.OrderIndex ?? 0) + 1)));
+                setExistingChapterNumbers(numbers);
+                if (isNewChapter) {
+                    const nextNumber = arr.length > 0
+                        ? Math.max(...arr.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) + 1)) + 1
+                        : 1;
+                    setChapterData((prev) => ({ ...prev, number: nextNumber }));
+                }
+            })
+            .catch(() => setExistingChapterNumbers(new Set()));
+    }, [storyId, isNewChapter]);
+
+    // Reload chapter data when chapter prop changes (chỉnh sửa)
     useEffect(() => {
         if (chapter) {
             setChapterData({
-                number: chapter.number || (story?.chapters || 0) + 1,
+                number: chapter.number ?? 1,
                 title: chapter.title || '',
                 content: chapter.content || '',
                 status: chapter.status || 'draft',
@@ -170,18 +198,17 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
                 changeSummary: chapter.changeSummary ?? '',
             });
         } else {
-            // Reset to default for new chapter
-            setChapterData({
-                number: (story?.chapters || 0) + 1,
+            setChapterData((prev) => ({
+                ...prev,
                 title: '',
                 content: '',
                 status: 'draft',
                 accessType: 'public',
                 price: 0,
                 changeSummary: '',
-            });
+            }));
         }
-    }, [chapter, story?.chapters]);
+    }, [chapter]);
 
     const fontFamilies = [
         { name: 'Arial', value: 'Arial, sans-serif' },
@@ -280,6 +307,16 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
         setCoCreateResult(null);
     };
 
+    const currentChapterNumber = chapter ? Number(chapter.number ?? chapter.chapterNumber ?? (chapter.orderIndex ?? chapter.OrderIndex ?? 0) + 1) : null;
+    const validateChapterNumber = (num) => {
+        const n = Number(num);
+        if (n < 1 || !Number.isInteger(n)) return 'Số chương phải là số nguyên từ 1 trở lên.';
+        if (existingChapterNumbers.has(n) && (currentChapterNumber == null || n !== currentChapterNumber)) {
+            return `Chương ${n} đã tồn tại. Vui lòng chọn số khác.`;
+        }
+        return '';
+    };
+
     const handleSave = async (saveStatus) => {
         if (!chapterData.title.trim()) {
             showToast('Vui lòng nhập tên chương', 'error');
@@ -289,6 +326,14 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
             showToast('Vui lòng nhập nội dung chương', 'error');
             return;
         }
+        const num = Number(chapterData.number);
+        const numError = validateChapterNumber(isNaN(num) ? 0 : num);
+        if (numError) {
+            setChapterNumberError(numError);
+            showToast(numError, 'error');
+            return;
+        }
+        setChapterNumberError('');
         const wordCount = countWords(chapterData.content);
         if (wordCount < 500) {
             showToast(`Nội dung chương cần ít nhất 500 từ (Hiện tại: ${wordCount} từ)`, 'error');
@@ -705,18 +750,32 @@ export function ChapterEditorPage({ story, chapter, onSave, onCancel }) {
                                     <input
                                         type="number"
                                         value={chapterData.number}
-                                        onChange={(e) => setChapterData({ ...chapterData, number: Number(e.target.value) })}
+                                        onChange={(e) => {
+                                            const v = e.target.value === '' ? '' : Number(e.target.value);
+                                            setChapterData({ ...chapterData, number: v === '' ? '' : v });
+                                            const err = v === '' ? 'Vui lòng nhập số chương.' : validateChapterNumber(v);
+                                            setChapterNumberError(err);
+                                        }}
+                                        onBlur={() => {
+                                            const err = validateChapterNumber(chapterData.number);
+                                            setChapterNumberError(err);
+                                        }}
                                         min="1"
                                         style={{
                                             width: '100%',
                                             padding: '0.75rem',
                                             backgroundColor: '#f9fafb',
-                                            border: '1px solid #e5e7eb',
+                                            border: `1px solid ${chapterNumberError ? '#ef4444' : '#e5e7eb'}`,
                                             borderRadius: '8px',
                                             fontSize: '0.875rem',
                                             outline: 'none'
                                         }}
                                     />
+                                    {chapterNumberError && (
+                                        <div style={{ fontSize: '0.75rem', color: '#ef4444', marginTop: '0.25rem' }}>
+                                            {chapterNumberError}
+                                        </div>
+                                    )}
                                 </div>
                                 <div>
                                     <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
