@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { getAllCategories } from '../../api/category/categoryApi';
 import { getNotifications, getUnreadCount, markNotificationAsRead, markAllNotificationsAsRead } from '../../api/notification/notificationApi';
+import * as coinApi from '../../api/coins/coinApi';
 
 export function Header() {
     const navigate = useNavigate();
@@ -19,7 +20,9 @@ export function Header() {
     const [unreadCount, setUnreadCount] = useState(0);
     const [notificationsLoading, setNotificationsLoading] = useState(false);
 
-    const userCoins = user?.stats?.currentCoins ?? 0;
+    const userCoinsFallback = user?.stats?.currentCoins ?? 0;
+    const [walletCoins, setWalletCoins] = useState(null);
+    const displayedCoins = walletCoins ?? userCoinsFallback;
 
     const fetchNotifications = useCallback(() => {
         if (!isAuthenticated) return;
@@ -48,6 +51,30 @@ export function Header() {
         window.addEventListener('app:notification', handler);
         return () => window.removeEventListener('app:notification', handler);
     }, [isAuthenticated, fetchNotifications]);
+
+    const fetchWallet = useCallback(async () => {
+        if (!isAuthenticated) {
+            setWalletCoins(null);
+            return;
+        }
+        const res = await coinApi.getMyWallet();
+        if (res?.success) {
+            setWalletCoins(res?.data?.balanceCoin ?? 0);
+        }
+    }, [isAuthenticated]);
+
+    useEffect(() => {
+        fetchWallet().catch(() => {
+            // ignore, keep fallback coins
+        });
+    }, [fetchWallet]);
+
+    useEffect(() => {
+        if (!isAuthenticated) return;
+        const handler = () => fetchWallet().catch(() => {});
+        window.addEventListener('wallet:changed', handler);
+        return () => window.removeEventListener('wallet:changed', handler);
+    }, [isAuthenticated, fetchWallet]);
 
     const handleLogout = async () => {
         await logout();
@@ -163,7 +190,7 @@ export function Header() {
                                     className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/40 border border-amber-700/50 rounded-full hover:bg-amber-950/60 transition-colors"
                                 >
                                     <Wallet className="w-4 h-4 text-amber-400" />
-                                    <span className="text-sm font-bold text-amber-400">{userCoins.toLocaleString()}</span>
+                                    <span className="text-sm font-bold text-amber-400">{displayedCoins.toLocaleString()}</span>
                                 </Link>
 
                                 <div className="relative">
@@ -347,7 +374,7 @@ export function Header() {
                                     <Wallet className="w-5 h-5 text-amber-400" />
                                     <span className="font-semibold text-white">Ví</span>
                                 </div>
-                                <span className="text-lg font-bold text-amber-400">{userCoins.toLocaleString()}</span>
+                                <span className="text-lg font-bold text-amber-400">{displayedCoins.toLocaleString()}</span>
                             </Link>
                         )}
 
