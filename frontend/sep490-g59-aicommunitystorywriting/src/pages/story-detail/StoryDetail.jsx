@@ -120,6 +120,7 @@ export function StoryDetail() {
                         lastUpdate: storyRes?.updatedAt ? formatTimeAgo(storyRes.updatedAt) : 'Chưa cập nhật',
                         description: storyRes?.summary ?? storyRes?.Summary ?? 'Chưa có giới thiệu.'
                     };
+                    const newCount = 3; // số chương mới nhất được gắn nhãn MỚI
                     setChapters(rawItems.map((ch, idx) => {
                         const orderIndex = ch.orderIndex ?? ch.OrderIndex ?? idx;
                         const num = orderIndex + 1;
@@ -133,7 +134,7 @@ export function StoryDetail() {
                             title: ch.title ?? ch.Title ?? `Chương ${num}`,
                             time: updatedAt ? formatTimeAgo(updatedAt) : '',
                             views: Number(ch.viewCount ?? ch.ViewCount ?? ch.views ?? 0) || 0,
-                            isNew: idx < 3,
+                            isNew: idx >= rawItems.length - newCount,
                             isLocked: isPaid,
                             accessType,
                             coinPrice,

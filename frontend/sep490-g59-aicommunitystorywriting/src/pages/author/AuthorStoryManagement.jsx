@@ -7,7 +7,7 @@ import { StoryCommentsViewer } from './StoryCommentsViewer';
 import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
-import { createStory, updateStory, getStories, getStoryById } from '../../api/story/storyApi';
+import { createStory, updateStory, getStories, getStoryById, deleteStory } from '../../api/story/storyApi';
 import { createChapter, updateChapter, getChapterById, getChapters } from '../../api/chapter/chapterApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
@@ -59,7 +59,7 @@ function mapStoryFromApi(item) {
         ageRating,
         categories,
         status: status.toLowerCase(),
-        chapters: item.totalChapters ?? item.TotalChapters ?? 0,
+        chapters: item.publishedChaptersCount ?? item.PublishedChaptersCount ?? item.totalChapters ?? item.TotalChapters ?? 0,
         totalViews: Number(item.totalViews ?? item.TotalViews ?? 0),
         follows: Number(item.totalFavorites ?? item.TotalFavorites ?? 0),
         rating: item.avgRating ?? item.AvgRating ?? 0,
@@ -378,10 +378,23 @@ export function AuthorStoryManagement({ onBack }) {
         }
     };
 
+    const [deleteStoryConfirm, setDeleteStoryConfirm] = useState({ open: false, storyId: null });
+
     const handleDeleteStory = (storyId) => {
-        if (window.confirm('Bạn có chắc chắn muốn xóa truyện này?')) {
-            setStories(stories.filter(s => s.id !== storyId));
-        }
+        if (!storyId) return;
+        setDeleteStoryConfirm({ open: true, storyId });
+    };
+
+    const handleConfirmDeleteStory = () => {
+        const { storyId } = deleteStoryConfirm;
+        if (!storyId) return;
+        setDeleteStoryConfirm({ open: false, storyId: null });
+        deleteStory(storyId)
+            .then(() => loadStories(storiesCurrentPage))
+            .catch((err) => {
+                const msg = err?.response?.data?.message ?? err?.message ?? 'Xóa truyện thất bại';
+                alert(msg);
+            });
     };
 
     const handleSaveStory = async (storyData) => {
@@ -1230,30 +1243,35 @@ export function AuthorStoryManagement({ onBack }) {
                                                         Bình luận
                                                     </button>
                                                     <button
-                                                        onClick={() => handleDeleteStory(story.id)}
+                                                        onClick={() => story.status === 'draft' && handleDeleteStory(story.id)}
+                                                        disabled={story.status !== 'draft'}
+                                                        title={story.status === 'draft' ? 'Xóa truyện' : 'Chỉ được xóa truyện khi ở trạng thái Bản nháp'}
                                                         style={{
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             justifyContent: 'center',
                                                             gap: '0.375rem',
                                                             padding: '0.5rem 1rem',
-                                                            backgroundColor: '#fff',
-                                                            border: '1px solid #fecaca',
+                                                            backgroundColor: story.status === 'draft' ? '#fff' : '#f1f5f9',
+                                                            border: `1px solid ${story.status === 'draft' ? '#fecaca' : '#e2e8f0'}`,
                                                             borderRadius: '9999px',
                                                             fontSize: '0.8125rem',
                                                             fontWeight: 500,
-                                                            color: '#dc2626',
-                                                            cursor: 'pointer',
+                                                            color: story.status === 'draft' ? '#dc2626' : '#94a3b8',
+                                                            cursor: story.status === 'draft' ? 'pointer' : 'not-allowed',
                                                             whiteSpace: 'nowrap',
-                                                            transition: 'all 0.2s'
+                                                            transition: 'all 0.2s',
+                                                            opacity: story.status === 'draft' ? 1 : 0.8
                                                         }}
                                                         onMouseEnter={(e) => {
-                                                            e.currentTarget.style.backgroundColor = '#fef2f2';
-                                                            e.currentTarget.style.borderColor = '#ef4444';
+                                                            if (story.status === 'draft') {
+                                                                e.currentTarget.style.backgroundColor = '#fef2f2';
+                                                                e.currentTarget.style.borderColor = '#ef4444';
+                                                            }
                                                         }}
                                                         onMouseLeave={(e) => {
-                                                            e.currentTarget.style.backgroundColor = '#fff';
-                                                            e.currentTarget.style.borderColor = '#fecaca';
+                                                            e.currentTarget.style.backgroundColor = story.status === 'draft' ? '#fff' : '#f1f5f9';
+                                                            e.currentTarget.style.borderColor = story.status === 'draft' ? '#fecaca' : '#e2e8f0';
                                                         }}
                                                     >
                                                         <Trash2 style={{ width: '14px', height: '14px' }} />
@@ -1280,6 +1298,76 @@ export function AuthorStoryManagement({ onBack }) {
                 </div>
             </div>
             <Footer />
+
+            {/* Popup xác nhận xóa truyện */}
+            {deleteStoryConfirm.open && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10000
+                    }}
+                    onClick={() => setDeleteStoryConfirm({ open: false, storyId: null })}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '400px',
+                            width: '90%',
+                            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#1e293b', margin: '0 0 1rem 0' }}>
+                            Xác nhận xóa truyện
+                        </h3>
+                        <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
+                            Bạn có chắc chắn muốn xóa truyện này? Toàn bộ chương và dữ liệu liên quan sẽ bị xóa vĩnh viễn. Hành động này không thể hoàn tác.
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => setDeleteStoryConfirm({ open: false, storyId: null })}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#64748b',
+                                    backgroundColor: '#f1f5f9',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                onClick={handleConfirmDeleteStory}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#ffffff',
+                                    backgroundColor: '#dc2626',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Xóa
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

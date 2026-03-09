@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 
 namespace DataAccessObjects.DAOs
@@ -14,11 +14,11 @@ namespace DataAccessObjects.DAOs
                 return;
 
             using var context = new StoryPlatformDbContext();
-            var nextVersion = context.story_versions
+            // EF Core không dịch được Select().DefaultIfEmpty(0).Max() sang SQL — dùng Max(int?) rồi ?? 0.
+            var maxVersion = context.story_versions
                 .Where(v => v.story_id == story.id)
-                .Select(v => v.version_number)
-                .DefaultIfEmpty(0)
-                .Max() + 1;
+                .Max(v => (int?)v.version_number);
+            var nextVersion = (maxVersion ?? 0) + 1;
 
             var version = new story_versions
             {

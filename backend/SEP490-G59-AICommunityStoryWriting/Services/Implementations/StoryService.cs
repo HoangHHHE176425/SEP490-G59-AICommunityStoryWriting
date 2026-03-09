@@ -136,7 +136,13 @@ namespace Services.Implementations
                 storiesQuery = storiesQuery.Where(s => s.author_id == query.AuthorId.Value);
             }
 
-            if (!string.IsNullOrWhiteSpace(query.Status))
+            if (query.StatusIn != null && query.StatusIn.Count > 0)
+            {
+                var statusList = query.StatusIn.Select(s => s?.Trim().ToUpperInvariant()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+                if (statusList.Count > 0)
+                    storiesQuery = storiesQuery.Where(s => s.status != null && statusList.Contains(s.status.ToUpperInvariant()));
+            }
+            else if (!string.IsNullOrWhiteSpace(query.Status))
             {
                 storiesQuery = storiesQuery.Where(s => s.status == query.Status);
             }
@@ -313,6 +319,10 @@ namespace Services.Implementations
             var story = _storyRepository.GetById(id);
             if (story == null)
                 return false;
+
+            var statusUpper = (story.status ?? "").Trim().ToUpperInvariant();
+            if (statusUpper != "DRAFT")
+                throw new InvalidOperationException("Chỉ được xóa truyện khi ở trạng thái Bản nháp. Truyện hiện tại: " + (story.status ?? "—"));
 
             // Delete all associated chapters first
             try

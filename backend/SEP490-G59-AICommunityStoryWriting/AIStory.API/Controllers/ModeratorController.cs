@@ -282,6 +282,10 @@ namespace AIStory.API.Controllers
                     return NotFound(new { message = "Chapter không tồn tại, không ở trạng thái chờ duyệt (PENDING_REVIEW), hoặc không thuộc category bạn được gán." });
                 return NoContent();
             }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 Console.WriteLine($"[CONSOLE] ApproveChapter EXCEPTION ChapterId={id} ex={ex.Message}");
@@ -310,6 +314,10 @@ namespace AIStory.API.Controllers
                 if (!ok)
                     return NotFound(new { message = "Chapter không tồn tại, không ở trạng thái chờ duyệt (PENDING_REVIEW), hoặc không thuộc category bạn được gán." });
                 return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
             }
             catch (ArgumentException ex)
             {

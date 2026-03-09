@@ -55,15 +55,13 @@ public partial class stories
 
     public virtual ICollection<story_commitments> story_commitments { get; set; } = new List<story_commitments>();
 
-<<<<<<< HEAD
     public virtual ICollection<story_character_memory> story_character_memories { get; set; } = new List<story_character_memory>();
 
     public virtual ICollection<story_event_memory> story_event_memories { get; set; } = new List<story_event_memory>();
 
     public virtual ICollection<story_story_state> story_story_states { get; set; } = new List<story_story_state>();
-=======
+
     public virtual ICollection<story_versions> story_versions { get; set; } = new List<story_versions>();
->>>>>>> ce6a8b3cffa7124e5aed3e84c7bd01eeb39aa983
 
     public virtual ICollection<user_library> user_library { get; set; } = new List<user_library>();
 

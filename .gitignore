@@ -20,6 +20,9 @@ Thumbs.db
 *.bak
 *.backup
 
+# Git filter-branch temporary (safe to delete after rewrite)
+.git-rewrite/
+
 # Local secrets (do NOT commit)
 **/appsettings.Local.json
 **/appsettings.*.Local.json

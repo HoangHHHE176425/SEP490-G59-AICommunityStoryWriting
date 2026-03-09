@@ -36,7 +36,7 @@ function mapStoryToCard(item, profile = null) {
       verified: profile?.isVerified ?? false
     },
     genre,
-    chapters: item.totalChapters ?? item.TotalChapters ?? 0,
+    chapters: item.publishedChaptersCount ?? item.PublishedChaptersCount ?? item.totalChapters ?? item.TotalChapters ?? 0,
     views: formatViews(totalViews),
     rating: rating > 0 ? rating.toFixed(1) : '-',
     trending: false,
