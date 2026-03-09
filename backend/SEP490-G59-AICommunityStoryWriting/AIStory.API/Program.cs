@@ -12,6 +12,7 @@ using Microsoft.OpenApi.Models;
 using Repositories;
 using Repositories.Implementations;
 using Repositories.Interfaces;
+using AIStory.API.BackgroundServices;
 using Services.Implementations;
 using Services.Integrations.PayOS;
 using Services.Interfaces;
@@ -119,6 +120,7 @@ namespace AIStory.API
             // Coin / PayOS
             builder.Services.AddHttpClient<PayOSClient>();
             builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
+            builder.Services.AddHostedService<PayOSPendingOrderSyncService>();
 
             var jwtKey = builder.Configuration["Jwt:Key"];
             var jwtIssuer = builder.Configuration["Jwt:Issuer"];
