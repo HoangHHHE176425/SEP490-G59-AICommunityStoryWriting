@@ -12,6 +12,8 @@ namespace Services.DTOs.Chapters
         public string? AccessType { get; set; }
         public int? CoinPrice { get; set; }
         public int? WordCount { get; set; }
+        /// <summary>Phần trăm giống với bản AI (0–100), cập nhật khi chương PUBLISHED và gọi compare-chapter.</summary>
+        public decimal? AiSimilarityPercent { get; set; }
         public DateTime? PublishedAt { get; set; }
         public DateTime? CreatedAt { get; set; }
 

@@ -12,13 +12,15 @@ namespace Services.Implementations
     public class ChapterService : IChapterService
     {
         private readonly IChapterRepository _chapterRepository;
+        private readonly IAiGeneratedContentRepository _aiContentRepository;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
         private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly ILogger<ChapterService> _logger;
 
-        public ChapterService(IChapterRepository chapterRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
+        public ChapterService(IChapterRepository chapterRepository, IAiGeneratedContentRepository aiContentRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
         {
             _chapterRepository = chapterRepository;
+            _aiContentRepository = aiContentRepository;
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
             _notificationHubNotifier = notificationHubNotifier;
@@ -56,7 +58,18 @@ namespace Services.Implementations
                 coinPrice = 0; // Force coin price to 0 for FREE chapters
             }
 
-            var wordCount = CalculateWordCount(request.Content);
+            var content = request.Content;
+            if (request.AiGeneratedContentId.HasValue)
+            {
+                var aiDraft = _aiContentRepository.GetById(request.AiGeneratedContentId.Value);
+                if (aiDraft != null && aiDraft.story_id == request.StoryId && !string.IsNullOrWhiteSpace(aiDraft.ai_output))
+                {
+                    if (string.IsNullOrWhiteSpace(content))
+                        content = aiDraft.ai_output;
+                }
+            }
+
+            var wordCount = CalculateWordCount(content);
 
             // Determine status - default to DRAFT if not specified or invalid
             var status = "DRAFT";
@@ -76,7 +89,7 @@ namespace Services.Implementations
                 id = Guid.NewGuid(),
                 story_id = request.StoryId,
                 title = request.Title,
-                content = request.Content,
+                content = content,
                 order_index = request.OrderIndex,
                 status = status,
                 access_type = accessType,
@@ -90,6 +103,9 @@ namespace Services.Implementations
             };
 
             _chapterRepository.Add(chapter);
+
+            if (request.AiGeneratedContentId.HasValue)
+                _aiContentRepository.UpdateChapterId(request.AiGeneratedContentId.Value, chapter.id);
 
             try
             {
@@ -556,6 +572,7 @@ namespace Services.Implementations
                 CoinPrice = chapter.coin_price,
                 WordCount = chapter.word_count,
                 AiContributionRatio = chapter.ai_contribution_ratio,
+                AiSimilarityPercent = chapter.ai_similarity_percent,
                 IsAiClean = chapter.is_ai_clean ?? false,
                 PublishedAt = chapter.published_at,
                 CreatedAt = chapter.created_at,
@@ -576,6 +593,7 @@ namespace Services.Implementations
                 AccessType = chapter.access_type,
                 CoinPrice = chapter.coin_price,
                 WordCount = chapter.word_count,
+                AiSimilarityPercent = chapter.ai_similarity_percent,
                 PublishedAt = chapter.published_at,
                 CreatedAt = chapter.created_at
             };

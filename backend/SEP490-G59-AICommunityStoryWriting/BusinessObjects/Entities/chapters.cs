@@ -25,6 +25,9 @@ public partial class chapters
 
     public decimal? ai_contribution_ratio { get; set; }
 
+    /// <summary>Phần trăm giống với bản AI (0–100), lưu khi chương đã PUBLISHED và gọi compare-chapter.</summary>
+    public decimal? ai_similarity_percent { get; set; }
+
     public bool? is_ai_clean { get; set; }
 
     public DateTime? published_at { get; set; }
