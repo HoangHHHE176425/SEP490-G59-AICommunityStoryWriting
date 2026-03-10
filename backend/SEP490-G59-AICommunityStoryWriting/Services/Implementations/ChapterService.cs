@@ -355,6 +355,9 @@ namespace Services.Implementations
                 var newStatus = request.Status.ToUpper();
                 var oldStatus = chapter.status?.ToUpper() ?? "DRAFT";
 
+                if (newStatus == "PENDING_REVIEW")
+                    EnsureCanSubmitForReview(chapter);
+
                 chapter.status = newStatus;
 
                 // If changing to PUBLISHED, set published_at
@@ -419,6 +422,10 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
 
+            var statusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
+            if (statusUpper != "DRAFT")
+                throw new InvalidOperationException("Chỉ được xóa chương khi ở trạng thái Bản nháp. Chương hiện tại: " + (chapter.status ?? "—"));
+
             var storyId = chapter.story_id;
 
             _chapterRepository.Delete(id);
@@ -444,6 +451,8 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+
+            EnsureCanSubmitForReview(chapter);
 
             // Author "Publish" = gửi chờ duyệt. Chỉ moderator approve mới chuyển sang PUBLISHED và set published_at.
             chapter.status = "PENDING_REVIEW";
@@ -497,6 +506,21 @@ namespace Services.Implementations
             }
 
             return true;
+        }
+
+        /// <summary>Tác giả chỉ được gửi xuất bản chương theo thứ tự 1, 2, 3... Chương trước phải đã gửi (PUBLISHED hoặc PENDING_REVIEW) thì mới gửi được chương tiếp theo.</summary>
+        private void EnsureCanSubmitForReview(chapters chapter)
+        {
+            if (chapter.order_index <= 0)
+                return;
+            var storyId = chapter.story_id ?? Guid.Empty;
+            var previous = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, chapter.order_index - 1);
+            var prevStatus = (previous?.status ?? "").ToUpper();
+            if (previous == null || (prevStatus != "PUBLISHED" && prevStatus != "PENDING_REVIEW"))
+            {
+                throw new InvalidOperationException(
+                    "Phải gửi xuất bản chương theo thứ tự. Chương " + (chapter.order_index) + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
+            }
         }
 
         /// <summary>Gửi real-time (SignalR) từng thông báo tới user theo dõi truyện. Gọi fire-and-forget từ Create/Update.</summary>

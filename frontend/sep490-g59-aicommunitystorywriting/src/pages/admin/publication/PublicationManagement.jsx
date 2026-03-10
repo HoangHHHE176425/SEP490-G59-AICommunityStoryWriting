@@ -161,6 +161,8 @@ export function PublicationManagement() {
     /** Modal "Nhận duyệt đơn": danh sách truyện + chương chưa nhận (type 'story' | 'chapter') */
     const [claimModalItems, setClaimModalItems] = useState([]);
     const [claimModalLoading, setClaimModalLoading] = useState(false);
+    /** Số đơn chưa nhận (unclaimed) — hiển thị bên cạnh "Nhận duyệt đơn" để moderator biết. */
+    const [unclaimedCount, setUnclaimedCount] = useState(0);
     /** Cache Đã duyệt / Từ chối để vừa vào màn đã load sẵn, chuyển tab thấy ngay. */
     const [approvedCache, setApprovedCache] = useState({ items: [], total: 0, totalPages: 1 });
     const [rejectedCache, setRejectedCache] = useState({ items: [], total: 0, totalPages: 1 });
@@ -222,9 +224,47 @@ export function PublicationManagement() {
                     });
                 }
                 setClaimModalItems(grouped);
+                // Lấy ảnh bìa từ GET /stories/:id để luôn đúng (tránh lỗi ảnh khi mở modal lần 2)
+                Promise.all(grouped.map((g) => getStoryById(g.storyId).then((s) => s).catch(() => null)))
+                    .then((storyDetails) => {
+                        const enriched = grouped.map((g, i) => {
+                            const story = storyDetails[i];
+                            const coverPath = story?.coverImage ?? story?.CoverImage;
+                            const cover = coverPath ? resolveBackendUrl(coverPath) : (g.storyCover || '');
+                            return { ...g, storyCover: cover || g.storyCover };
+                        });
+                        setClaimModalItems(enriched);
+                    })
+                    .catch(() => { });
             })
             .catch(() => setClaimModalItems([]))
             .finally(() => setClaimModalLoading(false));
+    }, []);
+
+    /** Số đơn chưa nhận = số truyện có đơn chờ nhận (mỗi truyện tính 1 đơn, trùng với số dòng trong modal "Chọn truyện hoặc chương để nhận duyệt"). */
+    const loadUnclaimedCount = useCallback(() => {
+        Promise.all([
+            getPendingStories({ claimFilter: 'UNCLAIMED', pageSize: 100 }),
+            getPendingChapters({ claimFilter: 'UNCLAIMED', pageSize: 100 }),
+        ])
+            .then(([storiesRes, chaptersRes]) => {
+                const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
+                const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
+                const stories = storyItems.map(mapPendingStoryToItem).filter((s) => s.status === 'pending');
+                const chapters = chapterItems.map(mapPendingChapterToItem);
+                const norm = (id) => (id != null ? String(id).toLowerCase() : '');
+                const unclaimedStoryIds = new Set(stories.map((s) => norm(s.storyId ?? s.id)).filter(Boolean));
+                const chaptersByStory = new Map();
+                for (const ch of chapters) {
+                    const sid = norm(ch.storyId);
+                    if (!sid) continue;
+                    if (!chaptersByStory.has(sid)) chaptersByStory.set(sid, []);
+                    chaptersByStory.get(sid).push(ch);
+                }
+                const storyIdsWithUnclaimed = new Set([...unclaimedStoryIds, ...chaptersByStory.keys()]);
+                setUnclaimedCount(storyIdsWithUnclaimed.size);
+            })
+            .catch(() => setUnclaimedCount(0));
     }, []);
 
     /** Preload Đã duyệt: truyện PUBLISHED + chương PUBLISHED (gộp theo truyện) để hiển thị cả chương đã duyệt (ví dụ Chương 1 Conan). */
@@ -398,19 +438,25 @@ export function PublicationManagement() {
                     });
                     // Tab Chờ duyệt chỉ hiển thị item đang thực sự chờ duyệt (pending). API CLAIMED đã trả về chỉ đơn đã nhận.
                     const combined = [...storyList, ...chapterList].filter((p) => p.status === 'pending');
+                    const norm = (id) => (id != null ? String(id).toLowerCase() : '');
                     // Nếu đã có chương của một truyện trong list thì không hiện dòng truyện (tránh 2 phần cùng truyện).
-                    const storyIdsWithChapters = combined.filter((p) => p.type === 'chapter').map((p) => p.storyId).filter(Boolean);
-                    const combinedDeduped = combined.filter(
-                        (p) => p.type !== 'story' || !storyIdsWithChapters.includes(p.storyId ?? p.id)
+                    const storyIdsWithChapters = new Set(
+                        combined.filter((p) => p.type === 'chapter').map((p) => norm(p.storyId)).filter(Boolean)
                     );
-                    // Gộp theo truyện: một khối mỗi truyện (chứa 1 truyện hoặc nhiều chương).
+                    const combinedDeduped = combined.filter(
+                        (p) => p.type !== 'story' || !storyIdsWithChapters.has(norm(p.storyId ?? p.id))
+                    );
+                    // Gộp theo truyện: một khối mỗi truyện (chứa 1 truyện hoặc nhiều chương). Chuẩn hóa storyId để tránh đếm trùng.
                     const byStory = new Map();
                     for (const p of combinedDeduped) {
-                        const sid = p.storyId ?? p.id;
-                        if (!byStory.has(sid)) byStory.set(sid, { storyId: sid, storyTitle: p.storyTitle, storyCover: p.storyCover ?? '', author: p.author, categories: p.categories ?? [], chapters: [], storyItem: null });
+                        const sid = norm(p.storyId ?? p.id) || null;
+                        if (!sid) continue;
+                        if (!byStory.has(sid)) byStory.set(sid, { storyId: p.storyId ?? p.id, storyTitle: p.storyTitle, storyCover: p.storyCover ?? '', author: p.author, categories: p.categories ?? [], chapters: [], storyItem: null });
                         const g = byStory.get(sid);
-                        if (p.type === 'chapter') g.chapters.push(p);
-                        else g.storyItem = p;
+                        if (p.type === 'chapter') {
+                            const chId = p.id ?? p.chapterId;
+                            if (!g.chapters.some((c) => (c.id ?? c.chapterId) === chId)) g.chapters.push(p);
+                        } else g.storyItem = p;
                     }
                     const groupedList = [];
                     for (const g of byStory.values()) {
@@ -574,14 +620,23 @@ export function PublicationManagement() {
                 const pendingStoryList = pendingStoryItems.map(mapPendingStoryToItem);
                 const pendingChapterList = pendingChapterItems.map(mapPendingChapterToItem);
                 const combined = [...pendingStoryList, ...pendingChapterList].filter((p) => p.status === 'pending');
-                const storyIdsWithChapters = combined.filter((p) => p.type === 'chapter').map((p) => p.storyId).filter(Boolean);
-                const combinedDeduped = combined.filter((p) => p.type !== 'story' || !storyIdsWithChapters.includes(p.storyId ?? p.id));
+                const norm = (id) => (id != null ? String(id).toLowerCase() : '');
+                const storyIdsWithChapters = new Set(
+                    combined.filter((p) => p.type === 'chapter').map((p) => norm(p.storyId)).filter(Boolean)
+                );
+                const combinedDeduped = combined.filter(
+                    (p) => p.type !== 'story' || !storyIdsWithChapters.has(norm(p.storyId ?? p.id))
+                );
                 const byStory = new Map();
                 for (const p of combinedDeduped) {
-                    const sid = p.storyId ?? p.id;
+                    const sid = norm(p.storyId ?? p.id) || 'none';
+                    if (!sid || sid === 'none') continue;
                     if (!byStory.has(sid)) byStory.set(sid, { chapters: [] });
                     const g = byStory.get(sid);
-                    if (p.type === 'chapter') g.chapters.push(p);
+                    if (p.type === 'chapter') {
+                        const chId = p.id ?? p.chapterId;
+                        if (!g.chapters.some((c) => (c.id ?? c.chapterId) === chId)) g.chapters.push(p);
+                    }
                 }
                 const pendingCount = [...byStory.values()].filter((g) => g.chapters.length > 0).length;
                 setStatsData({
@@ -639,9 +694,12 @@ export function PublicationManagement() {
     }, [filterStatus, approvedCache, rejectedCache, approvedCacheLoading, rejectedCacheLoading, loadApprovedCache, loadRejectedCache]);
 
     useEffect(() => {
-        const id = setTimeout(() => loadStats(), 0);
+        const id = setTimeout(() => {
+            loadStats();
+            loadUnclaimedCount();
+        }, 0);
         return () => clearTimeout(id);
-    }, [loadStats]);
+    }, [loadStats, loadUnclaimedCount]);
 
     /** Chỉ refresh định kỳ khi đang ở tab Chờ duyệt. Tab Đã duyệt/Từ chối dùng cache, không gọi loadPublications (tránh ghi đè list và làm mất item như Conan). */
     useEffect(() => {
@@ -649,9 +707,10 @@ export function PublicationManagement() {
         const intervalId = setInterval(() => {
             loadPublications(currentPage, { silent: true });
             loadStats();
+            loadUnclaimedCount();
         }, REFRESH_INTERVAL_MS);
         return () => clearInterval(intervalId);
-    }, [filterStatus, loadPublications, loadStats, currentPage]);
+    }, [filterStatus, loadPublications, loadStats, loadUnclaimedCount, currentPage]);
 
     /** Refetch khi SignalR báo PendingListChanged. Chỉ refetch khi đang ở tab Chờ duyệt; tab Đã duyệt/Từ chối không ghi đè list. */
     const onRefetchPendingRef = useRef(() => { });
@@ -659,6 +718,7 @@ export function PublicationManagement() {
         if (filterStatus !== 'pending') return;
         loadPublications(currentPage, { silent: true });
         loadStats();
+        loadUnclaimedCount();
     };
 
     useEffect(() => {
@@ -736,6 +796,7 @@ export function PublicationManagement() {
             setShowClaimModal(false);
             loadPublications(1);
             loadStats();
+            loadUnclaimedCount();
             loadClaimModalItems();
         } catch (err) {
             alert(getClaimErrorMessage(err));
@@ -775,7 +836,7 @@ export function PublicationManagement() {
                 </h1>
             </div>
 
-            {/* Nút "Nhận duyệt đơn" — hiển thị trên mọi tab (Chờ duyệt, Đã duyệt, Từ chối) */}
+            {/* Nút "Nhận duyệt đơn" — số bên cạnh = đơn chưa ai nhận; tab Chờ duyệt = đơn bạn đã nhận, đang chờ bạn duyệt */}
             <div style={{
                 backgroundColor: '#ffffff',
                 borderRadius: '12px',
@@ -796,10 +857,29 @@ export function PublicationManagement() {
                         cursor: 'pointer',
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '0.375rem'
+                        gap: '0.5rem'
                     }}
                 >
                     Nhận duyệt đơn
+                    {unclaimedCount > 0 && (
+                        <span
+                            style={{
+                                minWidth: '20px',
+                                height: '20px',
+                                padding: '0 6px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                backgroundColor: '#ffffff',
+                                color: '#0ea5e9',
+                                borderRadius: '9999px',
+                            }}
+                        >
+                            {unclaimedCount > 99 ? '99+' : unclaimedCount}
+                        </span>
+                    )}
                 </button>
             </div>
 
@@ -974,15 +1054,18 @@ export function PublicationManagement() {
                                                     backgroundColor: '#fafafa'
                                                 }}
                                             >
-                                                {item.storyCover ? (
-                                                    <img
-                                                        src={item.storyCover}
-                                                        alt=""
-                                                        style={{ width: '48px', height: '64px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0 }}
-                                                        onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling && (e.target.nextSibling.style.display = 'flex'); }}
-                                                    />
-                                                ) : null}
-                                                <div style={{ display: item.storyCover ? 'none' : 'flex', width: '48px', height: '64px', borderRadius: '6px', flexShrink: 0, backgroundColor: '#e2e8f0', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}>📄</div>
+                                                <div style={{ position: 'relative', width: '48px', height: '64px', borderRadius: '6px', flexShrink: 0, overflow: 'hidden' }}>
+                                                    <div style={{ position: 'absolute', inset: 0, backgroundColor: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}>📄</div>
+                                                    {item.storyCover ? (
+                                                        <img
+                                                            src={item.storyCover}
+                                                            alt=""
+                                                            style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%', objectFit: 'cover', borderRadius: '6px' }}
+                                                            onError={(e) => { e.target.style.opacity = '0'; e.target.style.position = 'absolute'; }}
+                                                            referrerPolicy="no-referrer"
+                                                        />
+                                                    ) : null}
+                                                </div>
                                                 <div style={{ flex: 1, minWidth: 0 }}>
                                                     <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: '0.25rem' }}>
                                                         {item.storyTitle}

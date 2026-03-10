@@ -2,6 +2,7 @@ using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Services.DTOs.Payments;
 using Services.Integrations.PayOS;
@@ -15,12 +16,14 @@ namespace Services.Implementations
     {
         private readonly StoryPlatformDbContext _db;
         private readonly PayOSClient _payos;
+        private readonly IConfiguration _config;
         private readonly ILogger<CoinPaymentService> _logger;
 
-        public CoinPaymentService(StoryPlatformDbContext db, PayOSClient payos, ILogger<CoinPaymentService> logger)
+        public CoinPaymentService(StoryPlatformDbContext db, PayOSClient payos, IConfiguration config, ILogger<CoinPaymentService> logger)
         {
             _db = db;
             _payos = payos;
+            _config = config;
             _logger = logger;
         }
 
@@ -129,12 +132,19 @@ namespace Services.Implementations
             var cancelUrl = QueryHelpers.AddQueryString(request.CancelUrl, "orderId", order.id.ToString());
             var returnUrl = QueryHelpers.AddQueryString(request.ReturnUrl, "orderId", order.id.ToString());
 
+            // Set PayOS payment link expiration (TTL)
+            // PayOS expects expiredAt as Unix Timestamp (Int32).
+            var ttlMinutes = _config.GetValue<int?>("PayOS:DefaultExpiredMinutes") ?? 15;
+            ttlMinutes = Math.Clamp(ttlMinutes, 1, 7 * 24 * 60); // 1 minute .. 7 days (sane bound)
+            var expiredAt = checked((int)DateTimeOffset.UtcNow.AddMinutes(ttlMinutes).ToUnixTimeSeconds());
+
             var payosRes = await _payos.CreatePaymentLinkAsync(
                 orderCode,
                 pkg.price_amount,
                 description,
                 cancelUrl,
                 returnUrl,
+                expiredAt,
                 cancellationToken
             );
 

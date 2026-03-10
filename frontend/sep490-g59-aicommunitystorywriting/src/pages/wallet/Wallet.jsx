@@ -1,28 +1,75 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { Wallet as WalletIcon, History, ArrowDownCircle, ArrowUpCircle, Lock } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import RechargeCoin from '../../components/profile/RechargeCoin';
 import ActivityHistory from '../../components/profile/ActivityHistory';
+import * as coinApi from '../../api/coins/coinApi';
 
 export default function Wallet() {
     const { user } = useAuth();
     const [activeTab, setActiveTab] = useState('recharge');
 
-    const balance = user?.stats?.currentCoins ?? 0;
+    const [walletBalance, setWalletBalance] = useState(null);
+    const [totalRechargeCoins, setTotalRechargeCoins] = useState(0);
+    const [totalSpentCoins, setTotalSpentCoins] = useState(0); // chưa có API
+    const [lockedCoins, setLockedCoins] = useState(0); // chưa có API
+    const [loadingStats, setLoadingStats] = useState(true);
+    const [statsError, setStatsError] = useState('');
 
-    // Mock summary numbers – thay bằng API thật sau
-    const summaryStats = {
-        totalRecharge: 1500,
-        totalSpent: 150,
-        locked: 0,
-    };
+    const balance = walletBalance ?? (user?.stats?.currentCoins ?? 0);
 
-    const spentPercent =
-        summaryStats.totalRecharge > 0
-            ? Math.min(100, Math.round((summaryStats.totalSpent / summaryStats.totalRecharge) * 100))
-            : 0;
+    const spentPercent = useMemo(() => {
+        if (totalRechargeCoins <= 0) return 0;
+        if (totalSpentCoins <= 0) return 0;
+        return Math.min(100, Math.round((totalSpentCoins / totalRechargeCoins) * 100));
+    }, [totalRechargeCoins, totalSpentCoins]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const load = async () => {
+            setLoadingStats(true);
+            setStatsError('');
+            try {
+                const [walletRes, ordersRes] = await Promise.all([
+                    coinApi.getMyWallet(),
+                    coinApi.getMyCoinOrders({ take: 200 }),
+                ]);
+
+                if (!walletRes?.success) throw new Error(walletRes?.message || 'Không thể tải ví');
+                if (!ordersRes?.success) throw new Error(ordersRes?.message || 'Không thể tải lịch sử giao dịch');
+
+                if (cancelled) return;
+
+                setWalletBalance(walletRes?.data?.balanceCoin ?? 0);
+
+                const orders = Array.isArray(ordersRes.data) ? ordersRes.data : [];
+                const totalPaid = orders
+                    .filter((o) => String(o.status || '').toUpperCase() === 'PAID')
+                    .reduce((sum, o) => sum + (Number(o.coinsGranted ?? 0) || 0), 0);
+
+                setTotalRechargeCoins(totalPaid);
+                setTotalSpentCoins(0);
+                setLockedCoins(0);
+            } catch (e) {
+                if (cancelled) return;
+                setStatsError(e?.message || 'Không thể tải dữ liệu ví');
+            } finally {
+                if (!cancelled) setLoadingStats(false);
+            }
+        };
+
+        load().catch(() => {});
+
+        const handler = () => load().catch(() => {});
+        window.addEventListener('wallet:changed', handler);
+        return () => {
+            cancelled = true;
+            window.removeEventListener('wallet:changed', handler);
+        };
+    }, []);
 
     const tabs = [
         { id: 'recharge', label: 'Nạp tiền', icon: WalletIcon },
@@ -34,7 +81,7 @@ export default function Wallet() {
             case 'recharge':
                 return <RechargeCoin />;
             case 'history':
-                return <ActivityHistory />;
+                return <ActivityHistory mode="wallet" />;
             default:
                 return <RechargeCoin />;
         }
@@ -69,6 +116,12 @@ export default function Wallet() {
                             </div>
                         </div>
 
+                        {statsError && (
+                            <div className="mt-4 p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
+                                {statsError}
+                            </div>
+                        )}
+
                         {/* Quick stats */}
                         <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div className="flex items-center gap-3 rounded-lg border border-emerald-100 dark:border-emerald-900/60 bg-emerald-50/60 dark:bg-emerald-900/20 px-3 py-2.5">
@@ -78,7 +131,7 @@ export default function Wallet() {
                                 <div>
                                     <p className="text-xs text-slate-500 dark:text-slate-400">Tổng đã nạp</p>
                                     <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                        {summaryStats.totalRecharge.toLocaleString()} Coins
+                                        {loadingStats ? '...' : `${totalRechargeCoins.toLocaleString()} Coins`}
                                     </p>
                                 </div>
                             </div>
@@ -89,7 +142,7 @@ export default function Wallet() {
                                 <div>
                                     <p className="text-xs text-slate-500 dark:text-slate-400">Đã sử dụng</p>
                                     <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                        {summaryStats.totalSpent.toLocaleString()} Coins
+                                        {loadingStats ? '...' : `${totalSpentCoins.toLocaleString()} Coins`}
                                     </p>
                                 </div>
                             </div>
@@ -100,28 +153,30 @@ export default function Wallet() {
                                 <div>
                                     <p className="text-xs text-slate-500 dark:text-slate-400">Số dư khóa</p>
                                     <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                        {summaryStats.locked.toLocaleString()} Coins
+                                        {loadingStats ? '...' : `${lockedCoins.toLocaleString()} Coins`}
                                     </p>
                                 </div>
                             </div>
                         </div>
 
                         {/* Usage progress */}
-                        <div className="mt-5">
-                            <div className="flex items-center justify-between mb-1 text-xs text-slate-500 dark:text-slate-400">
-                                <span>Đã sử dụng {spentPercent}% số coin đã nạp</span>
-                                <span>
-                                    {summaryStats.totalSpent.toLocaleString()} /{' '}
-                                    {summaryStats.totalRecharge.toLocaleString()} Coins
-                                </span>
+                        {!loadingStats && totalSpentCoins > 0 && totalRechargeCoins > 0 && (
+                            <div className="mt-5">
+                                <div className="flex items-center justify-between mb-1 text-xs text-slate-500 dark:text-slate-400">
+                                    <span>Đã sử dụng {spentPercent}% số coin đã nạp</span>
+                                    <span>
+                                        {totalSpentCoins.toLocaleString()} /{' '}
+                                        {totalRechargeCoins.toLocaleString()} Coins
+                                    </span>
+                                </div>
+                                <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
+                                    <div
+                                        className="h-full bg-primary/80 rounded-full transition-all"
+                                        style={{ width: `${spentPercent}%` }}
+                                    ></div>
+                                </div>
                             </div>
-                            <div className="h-2 rounded-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
-                                <div
-                                    className="h-full bg-primary/80 rounded-full transition-all"
-                                    style={{ width: `${spentPercent}%` }}
-                                ></div>
-                            </div>
-                        </div>
+                        )}
                     </div>
 
                     {/* Tabs */}

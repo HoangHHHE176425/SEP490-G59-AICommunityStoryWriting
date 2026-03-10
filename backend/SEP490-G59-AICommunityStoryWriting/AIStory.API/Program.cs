@@ -12,6 +12,7 @@ using Microsoft.OpenApi.Models;
 using Repositories;
 using Repositories.Implementations;
 using Repositories.Interfaces;
+using AIStory.API.BackgroundServices;
 using Services.Implementations;
 using Services.Integrations.PayOS;
 using Services.Interfaces;
@@ -47,7 +48,7 @@ namespace AIStory.API
             builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
                 options.UseSqlServer(
                     builder.Configuration.GetConnectionString("DefaultConnection")
-                    ?? "Server=QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                    ?? "Server=localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                     sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                         maxRetryCount: 5,
                         maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -96,6 +97,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
             builder.Services.AddScoped<IModerationService, ModerationService>();
             builder.Services.AddSignalR();
+            builder.Services.AddSingleton<IUserIdProvider, SignalRUserIdProvider>();
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
 
@@ -121,6 +123,7 @@ namespace AIStory.API
             // Coin / PayOS
             builder.Services.AddHttpClient<PayOSClient>();
             builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
+            builder.Services.AddHostedService<PayOSPendingOrderSyncService>();
 
             var jwtKey = builder.Configuration["Jwt:Key"];
             var jwtIssuer = builder.Configuration["Jwt:Issuer"];
