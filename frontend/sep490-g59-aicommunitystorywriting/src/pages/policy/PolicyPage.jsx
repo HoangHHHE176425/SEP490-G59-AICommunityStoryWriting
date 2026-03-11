@@ -10,6 +10,9 @@ export default function PolicyPage() {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
 
+    const fromBecomeAuthor = (searchParams.get('from') ?? '').toLowerCase() === 'become-author';
+    const nextPath = searchParams.get('next') || '/author';
+
     const type = useMemo(() => {
         const t = (searchParams.get('type') ?? 'USER').trim().toUpperCase();
         return t || 'USER';
@@ -155,6 +158,30 @@ export default function PolicyPage() {
 
                                 <PolicyBody content={policy?.content} />
                             </>
+                        )}
+
+                        {fromBecomeAuthor && (
+                            <div className="mt-8 pt-6 border-t border-slate-200 dark:border-slate-700">
+                                <div className="flex flex-col sm:flex-row gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate(-1)}
+                                        className="flex-1 px-6 py-3 border-2 border-slate-300 dark:border-slate-600 text-slate-900 dark:text-slate-100 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-all font-semibold"
+                                    >
+                                        Hủy Bỏ
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate(nextPath)}
+                                        className="flex-1 px-6 py-3 bg-gradient-to-r from-[#13EC5B] to-[#11D350] text-white rounded-xl hover:shadow-[0_0_20px_rgba(19,236,91,0.5)] transition-all font-bold"
+                                    >
+                                        Tôi Đồng Ý Các Điều Khoản
+                                    </button>
+                                </div>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 text-center mt-3">
+                                    Các nút này chỉ hiển thị khi bạn vào Policy từ “Trở thành tác giả”.
+                                </p>
+                            </div>
                         )}
                     </div>
                 </div>

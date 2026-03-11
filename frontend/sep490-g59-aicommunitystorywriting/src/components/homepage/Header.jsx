@@ -9,7 +9,7 @@ import * as coinApi from '../../api/coins/coinApi';
 
 export function Header() {
     const navigate = useNavigate();
-    const { user, logout, isAuthenticated } = useAuth();
+    const { user, logout, isAuthenticated, role } = useAuth();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isGenreOpen, setIsGenreOpen] = useState(false);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -19,6 +19,8 @@ export function Header() {
     const [notifications, setNotifications] = useState([]);
     const [unreadCount, setUnreadCount] = useState(0);
     const [notificationsLoading, setNotificationsLoading] = useState(false);
+    const roleUpper = (role ?? '').toString().toUpperCase();
+    const isAuthor = roleUpper === 'AUTHOR';
 
     const userCoinsFallback = user?.stats?.currentCoins ?? 0;
     const [walletCoins, setWalletCoins] = useState(null);
@@ -102,6 +104,11 @@ export function Header() {
         navigate('/');
     };
 
+    const handleBecomeAuthor = () => {
+        // Navigate to Policy page, show accept/decline buttons only for this entry.
+        navigate('/policy?type=AUTHOR&from=become-author&next=/author');
+    };
+
     useEffect(() => {
         let cancelled = false;
         getAllCategories({ includeInactive: false })
@@ -156,47 +163,20 @@ export function Header() {
                 {/* Main Nav & User Actions */}
                 <nav className="flex items-center gap-6">
                     <div className="hidden lg:flex items-center gap-6 text-sm font-semibold text-slate-300">
-                        <Link to="/home" className="hover:text-primary transition-colors">Trang chủ</Link>
-                        {/* Thể loại dropdown */}
-                        <div className="relative group">
-                            <button
-                                className="flex items-center gap-1 hover:text-primary transition-colors"
-                                onClick={() => setIsGenreOpen(!isGenreOpen)}
-                                onBlur={() => setTimeout(() => setIsGenreOpen(false), 200)}
-                            >
-                                Thể loại
-                                <ChevronDown className={`w-4 h-4 transition-transform ${isGenreOpen ? 'rotate-180' : ''}`} />
-                            </button>
-
-                            {isGenreOpen && (
-                                <div
-                                    className="absolute top-full left-0 mt-2 w-56 bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                >
-                                    <div className="grid grid-cols-1 py-2">
-                                        {categoriesLoading ? (
-                                            <div className="px-4 py-2 text-sm text-slate-400">Đang tải...</div>
-                                        ) : categories.length === 0 ? (
-                                            <div className="px-4 py-2 text-sm text-slate-400">Chưa có thể loại</div>
-                                        ) : (
-                                            categories.map((categoryName) => (
-                                                <a
-                                                    key={categoryName}
-                                                    href="#"
-                                                    className="px-4 py-2 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
-                                                >
-                                                    {categoryName}
-                                                </a>
-                                            ))
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        <a className="hover:text-primary transition-colors" href="#">Bài viết</a>
-                        <Link to="/about-us" className="hover:text-primary transition-colors">Về chúng tôi</Link>
-                        <a className="hover:text-primary transition-colors" href="#">Đăng bài</a>
+                        {isAuthor ? (
+                            <>
+                                <Link to="/home" className="hover:text-primary transition-colors">Trang chủ</Link>
+                                <Link to="/about-us" className="hover:text-primary transition-colors">Về chúng tôi</Link>
+                                <Link to="/author" className="hover:text-primary transition-colors">Truyện của tôi</Link>
+                                <Link to="/story-list" className="hover:text-primary transition-colors">Khám phá</Link>
+                            </>
+                        ) : (
+                            <>
+                                <Link to="/home" className="hover:text-primary transition-colors">Trang chủ</Link>
+                                <Link to="/about-us" className="hover:text-primary transition-colors">About us</Link>
+                                <Link to="/story-list" className="hover:text-primary transition-colors">Khám phá truyện</Link>
+                            </>
+                        )}
                     </div>
 
                     <div className="h-6 w-px bg-slate-700 hidden lg:block"></div>
@@ -282,13 +262,24 @@ export function Header() {
                                     )}
                                 </div>
 
-                                <Link
-                                    to="/author"
-                                    className="hidden sm:flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all"
-                                >
-                                    <Edit className="w-4 h-4" />
-                                    Viết truyện
-                                </Link>
+                                {isAuthor ? (
+                                    <Link
+                                        to="/author"
+                                        className="hidden sm:flex items-center gap-2 px-5 py-2.5 bg-primary text-white text-sm font-extrabold rounded-full shadow-lg shadow-primary/50 hover:bg-primary/90 hover:shadow-primary/60 transition-all"
+                                    >
+                                        <Edit className="w-4 h-4" />
+                                        Viết truyện
+                                    </Link>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={handleBecomeAuthor}
+                                        className="hidden sm:flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all"
+                                    >
+                                        <Edit className="w-4 h-4" />
+                                        Trở thành tác giả
+                                    </button>
+                                )}
 
                                 {/* User Avatar - click to Homepage; Chevron for user menu */}
                                 <div className="relative flex items-center gap-0.5">
@@ -435,21 +426,46 @@ export function Header() {
                                 </div>
                             </details>
 
-                            <a className="text-slate-300 hover:text-primary transition-colors font-semibold" href="#">Bài viết</a>
-                            <Link to="/about-us" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Về chúng tôi</Link>
-                            <a className="text-slate-300 hover:text-primary transition-colors font-semibold" href="#">Đăng bài</a>
+                            {isAuthor ? (
+                                <>
+                                    <Link to="/home" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Trang chủ</Link>
+                                    <Link to="/about-us" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Về chúng tôi</Link>
+                                    <Link to="/author" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Truyện của tôi</Link>
+                                    <Link to="/story-list" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Khám phá</Link>
+                                </>
+                            ) : (
+                                <>
+                                    <Link to="/home" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Trang chủ</Link>
+                                    <Link to="/about-us" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>About us</Link>
+                                    <Link to="/story-list" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Khám phá truyện</Link>
+                                </>
+                            )}
 
                             {isAuthenticated ? (
                                 <>
                                     <div className="border-t border-slate-700 my-2"></div>
-                                    <Link
-                                        to="/author"
-                                        className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold"
-                                        onClick={() => setIsMenuOpen(false)}
-                                    >
-                                        <Edit className="w-4 h-4" />
-                                        Viết truyện
-                                    </Link>
+                                    {isAuthor ? (
+                                        <Link
+                                            to="/author"
+                                            onClick={() => setIsMenuOpen(false)}
+                                            className="flex items-center gap-3 px-4 py-2 bg-primary text-white rounded-full font-semibold justify-center hover:bg-primary/90 transition-colors"
+                                        >
+                                            <Edit className="w-4 h-4" />
+                                            Viết truyện
+                                        </Link>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setIsMenuOpen(false);
+                                                handleBecomeAuthor();
+                                            }}
+                                            className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold"
+                                        >
+                                            <Edit className="w-4 h-4" />
+                                            Trở thành tác giả
+                                        </button>
+                                    )}
                                     {/* User Menu Mobile */}
                                     <Link
                                         to="/profile"
@@ -495,6 +511,7 @@ export function Header() {
                     </div>
                 </div>
             )}
+
         </header>
     );
 }
