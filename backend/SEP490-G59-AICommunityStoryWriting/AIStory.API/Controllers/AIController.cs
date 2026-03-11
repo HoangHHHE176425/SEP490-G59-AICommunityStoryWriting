@@ -20,6 +20,8 @@ namespace AIStory.API.Controllers
         private readonly IAINextChapterService _aiNextChapterService;
         private readonly IAICoCreationService _aiCoCreationService;
         private readonly IAIConsistencyCheckService _aiConsistencyCheckService;
+        private readonly IChapterCheckService _chapterCheckService;
+        private readonly IChapterCompareService _chapterCompareService;
         private readonly IStoryRagService _ragService;
         private readonly IStoryRepository _storyRepository;
         private readonly IAISuggestRateLimitService _rateLimitService;
@@ -30,6 +32,8 @@ namespace AIStory.API.Controllers
             IAINextChapterService aiNextChapterService,
             IAICoCreationService aiCoCreationService,
             IAIConsistencyCheckService aiConsistencyCheckService,
+            IChapterCheckService chapterCheckService,
+            IChapterCompareService chapterCompareService,
             IStoryRagService ragService,
             IStoryRepository storyRepository,
             IAISuggestRateLimitService rateLimitService,
@@ -39,6 +43,8 @@ namespace AIStory.API.Controllers
             _aiNextChapterService = aiNextChapterService;
             _aiCoCreationService = aiCoCreationService;
             _aiConsistencyCheckService = aiConsistencyCheckService;
+            _chapterCheckService = chapterCheckService;
+            _chapterCompareService = chapterCompareService;
             _ragService = ragService;
             _storyRepository = storyRepository;
             _rateLimitService = rateLimitService;
@@ -252,6 +258,62 @@ namespace AIStory.API.Controllers
             {
                 _logger.LogError(ex, "Index RAG failed for StoryId={StoryId}", request.StoryId);
                 return StatusCode(500, new { message = "Lỗi khi index RAG. Vui lòng thử lại sau." });
+            }
+        }
+
+        /// <summary>Kiểm tra chương: lỗi chính tả, vi phạm chính sách, nội dung không phù hợp. Trả về danh sách lỗi và gợi ý sửa.</summary>
+        [HttpPost("check-chapter")]
+        public async Task<IActionResult> CheckChapter([FromBody] CheckChapterRequest request, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(request.Content))
+                return BadRequest(new { message = "Content (nội dung chương) là bắt buộc." });
+
+            Guid? userId = null;
+            var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var uid))
+                userId = uid;
+
+            try
+            {
+                var response = await _chapterCheckService.CheckAsync(request, userId, cancellationToken);
+                return Ok(response);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "AI check-chapter failed");
+                var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi kiểm tra chương. Vui lòng thử lại sau.";
+                return StatusCode(500, new { message });
+            }
+        }
+
+        /// <summary>So sánh chương tác giả với bản AI sinh ra: độ giống (0–100%). Chỉ tác giả truyện được gọi.</summary>
+        [HttpPost("compare-chapter")]
+        public async Task<IActionResult> CompareChapter([FromBody] CompareChapterRequest request, CancellationToken cancellationToken)
+        {
+            if (request.ChapterId == Guid.Empty)
+                return BadRequest(new { message = "ChapterId là bắt buộc." });
+
+            Guid? userId = null;
+            var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var uid))
+                userId = uid;
+            if (!userId.HasValue)
+                return Unauthorized(new { message = "Vui lòng đăng nhập để so sánh chương." });
+
+            try
+            {
+                var response = await _chapterCompareService.CompareAsync(request, userId, cancellationToken);
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Compare chapter failed for ChapterId={ChapterId}", request.ChapterId);
+                var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi so sánh chương. Vui lòng thử lại sau.";
+                return StatusCode(500, new { message });
             }
         }
     }

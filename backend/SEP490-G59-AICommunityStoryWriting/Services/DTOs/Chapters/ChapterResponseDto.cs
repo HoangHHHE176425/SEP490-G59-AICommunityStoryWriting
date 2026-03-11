@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.Chapters
+namespace Services.DTOs.Chapters
 {
     public class ChapterResponseDto
     {
@@ -13,6 +13,8 @@
         public int? CoinPrice { get; set; }
         public int? WordCount { get; set; }
         public decimal? AiContributionRatio { get; set; }
+        /// <summary>Phần trăm giống với bản AI (0–100), cập nhật khi chương PUBLISHED và gọi compare-chapter.</summary>
+        public decimal? AiSimilarityPercent { get; set; }
         public bool IsAiClean { get; set; }
         public DateTime? PublishedAt { get; set; }
         public DateTime? CreatedAt { get; set; }

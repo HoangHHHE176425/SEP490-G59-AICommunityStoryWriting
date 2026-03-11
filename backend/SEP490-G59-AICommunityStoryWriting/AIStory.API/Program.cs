@@ -115,6 +115,9 @@ namespace AIStory.API
             builder.Services.AddScoped<IAINextChapterService, AINextChapterService>();
             builder.Services.AddScoped<IAICoCreationService, AICoCreationService>();
             builder.Services.AddScoped<IAIConsistencyCheckService, AIConsistencyCheckService>();
+            builder.Services.AddScoped<IChapterCheckService, ChapterCheckService>();
+            builder.Services.AddScoped<IAiGeneratedContentRepository, AiGeneratedContentRepository>();
+            builder.Services.AddScoped<IChapterCompareService, ChapterCompareService>();
             builder.Services.AddSingleton<IAISuggestRateLimitService, AISuggestRateLimitService>();
 
             // Coin / PayOS

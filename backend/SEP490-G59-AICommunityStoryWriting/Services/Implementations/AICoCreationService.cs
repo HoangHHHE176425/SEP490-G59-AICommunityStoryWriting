@@ -25,6 +25,8 @@ Quy tắc bắt buộc: Bám sát thông tin trong ngữ cảnh (Story memory, C
 """;
 
     private readonly IStoryRepository _storyRepository;
+    private readonly IChapterRepository _chapterRepository;
+    private readonly IAiGeneratedContentRepository _aiContentRepository;
     private readonly IStoryMemoryEngine _memoryEngine;
     private readonly IContentGuardrailService _guardrail;
     private readonly IAIUsageLogRepository _aiUsageLogRepository;
@@ -32,12 +34,16 @@ Quy tắc bắt buộc: Bám sát thông tin trong ngữ cảnh (Story memory, C
 
     public AICoCreationService(
         IStoryRepository storyRepository,
+        IChapterRepository chapterRepository,
+        IAiGeneratedContentRepository aiContentRepository,
         IStoryMemoryEngine memoryEngine,
         IContentGuardrailService guardrail,
         IAIUsageLogRepository aiUsageLogRepository,
         IConfiguration configuration)
     {
         _storyRepository = storyRepository;
+        _chapterRepository = chapterRepository;
+        _aiContentRepository = aiContentRepository;
         _memoryEngine = memoryEngine;
         _guardrail = guardrail;
         _aiUsageLogRepository = aiUsageLogRepository;
@@ -130,27 +136,67 @@ Quy tắc bắt buộc: Bám sát thông tin trong ngữ cảnh (Story memory, C
                 LogUsage(authorUserId, request.StoryId, null, ActionReview, m3, 0, 0);
                 if (approvedAgain)
                 {
+                    var (chapterId, aiContentId) = SaveDraftChapterAndAiContent(request.StoryId, authorUserId, request.AuthorIdea, draft);
                     return new CoCreationResponse
                     {
                         Outline = outlineForPrompt,
                         FinalContent = draft,
                         Approved = true,
                         RevisionCount = revisionCount,
-                        ReviewFeedback = null
+                        ReviewFeedback = null,
+                        ChapterId = chapterId,
+                        AiGeneratedContentId = aiContentId
                     };
                 }
                 lastFeedback = feedbackAgain;
             }
         }
 
+        var saved = SaveDraftChapterAndAiContent(request.StoryId, authorUserId, request.AuthorIdea, draft);
         return new CoCreationResponse
         {
             Outline = outlineForPrompt,
             FinalContent = draft,
             Approved = approved,
             RevisionCount = revisionCount,
-            ReviewFeedback = lastFeedback
+            ReviewFeedback = lastFeedback,
+            ChapterId = saved.ChapterId,
+            AiGeneratedContentId = saved.AiGeneratedContentId
         };
+    }
+
+    /// <summary>Cách cũ: mỗi lần co-create thành công — tạo một chương nháp (DRAFT) và một bản ai_generated_content (gán chapter_id).</summary>
+    private (Guid? ChapterId, Guid? AiGeneratedContentId) SaveDraftChapterAndAiContent(Guid storyId, Guid authorUserId, string authorIdea, string finalContent)
+    {
+        if (string.IsNullOrWhiteSpace(finalContent)) return (null, null);
+        var chapters = _chapterRepository.GetByStoryId(storyId).ToList();
+        var nextOrder = chapters.Count == 0 ? 1 : (chapters.Max(c => c.order_index) + 1);
+        var now = DateTime.UtcNow;
+        var chapter = new chapters
+        {
+            id = Guid.NewGuid(),
+            story_id = storyId,
+            title = $"Bản nháp AI #{nextOrder}",
+            order_index = nextOrder,
+            content = finalContent,
+            status = "DRAFT",
+            word_count = finalContent.Length,
+            created_at = now,
+            updated_at = now
+        };
+        _chapterRepository.Add(chapter);
+        var aiRecord = new ai_generated_content
+        {
+            id = Guid.NewGuid(),
+            story_id = storyId,
+            chapter_id = chapter.id,
+            user_id = authorUserId,
+            input_prompt = authorIdea.Length > 2000 ? authorIdea[..2000] + "..." : authorIdea,
+            ai_output = finalContent,
+            created_at = now
+        };
+        _aiContentRepository.Add(aiRecord);
+        return (chapter.id, aiRecord.id);
     }
 
     private static string GetAgent1SystemPrompt() => """
@@ -181,7 +227,7 @@ Bước 2 — Nếu không mâu thuẫn: Dàn ý phải NỐI TIẾP mạch truy
         return text.Trim();
     }
 
-    /// <summary>Nếu Agent 1 trả về ideaContradiction thì trả về nội dung feedback; ngược lại null.</summary>
+    /// <summary>Nếu Agent 1 trả về ideaContradiction (JSON thuần hoặc JSON nằm trong đoạn văn) thì trả về feedback; ngược lại null.</summary>
     private static string? TryParseIdeaContradiction(string outlineJson)
     {
         var raw = outlineJson.Trim();
@@ -191,6 +237,7 @@ Bước 2 — Nếu không mâu thuẫn: Dàn ý phải NỐI TIẾP mạch truy
             var end = raw.IndexOf("```", start, StringComparison.Ordinal);
             if (end > start) raw = raw[start..end];
         }
+        // Thử parse cả chuỗi như JSON
         try
         {
             var root = JsonDocument.Parse(raw).RootElement;
@@ -200,6 +247,60 @@ Bước 2 — Nếu không mâu thuẫn: Dàn ý phải NỐI TIẾP mạch truy
             }
         }
         catch { /* ignore */ }
+        // Trích nội dung trong ```json ... ``` nếu có (model hay trả về JSON trong markdown)
+        var codeBlockStart = raw.IndexOf("```json", StringComparison.OrdinalIgnoreCase);
+        if (codeBlockStart >= 0)
+        {
+            var contentStart = raw.IndexOf('\n', codeBlockStart) + 1;
+            var codeBlockEnd = raw.IndexOf("```", contentStart, StringComparison.Ordinal);
+            if (contentStart > 0 && codeBlockEnd > contentStart)
+            {
+                var jsonBlock = raw[contentStart..codeBlockEnd].Trim();
+                try
+                {
+                    var root = JsonDocument.Parse(jsonBlock).RootElement;
+                    if (root.TryGetProperty("ideaContradiction", out var ic) && ic.ValueKind == JsonValueKind.True)
+                    {
+                        return root.TryGetProperty("feedback", out var fb) ? fb.GetString()?.Trim() : "Ý tưởng tác giả mâu thuẫn với nội dung truyện đã có.";
+                    }
+                }
+                catch { /* ignore */ }
+            }
+        }
+        // Đoạn văn có nhúng JSON (vd. "Trả về JSON:\n{ \"ideaContradiction\": true, ... }") → tìm { trước "ideaContradiction"
+        var idx = raw.IndexOf("\"ideaContradiction\"", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) idx = raw.IndexOf("ideaContradiction", StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0)
+        {
+            // Dấu { mở object nằm trước "ideaContradiction" trong chuỗi
+            var startObj = raw.LastIndexOf('{', idx);
+            if (startObj >= 0)
+            {
+                int depth = 0, endObj = -1;
+                for (int i = startObj; i < raw.Length; i++)
+                {
+                    if (raw[i] == '{') depth++;
+                    else if (raw[i] == '}')
+                    {
+                        depth--;
+                        if (depth == 0) { endObj = i; break; }
+                    }
+                }
+                if (endObj > startObj)
+                {
+                    try
+                    {
+                        var jsonSpan = raw.Substring(startObj, endObj - startObj + 1);
+                        var root = JsonDocument.Parse(jsonSpan).RootElement;
+                        if (root.TryGetProperty("ideaContradiction", out var ic) && ic.ValueKind == JsonValueKind.True)
+                        {
+                            return root.TryGetProperty("feedback", out var fb) ? fb.GetString()?.Trim() : "Ý tưởng tác giả mâu thuẫn với nội dung truyện đã có.";
+                        }
+                    }
+                    catch { /* ignore */ }
+                }
+            }
+        }
         return null;
     }
 
