@@ -1,4 +1,4 @@
-import { Search, Bell, Edit, BookOpen, Menu, X, ChevronDown, Wallet, User, Library, LogOut } from 'lucide-react';
+import { Search, Bell, Edit, PenLine, Menu, X, ChevronDown, Wallet, User, Library, LogOut } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -141,7 +141,7 @@ export function Header() {
                 {/* Logo & Brand */}
                 <Link to="/home" className="flex items-center gap-2 shrink-0 hover:opacity-80 transition-opacity">
                     <div className="size-9 bg-primary rounded-lg flex items-center justify-center text-white">
-                        <BookOpen className="w-5 h-5" />
+                        <PenLine className="w-5 h-5" />
                     </div>
                     <h1 className="text-xl font-bold tracking-tight text-white">CSW_AI</h1>
                 </Link>
