@@ -377,6 +377,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     <span>{publication.author ?? '—'}</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                                    <span>Độ tuổi phù hợp: {publication.ageRating ? (({ ALL: 'Phù hợp mọi lứa tuổi', '13+': 'Từ 13 tuổi', '16+': 'Từ 16 tuổi', '18+': 'Từ 18 tuổi' })[String(publication.ageRating).toUpperCase()] ?? publication.ageRating) : '—'}</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                                     <Calendar style={{ width: '14px', height: '14px' }} />
                                     <span>{formatDate(publication.submittedAt)}</span>
                                 </div>

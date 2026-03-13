@@ -262,7 +262,7 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                 </div>
                             </div>
 
-                            {/* Info — cùng cấu trúc cho truyện và nhóm chương (Đã duyệt/Từ chối/Chờ duyệt) */}
+                            {/* Info — Số chương, Độ tuổi phù hợp, Nộp lúc, Duyệt lúc */}
                             <div style={{
                                 display: 'grid',
                                 gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
@@ -279,6 +279,14 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                         </div>
                                     </div>
                                 ) : null}
+                                <div>
+                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                                        Độ tuổi phù hợp
+                                    </div>
+                                    <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
+                                        {pub.ageRating ? ({ ALL: 'Phù hợp mọi lứa tuổi', '13+': 'Từ 13 tuổi', '16+': 'Từ 16 tuổi', '18+': 'Từ 18 tuổi' })[String(pub.ageRating).toUpperCase()] ?? pub.ageRating : '—'}
+                                    </div>
+                                </div>
                                 {pub.type === 'chapter' && pub.wordCount != null && (
                                     <div>
                                         <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>

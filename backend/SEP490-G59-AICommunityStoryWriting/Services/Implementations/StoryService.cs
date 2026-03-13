@@ -610,6 +610,7 @@ namespace Services.Implementations
                 CategoryIds = categoryIds,
                 CategoryNames = categoryNames,
                 AuthorId = story.author_id,
+                AgeRating = story.age_rating,
                 TotalChapters = totalChapters,
                 PublishedChaptersCount = publishedChaptersCount,
                 TotalViews = story.total_views,

@@ -4,8 +4,44 @@ import { PublicationDetailModal } from '../../../components/admin/publication/Pu
 import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories, getStoryById } from '../../../api/story/storyApi';
 import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, claimStory, claimChapter } from '../../../api/moderator/moderatorApi';
+import { getProfileByUserId } from '../../../api/account/accountApi';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
+
+/** Bổ sung ageRating từ GET /stories/:id cho publication có storyId nhưng chưa có ageRating (tránh lỗi hiển thị "—" khi API danh sách không trả hoặc trả null). */
+async function enrichAgeRatingFromStory(list) {
+    const needEnrich = (p) => (p.storyId ?? p.id) && !(p.ageRating ?? p.age_rating);
+    const ids = [...new Set(list.filter(needEnrich).map((p) => p.storyId ?? p.id).filter(Boolean))];
+    if (ids.length === 0) return list;
+    const storyMap = {};
+    await Promise.all(ids.map((id) => getStoryById(id).then((s) => { storyMap[id] = s; }).catch(() => { })));
+    return list.map((p) => {
+        const id = p.storyId ?? p.id;
+        const story = id ? storyMap[id] : null;
+        const rating = story ? (story.ageRating ?? story.AgeRating ?? null) : null;
+        if (!rating) return p;
+        return { ...p, ageRating: rating };
+    });
+}
+
+/** Gọi API profile theo authorId để lấy tên tác giả khi author đang N/A. */
+async function enrichPublicationsWithAuthorProfile(list) {
+    const needEnrich = (pub) => {
+        const id = pub.authorId ?? pub.author_id;
+        const name = pub.author;
+        return id && (!name || name === 'N/A' || String(name).trim() === '');
+    };
+    const ids = [...new Set(list.filter(needEnrich).map((p) => p.authorId ?? p.author_id).filter(Boolean))];
+    if (ids.length === 0) return list;
+    const profileMap = {};
+    await Promise.all(ids.map((id) => getProfileByUserId(id).then((profile) => { profileMap[id] = profile; }).catch(() => { })));
+    return list.map((p) => {
+        const id = p.authorId ?? p.author_id;
+        const profile = id ? profileMap[id] : null;
+        if (!profile) return p;
+        return { ...p, author: profile.displayName ?? p.author };
+    });
+}
 
 /** Map API story item sang format publication cho PublicationList / PublicationDetailModal */
 function mapStoryToPublication(item) {
@@ -40,18 +76,21 @@ function mapStoryToPublication(item) {
         totalWords: 0,
         categories: categoryNamesArr,
         description: item.summary ?? item.Summary ?? '',
+        ageRating: item.ageRating ?? item.AgeRating ?? null,
     };
 }
 
-/** Lấy cover, author, categories, description từ response GET /stories/:id để gán vào story_group. */
+/** Lấy cover, author, authorId, ageRating, categories, description từ GET /stories/:id. */
 function storyResponseToMeta(story) {
-    if (!story) return { storyCover: '', author: 'N/A', categories: [], description: '' };
+    if (!story) return { storyCover: '', author: 'N/A', authorId: null, ageRating: null, categories: [], description: '' };
     const categoryNamesStr = story.categoryNames ?? story.CategoryNames ?? '';
     const categoryNamesArr = categoryNamesStr ? String(categoryNamesStr).split(',').map((s) => s.trim()).filter(Boolean) : [];
     const coverPath = story.coverImage ?? story.CoverImage;
     return {
         storyCover: coverPath ? resolveBackendUrl(coverPath) : '',
         author: story.authorName ?? story.AuthorName ?? 'N/A',
+        authorId: story.authorId ?? story.AuthorId ?? null,
+        ageRating: story.ageRating ?? story.AgeRating ?? 'ALL',
         categories: categoryNamesArr,
         description: story.summary ?? story.Summary ?? '',
     };
@@ -310,8 +349,11 @@ export function PublicationManagement() {
                 const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
                 if (chapterGroups.length === 0) {
-                    setApprovedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
-                    setStatsData((prev) => ({ ...prev, approved: total }));
+                    const combined = [...storyPubs, ...chapterGroups];
+                    enrichAgeRatingFromStory(combined).then((withAge) => enrichPublicationsWithAuthorProfile(withAge).then((items) => {
+                        setApprovedCache({ items, total, totalPages });
+                        setStatsData((prev) => ({ ...prev, approved: total }));
+                    }));
                     return;
                 }
                 Promise.all(chapterGroups.map((g) => getStoryById(g.storyId).catch(() => null)))
@@ -320,11 +362,16 @@ export function PublicationManagement() {
                             const meta = storyResponseToMeta(story);
                             chapterGroups[i].storyCover = meta.storyCover;
                             chapterGroups[i].author = meta.author;
+                            chapterGroups[i].authorId = meta.authorId ?? chapterGroups[i].authorId;
+                            chapterGroups[i].ageRating = meta.ageRating ?? chapterGroups[i].ageRating;
                             chapterGroups[i].categories = meta.categories;
                             chapterGroups[i].description = meta.description;
                         });
-                        setApprovedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
-                        setStatsData((prev) => ({ ...prev, approved: total }));
+                        const combined = [...storyPubs, ...chapterGroups];
+                        return enrichAgeRatingFromStory(combined).then((withAge) => enrichPublicationsWithAuthorProfile(withAge).then((items) => {
+                            setApprovedCache({ items, total, totalPages });
+                            setStatsData((prev) => ({ ...prev, approved: total }));
+                        }));
                     })
                     .catch(() => {
                         setApprovedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
@@ -378,8 +425,11 @@ export function PublicationManagement() {
                 const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
                 if (chapterGroups.length === 0) {
-                    setRejectedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
-                    setStatsData((prev) => ({ ...prev, rejected: total }));
+                    const combined = [...storyPubs, ...chapterGroups];
+                    enrichAgeRatingFromStory(combined).then((withAge) => enrichPublicationsWithAuthorProfile(withAge).then((items) => {
+                        setRejectedCache({ items, total, totalPages });
+                        setStatsData((prev) => ({ ...prev, rejected: total }));
+                    }));
                     return;
                 }
                 Promise.all(chapterGroups.map((g) => getStoryById(g.storyId).catch(() => null)))
@@ -388,11 +438,16 @@ export function PublicationManagement() {
                             const meta = storyResponseToMeta(story);
                             chapterGroups[i].storyCover = meta.storyCover;
                             chapterGroups[i].author = meta.author;
+                            chapterGroups[i].authorId = meta.authorId ?? chapterGroups[i].authorId;
+                            chapterGroups[i].ageRating = meta.ageRating ?? chapterGroups[i].ageRating;
                             chapterGroups[i].categories = meta.categories;
                             chapterGroups[i].description = meta.description;
                         });
-                        setRejectedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
-                        setStatsData((prev) => ({ ...prev, rejected: total }));
+                        const combined = [...storyPubs, ...chapterGroups];
+                        return enrichAgeRatingFromStory(combined).then((withAge) => enrichPublicationsWithAuthorProfile(withAge).then((items) => {
+                            setRejectedCache({ items, total, totalPages });
+                            setStatsData((prev) => ({ ...prev, rejected: total }));
+                        }));
                     })
                     .catch(() => {
                         setRejectedCache({ items: [...storyPubs, ...chapterGroups], total, totalPages });
@@ -487,7 +542,7 @@ export function PublicationManagement() {
                         setStatsData(prev => ({ ...prev, pending: 0 }));
                         return;
                     }
-                    // Bổ sung ảnh bìa, tác giả, thể loại, mô tả từ GET /stories/:id để giao diện Chờ duyệt giống Đã duyệt/Từ chối.
+                    // Bổ sung ảnh bìa, tác giả, độ tuổi phù hợp, thể loại, mô tả từ GET /stories/:id.
                     return Promise.all(groupedList.map((g) => getStoryById(g.storyId).then((story) => storyResponseToMeta(story)).catch(() => null)))
                         .then((metas) => {
                             const enriched = groupedList.map((g, i) => {
@@ -497,16 +552,20 @@ export function PublicationManagement() {
                                     ...g,
                                     storyCover: meta.storyCover || g.storyCover,
                                     author: meta.author ?? g.author,
+                                    authorId: meta.authorId ?? g.authorId,
+                                    ageRating: meta.ageRating ?? g.ageRating,
                                     categories: (meta.categories?.length ? meta.categories : g.categories) ?? [],
                                     description: meta.description || g.description || '',
                                 };
                             });
-                            setPublications(enriched);
-                            const total = enriched.length;
-                            setTotalCount(total);
-                            setTotalPages(Math.max(1, Math.ceil(total / PAGE_SIZE)));
-                            setCurrentPage(Math.min(page, Math.max(1, Math.ceil(total / PAGE_SIZE))));
-                            setStatsData(prev => ({ ...prev, pending: total }));
+                            return enrichPublicationsWithAuthorProfile(enriched).then((finalList) => {
+                                setPublications(finalList);
+                                const total = finalList.length;
+                                setTotalCount(total);
+                                setTotalPages(Math.max(1, Math.ceil(total / PAGE_SIZE)));
+                                setCurrentPage(Math.min(page, Math.max(1, Math.ceil(total / PAGE_SIZE))));
+                                setStatsData(prev => ({ ...prev, pending: total }));
+                            });
                         });
                 })
                 .catch((err) => {
@@ -562,10 +621,12 @@ export function PublicationManagement() {
                     const combined = [...storyPubs, ...chapterGroups];
                     const total = combined.length;
                     const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-                    setPublications(combined);
-                    setTotalCount(total);
-                    setTotalPages(pages);
-                    setCurrentPage(Math.min(page, pages));
+                    enrichAgeRatingFromStory(combined).then((withAge) => enrichPublicationsWithAuthorProfile(withAge).then((items) => {
+                        setPublications(items);
+                        setTotalCount(total);
+                        setTotalPages(pages);
+                        setCurrentPage(Math.min(page, pages));
+                    }));
                 })
                 .catch((err) => {
                     if (!silent) setError(err?.response?.data?.message ?? err?.message ?? 'Không tải được lịch sử từ chối.');
@@ -588,10 +649,12 @@ export function PublicationManagement() {
                 const pages = res?.totalPages ?? res?.TotalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
                 const pageNum = res?.page ?? res?.Page ?? page;
                 const list = Array.isArray(items) ? items.map(mapStoryToPublication) : [];
-                setPublications(list);
-                setTotalCount(total);
-                setTotalPages(pages);
-                setCurrentPage(pageNum);
+                return enrichAgeRatingFromStory(list).then((withAge) => enrichPublicationsWithAuthorProfile(withAge).then((enrichedList) => {
+                    setPublications(enrichedList);
+                    setTotalCount(total);
+                    setTotalPages(pages);
+                    setCurrentPage(pageNum);
+                }));
             })
             .catch((err) => {
                 if (!silent) setError(err?.response?.data?.message ?? err?.message ?? 'Không tải được lịch sử đã duyệt.');
