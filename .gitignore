@@ -20,6 +20,9 @@ Thumbs.db
 *.bak
 *.backup
 
+# Git filter-branch temporary (safe to delete after rewrite)
+.git-rewrite/
+
 # Local secrets (do NOT commit)
 **/appsettings.Local.json
 **/appsettings.*.Local.json
@@ -27,4 +30,6 @@ backend/SEP490-G59-AICommunityStoryWriting/DataAccessObjects/Context/StoryPlatfo
 
 # Runtime uploads (do NOT commit)
 **/wwwroot/uploads/**
-backend/SEP490-G59-AICommunityStoryWriting/DataAccessObjects/Context/StoryPlatformDbContext.cs
+
+# Docs (không đẩy lên GitHub)
+docs/

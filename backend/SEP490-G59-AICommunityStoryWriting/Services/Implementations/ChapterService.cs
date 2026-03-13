@@ -12,13 +12,15 @@ namespace Services.Implementations
     public class ChapterService : IChapterService
     {
         private readonly IChapterRepository _chapterRepository;
+        private readonly IAiGeneratedContentRepository _aiContentRepository;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
         private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly ILogger<ChapterService> _logger;
 
-        public ChapterService(IChapterRepository chapterRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
+        public ChapterService(IChapterRepository chapterRepository, IAiGeneratedContentRepository aiContentRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
         {
             _chapterRepository = chapterRepository;
+            _aiContentRepository = aiContentRepository;
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
             _notificationHubNotifier = notificationHubNotifier;
@@ -56,7 +58,18 @@ namespace Services.Implementations
                 coinPrice = 0; // Force coin price to 0 for FREE chapters
             }
 
-            var wordCount = CalculateWordCount(request.Content);
+            var content = request.Content;
+            if (request.AiGeneratedContentId.HasValue)
+            {
+                var aiDraft = _aiContentRepository.GetById(request.AiGeneratedContentId.Value);
+                if (aiDraft != null && aiDraft.story_id == request.StoryId && !string.IsNullOrWhiteSpace(aiDraft.ai_output))
+                {
+                    if (string.IsNullOrWhiteSpace(content))
+                        content = aiDraft.ai_output;
+                }
+            }
+
+            var wordCount = CalculateWordCount(content);
 
             // Determine status - default to DRAFT if not specified or invalid
             var status = "DRAFT";
@@ -76,7 +89,7 @@ namespace Services.Implementations
                 id = Guid.NewGuid(),
                 story_id = request.StoryId,
                 title = request.Title,
-                content = request.Content,
+                content = content,
                 order_index = request.OrderIndex,
                 status = status,
                 access_type = accessType,
@@ -90,6 +103,9 @@ namespace Services.Implementations
             };
 
             _chapterRepository.Add(chapter);
+
+            if (request.AiGeneratedContentId.HasValue)
+                _aiContentRepository.UpdateChapterId(request.AiGeneratedContentId.Value, chapter.id);
 
             try
             {
@@ -339,6 +355,9 @@ namespace Services.Implementations
                 var newStatus = request.Status.ToUpper();
                 var oldStatus = chapter.status?.ToUpper() ?? "DRAFT";
 
+                if (newStatus == "PENDING_REVIEW")
+                    EnsureCanSubmitForReview(chapter);
+
                 chapter.status = newStatus;
 
                 // If changing to PUBLISHED, set published_at
@@ -403,6 +422,10 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
 
+            var statusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
+            if (statusUpper != "DRAFT")
+                throw new InvalidOperationException("Chỉ được xóa chương khi ở trạng thái Bản nháp. Chương hiện tại: " + (chapter.status ?? "—"));
+
             var storyId = chapter.story_id;
 
             _chapterRepository.Delete(id);
@@ -428,6 +451,8 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+
+            EnsureCanSubmitForReview(chapter);
 
             // Author "Publish" = gửi chờ duyệt. Chỉ moderator approve mới chuyển sang PUBLISHED và set published_at.
             chapter.status = "PENDING_REVIEW";
@@ -481,6 +506,21 @@ namespace Services.Implementations
             }
 
             return true;
+        }
+
+        /// <summary>Tác giả chỉ được gửi xuất bản chương theo thứ tự 1, 2, 3... Chương trước phải đã gửi (PUBLISHED hoặc PENDING_REVIEW) thì mới gửi được chương tiếp theo.</summary>
+        private void EnsureCanSubmitForReview(chapters chapter)
+        {
+            if (chapter.order_index <= 0)
+                return;
+            var storyId = chapter.story_id ?? Guid.Empty;
+            var previous = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, chapter.order_index - 1);
+            var prevStatus = (previous?.status ?? "").ToUpper();
+            if (previous == null || (prevStatus != "PUBLISHED" && prevStatus != "PENDING_REVIEW"))
+            {
+                throw new InvalidOperationException(
+                    "Phải gửi xuất bản chương theo thứ tự. Chương " + (chapter.order_index) + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
+            }
         }
 
         /// <summary>Gửi real-time (SignalR) từng thông báo tới user theo dõi truyện. Gọi fire-and-forget từ Create/Update.</summary>
@@ -556,6 +596,7 @@ namespace Services.Implementations
                 CoinPrice = chapter.coin_price,
                 WordCount = chapter.word_count,
                 AiContributionRatio = chapter.ai_contribution_ratio,
+                AiSimilarityPercent = chapter.ai_similarity_percent,
                 IsAiClean = chapter.is_ai_clean ?? false,
                 PublishedAt = chapter.published_at,
                 CreatedAt = chapter.created_at,
@@ -576,6 +617,7 @@ namespace Services.Implementations
                 AccessType = chapter.access_type,
                 CoinPrice = chapter.coin_price,
                 WordCount = chapter.word_count,
+                AiSimilarityPercent = chapter.ai_similarity_percent,
                 PublishedAt = chapter.published_at,
                 CreatedAt = chapter.created_at
             };

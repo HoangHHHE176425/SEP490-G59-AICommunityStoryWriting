@@ -1,0 +1,21 @@
+using BusinessObjects.Entities;
+
+namespace Repositories;
+
+/// <summary>Đọc và ghi bản ghi ai_generated_content (nội dung AI sinh ra theo chương).</summary>
+public interface IAiGeneratedContentRepository
+{
+    /// <summary>Bản AI sinh ra gần nhất cho chương.</summary>
+    ai_generated_content? GetLatestByChapterId(Guid chapterId);
+
+    /// <summary>Tất cả bản AI của chương (để so sánh với từng bản, lấy điểm cao nhất).</summary>
+    IReadOnlyList<ai_generated_content> GetAllByChapterId(Guid chapterId);
+
+    ai_generated_content? GetById(Guid id);
+
+    /// <summary>Lưu bản nội dung AI (vd. từ co-create).</summary>
+    void Add(ai_generated_content entity);
+
+    /// <summary>Gán chapter_id khi tác giả tạo chương từ bản nháp.</summary>
+    void UpdateChapterId(Guid id, Guid chapterId);
+}

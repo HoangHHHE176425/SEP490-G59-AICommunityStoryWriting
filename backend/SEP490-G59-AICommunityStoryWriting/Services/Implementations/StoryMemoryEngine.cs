@@ -16,6 +16,7 @@ public class StoryMemoryEngine : IStoryMemoryEngine
     private readonly IStoryEventMemoryRepository _eventRepo;
     private readonly IStoryStoryStateRepository _stateRepo;
     private readonly IStoryRagService _ragService;
+    private readonly IStoryContextBuilder _contextBuilder;
     private readonly IStoryRepository _storyRepository;
     private readonly IConfiguration _configuration;
 
@@ -24,6 +25,7 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         IStoryEventMemoryRepository eventRepo,
         IStoryStoryStateRepository stateRepo,
         IStoryRagService ragService,
+        IStoryContextBuilder contextBuilder,
         IStoryRepository storyRepository,
         IConfiguration configuration)
     {
@@ -31,6 +33,7 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         _eventRepo = eventRepo;
         _stateRepo = stateRepo;
         _ragService = ragService;
+        _contextBuilder = contextBuilder;
         _storyRepository = storyRepository;
         _configuration = configuration;
     }
@@ -41,20 +44,27 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         if (story == null)
             return string.Empty;
 
-        if (!_ragService.IsRagAvailableForStory(storyId))
-            throw new InvalidOperationException("RAG chưa sẵn sàng cho truyện này. Hãy gọi POST /api/ai/index-rag với storyId của truyện trước khi đồng sáng tác.");
+        string storyContextBlock;
+        if (_ragService.IsRagAvailableForStory(storyId))
+        {
+            int ragMaxChars = _configuration.GetValue("AI:CoCreateRagMaxChars", DefaultRagMaxChars);
+            int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);
+            if (ragMaxChars < 1000) ragMaxChars = DefaultRagMaxChars;
+            if (ragTopK < 5) ragTopK = 5;
+            var query = authorIdea.Trim();
+            var ragBlock = await _ragService.RetrieveContextAsync(storyId, query, maxChars: ragMaxChars, topK: ragTopK, cancellationToken);
 
-        int ragMaxChars = _configuration.GetValue("AI:CoCreateRagMaxChars", DefaultRagMaxChars);
-        int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);
-        if (ragMaxChars < 1000) ragMaxChars = DefaultRagMaxChars;
-        if (ragTopK < 5) ragTopK = 5;
-        var query = authorIdea.Trim();
-        var ragBlock = await _ragService.RetrieveContextAsync(storyId, query, maxChars: ragMaxChars, topK: ragTopK, cancellationToken);
+            if (string.IsNullOrWhiteSpace(ragBlock))
+                throw new InvalidOperationException("Không lấy được ngữ cảnh từ RAG. Đảm bảo truyện đã có chương có nội dung và đã gọi POST /api/ai/index-rag.");
 
-        if (string.IsNullOrWhiteSpace(ragBlock))
-            throw new InvalidOperationException("Không lấy được ngữ cảnh từ RAG. Đảm bảo truyện đã có chương có nội dung và đã gọi POST /api/ai/index-rag.");
-
-        var storyContextBlock = BuildRagStoryBlock(story, ragBlock);
+            storyContextBlock = BuildRagStoryBlock(story, ragBlock);
+        }
+        else
+        {
+            storyContextBlock = _contextBuilder.GetStoryAndMemoryBlock(storyId, afterChapterId: null);
+            if (string.IsNullOrWhiteSpace(storyContextBlock))
+                throw new InvalidOperationException("Không lấy được ngữ cảnh truyện. Đảm bảo truyện đã có chương có nội dung.");
+        }
 
         var characterBlock = BuildCharacterMemoryBlock(storyId);
         var eventBlock = BuildEventMemoryBlock(storyId);

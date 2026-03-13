@@ -48,7 +48,7 @@ namespace AIStory.API
             builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
                 options.UseSqlServer(
                     builder.Configuration.GetConnectionString("DefaultConnection")
-                    ?? "Server=TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                    ?? "Server=QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                     sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                         maxRetryCount: 5,
                         maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -97,6 +97,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
             builder.Services.AddScoped<IModerationService, ModerationService>();
             builder.Services.AddSignalR();
+            builder.Services.AddSingleton<IUserIdProvider, SignalRUserIdProvider>();
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
 
@@ -114,6 +115,12 @@ namespace AIStory.API
             builder.Services.AddScoped<IAINextChapterService, AINextChapterService>();
             builder.Services.AddScoped<IAICoCreationService, AICoCreationService>();
             builder.Services.AddScoped<IAIConsistencyCheckService, AIConsistencyCheckService>();
+            builder.Services.AddScoped<IChapterCheckService, ChapterCheckService>();
+            builder.Services.AddScoped<IAiGeneratedContentRepository, AiGeneratedContentRepository>();
+            builder.Services.AddScoped<IAiSensitiveWordsRepository, AiSensitiveWordsRepository>();
+            builder.Services.AddScoped<IAiConfigsRepository, AiConfigsRepository>();
+            builder.Services.AddScoped<IAIUsageLimitConfigService, AIUsageLimitConfigService>();
+            builder.Services.AddScoped<IChapterCompareService, ChapterCompareService>();
             builder.Services.AddSingleton<IAISuggestRateLimitService, AISuggestRateLimitService>();
 
             // Coin / PayOS
