@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/purity */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { Pagination } from '../../components/pagination/Pagination';
@@ -11,7 +12,14 @@ import { EmptyState } from '../../components/story-list/EmptyState';
 
 // eslint-disable-next-line no-unused-vars
 export function StoryBrowse({ onBack }) {
-    const [searchQuery, setSearchQuery] = useState('');
+    const [searchParams, setSearchParams] = useSearchParams();
+    const searchFromUrl = searchParams.get('search') ?? '';
+    const [searchQuery, setSearchQuery] = useState(searchFromUrl);
+
+    // Đồng bộ từ URL khi vào trang từ thanh tìm kiếm header
+    useEffect(() => {
+        setSearchQuery(searchFromUrl);
+    }, [searchFromUrl]);
     const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'list'
     const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'popular' | 'views' | 'rating'
     const [currentPage, setCurrentPage] = useState(1);
@@ -121,12 +129,15 @@ export function StoryBrowse({ onBack }) {
         }))
     ];
 
-    // Filter stories
+    // Filter stories (tìm kiếm theo truyện, tác giả, thể loại)
     const filteredStories = allStories.filter(story => {
-        // Search query
-        if (searchQuery && !story.title.toLowerCase().includes(searchQuery.toLowerCase()) &&
-            !story.author.toLowerCase().includes(searchQuery.toLowerCase())) {
-            return false;
+        if (searchQuery.trim()) {
+            const q = searchQuery.trim().toLowerCase();
+            const matchTitle = story.title.toLowerCase().includes(q);
+            const matchAuthor = story.author.toLowerCase().includes(q);
+            const matchGenre = Array.isArray(story.categories) &&
+                story.categories.some(cat => (cat || '').toLowerCase().includes(q));
+            if (!matchTitle && !matchAuthor && !matchGenre) return false;
         }
 
         // Story type
@@ -182,6 +193,9 @@ export function StoryBrowse({ onBack }) {
         setSelectedAgeRating('all');
         setSearchQuery('');
         setCurrentPage(1);
+        const next = new URLSearchParams(searchParams);
+        next.delete('search');
+        setSearchParams(next, { replace: true });
     };
 
     const activeFiltersCount =
@@ -194,6 +208,9 @@ export function StoryBrowse({ onBack }) {
     const handleSearchChange = (value) => {
         setSearchQuery(value);
         setCurrentPage(1);
+        const next = new URLSearchParams(searchParams);
+        if ((value || '').trim()) next.set('search', value.trim()); else next.delete('search');
+        setSearchParams(next, { replace: true });
     };
 
     const handleStoryTypeChange = (value) => {

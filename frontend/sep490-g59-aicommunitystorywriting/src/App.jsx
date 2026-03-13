@@ -13,9 +13,11 @@ import Wallet from './pages/wallet/Wallet';
 import Library from './pages/library/Library';
 import { ChapterReader } from './pages/chapter-detail/ChapterReader';
 import { AuthorStoryManagement } from './pages/author/AuthorStoryManagement';
+import { AuthorDetail } from './pages/author/AuthorDetail';
 import { StoryBrowse } from './pages/story-list/StoryBrowse';
 import AboutUs from './pages/aboutus/AboutUs';
 import PolicyPage from './pages/policy/PolicyPage';
+import Donate from './pages/donate/Donate';
 
 export default function App() {
   return (
@@ -35,6 +37,8 @@ export default function App() {
           <Route path="/library" element={<Library />} />
           <Route path="/chapter" element={<ChapterReader />} />
           <Route path="/author" element={<AuthorStoryManagement />} />
+          <Route path="/authors/:authorId" element={<AuthorDetail />} />
+          <Route path="/donate/:authorId" element={<Donate />} />
           <Route path="/story-list" element={<StoryBrowse />} />
           <Route path="/about-us" element={<AboutUs />} />
           <Route path="/policy" element={<PolicyPage />} />
