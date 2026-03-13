@@ -9,7 +9,7 @@ public static class StoryEventMemoryDAO
     public static List<story_event_memory> GetByStoryId(Guid storyId)
     {
         using var context = new StoryPlatformDbContext();
-        return context.story_event_memories
+        return context.story_event_memory
             .AsNoTracking()
             .Where(c => c.story_id == storyId)
             .OrderBy(c => c.order_index)
@@ -20,7 +20,7 @@ public static class StoryEventMemoryDAO
     public static void Add(Guid storyId, Guid? chapterId, int orderIndex, string description)
     {
         using var context = new StoryPlatformDbContext();
-        context.story_event_memories.Add(new story_event_memory
+        context.story_event_memory.Add(new story_event_memory
         {
             id = Guid.NewGuid(),
             story_id = storyId,
@@ -35,14 +35,14 @@ public static class StoryEventMemoryDAO
     public static void AddRange(IEnumerable<story_event_memory> events)
     {
         using var context = new StoryPlatformDbContext();
-        context.story_event_memories.AddRange(events);
+        context.story_event_memory.AddRange(events);
         context.SaveChanges();
     }
 
     public static int GetNextOrderIndex(Guid storyId)
     {
         using var context = new StoryPlatformDbContext();
-        var max = context.story_event_memories
+        var max = context.story_event_memory
             .Where(c => c.story_id == storyId)
             .Select(c => c.order_index)
             .DefaultIfEmpty(-1)
@@ -53,8 +53,8 @@ public static class StoryEventMemoryDAO
     public static void DeleteByStoryId(Guid storyId)
     {
         using var context = new StoryPlatformDbContext();
-        var list = context.story_event_memories.Where(c => c.story_id == storyId).ToList();
-        context.story_event_memories.RemoveRange(list);
+        var list = context.story_event_memory.Where(c => c.story_id == storyId).ToList();
+        context.story_event_memory.RemoveRange(list);
         context.SaveChanges();
     }
 }
