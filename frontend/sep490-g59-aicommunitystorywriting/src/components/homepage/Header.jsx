@@ -1,15 +1,19 @@
 import { Search, Bell, Edit, Menu, X, ChevronDown, Wallet, User, Library, LogOut } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { getAllCategories } from '../../api/category/categoryApi';
 import { getNotifications, getUnreadCount, markNotificationAsRead, markAllNotificationsAsRead } from '../../api/notification/notificationApi';
 import * as coinApi from '../../api/coins/coinApi';
+import { useToast } from '../author/story-editor/Toast';
 
 export function Header() {
     const navigate = useNavigate();
     const { user, logout, isAuthenticated, role } = useAuth();
+    const { showToast, ToastContainer } = useToast();
+    const showToastRef = useRef(showToast);
+    showToastRef.current = showToast;
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isGenreOpen, setIsGenreOpen] = useState(false);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -54,13 +58,16 @@ export function Header() {
         const handler = (e) => {
             const n = e?.detail;
             if (n && (n.id ?? n.Id)) {
+                const title = n.title ?? n.Title ?? '';
+                const content = n.content ?? n.Content ?? '';
+                const type = (n.type ?? n.Type ?? '').toUpperCase();
                 setNotifications((prev) => {
                     const id = n.id ?? n.Id;
                     if (prev.some((x) => (x.id ?? x.Id) === id)) return prev;
                     const item = {
                         id,
-                        title: n.title ?? n.Title ?? '',
-                        content: n.content ?? n.Content ?? '',
+                        title,
+                        content,
                         linkUrl: n.linkUrl ?? n.LinkUrl,
                         isRead: n.isRead ?? n.IsRead ?? false,
                         createdAt: n.createdAt ?? n.CreatedAt,
@@ -69,6 +76,14 @@ export function Header() {
                     return [item, ...prev];
                 });
                 setUnreadCount((c) => c + 1);
+                // Realtime toast: hiển thị popup khi có thông báo mới (vd: ủng hộ, duyệt truyện/chương)
+                const toastMsg = content || title || 'Bạn có thông báo mới';
+                const toastType = type === 'DONATION' ? 'success' : 'info';
+                showToastRef.current(toastMsg, toastType, 5000);
+                // Khi có ủng hộ (DONATION), cập nhật số dư ví ngay không cần F5
+                if (type === 'DONATION') {
+                    window.dispatchEvent(new CustomEvent('wallet:changed'));
+                }
             }
             fetchNotifications();
         };
@@ -148,6 +163,7 @@ export function Header() {
     }, []);
 
     return (
+        <>
         <header className="sticky top-0 z-50 w-full bg-slate-900/95 backdrop-blur-md border-b border-slate-700/50">
             <div className="max-w-[1280px] mx-auto px-4 h-16 flex items-center justify-between gap-8">
                 {/* Logo & Brand */}
@@ -527,5 +543,7 @@ export function Header() {
             )}
 
         </header>
+        <ToastContainer />
+    </>
     );
 }

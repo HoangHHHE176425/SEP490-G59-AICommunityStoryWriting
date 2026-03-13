@@ -87,3 +87,41 @@ export async function uploadAvatar(file) {
     }
 }
 
+function normalizeAuthorOnboardingStatus(data) {
+    if (!data) return null;
+    return {
+        currentRole: (data.currentRole ?? data.CurrentRole ?? "USER").toString().trim().toUpperCase(),
+        isAuthor: data.isAuthor ?? data.IsAuthor ?? false,
+        hasActiveAuthorPolicy: data.hasActiveAuthorPolicy ?? data.HasActiveAuthorPolicy ?? false,
+        activeAuthorPolicyId: data.activeAuthorPolicyId ?? data.ActiveAuthorPolicyId ?? null,
+        activeAuthorPolicyVersion: data.activeAuthorPolicyVersion ?? data.ActiveAuthorPolicyVersion ?? null,
+        hasAcceptedActivePolicy: data.hasAcceptedActivePolicy ?? data.HasAcceptedActivePolicy ?? false,
+        acceptedAt: data.acceptedAt ?? data.AcceptedAt ?? null,
+        canBecomeAuthor: data.canBecomeAuthor ?? data.CanBecomeAuthor ?? false,
+        missingRequirements: data.missingRequirements ?? data.MissingRequirements ?? [],
+    };
+}
+
+export async function getAuthorOnboardingStatus() {
+    const res = await axiosInstance.get("/Account/author-onboarding");
+    return normalizeAuthorOnboardingStatus(res.data);
+}
+
+export async function becomeAuthor() {
+    try {
+        const res = await axiosInstance.post("/Account/become-author");
+        return {
+            success: true,
+            data: {
+                accessToken: res?.data?.accessToken ?? res?.data?.AccessToken ?? "",
+                role: res?.data?.role ?? res?.data?.Role ?? "AUTHOR",
+                policyId: res?.data?.policyId ?? res?.data?.PolicyId ?? null,
+                acceptedPolicyNow: res?.data?.acceptedPolicyNow ?? res?.data?.AcceptedPolicyNow ?? false,
+                acceptedAt: res?.data?.acceptedAt ?? res?.data?.AcceptedAt ?? null,
+            },
+        };
+    } catch (err) {
+        return { success: false, message: getErrorMessage(err) };
+    }
+}
+

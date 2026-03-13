@@ -27,3 +27,41 @@ export async function getActivePolicy(type) {
   }
 }
 
+export async function getMyAuthorPolicyStatus(type = 'AUTHOR') {
+  try {
+    const res = await axiosInstance.get('/policies/me/author-status', {
+      params: { type },
+    });
+    return {
+      policy: normalizePolicy(res?.data?.policy ?? res?.data?.Policy),
+      hasAccepted: res?.data?.hasAccepted ?? res?.data?.HasAccepted ?? false,
+      acceptedAt: res?.data?.acceptedAt ?? res?.data?.AcceptedAt ?? null,
+    };
+  } catch (err) {
+    if (err?.response?.status === 404) return null;
+    throw err;
+  }
+}
+
+export async function acceptAuthorPolicy(policyId) {
+  if (!policyId) {
+    return { success: false, message: 'policyId là bắt buộc.' };
+  }
+
+  try {
+    const res = await axiosInstance.post(`/policies/${policyId}/accept-author`);
+    return {
+      success: true,
+      data: {
+        accepted: res?.data?.accepted ?? res?.data?.Accepted ?? false,
+        alreadyAccepted: res?.data?.alreadyAccepted ?? res?.data?.AlreadyAccepted ?? false,
+      },
+    };
+  } catch (err) {
+    return {
+      success: false,
+      message: err?.response?.data?.message || err?.message || 'Không thể chấp nhận điều khoản tác giả.',
+    };
+  }
+}
+

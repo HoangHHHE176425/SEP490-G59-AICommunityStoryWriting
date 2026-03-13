@@ -2,6 +2,7 @@ using BusinessObjects.Entities;
 using Repositories.Interfaces;
 using Services.DTOs.Policies;
 using Services.Interfaces;
+using System;
 
 namespace Services.Implementations
 {
@@ -42,6 +43,8 @@ namespace Services.Implementations
             var policy = await _policyRepo.GetPolicyByIdAsync(policyId);
             if (policy == null) throw new Exception("Policy not found.");
             if (policy.is_active != true) throw new Exception("Policy is not active.");
+            if (!string.Equals(policy.type, "AUTHOR", StringComparison.OrdinalIgnoreCase))
+                throw new Exception("Chỉ có thể chấp nhận policy loại AUTHOR trong luồng này.");
 
             var existing = await _acceptRepo.GetAcceptanceAsync(userId, policyId);
             if (existing != null) return false; // already accepted
