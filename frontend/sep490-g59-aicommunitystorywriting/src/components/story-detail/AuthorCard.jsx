@@ -1,7 +1,10 @@
+import { Link } from 'react-router-dom';
+
 export function AuthorCard({ author }) {
     const avatarUrl = author?.avatar;
     const displayName = author?.name ?? 'Ẩn danh';
     const followers = typeof author?.followers === 'number' ? author.followers.toLocaleString() : (author?.followers ?? '0');
+    const authorId = author?.id || author?.userId;
     return (
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-6">
             <h3 className="font-bold text-slate-900 dark:text-white mb-4">Tác giả</h3>
@@ -26,9 +29,18 @@ export function AuthorCard({ author }) {
                     </p>
                 </div>
             </div>
-            <button className="w-full py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
-                Theo dõi tác giả
-            </button>
+            {authorId ? (
+                <Link
+                    to={`/authors/${authorId}`}
+                    className="w-full inline-flex items-center justify-center py-2 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all"
+                >
+                    Xem trang tác giả
+                </Link>
+            ) : (
+                <button className="w-full py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
+                    Theo dõi tác giả
+                </button>
+            )}
         </div>
     );
 }

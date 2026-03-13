@@ -26,6 +26,8 @@ export function Header() {
     const [walletCoins, setWalletCoins] = useState(null);
     const displayedCoins = walletCoins ?? userCoinsFallback;
 
+    const [searchKeyword, setSearchKeyword] = useState('');
+
     const fetchNotifications = useCallback(() => {
         if (!isAuthenticated) return;
         setNotificationsLoading(true);
@@ -109,6 +111,16 @@ export function Header() {
         navigate('/policy?type=AUTHOR&from=become-author&next=/author');
     };
 
+    const handleSearchSubmit = (e) => {
+        e?.preventDefault?.();
+        const q = (searchKeyword ?? '').trim();
+        if (q) {
+            navigate(`/story-list?search=${encodeURIComponent(q)}`);
+        } else {
+            navigate('/story-list');
+        }
+    };
+
     useEffect(() => {
         let cancelled = false;
         getAllCategories({ includeInactive: false })
@@ -146,9 +158,9 @@ export function Header() {
                     <h1 className="text-xl font-bold tracking-tight text-white">CSW_AI</h1>
                 </Link>
 
-                {/* Search Bar (Center) */}
+                {/* Search Bar (Center) - Tìm kiếm truyện, tác giả, thể loại */}
                 <div className="flex-1 max-w-2xl hidden md:block">
-                    <div className="relative group">
+                    <form onSubmit={handleSearchSubmit} className="relative group">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 group-focus-within:text-primary transition-colors">
                             <Search className="w-5 h-5" />
                         </div>
@@ -156,8 +168,11 @@ export function Header() {
                             className="block w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-full text-sm focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-slate-500 outline-none text-white"
                             placeholder="Tìm kiếm truyện, tác giả, thể loại..."
                             type="text"
+                            value={searchKeyword}
+                            onChange={(e) => setSearchKeyword(e.target.value)}
+                            aria-label="Tìm kiếm truyện, tác giả, thể loại"
                         />
-                    </div>
+                    </form>
                 </div>
 
                 {/* Main Nav & User Actions */}
@@ -173,7 +188,7 @@ export function Header() {
                         ) : (
                             <>
                                 <Link to="/home" className="hover:text-primary transition-colors">Trang chủ</Link>
-                                <Link to="/about-us" className="hover:text-primary transition-colors">About us</Link>
+                                <Link to="/about-us" className="hover:text-primary transition-colors">Về chúng tôi</Link>
                                 <Link to="/story-list" className="hover:text-primary transition-colors">Khám phá truyện</Link>
                             </>
                         )}
@@ -389,16 +404,18 @@ export function Header() {
                             </Link>
                         )}
 
-                        <div className="relative mb-2">
+                        <form onSubmit={handleSearchSubmit} className="relative mb-2">
                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                                 <Search className="w-5 h-5" />
                             </div>
                             <input
                                 className="block w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-full text-sm outline-none text-white placeholder:text-slate-500"
-                                placeholder="Tìm kiếm..."
+                                placeholder="Tìm kiếm truyện, tác giả, thể loại..."
                                 type="text"
+                                value={searchKeyword}
+                                onChange={(e) => setSearchKeyword(e.target.value)}
                             />
-                        </div>
+                        </form>
 
                         <div className="flex flex-col gap-3">
                             <Link to="/home" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Trang chủ</Link>
