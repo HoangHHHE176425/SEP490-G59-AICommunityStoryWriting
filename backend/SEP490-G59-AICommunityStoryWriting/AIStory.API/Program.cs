@@ -87,6 +87,8 @@ namespace AIStory.API
             builder.Services.AddScoped<ICategoryService, CategoryService>();
             builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
             builder.Services.AddScoped<IChapterService, ChapterService>();
+            builder.Services.AddScoped<IChapterVersionRepository, ChapterVersionRepository>();
+            builder.Services.AddScoped<IChapterVersionService, ChapterVersionService>();
 
             // Policies
             builder.Services.AddScoped<IPolicyRepository, PolicyRepository>();

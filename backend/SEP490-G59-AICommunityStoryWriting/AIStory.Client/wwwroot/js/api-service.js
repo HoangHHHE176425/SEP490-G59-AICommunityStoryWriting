@@ -3,7 +3,13 @@ const API_BASE_URL = (typeof window !== 'undefined' && window.__API_BASE_URL) ? 
 
 // API Service Class
 class ApiService {
-    static async request(url, options = {}) {
+    /**
+     * Gửi request tới API. Khi gặp 401 Unauthorized, thử refresh token rồi gửi lại request một lần.
+     * @param {string} url - Đường dẫn API (vd: /chapters/xxx)
+     * @param {RequestInit} options - fetch options
+     * @param {boolean} skipRetry - Không thử refresh khi 401 (dùng cho request refresh tránh lặp vô hạn)
+     */
+    static async request(url, options = {}, skipRetry = false) {
         try {
             // Tự động thêm Authorization header nếu có token
             const headers = {
@@ -18,6 +24,7 @@ class ApiService {
 
             const response = await fetch(`${API_BASE_URL}${url}`, {
                 headers: headers,
+                credentials: 'include', // Gửi cookie (refresh token) khi gọi API
                 ...options
             });
 
@@ -27,6 +34,18 @@ class ApiService {
             }
 
             if (!response.ok) {
+                // 401: thử refresh token rồi gửi lại (trừ khi đang gọi refresh hoặc đã skipRetry)
+                if (response.status === 401 && !skipRetry && url.indexOf('/auth/refresh') === -1 &&
+                    typeof AuthHelper !== 'undefined' && AuthHelper.getToken()) {
+                    const refreshed = await ApiService._tryRefreshToken();
+                    if (refreshed) {
+                        return ApiService.request(url, options, true);
+                    }
+                    // Refresh thất bại: xóa token và báo đăng nhập lại
+                    AuthHelper.removeToken();
+                    throw new Error('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.');
+                }
+
                 let errorMessage = response.statusText;
                 try {
                     const errorBody = await response.json();
@@ -52,6 +71,26 @@ class ApiService {
                 throw new Error('Không thể kết nối đến server. Vui lòng kiểm tra kết nối mạng.');
             }
             throw error;
+        }
+    }
+
+    /** Gọi API refresh token (dùng cookie), cập nhật token mới vào AuthHelper. Trả về true nếu thành công. */
+    static async _tryRefreshToken() {
+        try {
+            const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include'
+            });
+            if (!res.ok) return false;
+            const data = await res.json().catch(() => null);
+            if (data && data.accessToken && typeof AuthHelper !== 'undefined') {
+                AuthHelper.setToken(data.accessToken);
+                return true;
+            }
+            return false;
+        } catch {
+            return false;
         }
     }
 
@@ -323,6 +362,41 @@ class ApiService {
         });
     }
 
+    // Chapter versions (AUTHOR)
+    static async getChapterVersions(chapterId) {
+        return this.request(`/chapters/${chapterId}/versions`);
+    }
+
+    static async getChapterVersion(chapterId, versionId) {
+        return this.request(`/chapters/${chapterId}/versions/${versionId}`);
+    }
+
+    static async createChapterVersion(chapterId, data) {
+        return this.request(`/chapters/${chapterId}/versions`, {
+            method: 'POST',
+            body: JSON.stringify(data || {})
+        });
+    }
+
+    static async updateChapterVersion(chapterId, versionId, data) {
+        return this.request(`/chapters/${chapterId}/versions/${versionId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data || {})
+        });
+    }
+
+    static async deleteChapterVersion(chapterId, versionId) {
+        return this.request(`/chapters/${chapterId}/versions/${versionId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    static async submitChapterVersion(chapterId, versionId) {
+        return this.request(`/chapters/${chapterId}/versions/${versionId}/submit`, {
+            method: 'POST'
+        });
+    }
+
     static async publishChapter(id) {
         return this.request(`/chapters/${id}/publish`, {
             method: 'POST'
@@ -394,6 +468,14 @@ class ApiService {
             method: 'POST',
             body: JSON.stringify({ reason: reason })
         });
+    }
+
+    static async moderatorGetChapterVersions(chapterId) {
+        return this.request(`/moderator/chapters/${chapterId}/versions`);
+    }
+
+    static async moderatorGetChapterVersion(chapterId, versionId) {
+        return this.request(`/moderator/chapters/${chapterId}/versions/${versionId}`);
     }
 
     // Notifications API
