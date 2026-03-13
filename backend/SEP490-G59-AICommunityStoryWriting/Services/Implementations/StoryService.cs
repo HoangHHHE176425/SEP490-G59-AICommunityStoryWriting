@@ -455,7 +455,7 @@ namespace Services.Implementations
             if (!UserActivityLogDAO.HasReadAnyChapterOfStory(userId, storyId))
                 throw new InvalidOperationException("Bạn cần đọc ít nhất một chapter trước khi đánh giá.");
 
-            RatingDAO.Upsert(userId, storyId, starValue, reviewText, status: "VISIBLE");
+            RatingDAO.CreateOnce(userId, storyId, starValue, reviewText, status: "VISIBLE");
             var (avg, count) = RatingDAO.GetAverageAndCount(storyId, status: "VISIBLE");
             StoryDAO.UpdateAvgRating(storyId, avg);
             return (avg, count);

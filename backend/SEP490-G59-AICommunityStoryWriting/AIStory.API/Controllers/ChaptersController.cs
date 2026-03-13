@@ -12,14 +12,23 @@ namespace AIStory.API.Controllers
     public class ChaptersController : ControllerBase
     {
         private readonly IChapterService _chapterService;
+        private readonly IChapterVersionService _chapterVersionService;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IStoryService _storyService;
 
-        public ChaptersController(IChapterService chapterService, IServiceScopeFactory scopeFactory, IStoryService storyService)
+        public ChaptersController(IChapterService chapterService, IChapterVersionService chapterVersionService, IServiceScopeFactory scopeFactory, IStoryService storyService)
         {
             _chapterService = chapterService;
+            _chapterVersionService = chapterVersionService;
             _scopeFactory = scopeFactory;
             _storyService = storyService;
+        }
+
+        private Guid? GetCurrentUserId()
+        {
+            var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
+                      ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return Guid.TryParse(sub, out var id) ? id : null;
         }
 
         /// <summary>Tạo chapter mới - Chỉ AUTHOR. Sau khi lưu, Plot Manager (Agent 4) cập nhật memory nếu có nội dung.</summary>
@@ -263,6 +272,99 @@ namespace AIStory.API.Controllers
             {
                 return StatusCode(500, new { message = "Lỗi lấy lý do từ chối", error = ex.Message });
             }
+        }
+
+        // ---------- Chapter Versions (AUTHOR) ----------
+        /// <summary>Lấy danh sách version của chapter. Chỉ AUTHOR (tác giả truyện chứa chapter).</summary>
+        [HttpGet("{chapterId:guid}/versions")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult GetChapterVersions(Guid chapterId)
+        {
+            var list = _chapterVersionService.GetByChapterId(chapterId);
+            return Ok(list);
+        }
+
+        /// <summary>Lấy chi tiết một version. Chỉ AUTHOR.</summary>
+        [HttpGet("{chapterId:guid}/versions/{versionId:guid}")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult GetChapterVersion(Guid chapterId, Guid versionId)
+        {
+            var v = _chapterVersionService.GetById(versionId);
+            if (v == null || v.ChapterId != chapterId)
+                return NotFound(new { message = "Version không tồn tại." });
+            return Ok(v);
+        }
+
+        /// <summary>Tạo version mới cho chapter. Chỉ AUTHOR.</summary>
+        [HttpPost("{chapterId:guid}/versions")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult CreateChapterVersion(Guid chapterId, [FromBody] CreateChapterVersionRequestDto request)
+        {
+            var authorId = GetCurrentUserId();
+            if (!authorId.HasValue)
+                return Unauthorized(new { message = "Không xác định user. Vui lòng đăng nhập." });
+            try
+            {
+                var v = _chapterVersionService.Create(chapterId, authorId.Value, request ?? new CreateChapterVersionRequestDto());
+                return v == null ? NotFound(new { message = "Chapter không tồn tại." }) : CreatedAtAction(nameof(GetChapterVersion), new { chapterId, versionId = v.Id }, v);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+        }
+
+        /// <summary>Cập nhật version (chỉ DRAFT). Chỉ AUTHOR.</summary>
+        [HttpPut("{chapterId:guid}/versions/{versionId:guid}")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult UpdateChapterVersion(Guid chapterId, Guid versionId, [FromBody] UpdateChapterVersionRequestDto request)
+        {
+            var authorId = GetCurrentUserId();
+            if (!authorId.HasValue)
+                return Unauthorized(new { message = "Không xác định user. Vui lòng đăng nhập." });
+            if (request == null)
+                return BadRequest();
+            try
+            {
+                var ok = _chapterVersionService.Update(versionId, authorId.Value, request);
+                return ok ? NoContent() : NotFound(new { message = "Version không tồn tại." });
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        }
+
+        /// <summary>Xóa version (chỉ DRAFT). Chỉ AUTHOR.</summary>
+        [HttpDelete("{chapterId:guid}/versions/{versionId:guid}")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult DeleteChapterVersion(Guid chapterId, Guid versionId)
+        {
+            var authorId = GetCurrentUserId();
+            if (!authorId.HasValue)
+                return Unauthorized(new { message = "Không xác định user. Vui lòng đăng nhập." });
+            try
+            {
+                var ok = _chapterVersionService.Delete(versionId, authorId.Value);
+                return ok ? NoContent() : NotFound(new { message = "Version không tồn tại hoặc không thể xóa." });
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        }
+
+        /// <summary>Gửi duyệt version: áp dụng nội dung version lên chapter và chuyển chapter sang PENDING_REVIEW. Chỉ AUTHOR.</summary>
+        [HttpPost("{chapterId:guid}/versions/{versionId:guid}/submit")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult SubmitChapterVersion(Guid chapterId, Guid versionId)
+        {
+            var authorId = GetCurrentUserId();
+            if (!authorId.HasValue)
+                return Unauthorized(new { message = "Không xác định user. Vui lòng đăng nhập." });
+            try
+            {
+                var ok = _chapterVersionService.SubmitForReview(versionId, authorId.Value);
+                return ok ? NoContent() : NotFound(new { message = "Version không tồn tại hoặc không thể gửi duyệt." });
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
         }
 
         /// <summary>Gọi Plot Manager (Agent 4) cập nhật memory trong background; không chặn response.</summary>

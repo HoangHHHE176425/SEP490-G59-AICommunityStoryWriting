@@ -44,6 +44,30 @@
                     </div>
                 </div>
 
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Các version của chapter</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Version</th>
+                                        <th>Tiêu đề</th>
+                                        <th>Trạng thái</th>
+                                        <th>Ngày tạo</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="versionsTableBodyModerator">
+                                    <tr><td colspan="5" class="text-muted text-center">Đang tải...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Quyết định</h5>
@@ -75,6 +99,7 @@
 @section Scripts {
     <script>
         const chapterId = '@(chapterId)';
+        let versions = [];
 
         document.addEventListener('DOMContentLoaded', function () {
             if (!AuthHelper.isAuthenticated() || !AuthHelper.hasAnyRole('MODERATOR', 'ADMIN')) {
@@ -82,6 +107,7 @@
                 return;
             }
             loadChapter();
+            loadChapterVersions();
             document.getElementById('btnApproveChapter').addEventListener('click', approveChapter);
             document.getElementById('btnRejectChapter').addEventListener('click', function () {
                 document.getElementById('rejectFormChapter').style.display = 'block';
@@ -128,6 +154,76 @@
                 document.getElementById('loadingChapter').style.display = 'none';
                 document.getElementById('errorChapter').style.display = 'block';
                 document.getElementById('errorChapter').textContent = e.message || 'Không tải được chapter.';
+            }
+        }
+
+        async function loadChapterVersions() {
+            const tbody = document.getElementById('versionsTableBodyModerator');
+            try {
+                versions = await ApiService.moderatorGetChapterVersions(chapterId);
+                if (!versions || versions.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">Chưa có version nào.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = versions.map(v => {
+                    const statusBadge = v.status === 'PUBLISHED'
+                        ? '<span class="badge bg-success">Đã xuất bản</span>'
+                        : v.status === 'PENDING_REVIEW'
+                            ? '<span class="badge bg-warning text-dark">Chờ duyệt</span>'
+                            : '<span class="badge bg-secondary">Nháp</span>';
+                    return `
+                        <tr>
+                            <td>#${v.versionNumber}</td>
+                            <td>${v.titleSnapshot || '-'}</td>
+                            <td>${statusBadge}</td>
+                            <td>${Utils.formatDate(v.createdAt)}</td>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-outline-primary btn-sm" onclick="viewVersion('${v.id}')">
+                                    <i class="bi bi-eye"></i> Xem nội dung
+                                </button>
+                            </td>
+                        </tr>`;
+                }).join('');
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-danger text-center">' + (e.message || 'Lỗi tải versions.') + '</td></tr>';
+            }
+        }
+
+        async function viewVersion(versionId) {
+            try {
+                const v = await ApiService.moderatorGetChapterVersion(chapterId, versionId);
+                const title = v.titleSnapshot || ('Version #' + v.versionNumber);
+                const created = v.createdAt ? Utils.formatDate(v.createdAt) : '';
+                const content = v.contentSnapshot || '(Không có nội dung)';
+                const modalHtml = `
+                    <div class="modal fade" id="versionViewModal" tabindex="-1">
+                        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title">Version #${v.versionNumber} - ${title}</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <p class="text-muted small mb-2">Tạo lúc: ${created}</p>
+                                    <div style="white-space: pre-wrap; font-family: inherit;">${content.replace(/</g, '&lt;')}</div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+                let holder = document.getElementById('versionViewModalHolder');
+                if (!holder) {
+                    holder = document.createElement('div');
+                    holder.id = 'versionViewModalHolder';
+                    document.body.appendChild(holder);
+                }
+                holder.innerHTML = modalHtml;
+                const modal = new bootstrap.Modal(document.getElementById('versionViewModal'));
+                modal.show();
+            } catch (e) {
+                Utils.showAlert(e.message || 'Không tải được version.', 'danger');
             }
         }
 
