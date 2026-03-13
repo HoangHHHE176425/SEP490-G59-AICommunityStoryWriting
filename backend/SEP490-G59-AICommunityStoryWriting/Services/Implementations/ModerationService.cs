@@ -366,13 +366,22 @@ namespace Services.Implementations
                 return false;
             }
 
-            // Duyệt theo thứ tự: chương trước (order_index - 1) phải đã PUBLISHED.
-            if (chapter.order_index > 0)
+            // Duyệt theo thứ tự CHỈ khi publish lần đầu cho chapter.
+            // Nếu chapter đã từng PUBLISHED (published_at có giá trị) và giờ chỉ gửi version mới,
+            // thì bỏ qua bước kiểm tra thứ tự.
+            var isFirstTimePublish = !chapter.published_at.HasValue;
+            var currentIndex = chapter.order_index;
+            if (isFirstTimePublish && currentIndex > 0)
             {
                 var storyId = chapter.story_id ?? Guid.Empty;
-                var previous = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, chapter.order_index - 1);
-                if (previous == null || (previous.status ?? "").ToUpper() != "PUBLISHED")
-                    throw new InvalidOperationException($"Phải duyệt chương theo thứ tự. Chương {chapter.order_index} chưa được duyệt xuất bản, không thể duyệt chương {chapter.order_index + 1}.");
+                var previous = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, currentIndex - 1);
+                var previousStatus = (previous?.status ?? "").ToUpperInvariant();
+                if (previous == null || previousStatus != "PUBLISHED")
+                {
+                    var missingIndex = currentIndex - 1;
+                    throw new InvalidOperationException(
+                        $"Phải duyệt chương theo thứ tự. Cần duyệt chương có thứ tự {missingIndex} trước khi duyệt chương {currentIndex}.");
+                }
             }
 
             chapter.status = "PUBLISHED";
@@ -404,6 +413,7 @@ namespace Services.Implementations
             }
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
+            DataAccessObjects.DAOs.ChapterVersionDAO.MarkPendingVersionsAsPublished(chapterId);
             LogModeration("CHAPTER", chapterId, "APPROVED", moderatorId, null);
             var chapterNotif = NotifyChapterResult(chapter, "APPROVED", null);
             if (chapterNotif != null) _ = PushAuthorNotificationAsync(chapterNotif);
@@ -431,15 +441,6 @@ namespace Services.Implementations
             }
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId))
                 return false;
-
-            // Từ chối cũng theo thứ tự: chương trước (order_index - 1) phải đã PUBLISHED thì mới được xử lý (từ chối) chương này.
-            if (chapter.order_index > 0)
-            {
-                var storyId = chapter.story_id ?? Guid.Empty;
-                var previous = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, chapter.order_index - 1);
-                if (previous == null || (previous.status ?? "").ToUpper() != "PUBLISHED")
-                    throw new InvalidOperationException($"Phải duyệt/từ chối chương theo thứ tự. Chương {chapter.order_index} chưa được duyệt xuất bản, không thể xử lý chương {chapter.order_index + 1}.");
-            }
 
             chapter.status = "REJECTED";
             chapter.updated_at = DateTime.Now;
