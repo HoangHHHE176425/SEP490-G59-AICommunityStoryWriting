@@ -1,17 +1,14 @@
 import { Link } from 'react-router-dom';
-import { BookOpen, Share2, Bot, Users, Award, Shield } from 'lucide-react';
+import { Share2, Bot, Users, Award, Shield } from 'lucide-react';
 
 export function Footer() {
     return (
         <footer className="mt-16 bg-slate-900 border-t border-slate-700/50 py-12">
             <div className="max-w-[1280px] mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-8">
                 <div className="col-span-1 md:col-span-1">
-                    <div className="flex items-center gap-2 mb-6">
-                        <div className="size-8 bg-primary rounded-lg flex items-center justify-center text-white">
-                            <BookOpen className="w-5 h-5" />
-                        </div>
-                        <span className="text-xl font-bold tracking-tight text-white">CSW_AI</span>
-                    </div>
+                    <Link to="/home" className="flex items-center gap-2 mb-6 w-fit hover:opacity-90 transition-opacity">
+                        <img src="/logo.png" alt="CSW-AI" className="h-10 w-auto object-contain" />
+                    </Link>
                     <p className="text-sm text-slate-400 mb-6 leading-relaxed">
                         CSW-AI là nền tảng viết truyện cộng đồng đầu tiên tại Việt Nam tích hợp công nghệ trí tuệ nhân tạo, giúp
                         tác giả và độc giả kết nối, sáng tạo và chia sẻ những câu chuyện đầy cảm hứng.

@@ -1,4 +1,4 @@
-import { Search, Bell, Edit, PenLine, Menu, X, ChevronDown, Wallet, User, Library, LogOut } from 'lucide-react';
+import { Search, Bell, Edit, Menu, X, ChevronDown, Wallet, User, Library, LogOut } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -151,11 +151,8 @@ export function Header() {
         <header className="sticky top-0 z-50 w-full bg-slate-900/95 backdrop-blur-md border-b border-slate-700/50">
             <div className="max-w-[1280px] mx-auto px-4 h-16 flex items-center justify-between gap-8">
                 {/* Logo & Brand */}
-                <Link to="/home" className="flex items-center gap-2 shrink-0 hover:opacity-80 transition-opacity">
-                    <div className="size-9 bg-primary rounded-lg flex items-center justify-center text-white">
-                        <PenLine className="w-5 h-5" />
-                    </div>
-                    <h1 className="text-xl font-bold tracking-tight text-white">CSW_AI</h1>
+                <Link to="/home" className="flex items-center shrink-0 hover:opacity-90 transition-opacity" aria-label="CSW-AI - Trang chủ">
+                    <img src="/logo.png" alt="CSW-AI" className="h-12 w-auto object-contain" />
                 </Link>
 
                 {/* Search Bar (Center) - Tìm kiếm truyện, tác giả, thể loại */}

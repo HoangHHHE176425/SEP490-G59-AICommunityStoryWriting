@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { UserPlus, UserMinus, Gift, BookOpen, Quote, X, Eye, Star } from 'lucide-react';
+import { UserPlus, UserMinus, Gift, BookOpen, Quote, Eye, Star, Compass } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getProfileByUserId } from '../../api/account/accountApi';
@@ -25,7 +25,6 @@ export function AuthorDetail() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [isFollowing, setIsFollowing] = useState(false);
-    const [showDonateModal, setShowDonateModal] = useState(false);
 
     const loadData = useCallback(async () => {
         if (!authorId) {
@@ -135,14 +134,13 @@ export function AuthorDetail() {
                                             </>
                                         )}
                                     </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowDonateModal(true)}
+                                    <Link
+                                        to={authorId ? `/donate/${authorId}?name=${encodeURIComponent(displayName)}` : '#'}
                                         className="flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 shadow-md transition-all"
                                     >
                                         <Gift className="w-4 h-4" />
                                         Ủng hộ
-                                    </button>
+                                    </Link>
                                 </div>
 
                                 {/* Thành tích */}
@@ -392,7 +390,7 @@ export function AuthorDetail() {
                             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
                                 <div className="flex flex-col sm:flex-row">
                                     <div className="w-full sm:w-48 h-32 sm:h-auto bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center shrink-0">
-                                        <BookOpen className="w-12 h-12 text-slate-400" />
+                                        <Compass className="w-12 h-12 text-slate-400" />
                                     </div>
                                     <div className="p-5 flex-1">
                                         <h3 className="font-semibold text-slate-800 mb-1">Khám phá thêm truyện</h3>
@@ -412,53 +410,6 @@ export function AuthorDetail() {
                         </section>
                     </div>
                 )}
-
-            {/* Modal Ủng hộ (Donate) */}
-            {showDonateModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" aria-modal="true" role="dialog">
-                    <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 relative">
-                        <button
-                            type="button"
-                            onClick={() => setShowDonateModal(false)}
-                            className="absolute top-4 right-4 p-1 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                            aria-label="Đóng"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
-                                <Gift className="w-6 h-6 text-amber-600" />
-                            </div>
-                            <div>
-                                <h3 className="text-lg font-bold text-slate-900">Ủng hộ tác giả</h3>
-                                <p className="text-sm text-slate-500">Gửi sự ủng hộ đến {displayName}</p>
-                            </div>
-                        </div>
-                        <p className="text-sm text-slate-600 mb-6">
-                            Tính năng ủng hộ (donate) đang được phát triển. Bạn có thể theo dõi tác giả để nhận thông báo khi có truyện mới.
-                        </p>
-                        <div className="flex gap-3">
-                            <button
-                                type="button"
-                                onClick={() => setShowDonateModal(false)}
-                                className="flex-1 py-2.5 rounded-lg border border-slate-300 text-slate-700 font-medium hover:bg-slate-50"
-                            >
-                                Đóng
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setShowDonateModal(false);
-                                    if (!isFollowing) setIsFollowing(true);
-                                }}
-                                className="flex-1 py-2.5 rounded-lg bg-primary text-white font-medium hover:bg-primary/90"
-                            >
-                                Theo dõi tác giả
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
             </main>
 
             <Footer />
