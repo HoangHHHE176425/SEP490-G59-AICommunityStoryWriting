@@ -52,6 +52,23 @@ namespace AIStory.API.Controllers
             _logger = logger;
         }
 
+        /// <summary>Xem giới hạn sử dụng AI (mặc định 3 lần/24h). Trả về: limitPerDay, usedInWindow, remaining, resetsAtUtc.</summary>
+        [HttpGet("usage-limit")]
+        public IActionResult GetUsageLimit()
+        {
+            var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
+                return Unauthorized(new { message = "Vui lòng đăng nhập." });
+            var info = _rateLimitService.GetDailyLimitInfo(userId);
+            return Ok(new
+            {
+                limitPerDay = info.LimitPerDay,
+                usedInWindow = info.UsedInWindow,
+                remaining = info.Remaining,
+                resetsAtUtc = info.ResetsAtUtc
+            });
+        }
+
         /// <summary>Gợi ý 3 hướng đi khác nhau cho chương tiếp theo. Chỉ tác giả của truyện được gọi. Có giới hạn số lần gọi theo user (tránh 429).</summary>
         [HttpPost("suggest-next-chapter")]
         public async Task<IActionResult> SuggestNextChapter([FromBody] SuggestNextChapterRequest request, CancellationToken cancellationToken)
@@ -68,7 +85,7 @@ namespace AIStory.API.Controllers
                 Response.Headers.RetryAfter = retryAfterSeconds.ToString();
                 return StatusCode(429, new
                 {
-                    message = "Bạn đã gọi gợi ý chương quá nhiều lần. Vui lòng thử lại sau.",
+                    message = "Bạn đã đạt giới hạn sử dụng AI trong ngày (3 lần/24h). Vui lòng thử lại sau.",
                     retryAfterSeconds
                 });
             }
@@ -119,7 +136,7 @@ namespace AIStory.API.Controllers
                 Response.Headers.RetryAfter = retryAfterSeconds.ToString();
                 return StatusCode(429, new
                 {
-                    message = "Bạn đã gọi AI quá nhiều lần. Vui lòng thử lại sau.",
+                    message = "Bạn đã đạt giới hạn sử dụng AI trong ngày (3 lần/24h). Vui lòng thử lại sau.",
                     retryAfterSeconds
                 });
             }
@@ -170,7 +187,7 @@ namespace AIStory.API.Controllers
                 Response.Headers.RetryAfter = retryAfterSeconds.ToString();
                 return StatusCode(429, new
                 {
-                    message = "Bạn đã gọi AI quá nhiều lần. Vui lòng thử lại sau.",
+                    message = "Bạn đã đạt giới hạn sử dụng AI trong ngày (3 lần/24h). Vui lòng thử lại sau.",
                     retryAfterSeconds
                 });
             }

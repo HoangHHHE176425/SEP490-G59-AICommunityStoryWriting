@@ -1,5 +1,23 @@
 # Ý tưởng: Kiểm tra chương tác giả viết có giống chương AI sinh ra hay không
 
+## AI Similarity Check – Mô tả và công nghệ sử dụng
+
+**Mô tả:** The system compares the author's submitted chapter with AI-generated drafts created by the platform during the writing process. Semantic similarity is calculated using text embeddings and cosine similarity. If the similarity score exceeds a configurable threshold (e.g. 70%), the system marks the chapter as potentially AI-assisted (trường `isSimilar` trong response và có thể lưu phần trăm vào `chapters.ai_similarity_percent` khi chương đã PUBLISHED).
+
+**Công nghệ sử dụng (Technology used):**
+
+| Thành phần | Công nghệ / Chi tiết |
+|------------|----------------------|
+| **Text embeddings** | **Ollama** (mặc định): API `POST /api/embed`, model **nomic-embed-text** — hoặc **OpenAI-compatible** (vd. OpenAI, Azure): `POST /v1/embeddings`, model cấu hình (vd. text-embedding-3-small). Cấu hình: `AI:EmbeddingBaseUrl`, `AI:EmbeddingModel`, `AI:EmbeddingProvider`, `AI:EmbeddingApiKey` (nếu dùng OpenAI). |
+| **Vector biểu diễn** | Mỗi đoạn văn → vector số thực (float[]) độ dài cố định (nomic-embed-text: 768 chiều; OpenAI tùy model). |
+| **Độ tương đồng ngữ nghĩa** | **Cosine similarity** giữa hai vector embedding: cos(A, B) = (A·B) / (‖A‖ × ‖B‖), quy về thang 0–100%. |
+| **Fallback khi không có embedding** | **Jaccard similarity** theo từ (word-level): tách từ, tính intersection/union của hai tập từ → %. Không cần API, chạy local. |
+| **Ngưỡng “AI-assisted”** | Cấu hình `ChapterCompare:SimilarityThresholdPercent` trong appsettings (mặc định **85%**). Nếu similarity ≥ ngưỡng → `isSimilar = true` (đánh dấu có thể có đóng góp AI). Có thể đổi thành 70% hoặc giá trị khác. |
+| **Lưu kết quả** | Khi chương đã **PUBLISHED** và gọi **POST /api/ai/compare-chapter**, điểm similarity được ghi vào cột **chapters.ai_similarity_percent** (decimal 0–100). |
+| **Backend / API** | .NET (C#), service **ChapterCompareService**, helper **EmbeddingHelper**; endpoint **POST /api/ai/compare-chapter** (JWT, role AUTHOR hoặc ADMIN). |
+
+---
+
 ## Mục đích
 
 - Cho phép hệ thống (hoặc tác giả) biết **nội dung chương hiện tại** (tác giả viết/chỉnh sửa) **giống đến mức nào** so với **bản nháp do AI sinh ra** cho chương đó.
@@ -128,6 +146,13 @@ Hệ thống cần **một con số từ 0% đến 100%** để biết hai đo�
 
 **Embedding là gì?**  
 Mỗi đoạn văn được chuyển thành **một dãy số** (vector) thể hiện “nghĩa” của đoạn đó. Hai đoạn nghĩa càng gần thì dãy số càng giống nhau.
+
+**Embedding biến đoạn văn thành vector kiểu gì?**  
+- **Đầu vào:** Một đoạn văn (chuỗi ký tự), ví dụ *"Lan thức dậy sớm. Cô nhìn ra cửa sổ."*  
+- **Đầu ra:** Một **vector** = mảng số thực (float) có **độ dài cố định** do model quy định (vd. model **nomic-embed-text** của Ollama thường ra **768** số; OpenAI text-embedding-3-small ra 1536 số).  
+- **Cách làm:** Backend **gửi đoạn văn lên API embedding** (Ollama: `POST /api/embed`, hoặc OpenAI-compatible: `POST /embeddings`). Model embedding là **mạng neural** đã được huấn luyện sẵn: nó đọc cả đoạn văn, “nén” thông tin nghĩa thành một điểm trong không gian nhiều chiều (mỗi chiều là một số). Model được train sao cho hai đoạn **nghĩa gần nhau** thì vector **gần nhau** (góc nhỏ, cosine lớn), đoạn nghĩa khác thì vector xa nhau.  
+- **Không có công thức tường minh** từ chữ → từng số: từng chiều trong vector không gắn nhãn “chiều 1 = chủ đề A, chiều 2 = chủ đề B” mà model tự học; ta chỉ dùng cả vector để so sánh (cosine) với vector đoạn khác.  
+- **Trong dự án:** `EmbeddingHelper.GetEmbeddingAsync(text, ...)` gọi API (Ollama hoặc OpenAI), nhận về mảng `float[]` — đó chính là vector của đoạn văn.
 
 **Cosine similarity là gì?**  
 Từ hai dãy số (một của chương tác giả, một của chương AI), hệ thống tính góc giữa chúng:
@@ -326,6 +351,36 @@ Content-Type: application/json
 | ~95%            | true      | Chương tác giả **gần giống** bản AI (ít chỉnh sửa / gần như copy). |
 | ~30%            | false     | Chương tác giả **khác nhiều** so với bản AI (viết lại, sáng tạo thêm). |
 | hasBothContents = false | - | Chưa có bản AI để so (chưa dùng đồng sáng tác cho chương này, hoặc nội dung trống). |
+
+---
+
+### Ví dụ về `ai_similarity_percent` (cột trong bảng `chapters`)
+
+`ai_similarity_percent` là **phần trăm giống nhau** (0–100) giữa nội dung chương hiện tại (`chapters.content`) và bản AI giống nhất trong số các bản `ai_generated_content` của chương đó. Chỉ được **cập nhật** khi chương đã **PUBLISHED** và có gọi API **compare-chapter**.
+
+**Cách so sánh / lưu:**
+
+1. Tác giả publish chương → `chapters.status = 'PUBLISHED'`.
+2. Ai đó (tác giả hoặc hệ thống) gọi **POST /api/ai/compare-chapter** với `chapterId` của chương đó.
+3. Backend so sánh `chapters.content` với **từng** bản `ai_generated_content` của chương, lấy **điểm cao nhất** (similarity %).
+4. Backend ghi điểm đó vào **`chapters.ai_similarity_percent`** (chỉ khi chương đang PUBLISHED). Response API vẫn trả `similarityScore` giống giá trị đó.
+
+**Ví dụ số liệu:**
+
+| Tình huống | chapters.content (tóm tắt) | Bản AI so sánh | ai_similarity_percent (sau compare) | Ý nghĩa |
+|------------|----------------------------|----------------|--------------------------------------|--------|
+| Tác giả gần như giữ nguyên bản AI | *"Sáng hôm sau, Lan thức dậy sớm. Cô nhìn ra cửa sổ..."* | Giống gần như từng chữ | **96.2** | Nội dung chương **rất giống** một bản AI → đóng góp AI cao. |
+| Tác giả sửa ít từ, thêm vài câu | *"Sáng hôm sau, Lan dậy sớm. Cô nhìn ra cửa sổ. Mặt trời vừa lên."* | Bản AI: *"Sáng hôm sau, Lan thức dậy sớm. Cô nhìn ra cửa sổ..."* | **88.0** | Vẫn **giống** (≥ 85%) → có thể hiển thị "Nội dung gần với bản AI". |
+| Tác giả viết lại hoàn toàn | *"Lan ngủ đến trưa. Tỉnh dậy bên bờ suối."* | Bản AI: *"Sáng hôm sau, Lan thức dậy sớm..."* | **28.5** | **Khác** so với bản AI → đóng góp tác giả nhiều, AI ít. |
+| Chương chưa gọi compare hoặc DRAFT | (bất kỳ) | - | **NULL** | Chưa có lần so sánh nào được lưu vào chương. |
+
+**Dùng trong ứng dụng:**
+
+- **Hiển thị cho tác giả:** Ví dụ "Chương này giống bản AI **92%**" hoặc "Độ tương đồng với bản nháp AI: **92%**".
+- **Lọc / báo cáo:** Ví dụ chỉ lấy các chương có `ai_similarity_percent >= 80` để xem chương nào “gần bản AI”.
+- **Ngưỡng:** Nếu `ai_similarity_percent >= 85` (hoặc ngưỡng cấu hình) → coi là **giống** bản AI (`isSimilar = true` khi gọi API).
+
+**Lưu ý:** Giá trị chỉ thay đổi khi có **lần gọi compare-chapter mới** (và chương đang PUBLISHED). Nếu tác giả sửa nội dung chương sau đó mà không gọi lại compare-chapter thì `ai_similarity_percent` vẫn là giá trị cũ.
 
 ---
 
