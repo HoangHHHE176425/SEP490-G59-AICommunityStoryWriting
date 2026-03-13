@@ -59,15 +59,17 @@ namespace DataAccessObjects.DAOs
                 .First(c => c.id == entity.id);
         }
 
-        /// <summary>Kiểm tra user đã like comment chưa (bảng comment_likes). Trả về false nếu bảng chưa có hoặc lỗi.</summary>
+        /// <summary>Kiểm tra user đã like comment chưa (dựa trên comment_reactions với type LIKE). Trả về false nếu lỗi.</summary>
         public static bool HasLiked(Guid userId, Guid commentId)
         {
             try
             {
                 using var context = new StoryPlatformDbContext();
-                var count = context.Database
-                    .SqlQuery<int>($"SELECT CAST(COUNT(1) AS int) FROM comment_likes WHERE user_id = {userId} AND comment_id = {commentId}")
-                    .FirstOrDefault();
+                var count = context.comment_reactions
+                    .AsNoTracking()
+                    .Count(r => r.user_id == userId
+                                && r.comment_id == commentId
+                                && r.reaction_type == comment_reactions.ReactionTypes.Like);
                 return count > 0;
             }
             catch
@@ -76,23 +78,36 @@ namespace DataAccessObjects.DAOs
             }
         }
 
-        /// <summary>Bật/tắt like: 1 user chỉ 1 like/comment. Trả về true = đã like, false = đã bỏ like. Dùng quan hệ many-to-many thay vì raw SQL.</summary>
+        /// <summary>
+        /// Bật/tắt like: 1 user chỉ 1 like/comment. Trả về true = đã like, false = đã bỏ like.
+        /// Dùng chung bảng comment_reactions với reaction_type = LIKE, không cần bảng commentsusers/comment_likes.
+        /// </summary>
         public static bool ToggleLike(Guid userId, Guid commentId)
         {
             using var context = new StoryPlatformDbContext();
-            var user = context.users.Include(u => u.comment).FirstOrDefault(u => u.id == userId);
             var comment = context.comments.FirstOrDefault(c => c.id == commentId);
-            if (user == null || comment == null) return false;
+            if (comment == null) return false;
 
-            var alreadyLiked = user.comment.Any(c => c.id == commentId);
+            var existing = context.comment_reactions
+                .FirstOrDefault(r => r.user_id == userId
+                                     && r.comment_id == commentId
+                                     && r.reaction_type == comment_reactions.ReactionTypes.Like);
+
+            var alreadyLiked = existing != null;
             if (alreadyLiked)
             {
-                user.comment.Remove(comment);
+                context.comment_reactions.Remove(existing);
                 comment.likes_count = Math.Max(0, (comment.likes_count ?? 1) - 1);
             }
             else
             {
-                user.comment.Add(comment);
+                context.comment_reactions.Add(new comment_reactions
+                {
+                    user_id = userId,
+                    comment_id = commentId,
+                    reaction_type = comment_reactions.ReactionTypes.Like,
+                    created_at = DateTime.Now
+                });
                 comment.likes_count = (comment.likes_count ?? 0) + 1;
             }
             context.SaveChanges();

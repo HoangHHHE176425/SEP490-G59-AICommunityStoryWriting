@@ -19,6 +19,16 @@ public partial class chapter_versions
 
     public DateTime? created_at { get; set; }
 
+    public string status { get; set; } = null!;
+
+    public Guid? reviewed_by { get; set; }
+
+    public DateTime? reviewed_at { get; set; }
+
+    public string? rejection_reason { get; set; }
+
+    public string? title_snapshot { get; set; }
+
     public virtual users? author { get; set; }
 
     public virtual chapters? chapter { get; set; }

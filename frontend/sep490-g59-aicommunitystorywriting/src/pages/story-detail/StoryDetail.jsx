@@ -103,6 +103,8 @@ export function StoryDetail() {
                         id: storyRes?.id ?? storyRes?.Id,
                         title: storyRes?.title ?? storyRes?.Title ?? 'Không có tiêu đề',
                         author: {
+                            id: authorId,
+                            userId: authorId,
                             name: storyRes?.authorName ?? storyRes?.AuthorName ?? 'Ẩn danh',
                             avatar: '',
                             followers: 0
@@ -148,6 +150,8 @@ export function StoryDetail() {
                         .then((profile) => {
                             if (cancelled) return;
                             storyPayload.author = {
+                                id: profile.id ?? authorId,
+                                userId: profile.id ?? authorId,
                                 name: profile.displayName ?? storyPayload.author.name,
                                 avatar: profile.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '',
                                 followers: Number(profile.stats?.totalReads ?? profile.stats?.TotalReads ?? 0) || 0

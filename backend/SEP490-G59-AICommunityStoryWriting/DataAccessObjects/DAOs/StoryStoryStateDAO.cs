@@ -9,7 +9,7 @@ public static class StoryStoryStateDAO
     public static story_story_state? GetByStoryId(Guid storyId)
     {
         using var context = new StoryPlatformDbContext();
-        return context.story_story_states
+        return context.story_story_state
             .AsNoTracking()
             .FirstOrDefault(s => s.story_id == storyId);
     }
@@ -17,7 +17,7 @@ public static class StoryStoryStateDAO
     public static void Upsert(Guid storyId, string? stateSnapshotJson)
     {
         using var context = new StoryPlatformDbContext();
-        var existing = context.story_story_states.FirstOrDefault(s => s.story_id == storyId);
+        var existing = context.story_story_state.FirstOrDefault(s => s.story_id == storyId);
         if (existing != null)
         {
             existing.state_snapshot_json = stateSnapshotJson;
@@ -25,7 +25,7 @@ public static class StoryStoryStateDAO
         }
         else
         {
-            context.story_story_states.Add(new story_story_state
+            context.story_story_state.Add(new story_story_state
             {
                 id = Guid.NewGuid(),
                 story_id = storyId,
@@ -39,8 +39,8 @@ public static class StoryStoryStateDAO
     public static void DeleteByStoryId(Guid storyId)
     {
         using var context = new StoryPlatformDbContext();
-        var list = context.story_story_states.Where(s => s.story_id == storyId).ToList();
-        context.story_story_states.RemoveRange(list);
+        var list = context.story_story_state.Where(s => s.story_id == storyId).ToList();
+        context.story_story_state.RemoveRange(list);
         context.SaveChanges();
     }
 }

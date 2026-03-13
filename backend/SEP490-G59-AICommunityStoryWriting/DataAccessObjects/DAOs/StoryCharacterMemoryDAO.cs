@@ -9,7 +9,7 @@ public static class StoryCharacterMemoryDAO
     public static List<story_character_memory> GetByStoryId(Guid storyId)
     {
         using var context = new StoryPlatformDbContext();
-        return context.story_character_memories
+        return context.story_character_memory
             .AsNoTracking()
             .Where(c => c.story_id == storyId)
             .OrderBy(c => c.character_name)
@@ -19,7 +19,7 @@ public static class StoryCharacterMemoryDAO
     public static void Upsert(Guid storyId, string characterName, string? stateJson)
     {
         using var context = new StoryPlatformDbContext();
-        var existing = context.story_character_memories
+        var existing = context.story_character_memory
             .FirstOrDefault(c => c.story_id == storyId && c.character_name == characterName);
         if (existing != null)
         {
@@ -28,7 +28,7 @@ public static class StoryCharacterMemoryDAO
         }
         else
         {
-            context.story_character_memories.Add(new story_character_memory
+            context.story_character_memory.Add(new story_character_memory
             {
                 id = Guid.NewGuid(),
                 story_id = storyId,
@@ -43,8 +43,8 @@ public static class StoryCharacterMemoryDAO
     public static void DeleteByStoryId(Guid storyId)
     {
         using var context = new StoryPlatformDbContext();
-        var list = context.story_character_memories.Where(c => c.story_id == storyId).ToList();
-        context.story_character_memories.RemoveRange(list);
+        var list = context.story_character_memory.Where(c => c.story_id == storyId).ToList();
+        context.story_character_memory.RemoveRange(list);
         context.SaveChanges();
     }
 }

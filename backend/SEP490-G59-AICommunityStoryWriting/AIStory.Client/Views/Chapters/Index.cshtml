@@ -313,6 +313,7 @@
                     <td>${Utils.formatDate(chapter.createdAt)}</td>
                     <td>
                         ${chapter.status === 'REJECTED' ? `<button class="btn btn-sm btn-outline-danger" onclick="showChapterRejectionReason('${chapter.id}')" title="Xem lý do từ chối"><i class="bi bi-chat-left-quote"></i> Lý do</button> ` : ''}
+                        <a href="/Chapters/Details/${chapter.id}" class="btn btn-sm btn-outline-secondary" title="Phiên bản"><i class="bi bi-link-45deg"></i></a>
                         <button class="btn btn-sm btn-info" onclick="viewChapter('${chapter.id}')" title="Xem">
                             <i class="bi bi-eye"></i>
                         </button>
