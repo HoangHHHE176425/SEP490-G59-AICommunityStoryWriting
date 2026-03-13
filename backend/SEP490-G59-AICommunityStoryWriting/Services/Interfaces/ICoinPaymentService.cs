@@ -11,6 +11,8 @@ namespace Services.Interfaces
         Task<CreatePayOSPaymentResponseDto> CreatePayOSPaymentAsync(Guid userId, CreatePayOSPaymentRequestDto request, CancellationToken cancellationToken = default);
         Task<string> ProcessPayOSWebhookAsync(string rawBody, CancellationToken cancellationToken = default);
         Task<CoinOrderDto> SyncMyPayOSOrderAsync(Guid userId, Guid coinOrderId, CancellationToken cancellationToken = default);
+
+        Task<DonateResponseDto> DonateAsync(Guid senderUserId, Guid receiverUserId, int amount, string? message, CancellationToken cancellationToken = default);
     }
 }
 

@@ -58,3 +58,27 @@ export async function syncMyPayOSOrder(orderId) {
   }
 }
 
+/**
+ * Ủng hộ coin cho tác giả.
+ * @param {{ authorId: string, amount: number, message?: string }} payload
+ */
+export async function donateToAuthor({ authorId, amount, message }) {
+  if (!authorId) {
+    return { success: false, message: 'Thiếu thông tin tác giả để ủng hộ.' };
+  }
+  if (!amount || amount <= 0) {
+    return { success: false, message: 'Số coin ủng hộ phải lớn hơn 0.' };
+  }
+
+  try {
+    const res = await axiosInstance.post('/coins/donate', {
+      authorId,
+      amount,
+      message,
+    });
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, message: getErrorMessage(err) };
+  }
+}
+
