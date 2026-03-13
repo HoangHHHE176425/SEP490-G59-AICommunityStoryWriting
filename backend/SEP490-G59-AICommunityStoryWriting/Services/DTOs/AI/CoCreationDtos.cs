@@ -30,4 +30,10 @@ public class CoCreationResponse
 
     /// <summary>Feedback cuối từ Agent 3 nếu vẫn chưa đạt (để tác giả tham khảo).</summary>
     public string? ReviewFeedback { get; set; }
+
+    /// <summary>ID chương nháp (DRAFT) vừa tạo — mỗi lần co-create thành công tạo một chương + một bản ai_generated_content.</summary>
+    public Guid? ChapterId { get; set; }
+
+    /// <summary>ID bản ghi ai_generated_content vừa lưu (gắn với ChapterId).</summary>
+    public Guid? AiGeneratedContentId { get; set; }
 }
