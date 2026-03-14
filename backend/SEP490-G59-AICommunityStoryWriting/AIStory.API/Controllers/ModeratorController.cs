@@ -316,5 +316,18 @@ namespace AIStory.API.Controllers
                 return NotFound(new { message = "Version không tồn tại." });
             return Ok(v);
         }
+
+        /// <summary>Nội dung chapter cho màn duyệt: bản gốc đã xuất bản + bản version chờ duyệt (khi chapter đã PUBLISHED và có version gửi chỉnh sửa). Moderator dùng để xem 2 phiên bản.</summary>
+        [HttpGet("chapters/{id:guid}/review-content")]
+        public IActionResult GetChapterReviewContent(Guid id)
+        {
+            var moderatorId = GetCurrentUserId();
+            if (!moderatorId.HasValue)
+                return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+            var content = _moderationService.GetChapterReviewContent(id);
+            if (content == null)
+                return NotFound(new { message = "Chapter không tồn tại." });
+            return Ok(content);
+        }
     }
 }

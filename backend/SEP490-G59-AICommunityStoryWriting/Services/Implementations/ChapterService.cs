@@ -169,7 +169,14 @@ namespace Services.Implementations
                     (c.title != null && c.title.ToLower().Contains(searchLower)));
             }
 
-            if (query.StatusIn != null && query.StatusIn.Count > 0)
+            if (query.PendingVersionChapterIds != null && query.PendingVersionChapterIds.Count > 0)
+            {
+                var ids = query.PendingVersionChapterIds;
+                chaptersQuery = chaptersQuery.Where(c =>
+                    c.status == "PENDING_REVIEW" ||
+                    (c.status == "PUBLISHED" && ids.Contains(c.id)));
+            }
+            else if (query.StatusIn != null && query.StatusIn.Count > 0)
             {
                 var statusList = query.StatusIn;
                 chaptersQuery = chaptersQuery.Where(c => c.status != null && statusList.Contains(c.status));

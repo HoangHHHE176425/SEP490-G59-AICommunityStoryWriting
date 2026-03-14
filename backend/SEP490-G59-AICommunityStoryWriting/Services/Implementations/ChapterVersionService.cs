@@ -110,16 +110,15 @@ namespace Services.Implementations
             v.status = "PENDING_REVIEW";
             _versionRepository.Update(v);
 
-            chapter.status = "PENDING_REVIEW";
             chapter.updated_at = DateTime.UtcNow;
-
             if (chapterStatusUpper == "PUBLISHED")
             {
-                // Chapter đã xuất bản, đang gửi version chỉnh sửa: không ghi đè nội dung chapter để moderator thấy bản gốc và so sánh với version.
+                // Chapter đã xuất bản: giữ nguyên trạng thái PUBLISHED, chỉ version chuyển sang PENDING_REVIEW. Không ghi đè nội dung chapter để moderator thấy bản gốc và so sánh với version.
             }
             else
             {
-                // Chapter đang DRAFT: đồng bộ title + content từ version sang chapter để moderator xem nội dung gửi duyệt.
+                // Chapter đang DRAFT: chuyển chapter sang PENDING_REVIEW và đồng bộ title + content từ version để moderator xem nội dung gửi duyệt.
+                chapter.status = "PENDING_REVIEW";
                 if (!string.IsNullOrWhiteSpace(v.title_snapshot))
                     chapter.title = v.title_snapshot;
                 chapter.content = v.content_snapshot;
@@ -148,8 +147,10 @@ namespace Services.Implementations
             v.status = "DRAFT";
             _versionRepository.Update(v);
 
-            chapter.status = "DRAFT";
             chapter.updated_at = DateTime.UtcNow;
+            // Chỉ đưa chapter về DRAFT nếu nó đang PENDING_REVIEW (do gửi version từ chapter DRAFT). Nếu chapter đang PUBLISHED thì giữ nguyên.
+            if (string.Equals(chapter.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                chapter.status = "DRAFT";
             _chapterRepository.Update(chapter);
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, v.chapter_id.Value);

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar } from 'lucide-react';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
-import { approveStory, approveChapter, rejectStory, rejectChapter } from '../../../api/moderator/moderatorApi';
+import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent } from '../../../api/moderator/moderatorApi';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { useToast } from '../../author/story-editor/Toast';
 
@@ -42,6 +42,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [chapters, setChapters] = useState([]);
     const [chaptersLoading, setChaptersLoading] = useState(true);
     const [chapterContents, setChapterContents] = useState({});
+    /** Khi có: moderator xem 2 phiên bản (bản gốc + version chờ duyệt) cho chapter đã PUBLISHED có version gửi chỉnh sửa. */
+    const [chapterReviewContent, setChapterReviewContent] = useState({});
     const [selectedChapter, setSelectedChapter] = useState(null);
     const [showRejectForm, setShowRejectForm] = useState(false);
     const [showRejectConfirm, setShowRejectConfirm] = useState(false);
@@ -115,6 +117,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             setChapters([]);
             setSelectedChapter(null);
             setChapterContents({});
+            setChapterReviewContent({});
             // Tab Đã duyệt / Từ chối: item là story_group có sẵn danh sách chương (đã duyệt hoặc bị từ chối) — chỉ hiển thị các chương đó, không gọi API lấy hết chương.
             if (publication?.type === 'story_group' && Array.isArray(publication?.chapters) && publication.chapters.length > 0) {
                 const mapped = publication.chapters.map(mapStoryGroupChapterToModal);
@@ -143,13 +146,24 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
 
     const loadChapterContent = useCallback(async (chapterId) => {
         try {
-            const data = await getChapterById(chapterId);
+            const data = await getChapterReviewContent(chapterId);
+            setChapterReviewContent((prev) => ({ ...prev, [chapterId]: data }));
             setChapterContents((prev) => ({
                 ...prev,
-                [chapterId]: data?.content ?? data?.Content ?? '',
+                [chapterId]: data?.originalContent ?? data?.OriginalContent ?? '',
             }));
         } catch {
-            setChapterContents((prev) => ({ ...prev, [chapterId]: '(Không tải được nội dung)' }));
+            try {
+                const data = await getChapterById(chapterId);
+                setChapterReviewContent((prev) => ({ ...prev, [chapterId]: null }));
+                setChapterContents((prev) => ({
+                    ...prev,
+                    [chapterId]: data?.content ?? data?.Content ?? '',
+                }));
+            } catch {
+                setChapterReviewContent((prev) => ({ ...prev, [chapterId]: null }));
+                setChapterContents((prev) => ({ ...prev, [chapterId]: '(Không tải được nội dung)' }));
+            }
         }
     }, []);
 
@@ -212,6 +226,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 delete next[selectedChapter.id];
                 return next;
             });
+            setChapterReviewContent((prev) => {
+                const next = { ...prev };
+                delete next[selectedChapter.id];
+                return next;
+            });
             onRefresh?.();
             if (remaining.length === 0) {
                 onApprove(publication.id);
@@ -243,6 +262,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 setChapters(remaining);
                 setSelectedChapter(remaining[0] ?? null);
                 setChapterContents((prev) => {
+                    const next = { ...prev };
+                    delete next[selectedChapter.id];
+                    return next;
+                });
+                setChapterReviewContent((prev) => {
                     const next = { ...prev };
                     delete next[selectedChapter.id];
                     return next;
@@ -569,16 +593,63 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                 padding: '2rem',
                                                 backgroundColor: '#ffffff'
                                             }}>
-                                                <div style={{
-                                                    maxWidth: '800px',
-                                                    margin: '0 auto',
-                                                    fontSize: '1rem',
-                                                    lineHeight: 1.8,
-                                                    color: '#1e293b',
-                                                    whiteSpace: 'pre-wrap'
-                                                }}>
-                                                    {chapterContents[selectedChapter.id] ?? 'Đang tải nội dung...'}
-                                                </div>
+                                                {(() => {
+                                                    const review = chapterReviewContent[selectedChapter.id];
+                                                    const hasPendingVersion = review?.hasPendingVersion ?? review?.HasPendingVersion;
+                                                    const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
+                                                    const contentStyle = {
+                                                        maxWidth: '800px',
+                                                        margin: '0 auto',
+                                                        fontSize: '1rem',
+                                                        lineHeight: 1.8,
+                                                        color: '#1e293b',
+                                                        whiteSpace: 'pre-wrap'
+                                                    };
+                                                    if (hasPendingVersion && pendingVersions.length > 0) {
+                                                        const v = pendingVersions[0];
+                                                        const versionTitle = v?.titleSnapshot ?? v?.TitleSnapshot ?? 'Version gửi duyệt';
+                                                        const versionContent = v?.contentSnapshot ?? v?.ContentSnapshot ?? '';
+                                                        return (
+                                                            <>
+                                                                <div style={{ marginBottom: '2rem' }}>
+                                                                    <div style={{
+                                                                        fontSize: '0.75rem',
+                                                                        fontWeight: 700,
+                                                                        color: '#64748b',
+                                                                        textTransform: 'uppercase',
+                                                                        letterSpacing: '0.05em',
+                                                                        marginBottom: '0.75rem'
+                                                                    }}>
+                                                                        1. Bản chapter gốc đã xuất bản
+                                                                    </div>
+                                                                    <div style={contentStyle}>
+                                                                        {review?.originalContent ?? review?.OriginalContent ?? chapterContents[selectedChapter.id] ?? '—'}
+                                                                    </div>
+                                                                </div>
+                                                                <div>
+                                                                    <div style={{
+                                                                        fontSize: '0.75rem',
+                                                                        fontWeight: 700,
+                                                                        color: '#64748b',
+                                                                        textTransform: 'uppercase',
+                                                                        letterSpacing: '0.05em',
+                                                                        marginBottom: '0.75rem'
+                                                                    }}>
+                                                                        2. Bản version gửi chỉnh sửa {versionTitle ? `— ${versionTitle}` : ''}
+                                                                    </div>
+                                                                    <div style={contentStyle}>
+                                                                        {versionContent || '—'}
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    }
+                                                    return (
+                                                        <div style={contentStyle}>
+                                                            {chapterContents[selectedChapter.id] ?? 'Đang tải nội dung...'}
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </>
                                     ) : null}

@@ -114,3 +114,14 @@ export async function approveChapter(chapterId) {
 export async function rejectChapter(chapterId, reason) {
     await axiosInstance.post(`/moderator/chapters/${chapterId}/reject`, { reason });
 }
+
+/**
+ * Nội dung chapter cho màn duyệt: bản gốc đã xuất bản + bản version chờ duyệt (khi chapter đã PUBLISHED và có version gửi chỉnh sửa).
+ * Dùng để moderator xem 2 phiên bản (chỉnh sửa sau báo cáo vi phạm).
+ * @param {string} chapterId - Guid chapter
+ * @returns {Promise<{ chapterId, chapterStatus, originalTitle, originalContent, hasPendingVersion, pendingVersions }>}
+ */
+export async function getChapterReviewContent(chapterId) {
+    const res = await axiosInstance.get(`/moderator/chapters/${chapterId}/review-content`);
+    return res.data;
+}
