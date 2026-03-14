@@ -1,18 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle, ChevronDown, ChevronRight, GitBranch } from 'lucide-react';
-
-/** Data mẫu để hiển thị danh sách version (sau sẽ thay bằng API). */
-function getMockVersionsForChapter(chapterId) {
-    const now = new Date();
-    return [
-        { id: `mock-v1-${chapterId}`, version_number: 1, change_summary: 'Bản chỉnh sửa lỗi chính tả', created_at: new Date(now - 86400000 * 2).toISOString(), status: 'PUBLISHED' },
-        { id: `mock-v2-${chapterId}`, version_number: 2, change_summary: 'Bổ sung đoạn mô tả nhân vật', created_at: new Date(now - 86400000).toISOString(), status: 'PUBLISHED' },
-        { id: `mock-v3-${chapterId}`, version_number: 3, change_summary: 'Chỉnh sửa nội dung theo góp ý', created_at: now.toISOString(), status: 'DRAFT' },
-    ];
-}
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason } from '../../api/chapter/chapterApi';
+import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason, getChapterVersions, deleteChapterVersion, submitChapterVersion } from '../../api/chapter/chapterApi';
 import { getStoryRejectionReason } from '../../api/story/storyApi';
 import { updateStory } from '../../api/story/storyApi';
 import { Pagination } from '../../components/pagination/Pagination';
@@ -63,7 +53,7 @@ function mapChapterFromApi(item) {
 
 const CHAPTERS_PAGE_SIZE = 10;
 
-export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter, onAddVersion }) {
+export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter, onAddVersion, onEditVersion }) {
     const storyId = story?.id ?? story?.Id;
     const [chapters, setChapters] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -79,8 +69,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
     const [pendingOrderIndices, setPendingOrderIndices] = useState(new Set());
     /** Chương đang được mở rộng để xem/tạo version (click vào hàng chương). */
     const [expandedChapterId, setExpandedChapterId] = useState(null);
-    /** Danh sách version theo chapterId (sau sẽ load từ API). */
-    const [chapterVersionsMap] = useState({});
+    /** Danh sách version theo chapterId (load từ API khi mở panel). */
+    const [chapterVersionsMap, setChapterVersionsMap] = useState({});
+    /** ChapterId đang load versions (để hiển thị loading). */
+    const [loadingVersionsForChapterId, setLoadingVersionsForChapterId] = useState(null);
 
     const loadChapters = useCallback((page = 1, options = {}) => {
         if (!storyId) return;
@@ -205,6 +197,26 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
         setCurrentPage(page);
         loadChapters(page);
     };
+
+    /** Load danh sách version của một chapter (gọi API). */
+    const loadVersionsForChapter = useCallback((chapterId) => {
+        if (!chapterId) return;
+        setLoadingVersionsForChapterId(chapterId);
+        getChapterVersions(chapterId)
+            .then((list) => {
+                const arr = Array.isArray(list) ? list : [];
+                setChapterVersionsMap((prev) => ({ ...prev, [chapterId]: arr }));
+            })
+            .catch(() => setChapterVersionsMap((prev) => ({ ...prev, [chapterId]: [] })))
+            .finally(() => setLoadingVersionsForChapterId(null));
+    }, []);
+
+    /** Khi mở panel version của một chương thì load versions từ API (defer để tránh setState đồng bộ trong effect). */
+    useEffect(() => {
+        if (!expandedChapterId) return;
+        const tid = setTimeout(() => loadVersionsForChapter(expandedChapterId), 0);
+        return () => clearTimeout(tid);
+    }, [expandedChapterId, loadVersionsForChapter]);
 
     const [actioningChapterId, setActioningChapterId] = useState(null);
     const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, chapterId: null });
@@ -552,9 +564,15 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                             ) : (
                                 chapters.map((chapter, index) => {
                                     const isExpanded = expandedChapterId === chapter.id;
-                                    const versions = (chapterVersionsMap[chapter.id]?.length > 0)
-                                        ? chapterVersionsMap[chapter.id]
-                                        : getMockVersionsForChapter(chapter.id);
+                                    const versionsRaw = chapterVersionsMap[chapter.id] ?? [];
+                                    const versions = versionsRaw.map((v) => ({
+                                        id: v.id ?? v.Id,
+                                        version_number: v.versionNumber ?? v.version_number,
+                                        change_summary: v.titleSnapshot ?? v.change_summary ?? '—',
+                                        created_at: v.createdAt ?? v.created_at,
+                                        status: v.status ?? 'DRAFT',
+                                    }));
+                                    const versionsLoading = loadingVersionsForChapterId === chapter.id;
                                     const toggleExpand = (e) => {
                                         if (e.target.closest('button')) return;
                                         setExpandedChapterId((prev) => (prev === chapter.id ? null : chapter.id));
@@ -859,7 +877,11 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                         </button>
                                                     </div>
 
-                                                    {versions.length === 0 ? (
+                                                    {versionsLoading ? (
+                                                        <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0, padding: '1.5rem', textAlign: 'center' }}>
+                                                            Đang tải danh sách version...
+                                                        </p>
+                                                    ) : versions.length === 0 ? (
                                                         <p style={{
                                                             fontSize: '0.875rem',
                                                             color: '#64748b',
@@ -922,7 +944,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                                                                             <button
                                                                                 type="button"
-                                                                                onClick={(e) => { e.stopPropagation(); }}
+                                                                                onClick={(e) => { e.stopPropagation(); onEditVersion?.(chapter, v); }}
                                                                                 title="Chỉnh sửa version"
                                                                                 style={{
                                                                                     display: 'inline-flex',
@@ -939,24 +961,32 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                 }}
                                                                             >
                                                                                 <Pencil size={12} />
-                                                                                Sửa
+                                                                                Chỉnh sửa
                                                                             </button>
                                                                             <button
                                                                                 type="button"
-                                                                                onClick={(e) => { e.stopPropagation(); }}
-                                                                                title="Xóa version"
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    if (!v.id || v.status === 'PUBLISHED' || v.status === 'published') return;
+                                                                                    if (!window.confirm('Bạn có chắc muốn xóa version này?')) return;
+                                                                                    deleteChapterVersion(chapter.id, v.id)
+                                                                                        .then(() => loadVersionsForChapter(chapter.id))
+                                                                                        .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Xóa version thất bại'));
+                                                                                }}
+                                                                                title="Xóa version (chỉ DRAFT)"
+                                                                                disabled={vStatus === 'published'}
                                                                                 style={{
                                                                                     display: 'inline-flex',
                                                                                     alignItems: 'center',
                                                                                     gap: '0.25rem',
                                                                                     padding: '0.35rem 0.65rem',
-                                                                                    backgroundColor: '#fff',
+                                                                                    backgroundColor: vStatus === 'published' ? '#f1f5f9' : '#fff',
                                                                                     border: '1px solid #fecaca',
                                                                                     borderRadius: '9999px',
                                                                                     fontSize: '0.75rem',
                                                                                     fontWeight: 600,
-                                                                                    color: '#dc2626',
-                                                                                    cursor: 'pointer',
+                                                                                    color: vStatus === 'published' ? '#94a3b8' : '#dc2626',
+                                                                                    cursor: vStatus === 'published' ? 'not-allowed' : 'pointer',
                                                                                 }}
                                                                             >
                                                                                 <Trash2 size={12} />
@@ -964,8 +994,15 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                             </button>
                                                                             <button
                                                                                 type="button"
-                                                                                onClick={(e) => { e.stopPropagation(); }}
-                                                                                title={vStatus === 'published' ? 'Đã xuất bản' : 'Xuất bản version'}
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    if (vStatus === 'published') return;
+                                                                                    submitChapterVersion(chapter.id, v.id)
+                                                                                        .then(() => loadVersionsForChapter(chapter.id))
+                                                                                        .then(() => loadChapters(currentPage, { silent: true }))
+                                                                                        .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Gửi duyệt version thất bại'));
+                                                                                }}
+                                                                                title={vStatus === 'published' ? 'Đã xuất bản' : 'Gửi duyệt version'}
                                                                                 disabled={vStatus === 'published'}
                                                                                 style={{
                                                                                     display: 'inline-flex',

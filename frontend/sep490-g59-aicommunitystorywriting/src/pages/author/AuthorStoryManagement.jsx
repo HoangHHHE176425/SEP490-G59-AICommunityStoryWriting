@@ -8,7 +8,7 @@ import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
 import { createStory, updateStory, getStories, getStoryById, deleteStory } from '../../api/story/storyApi';
-import { createChapter, updateChapter, getChapterById, getChapters } from '../../api/chapter/chapterApi';
+import { createChapter, updateChapter, getChapterById, getChapters, createChapterVersion, updateChapterVersion, getChapterVersionById } from '../../api/chapter/chapterApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -86,6 +86,7 @@ export function AuthorStoryManagement({ onBack }) {
     const [currentChapter, setCurrentChapter] = useState(null);
     /** Chương gốc khi đang tạo version (mở editor giống tạo chương mới nhưng pre-fill từ chương này). */
     const [sourceChapterForVersion, setSourceChapterForVersion] = useState(null);
+    const [editingVersion, setEditingVersion] = useState(null);
     const [stories, setStories] = useState([]);
     const [storiesLoading, setStoriesLoading] = useState(true);
     const [storiesError, setStoriesError] = useState(null);
@@ -334,9 +335,41 @@ export function AuthorStoryManagement({ onBack }) {
             setCurrentStory(story);
             setCurrentChapter(null);
             setSourceChapterForVersion(mapped);
+            setEditingVersion(null);
             setActiveView('addChapterVersion');
         } catch (error) {
             const msg = error?.response?.data?.message || error?.message || 'Không thể tải nội dung chương';
+            showToast(msg, 'error');
+        }
+    };
+
+    /** Mở editor chỉnh sửa version đã có: load chi tiết version rồi mở ChapterEditorPage ở chế độ edit version. */
+    const handleEditVersion = async (chapter, versionFromList) => {
+        const chapterId = chapter?.id ?? chapter?.Id;
+        const versionId = versionFromList?.id ?? versionFromList?.Id;
+        if (!chapterId || !versionId) {
+            showToast('Không tìm thấy chương hoặc version', 'error');
+            return;
+        }
+        try {
+            const detail = await getChapterVersionById(chapterId, versionId);
+            const sourceMapped = {
+                id: chapterId,
+                number: (chapter.orderIndex ?? chapter.order_index ?? 0) + 1,
+                title: chapter.title ?? chapter.name ?? `Chương ${(chapter.orderIndex ?? chapter.order_index ?? 0) + 1}`,
+            };
+            setSourceChapterForVersion(sourceMapped);
+            setEditingVersion({
+                id: detail.id ?? detail.Id,
+                chapterId,
+                titleSnapshot: detail.titleSnapshot ?? detail.title_snapshot ?? '',
+                contentSnapshot: detail.contentSnapshot ?? detail.content_snapshot ?? '',
+                versionNumber: detail.versionNumber ?? detail.version_number ?? 1,
+                status: detail.status,
+            });
+            setActiveView('addChapterVersion');
+        } catch (error) {
+            const msg = error?.response?.data?.message || error?.message || 'Không thể tải version';
             showToast(msg, 'error');
         }
     };
@@ -349,6 +382,25 @@ export function AuthorStoryManagement({ onBack }) {
         }
 
         try {
+            // Chế độ version: tạo mới hoặc cập nhật version
+            if (chapterData.sourceChapterId) {
+                const chapterId = chapterData.sourceChapterId;
+                const titleSnapshot = chapterData.title ?? '';
+                const contentSnapshot = chapterData.content ?? '';
+                if (chapterData.editingVersionId) {
+                    await updateChapterVersion(chapterId, chapterData.editingVersionId, { titleSnapshot, contentSnapshot });
+                    showToast('Đã cập nhật version', 'success');
+                } else {
+                    await createChapterVersion(chapterId, { titleSnapshot, contentSnapshot });
+                    showToast('Đã tạo version', 'success');
+                }
+                setActiveView('chapterList');
+                setCurrentChapter(null);
+                setSourceChapterForVersion(null);
+                setEditingVersion(null);
+                return;
+            }
+
             // Map status: 'draft' -> 'DRAFT', 'published' -> 'PENDING_REVIEW'
             const apiStatus = chapterData.status === 'published' ? 'PENDING_REVIEW' : 'DRAFT';
 
@@ -404,6 +456,7 @@ export function AuthorStoryManagement({ onBack }) {
             setActiveView('chapterList');
             setCurrentChapter(null);
             setSourceChapterForVersion(null);
+            setEditingVersion(null);
         } catch (error) {
             const errorMessage = error?.response?.data?.message || error?.message || 'Không thể lưu chương';
             showToast(errorMessage, 'error');
@@ -559,6 +612,7 @@ export function AuthorStoryManagement({ onBack }) {
                 onAddChapter={() => handleAddChapter(currentStory)}
                 onEditChapter={(chapter) => handleEditChapter(chapter)}
                 onAddVersion={(chapter) => handleAddVersion(currentStory, chapter)}
+                onEditVersion={(chapter, version) => handleEditVersion(chapter, version)}
             />
         );
     }
@@ -569,11 +623,13 @@ export function AuthorStoryManagement({ onBack }) {
                 story={currentStory}
                 chapter={activeView === 'editChapter' ? currentChapter : null}
                 sourceChapterForVersion={activeView === 'addChapterVersion' ? sourceChapterForVersion : null}
+                editingVersion={activeView === 'addChapterVersion' ? editingVersion : null}
                 onSave={handleSaveChapter}
                 onCancel={() => {
                     setActiveView('chapterList');
                     setCurrentChapter(null);
                     setSourceChapterForVersion(null);
+                    setEditingVersion(null);
                 }}
             />
         );

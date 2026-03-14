@@ -125,7 +125,7 @@ function contentOnlyForChapter(raw) {
     return s.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, onSave, onCancel }) {
+export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, editingVersion, onSave, onCancel }) {
     const { showToast, ToastContainer } = useToast();
     const storyId = story?.id ?? story?.Id;
     const [chapterData, setChapterData] = useState({
@@ -181,6 +181,18 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, onS
             }));
         }
     }, [sourceChapterForVersion]);
+
+    // Pre-fill từ version khi chỉnh sửa version
+    useEffect(() => {
+        if (editingVersion) {
+            setChapterData((prev) => ({
+                ...prev,
+                title: editingVersion.titleSnapshot ?? prev.title,
+                content: editingVersion.contentSnapshot ?? prev.content,
+                versionNumber: editingVersion.versionNumber ?? prev.versionNumber ?? 1,
+            }));
+        }
+    }, [editingVersion]);
 
     // Load danh sách chương để tính số chương tiếp theo (thêm mới) và validate trùng (số 1-based)
     useEffect(() => {
@@ -381,6 +393,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, onS
             if (isVersionMode && sourceChapterForVersion?.id) {
                 payload.sourceChapterId = sourceChapterForVersion.id;
                 payload.versionNumber = chapterData.versionNumber ?? 1;
+                if (editingVersion?.id) payload.editingVersionId = editingVersion.id;
             }
             await onSave(payload);
         } catch (error) {
@@ -738,14 +751,16 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, onS
                                 </button>
                                 <div>
                                     <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>
-                                        {chapter ? 'Chỉnh sửa chương' : isVersionMode ? 'Tạo version chương' : 'Thêm chương mới'}
+                                        {chapter ? 'Chỉnh sửa chương' : isVersionMode ? (editingVersion ? 'Chỉnh sửa version' : 'Tạo version chương') : 'Thêm chương mới'}
                                     </h2>
                                     <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: '0.25rem 0 0 0' }}>
                                         {story?.title}
                                     </p>
                                     {isVersionMode && sourceChapterForVersion && (
                                         <p style={{ fontSize: '0.8125rem', color: '#6366f1', margin: '0.375rem 0 0 0', fontWeight: 600 }}>
-                                            Đang tạo version cho: Chương {sourceChapterForVersion.number} — {sourceChapterForVersion.title || '(Không có tiêu đề)'}
+                                            {editingVersion
+                                                ? `Đang chỉnh sửa version #${editingVersion.versionNumber ?? 1} — Chương ${sourceChapterForVersion.number}: ${sourceChapterForVersion.title || '(Không có tiêu đề)'}`
+                                                : `Đang tạo version cho: Chương ${sourceChapterForVersion.number} — ${sourceChapterForVersion.title || '(Không có tiêu đề)'}`}
                                         </p>
                                     )}
                                 </div>
