@@ -162,6 +162,8 @@ function mapReviewedChapterToItem(c) {
 function mapPendingChapterToItem(c) {
     const id = c.id ?? c.Id;
     const storyId = c.storyId ?? c.StoryId;
+    const statusApi = (c.status ?? c.Status ?? '').toUpperCase();
+    const isEditRequest = statusApi === 'PUBLISHED'; // Chương đã xuất bản, có version gửi chỉnh sửa (vd: sau báo cáo vi phạm)
     return {
         id,
         chapterId: id,
@@ -181,6 +183,7 @@ function mapPendingChapterToItem(c) {
         isClaimedByMe: c.isClaimedByMe ?? c.IsClaimedByMe ?? false,
         claimedByDisplayName: c.claimedByDisplayName ?? c.ClaimedByDisplayName ?? null,
         claimedAt: c.claimedAt ?? c.ClaimedAt ?? null,
+        isEditRequest,
     };
 }
 

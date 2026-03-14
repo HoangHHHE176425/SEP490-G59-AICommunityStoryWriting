@@ -58,6 +58,12 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [fetchedRejectionByChapter, setFetchedRejectionByChapter] = useState({});
     /** Set orderIndex (0-based) các chương đã PUBLISHED — để chỉ cho phép duyệt/từ chối theo thứ tự 1,2,3... */
     const [publishedOrderIndices, setPublishedOrderIndices] = useState(new Set());
+    /** Tab nội dung khi xem 2 phiên bản (gốc / version): 'original' | 'version' */
+    const [contentTab, setContentTab] = useState('original');
+    /** Chiều cao vùng đọc nội dung (px), có thể kéo để thay đổi. */
+    const [contentAreaHeight, setContentAreaHeight] = useState(420);
+    const [isResizingContent, setIsResizingContent] = useState(false);
+    const resizeStartRef = useRef({ y: 0, height: 0 });
 
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
@@ -173,6 +179,38 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         }, 0);
         return () => clearTimeout(id);
     }, [selectedChapter?.id, loadChapterContent]);
+
+    useEffect(() => {
+        setContentTab('original');
+    }, [selectedChapter?.id]);
+
+    const startResize = useCallback((e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resizeStartRef.current = { y: e.clientY, height: contentAreaHeight };
+        setIsResizingContent(true);
+        document.body.style.cursor = 'ns-resize';
+        document.body.style.userSelect = 'none';
+
+        const minH = 300;
+        const maxH = Math.round(window.innerHeight * 0.85);
+        const onMove = (ev) => {
+            const { y, height } = resizeStartRef.current;
+            const delta = ev.clientY - y;
+            const next = Math.min(maxH, Math.max(minH, height + delta));
+            setContentAreaHeight(next);
+            resizeStartRef.current = { y: ev.clientY, height: next };
+        };
+        const onUp = () => {
+            setIsResizingContent(false);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    }, [contentAreaHeight]);
 
     /** Tab Từ chối: nếu chương chưa có rejectionReason (từ list API) thì gọi GET /chapters/:id/rejection-reason để hiển thị lý do. */
     useEffect(() => {
@@ -365,9 +403,10 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                     style={{
                         backgroundColor: '#ffffff',
                         borderRadius: '16px',
-                        maxWidth: '1200px',
+                        maxWidth: 'min(1400px, 96vw)',
                         width: '100%',
-                        maxHeight: '90vh',
+                        maxHeight: '94vh',
+                        minHeight: '80vh',
                         display: 'flex',
                         flexDirection: 'column',
                         overflow: 'hidden',
@@ -445,12 +484,12 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         </div>
                     </div>
 
-                    {/* Body */}
+                    {/* Body — overflow: auto để khi kéo cao vùng đọc, có thể cuộn xem hết */}
                     <div style={{
                         display: 'flex',
                         flex: 1,
                         minHeight: 0,
-                        overflow: 'hidden'
+                        overflow: 'auto'
                     }}>
                         {chaptersLoading ? (
                             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
@@ -534,8 +573,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     </div>
                                 )}
 
-                                {/* Main Content */}
-                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                {/* Main Content — minWidth 0 để flex shrink; nội dung bên trong có thể cao hơn, body sẽ cuộn */}
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
                                     {selectedChapter ? (
                                         <>
                                             <div style={{
@@ -585,12 +624,55 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                         </div>
                                                     );
                                                 })()}
+                                                {(publication?.isEditRequest || chapterReviewContent[selectedChapter.id]?.hasPendingVersion || chapterReviewContent[selectedChapter.id]?.HasPendingVersion) && (
+                                                    <div style={{
+                                                        marginTop: '1rem',
+                                                        padding: '0.75rem 1rem',
+                                                        backgroundColor: '#fef3c7',
+                                                        borderLeft: '4px solid #f59e0b',
+                                                        borderRadius: '0.5rem'
+                                                    }}>
+                                                        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#92400e', marginBottom: '0.25rem' }}>
+                                                            Yêu cầu chỉnh sửa (chương đã xuất bản)
+                                                        </div>
+                                                        <div style={{ fontSize: '0.8125rem', color: '#92400e', lineHeight: 1.5 }}>
+                                                            Đây là bản chỉnh sửa nội dung của chương đã xuất bản (thường do yêu cầu sau báo cáo vi phạm). Bạn sẽ xem 2 phiên bản bên dưới: <strong>bản gốc đã xuất bản</strong> và <strong>bản chỉnh sửa gửi duyệt</strong>.
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Thanh kéo chiều cao vùng đọc — đặt ngay dưới header chương, z-index cao để không bị khối khác chặn */}
+                                            <div
+                                                role="separator"
+                                                aria-label="Kéo để thay đổi chiều cao vùng đọc"
+                                                onMouseDown={startResize}
+                                                style={{
+                                                    height: '20px',
+                                                    minHeight: '20px',
+                                                    cursor: 'ns-resize',
+                                                    flexShrink: 0,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    backgroundColor: isResizingContent ? '#cbd5e1' : '#e2e8f0',
+                                                    borderTop: '1px solid #cbd5e1',
+                                                    borderBottom: '1px solid #cbd5e1',
+                                                    position: 'relative',
+                                                    zIndex: 10
+                                                }}
+                                                title="Kéo lên/xuống để thay đổi chiều cao vùng đọc"
+                                            >
+                                                <span style={{ fontSize: '12px', color: '#64748b', pointerEvents: 'none' }}>⋮⋮</span>
                                             </div>
 
                                             <div style={{
-                                                flex: 1,
-                                                overflowY: 'auto',
-                                                padding: '2rem',
+                                                height: contentAreaHeight,
+                                                minHeight: 300,
+                                                maxHeight: '85vh',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                flexShrink: 0,
                                                 backgroundColor: '#ffffff'
                                             }}>
                                                 {(() => {
@@ -598,55 +680,87 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                     const hasPendingVersion = review?.hasPendingVersion ?? review?.HasPendingVersion;
                                                     const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
                                                     const contentStyle = {
-                                                        maxWidth: '800px',
+                                                        maxWidth: '900px',
                                                         margin: '0 auto',
-                                                        fontSize: '1rem',
-                                                        lineHeight: 1.8,
+                                                        width: '100%',
+                                                        fontSize: '1.125rem',
+                                                        lineHeight: 2,
                                                         color: '#1e293b',
-                                                        whiteSpace: 'pre-wrap'
+                                                        whiteSpace: 'pre-wrap',
+                                                        letterSpacing: '0.01em',
+                                                        padding: '0 0.5rem'
                                                     };
                                                     if (hasPendingVersion && pendingVersions.length > 0) {
                                                         const v = pendingVersions[0];
-                                                        const versionTitle = v?.titleSnapshot ?? v?.TitleSnapshot ?? 'Version gửi duyệt';
+                                                        const versionTitle = v?.titleSnapshot ?? v?.TitleSnapshot ?? '';
                                                         const versionContent = v?.contentSnapshot ?? v?.ContentSnapshot ?? '';
+                                                        const originalContent = review?.originalContent ?? review?.OriginalContent ?? chapterContents[selectedChapter.id] ?? '—';
+                                                        const tabs = [
+                                                            { id: 'original', label: 'Chapter gốc đã xuất bản' },
+                                                            { id: 'version', label: `Version gửi duyệt${versionTitle ? ` — ${versionTitle}` : ''}` }
+                                                        ];
                                                         return (
                                                             <>
-                                                                <div style={{ marginBottom: '2rem' }}>
-                                                                    <div style={{
-                                                                        fontSize: '0.75rem',
-                                                                        fontWeight: 700,
-                                                                        color: '#64748b',
-                                                                        textTransform: 'uppercase',
-                                                                        letterSpacing: '0.05em',
-                                                                        marginBottom: '0.75rem'
-                                                                    }}>
-                                                                        1. Bản chapter gốc đã xuất bản
-                                                                    </div>
-                                                                    <div style={contentStyle}>
-                                                                        {review?.originalContent ?? review?.OriginalContent ?? chapterContents[selectedChapter.id] ?? '—'}
-                                                                    </div>
+                                                                <div style={{
+                                                                    display: 'flex',
+                                                                    gap: '0.25rem',
+                                                                    padding: '0 1.5rem',
+                                                                    borderBottom: '2px solid #e2e8f0',
+                                                                    backgroundColor: '#f8fafc',
+                                                                    flexShrink: 0
+                                                                }}>
+                                                                    {tabs.map((tab) => (
+                                                                        <button
+                                                                            key={tab.id}
+                                                                            type="button"
+                                                                            onClick={() => setContentTab(tab.id)}
+                                                                            style={{
+                                                                                padding: '0.75rem 1.25rem',
+                                                                                fontSize: '0.875rem',
+                                                                                fontWeight: 600,
+                                                                                color: contentTab === tab.id ? '#0ea5e9' : '#64748b',
+                                                                                backgroundColor: 'transparent',
+                                                                                border: 'none',
+                                                                                borderBottom: contentTab === tab.id ? '2px solid #0ea5e9' : '2px solid transparent',
+                                                                                marginBottom: '-2px',
+                                                                                cursor: 'pointer',
+                                                                                transition: 'color 0.2s, border-color 0.2s'
+                                                                            }}
+                                                                        >
+                                                                            {tab.label}
+                                                                        </button>
+                                                                    ))}
                                                                 </div>
-                                                                <div>
-                                                                    <div style={{
-                                                                        fontSize: '0.75rem',
-                                                                        fontWeight: 700,
-                                                                        color: '#64748b',
-                                                                        textTransform: 'uppercase',
-                                                                        letterSpacing: '0.05em',
-                                                                        marginBottom: '0.75rem'
-                                                                    }}>
-                                                                        2. Bản version gửi chỉnh sửa {versionTitle ? `— ${versionTitle}` : ''}
-                                                                    </div>
-                                                                    <div style={contentStyle}>
-                                                                        {versionContent || '—'}
-                                                                    </div>
+                                                                <div style={{
+                                                                    flex: 1,
+                                                                    minHeight: 0,
+                                                                    overflowY: 'auto',
+                                                                    padding: '2.5rem 3rem'
+                                                                }}>
+                                                                    {contentTab === 'original' && (
+                                                                        <div style={contentStyle}>
+                                                                            {originalContent}
+                                                                        </div>
+                                                                    )}
+                                                                    {contentTab === 'version' && (
+                                                                        <div style={contentStyle}>
+                                                                            {versionContent || '—'}
+                                                                        </div>
+                                                                    )}
                                                                 </div>
                                                             </>
                                                         );
                                                     }
                                                     return (
-                                                        <div style={contentStyle}>
-                                                            {chapterContents[selectedChapter.id] ?? 'Đang tải nội dung...'}
+                                                        <div style={{
+                                                            flex: 1,
+                                                            minHeight: 0,
+                                                            overflowY: 'auto',
+                                                            padding: '2.5rem 3rem'
+                                                        }}>
+                                                            <div style={contentStyle}>
+                                                                {chapterContents[selectedChapter.id] ?? 'Đang tải nội dung...'}
+                                                            </div>
                                                         </div>
                                                     );
                                                 })()}

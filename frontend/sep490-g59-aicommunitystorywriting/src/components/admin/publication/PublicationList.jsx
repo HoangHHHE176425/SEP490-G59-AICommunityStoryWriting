@@ -191,6 +191,22 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                             <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.9375rem' }}> — {pub.chapterTitle}</span>
                                         )}
                                     </h3>
+                                    {pub.type === 'chapter' && pub.isEditRequest && (
+                                        <div style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            marginTop: '0.375rem',
+                                            padding: '0.25rem 0.5rem',
+                                            backgroundColor: '#fef3c7',
+                                            color: '#92400e',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 600,
+                                            borderRadius: '6px',
+                                            border: '1px solid #f59e0b'
+                                        }}>
+                                            Yêu cầu chỉnh sửa (chương đã xuất bản)
+                                        </div>
+                                    )}
                                     <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
                                         {pub.author ? <>Tác giả: <span style={{ fontWeight: 500, color: '#475569' }}>{pub.author}</span></> : null}
                                         {pub.type === 'chapter' && pub.wordCount != null ? ` • ${pub.wordCount} từ` : null}
