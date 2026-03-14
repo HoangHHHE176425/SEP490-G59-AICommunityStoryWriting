@@ -1,4 +1,4 @@
-﻿using Services.DTOs.Account;
+using Services.DTOs.Account;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,6 +12,8 @@ namespace Services.Interfaces
         Task ChangePasswordAsync(Guid userId, ChangePasswordRequest request);
         Task UpdateProfileAsync(Guid userId, UpdateProfileRequest request);
         Task<UserProfileResponse> GetProfileAsync(Guid userId);
+        Task<AuthorOnboardingStatusResponse> GetAuthorOnboardingStatusAsync(Guid userId);
+        Task<BecomeAuthorResponse> BecomeAuthorAsync(Guid userId, string? ipAddress, string? userAgent);
         Task DeleteAccountAsync(Guid userId);
     }
 }

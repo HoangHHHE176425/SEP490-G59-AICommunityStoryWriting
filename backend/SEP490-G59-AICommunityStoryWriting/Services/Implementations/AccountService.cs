@@ -1,3 +1,4 @@
+using AIStory.Services.Helpers;
 using BusinessObjects.Entities;
 using Repositories.Interfaces;
 using Services.DTOs.Account;
@@ -13,10 +14,20 @@ namespace Services.Implementations
     public class AccountService : IAccountService
     {
         private readonly IUserRepository _userRepo;
+        private readonly IPolicyRepository _policyRepo;
+        private readonly IAuthorPolicyAcceptanceRepository _authorPolicyAcceptanceRepo;
+        private readonly JwtHelper _jwtHelper;
 
-        public AccountService(IUserRepository userRepo)
+        public AccountService(
+            IUserRepository userRepo,
+            IPolicyRepository policyRepo,
+            IAuthorPolicyAcceptanceRepository authorPolicyAcceptanceRepo,
+            JwtHelper jwtHelper)
         {
             _userRepo = userRepo;
+            _policyRepo = policyRepo;
+            _authorPolicyAcceptanceRepo = authorPolicyAcceptanceRepo;
+            _jwtHelper = jwtHelper;
         }
         public async Task DeleteAccountAsync(Guid userId)
         {
@@ -144,6 +155,139 @@ namespace Services.Implementations
                     CurrentCoins = 0 // Tạm thời trả về 0 như yêu cầu
                 }
             };
+        }
+
+        public async Task<AuthorOnboardingStatusResponse> GetAuthorOnboardingStatusAsync(Guid userId)
+        {
+            var user = await _userRepo.GetUserById(userId);
+            if (user == null) throw new Exception("User not found");
+
+            var role = NormalizeRole(user.role);
+            var activePolicy = await _policyRepo.GetActivePolicyByTypeAsync("AUTHOR");
+            var acceptance = activePolicy == null
+                ? null
+                : await _authorPolicyAcceptanceRepo.GetAcceptanceAsync(userId, activePolicy.id);
+
+            var isAuthor = role == "AUTHOR";
+            var missingRequirements = isAuthor
+                ? new List<string>()
+                : GetAuthorMissingRequirements(user, role, activePolicy != null);
+
+            return new AuthorOnboardingStatusResponse
+            {
+                CurrentRole = role,
+                IsAuthor = isAuthor,
+                HasActiveAuthorPolicy = activePolicy != null,
+                ActiveAuthorPolicyId = activePolicy?.id,
+                ActiveAuthorPolicyVersion = activePolicy?.version,
+                HasAcceptedActivePolicy = acceptance != null,
+                AcceptedAt = acceptance?.accepted_at,
+                CanBecomeAuthor = !isAuthor && missingRequirements.Count == 0,
+                MissingRequirements = missingRequirements
+            };
+        }
+
+        public async Task<BecomeAuthorResponse> BecomeAuthorAsync(Guid userId, string? ipAddress, string? userAgent)
+        {
+            var user = await _userRepo.GetUserById(userId);
+            if (user == null) throw new Exception("User not found");
+
+            var role = NormalizeRole(user.role);
+            if (role != "USER" && role != "AUTHOR")
+            {
+                throw new Exception("Chỉ tài khoản người dùng thông thường mới có thể dùng luồng đăng ký tác giả.");
+            }
+
+            var activePolicy = await _policyRepo.GetActivePolicyByTypeAsync("AUTHOR");
+            if (activePolicy == null)
+            {
+                throw new Exception("Hiện chưa có điều khoản tác giả đang hiệu lực.");
+            }
+
+            var acceptance = await _authorPolicyAcceptanceRepo.GetAcceptanceAsync(userId, activePolicy.id);
+            var missingRequirements = role == "AUTHOR"
+                ? new List<string>()
+                : GetAuthorMissingRequirements(user, role, hasActiveAuthorPolicy: true);
+
+            if (missingRequirements.Count > 0)
+            {
+                throw new Exception("Chưa đủ điều kiện trở thành tác giả: " + string.Join("; ", missingRequirements));
+            }
+
+            var acceptedNow = false;
+            var acceptedAt = acceptance?.accepted_at ?? DateTime.UtcNow;
+
+            if (acceptance == null)
+            {
+                var row = new author_policy_acceptances
+                {
+                    id = Guid.NewGuid(),
+                    user_id = userId,
+                    policy_id = activePolicy.id,
+                    accepted_at = acceptedAt,
+                    ip_address = ipAddress,
+                    user_agent = userAgent,
+                    accepted_for = "AUTHOR"
+                };
+
+                await _authorPolicyAcceptanceRepo.AddAcceptanceAsync(row);
+                acceptedNow = true;
+            }
+
+            if (role != "AUTHOR")
+            {
+                user.role = "AUTHOR";
+                user.must_resign_policy = false;
+                user.updated_at = DateTime.UtcNow;
+                await _userRepo.UpdateUser(user);
+            }
+
+            return new BecomeAuthorResponse
+            {
+                AccessToken = _jwtHelper.GenerateToken(user),
+                Role = NormalizeRole(user.role),
+                PolicyId = activePolicy.id,
+                AcceptedPolicyNow = acceptedNow,
+                AcceptedAt = acceptedAt
+            };
+        }
+
+        private static string NormalizeRole(string? role)
+        {
+            return string.IsNullOrWhiteSpace(role)
+                ? "USER"
+                : role.Trim().ToUpperInvariant();
+        }
+
+        private static List<string> GetAuthorMissingRequirements(
+            users user,
+            string normalizedRole,
+            bool hasActiveAuthorPolicy)
+        {
+            var missing = new List<string>();
+
+            if (normalizedRole != "USER")
+            {
+                missing.Add("Tài khoản hiện tại không thuộc nhóm USER để tự nâng cấp lên AUTHOR.");
+                return missing;
+            }
+
+            if (!string.Equals(user.status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+                missing.Add("Tài khoản chưa ở trạng thái ACTIVE.");
+
+            if (string.IsNullOrWhiteSpace(user.user_profiles?.nickname))
+                missing.Add("Thiếu tên hiển thị.");
+
+            if (string.IsNullOrWhiteSpace(user.user_profiles?.phone))
+                missing.Add("Thiếu số điện thoại.");
+
+            if (string.IsNullOrWhiteSpace(user.user_profiles?.id_number))
+                missing.Add("Thiếu số CCCD/CMND.");
+
+            if (!hasActiveAuthorPolicy)
+                missing.Add("Chưa có điều khoản tác giả đang hiệu lực.");
+
+            return missing;
         }
     }
 }

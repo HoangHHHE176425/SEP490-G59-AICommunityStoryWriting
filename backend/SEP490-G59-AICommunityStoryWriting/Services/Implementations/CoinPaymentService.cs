@@ -1,9 +1,11 @@
 using BusinessObjects;
 using BusinessObjects.Entities;
+using DataAccessObjects.DAOs;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Services.DTOs.Notifications;
 using Services.DTOs.Payments;
 using Services.Integrations.PayOS;
 using Services.Interfaces;
@@ -18,13 +20,15 @@ namespace Services.Implementations
         private readonly PayOSClient _payos;
         private readonly IConfiguration _config;
         private readonly ILogger<CoinPaymentService> _logger;
+        private readonly INotificationHubNotifier? _notificationHubNotifier;
 
-        public CoinPaymentService(StoryPlatformDbContext db, PayOSClient payos, IConfiguration config, ILogger<CoinPaymentService> logger)
+        public CoinPaymentService(StoryPlatformDbContext db, PayOSClient payos, IConfiguration config, ILogger<CoinPaymentService> logger, INotificationHubNotifier? notificationHubNotifier = null)
         {
             _db = db;
             _payos = payos;
             _config = config;
             _logger = logger;
+            _notificationHubNotifier = notificationHubNotifier;
         }
 
         public async Task<IReadOnlyList<CoinPackageDto>> GetActivePackagesAsync(CancellationToken cancellationToken = default)
@@ -346,6 +350,138 @@ namespace Services.Implementations
                 await tx.CommitAsync(cancellationToken);
                 return MapOrderDto(order);
             });
+        }
+
+        public async Task<DonateResponseDto> DonateAsync(Guid senderUserId, Guid receiverUserId, int amount, string? message, CancellationToken cancellationToken = default)
+        {
+            if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount), "Số coin ủng hộ phải lớn hơn 0.");
+            if (senderUserId == receiverUserId) throw new InvalidOperationException("Bạn không thể tự ủng hộ chính mình.");
+
+            var strategy = _db.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+                var sender = await _db.users.FirstOrDefaultAsync(u => u.id == senderUserId, cancellationToken);
+                var receiver = await _db.users.FirstOrDefaultAsync(u => u.id == receiverUserId, cancellationToken);
+
+                if (sender == null) throw new InvalidOperationException("Tài khoản người ủng hộ không tồn tại.");
+                if (receiver == null) throw new InvalidOperationException("Tác giả nhận ủng hộ không tồn tại.");
+
+                // Ensure wallets
+                var senderWallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == senderUserId, cancellationToken);
+                if (senderWallet == null)
+                {
+                    senderWallet = new wallets
+                    {
+                        user_id = senderUserId,
+                        balance_coin = 0,
+                        currency = "VND",
+                        income_balance = 0m,
+                        frozen_balance = 0m,
+                        pending_escrow_balance = 0m,
+                        updated_at = DateTime.UtcNow
+                    };
+                    _db.wallets.Add(senderWallet);
+                    await _db.SaveChangesAsync(cancellationToken);
+                }
+
+                var receiverWallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == receiverUserId, cancellationToken);
+                if (receiverWallet == null)
+                {
+                    receiverWallet = new wallets
+                    {
+                        user_id = receiverUserId,
+                        balance_coin = 0,
+                        currency = "VND",
+                        income_balance = 0m,
+                        frozen_balance = 0m,
+                        pending_escrow_balance = 0m,
+                        updated_at = DateTime.UtcNow
+                    };
+                    _db.wallets.Add(receiverWallet);
+                    await _db.SaveChangesAsync(cancellationToken);
+                }
+
+                var senderBalance = senderWallet.balance_coin ?? 0;
+                if (senderBalance < amount)
+                {
+                    throw new InvalidOperationException("Số dư coin không đủ để thực hiện ủng hộ.");
+                }
+
+                senderWallet.balance_coin = senderBalance - amount;
+                senderWallet.updated_at = DateTime.UtcNow;
+
+                var receiverBalance = receiverWallet.balance_coin ?? 0;
+                receiverWallet.balance_coin = receiverBalance + amount;
+                receiverWallet.updated_at = DateTime.UtcNow;
+
+                var donation = new donations
+                {
+                    id = Guid.NewGuid(),
+                    sender_id = senderUserId,
+                    receiver_id = receiverUserId,
+                    story_id = null,
+                    amount = amount,
+                    message = message,
+                    created_at = DateTime.UtcNow
+                };
+
+                _db.donations.Add(donation);
+                await _db.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+
+                // B11: Thông báo realtime cho tác giả khi có donate.
+                // Tuy nhiên KHÔNG để lỗi notification làm hỏng giao dịch donate (trừ/cộng coin + lưu donations).
+                try
+                {
+                    var senderDisplayName = NotificationDAO.GetUserDisplayName(senderUserId);
+                    var notification = NotificationDAO.NotifyDonationReceived(receiverUserId, senderDisplayName, amount, message);
+                    _ = PushDonationNotificationAsync(receiverUserId, notification);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "DonateAsync succeeded but creating/pushing donation notification failed. Sender={SenderId} Receiver={ReceiverId} Amount={Amount}",
+                        senderUserId, receiverUserId, amount);
+                }
+
+                return new DonateResponseDto
+                {
+                    DonationId = donation.id,
+                    SenderId = senderUserId,
+                    ReceiverId = receiverUserId,
+                    Amount = amount,
+                    Message = message,
+                    CreatedAt = donation.created_at,
+                    SenderBalanceAfter = senderWallet.balance_coin ?? 0,
+                    ReceiverBalanceAfter = receiverWallet.balance_coin ?? 0
+                };
+            });
+        }
+
+        /// <summary>Gửi real-time (SignalR) thông báo donate tới tác giả. Gọi fire-and-forget sau DonateAsync.</summary>
+        private async Task PushDonationNotificationAsync(Guid userId, notifications n)
+        {
+            if (_notificationHubNotifier == null) return;
+            try
+            {
+                var dto = new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = n.is_read == true,
+                    CreatedAt = n.created_at
+                };
+                await _notificationHubNotifier.NotifyUserAsync(userId, dto);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Push donation notification to author failed. UserId={UserId} NotificationId={NotificationId}", userId, n.id);
+            }
         }
 
         private static CoinOrderDto MapOrderDto(coin_orders o)

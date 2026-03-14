@@ -133,6 +133,28 @@ namespace AIStory.API.Controllers
                 return BadRequest(new { message = ex.Message });
             }
         }
+
+        /// <summary>Ủng hộ coin cho tác giả (chuyển coin giữa 2 ví + ghi log donations)</summary>
+        [HttpPost("donate")]
+        [Authorize]
+        public async Task<IActionResult> Donate([FromBody] DonateRequestDto request, CancellationToken cancellationToken)
+        {
+            if (request == null) return BadRequest(new { message = "Payload không hợp lệ." });
+            if (request.Amount <= 0) return BadRequest(new { message = "Số coin ủng hộ phải lớn hơn 0." });
+            if (request.AuthorId == Guid.Empty) return BadRequest(new { message = "AuthorId là bắt buộc." });
+
+            try
+            {
+                var senderId = GetUserIdFromToken();
+                var result = await _coinPaymentService.DonateAsync(senderId, request.AuthorId, request.Amount, request.Message, cancellationToken);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Donate failed");
+                return BadRequest(new { message = ex.Message });
+            }
+        }
     }
 }
 
