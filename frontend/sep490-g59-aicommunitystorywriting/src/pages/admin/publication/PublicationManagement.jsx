@@ -572,7 +572,7 @@ export function PublicationManagement() {
                         });
                 })
                 .catch((err) => {
-                    if (!silent) setError(err?.response?.data?.message ?? err?.message ?? 'Không tải được danh sách. Bạn cần đăng nhập với vai trò MODERATOR hoặc ADMIN.');
+                    if (!silent) setError(err?.response?.data?.message ?? err?.message ?? 'Không tải được danh sách. Bạn cần đăng nhập với vai trò MODERATOR hoặc Admin.');
                     setPublications([]);
                     setTotalCount(0);
                     setTotalPages(1);

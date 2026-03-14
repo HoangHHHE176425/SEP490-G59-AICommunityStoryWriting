@@ -15,10 +15,17 @@ import {
     Search,
     X,
     CheckSquare,
-    Shield
+    Shield,
+    Brain,
 } from 'lucide-react';
 
-const ROLE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', MODERATOR: 'Kiểm duyệt', ADMIN: 'Quản trị' };
+const ROLE_LABELS = {
+    USER: 'Người dùng',
+    AUTHOR: 'Tác giả',
+    MODERATOR: 'Kiểm duyệt',
+    ADMIN: 'Quản trị',
+    COMPLIANCE: 'Compliance',
+};
 
 const ALL_MENU_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -28,19 +35,20 @@ const ALL_MENU_ITEMS = [
     { id: 'users', label: 'Quản lý người dùng', icon: Users },
     { id: 'comments', label: 'Quản lý bình luận', icon: MessageSquare },
     { id: 'policies', label: 'Quản lý Policy', icon: Shield },
+    { id: 'ai-config', label: 'AI Config', icon: Brain },
     { id: 'settings', label: 'Cài đặt', icon: Settings },
 ];
 
-/** Menu chỉ dành cho MODERATOR (chỉ xuất bản + dashboard). */
-const MODERATOR_MENU_IDS = new Set(['dashboard', 'publication']);
+/** Menu giới hạn cho MODERATOR và COMPLIANCE (dashboard + xuất bản). */
+const LIMITED_ADMIN_MENU_IDS = new Set(['dashboard', 'publication']);
 
 export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) {
     const navigate = useNavigate();
     const { user, logout, role } = useAuth();
     const roleUpper = (role ?? user?.role ?? user?.Role ?? '').toString().toUpperCase();
-    const isModeratorOnly = roleUpper === 'MODERATOR';
-    const menuItems = isModeratorOnly
-        ? ALL_MENU_ITEMS.filter((item) => MODERATOR_MENU_IDS.has(item.id))
+    const hasLimitedMenu = roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE';
+    const menuItems = hasLimitedMenu
+        ? ALL_MENU_ITEMS.filter((item) => LIMITED_ADMIN_MENU_IDS.has(item.id))
         : ALL_MENU_ITEMS;
 
     const displayName = user?.displayName ?? user?.DisplayName ?? user?.email ?? 'Admin';
@@ -53,7 +61,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
             await logout();
         } finally {
             setIsMobileSidebarOpen(false);
-            navigate('/login');
+            navigate('/admin/login');
         }
     };
 

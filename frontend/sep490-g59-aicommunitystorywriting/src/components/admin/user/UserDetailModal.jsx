@@ -5,7 +5,7 @@ import { getUserDisplayName } from '../../../api/admin/userManagementApi';
 import { updateUserRole, assignModeratorCategories, getModeratorCategories } from '../../../api/admin/userManagementApi';
 import { getAllCategories } from '../../../api/category/categoryApi';
 
-const ROLE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', MODERATOR: 'Kiểm duyệt', ADMIN: 'Quản trị' };
+const ROLE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', MODERATOR: 'Kiểm duyệt', ADMIN: 'Quản trị', COMPLIANCE: 'Compliance' };
 const STATUS_LABELS = {
     ACTIVE: 'Hoạt động',
     PENDING: 'Chờ xác thực',
