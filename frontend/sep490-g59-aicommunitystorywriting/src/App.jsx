@@ -28,7 +28,7 @@ export default function App() {
           <Route path="/" element={<AboutUs />} />
           <Route path="/home" element={<Homepage />} />
           <Route path="/story/:storyId" element={<StoryDetail />} />
-          {/* Quản trị: dùng /admin/login. User/guest: dùng /login */}
+          {/* User/guest/author: /login. Quản trị (admin, moderator, compliance): /admin/login */}
           <Route path="/admin" element={<AdminProtectedRoute><AdminPage /></AdminProtectedRoute>} />
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/login" element={<Login />} />

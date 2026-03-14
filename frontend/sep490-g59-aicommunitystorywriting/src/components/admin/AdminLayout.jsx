@@ -24,8 +24,7 @@ const ROLE_LABELS = {
     AUTHOR: 'Tác giả',
     MODERATOR: 'Kiểm duyệt',
     ADMIN: 'Quản trị',
-    COMPLIANCE_OFFICER: 'Compliance Officer',
-    COMPILER_OFFICER: 'Compiler Officer',
+    COMPLIANCE: 'Compliance',
 };
 
 const ALL_MENU_ITEMS = [
@@ -40,17 +39,14 @@ const ALL_MENU_ITEMS = [
     { id: 'settings', label: 'Cài đặt', icon: Settings },
 ];
 
-/** Menu giới hạn cho MODERATOR và COMPLIANCE/COMPILER_OFFICER (dashboard + xuất bản). */
+/** Menu giới hạn cho MODERATOR và COMPLIANCE (dashboard + xuất bản). */
 const LIMITED_ADMIN_MENU_IDS = new Set(['dashboard', 'publication']);
 
 export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) {
     const navigate = useNavigate();
     const { user, logout, role } = useAuth();
     const roleUpper = (role ?? user?.role ?? user?.Role ?? '').toString().toUpperCase();
-    const hasLimitedMenu =
-        roleUpper === 'MODERATOR' ||
-        roleUpper === 'COMPLIANCE_OFFICER' ||
-        roleUpper === 'COMPILER_OFFICER';
+    const hasLimitedMenu = roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE';
     const menuItems = hasLimitedMenu
         ? ALL_MENU_ITEMS.filter((item) => LIMITED_ADMIN_MENU_IDS.has(item.id))
         : ALL_MENU_ITEMS;

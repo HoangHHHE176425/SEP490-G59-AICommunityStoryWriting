@@ -2,7 +2,7 @@ import { User, Mail, Shield, Clock, Ban, CheckCircle, Eye, Phone, AlertCircle } 
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 import { getUserDisplayName } from '../../../api/admin/userManagementApi';
 
-const ROLE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', MODERATOR: 'Kiểm duyệt', ADMIN: 'Quản trị' };
+const ROLE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', MODERATOR: 'Kiểm duyệt', ADMIN: 'Quản trị', COMPLIANCE: 'Compliance' };
 const STATUS_CONFIG = {
     ACTIVE: { label: 'Hoạt động', bg: '#d1fae5', color: '#065f46', icon: CheckCircle },
     PENDING: { label: 'Chờ xác thực', bg: '#fef3c7', color: '#92400e', icon: AlertCircle },

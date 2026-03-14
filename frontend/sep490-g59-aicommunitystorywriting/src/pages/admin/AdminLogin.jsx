@@ -53,7 +53,7 @@ export function AdminLogin() {
                     Đăng nhập quản trị
                 </h1>
                 <p className="text-slate-400 text-sm max-w-sm">
-                    Dành cho Quản trị viên, Kiểm duyệt viên và Compliance/Compiler officer. Sử dụng email và mật khẩu đã được cấp.
+                    Dành cho Quản trị viên (Admin), Kiểm duyệt (MODERATOR) và Compliance. Sử dụng email và mật khẩu đã được cấp.
                 </p>
             </div>
 

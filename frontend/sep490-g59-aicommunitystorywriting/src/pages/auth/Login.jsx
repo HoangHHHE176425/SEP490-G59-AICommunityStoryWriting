@@ -102,7 +102,7 @@ export default function Login() {
                                 Đăng Nhập
                             </h1>
                             <p className="text-slate-600 dark:text-slate-400">
-                                Chào mừng bạn trở lại!
+                                Dành cho bạn đọc và tác giả. Chào mừng bạn trở lại!
                             </p>
                         </div>
 

@@ -11,8 +11,8 @@ import { AiConfig } from './ai/AiConfig';
 export function AdminPage() {
     const { role } = useAuth();
     const roleUpper = (role ?? '').toString().toUpperCase();
-    const isModeratorOnly = roleUpper === 'MODERATOR';
-    const [activePage, setActivePage] = useState(isModeratorOnly ? 'publication' : 'categories');
+    const hasLimitedAdminMenu = roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE';
+    const [activePage, setActivePage] = useState(hasLimitedAdminMenu ? 'publication' : 'categories');
 
     const renderPage = () => {
         switch (activePage) {
