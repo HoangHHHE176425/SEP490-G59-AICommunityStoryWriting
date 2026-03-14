@@ -356,8 +356,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                 .then(() => loadVersionsForChapter(chapterId))
                 .then(() => loadChapters(currentPage, { silent: true }))
                 .catch((err) => {
-                    const msg = err?.response?.data?.message ?? err?.message ?? 'Gửi duyệt version thất bại';
-                    const hint = (msg && (msg.includes('DRAFT') || msg.includes('Bản nháp'))) ? '\n\nVersion bị từ chối vẫn được phép gửi lại. Nếu lỗi lặp lại, hãy làm mới trang (F5) và thử lại.' : '';
+                    const msg = err?.response?.data?.message ?? err?.message ?? 'Gửi duyệt phiên bản thất bại';
+                    const hint = (msg && (msg.includes('DRAFT') || msg.includes('Bản nháp'))) ? '\n\nPhiên bản bị từ chối vẫn được phép gửi lại. Nếu lỗi lặp lại, hãy làm mới trang (F5) và thử lại.' : '';
                     alert(msg + hint);
                 })
                 .finally(() => setActioningVersionId(null));
@@ -368,7 +368,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
             unsubmitChapterVersion(chapterId, versionId)
                 .then(() => loadVersionsForChapter(chapterId))
                 .then(() => loadChapters(currentPage, { silent: true }))
-                .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Hủy gửi duyệt version thất bại'))
+                .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Hủy gửi duyệt phiên bản thất bại'))
                 .finally(() => setActioningVersionId(null));
         } else if (action === 'version_delete' && confirmDialog.versionId) {
             const versionId = confirmDialog.versionId;
@@ -376,7 +376,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
             setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
             deleteChapterVersion(chapterId, versionId)
                 .then(() => loadVersionsForChapter(chapterId))
-                .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Xóa version thất bại'))
+                .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Xóa phiên bản thất bại'))
                 .finally(() => setActioningVersionId(null));
         }
     };
@@ -629,7 +629,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                     }));
                                     const hasPendingVersion = versions.some((ver) => (ver.status ?? '').toLowerCase() === 'pending_review');
                                     const chapterIsPendingReview = (chapter.status ?? '').toLowerCase() === 'pending_review';
-                                    const canSubmitVersion = !hasPendingVersion && !chapterIsPendingReview;
+                                    const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(chapter.number - 2) || pendingOrderIndices.has(chapter.number - 2);
+                                    const canSubmitVersion = canSubmitForPublish && !hasPendingVersion && !chapterIsPendingReview;
                                     const versionsLoading = loadingVersionsForChapterId === chapter.id;
                                     const toggleExpand = (e) => {
                                         if (e.target.closest('button')) return;
@@ -957,13 +958,13 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                             }}
                                                         >
                                                             <Plus size={16} />
-                                                            Tạo version
+                                                            Tạo phiên bản
                                                         </button>
                                                     </div>
 
                                                     {versionsLoading ? (
                                                         <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0, padding: '1.5rem', textAlign: 'center' }}>
-                                                            Đang tải danh sách version...
+                                                            Đang tải danh sách phiên bản...
                                                         </p>
                                                     ) : versions.length === 0 ? (
                                                         <p style={{
@@ -976,7 +977,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                             borderRadius: '8px',
                                                             border: '1px dashed #e2e8f0',
                                                         }}>
-                                                            Chưa có version nào. Bấm &quot;Tạo version&quot; để lưu bản sao nội dung hiện tại.
+                                                            Chưa có phiên bản nào. Bấm &quot;Tạo phiên bản&quot; để lưu bản sao nội dung hiện tại.
                                                         </p>
                                                     ) : (
                                                         <div style={{ borderRadius: '8px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
@@ -992,8 +993,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                 color: '#6b7280',
                                                                 alignItems: 'center',
                                                             }}>
-                                                                <div>Version</div>
-                                                                <div>Tiêu đề version</div>
+                                                                <div>Phiên bản</div>
+                                                                <div>Tiêu đề phiên bản</div>
                                                                 <div>Trạng thái</div>
                                                                 <div>Ngày tạo</div>
                                                                 <div style={{ textAlign: 'center' }}>Hành động</div>
@@ -1058,16 +1059,16 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                 if (v.rejection_reason) {
                                                                                                     setRejectionReasonModal({
                                                                                                         open: true,
-                                                                                                        title: `Lý do từ chối: ${v.title_snapshot || v.titleSnapshot || `Version #${v.version_number}`}`,
+                                                                                                        title: `Lý do từ chối: ${v.title_snapshot || v.titleSnapshot || `Phiên bản #${v.version_number}`}`,
                                                                                                         reason: v.rejection_reason,
                                                                                                         rejectedAt: v.reviewed_at ?? null,
                                                                                                         loading: false
                                                                                                     });
                                                                                                 } else {
-                                                                                                    openChapterRejectionReason(v.title_snapshot || v.titleSnapshot || `Version #${v.version_number}`, chapter.id);
+                                                                                                    openChapterRejectionReason(v.title_snapshot || v.titleSnapshot || `Phiên bản #${v.version_number}`, chapter.id);
                                                                                                 }
                                                                                             }}
-                                                                                            title="Xem lý do từ chối version"
+                                                                                            title="Xem lý do từ chối phiên bản"
                                                                                             style={{
                                                                                                 display: 'inline-flex',
                                                                                                 alignItems: 'center',
@@ -1091,7 +1092,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                     <button
                                                                                         type="button"
                                                                                         onClick={(e) => { e.stopPropagation(); if (vStatusLower !== 'pending_review') onEditVersion?.(chapter, v); }}
-                                                                                        title={vStatusLower === 'pending_review' ? 'Version đang chờ duyệt, không thể chỉnh sửa' : 'Chỉnh sửa version'}
+                                                                                        title={vStatusLower === 'pending_review' ? 'Phiên bản đang chờ duyệt, không thể chỉnh sửa' : 'Chỉnh sửa phiên bản'}
                                                                                         disabled={vStatusLower === 'pending_review'}
                                                                                         style={{
                                                                                             display: 'inline-flex',
@@ -1120,7 +1121,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                             if (!v.id || vStatusLower === 'published' || vStatusLower === 'pending_review') return;
                                                                                             openVersionDeleteConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                         }}
-                                                                                        title={vStatusLower === 'pending_review' ? 'Version đang chờ duyệt, không thể xóa' : vStatusLower === 'published' ? 'Đã xuất bản' : 'Xóa version'}
+                                                                                        title={vStatusLower === 'pending_review' ? 'Phiên bản đang chờ duyệt, không thể xóa' : vStatusLower === 'published' ? 'Đã xuất bản' : 'Xóa phiên bản'}
                                                                                         disabled={vStatusLower === 'published' || vStatusLower === 'pending_review'}
                                                                                         style={{
                                                                                             display: 'inline-flex',
@@ -1152,7 +1153,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                     e.stopPropagation();
                                                                                                     openVersionUnsubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                                 }}
-                                                                                                title="Hủy gửi duyệt version"
+                                                                                                title="Hủy gửi duyệt phiên bản"
                                                                                                 disabled={actioningVersionId === v.id}
                                                                                                 style={{
                                                                                                     display: 'inline-flex',
@@ -1184,7 +1185,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                     if (vStatusLower === 'published' || !canSubmitVersion) return;
                                                                                                     openVersionSubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                                 }}
-                                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi version.' : 'Chỉ được gửi một version tại một thời điểm. Hãy hủy version đang chờ duyệt trước.') : 'Gửi duyệt version'}
+                                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (!canSubmitForPublish ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.' : 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.') : 'Gửi duyệt phiên bản'}
                                                                                                 disabled={vStatusLower === 'published' || !canSubmitVersion}
                                                                                                 style={{
                                                                                                     display: 'inline-flex',
@@ -1206,7 +1207,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                 }}
                                                                                             >
                                                                                                 <Send size={12} />
-                                                                                                {vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (chapterIsPendingReview ? 'Chương gốc đang chờ duyệt' : 'Đã có version chờ duyệt') : 'Xuất bản'}
+                                                                                                {vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (!canSubmitForPublish ? `Gửi chương ${chapter.number - 1} trước` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt' : 'Đã có phiên bản chờ duyệt') : 'Xuất bản'}
                                                                                             </button>
                                                                                         )}
                                                                                     </div>
@@ -1306,17 +1307,17 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                             {confirmDialog.action === 'publish' && 'Xác nhận xuất bản'}
                             {confirmDialog.action === 'unpublish' && 'Xác nhận hủy xuất bản'}
                             {confirmDialog.action === 'delete' && 'Xác nhận xóa chương'}
-                            {confirmDialog.action === 'version_submit' && 'Xác nhận gửi duyệt version'}
-                            {confirmDialog.action === 'version_unsubmit' && 'Xác nhận hủy gửi duyệt version'}
-                            {confirmDialog.action === 'version_delete' && 'Xác nhận xóa version'}
+                            {confirmDialog.action === 'version_submit' && 'Xác nhận gửi duyệt phiên bản'}
+                            {confirmDialog.action === 'version_unsubmit' && 'Xác nhận hủy gửi duyệt phiên bản'}
+                            {confirmDialog.action === 'version_delete' && 'Xác nhận xóa phiên bản'}
                         </h3>
                         <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
                             {confirmDialog.action === 'publish' && 'Bạn có chắc chắn muốn gửi chương này lên để duyệt xuất bản?'}
                             {confirmDialog.action === 'unpublish' && 'Bạn có chắc chắn muốn hủy xuất bản và đưa chương về bản nháp?'}
                             {confirmDialog.action === 'delete' && 'Bạn có chắc chắn muốn xóa chương này? Hành động này không thể hoàn tác.'}
-                            {confirmDialog.action === 'version_submit' && 'Bạn có chắc chắn muốn gửi version này lên để duyệt xuất bản?'}
-                            {confirmDialog.action === 'version_unsubmit' && 'Bạn có chắc chắn muốn hủy gửi duyệt? Version và chương sẽ về trạng thái Bản nháp.'}
-                            {confirmDialog.action === 'version_delete' && 'Bạn có chắc chắn muốn xóa version này? Hành động này không thể hoàn tác.'}
+                            {confirmDialog.action === 'version_submit' && 'Bạn có chắc chắn muốn gửi phiên bản này lên để duyệt xuất bản?'}
+                            {confirmDialog.action === 'version_unsubmit' && 'Bạn có chắc chắn muốn hủy gửi duyệt? Phiên bản và chương sẽ về trạng thái Bản nháp.'}
+                            {confirmDialog.action === 'version_delete' && 'Bạn có chắc chắn muốn xóa phiên bản này? Hành động này không thể hoàn tác.'}
                         </p>
                         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                             <button

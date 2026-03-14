@@ -409,7 +409,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
 
     const handleSave = async (saveStatus) => {
         if (!chapterData.title.trim()) {
-            showToast(isVersionMode ? 'Vui lòng nhập tiêu đề version' : 'Vui lòng nhập tên chương', 'error');
+            showToast(isVersionMode ? 'Vui lòng nhập tiêu đề phiên bản' : 'Vui lòng nhập tên chương', 'error');
             return;
         }
         if (!chapterData.content.trim()) {
@@ -419,16 +419,16 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         if (isVersionMode) {
             const vNum = Number(chapterData.versionNumber ?? 1);
             if (!Number.isInteger(vNum) || vNum < 1) {
-                setVersionNumberError('Số version phải là số nguyên từ 1 trở lên');
-                showToast('Số version phải là số nguyên từ 1 trở lên', 'error');
+                setVersionNumberError('Số phiên bản phải là số nguyên từ 1 trở lên');
+                showToast('Số phiên bản phải là số nguyên từ 1 trở lên', 'error');
                 return;
             }
             const takenNumbers = existingVersionsForChapter
                 .filter((v) => v.id !== (editingVersion?.id ?? editingVersion?.Id))
                 .map((v) => v.versionNumber);
             if (takenNumbers.includes(vNum)) {
-                setVersionNumberError(`Số version ${vNum} đã tồn tại, vui lòng chọn số khác`);
-                showToast(`Số version ${vNum} đã tồn tại`, 'error');
+                setVersionNumberError(`Số phiên bản ${vNum} đã tồn tại, vui lòng chọn số khác`);
+                showToast(`Số phiên bản ${vNum} đã tồn tại`, 'error');
                 return;
             }
             setVersionNumberError('');
@@ -820,7 +820,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 </button>
                                 <div>
                                     <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>
-                                        {readOnly ? 'Xem chi tiết chương' : chapter ? 'Chỉnh sửa chương' : isVersionMode ? (editingVersion ? 'Chỉnh sửa version' : 'Tạo version chương') : 'Thêm chương mới'}
+                                        {readOnly ? 'Xem chi tiết chương' : chapter ? 'Chỉnh sửa chương' : isVersionMode ? (editingVersion ? 'Chỉnh sửa phiên bản' : 'Tạo phiên bản chương') : 'Thêm chương mới'}
                                     </h2>
                                     <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: '0.25rem 0 0 0' }}>
                                         {story?.title}
@@ -828,8 +828,8 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                     {isVersionMode && sourceChapterForVersion && (
                                         <p style={{ fontSize: '0.8125rem', color: '#6366f1', margin: '0.375rem 0 0 0', fontWeight: 600 }}>
                                             {editingVersion
-                                                ? `Đang chỉnh sửa version #${editingVersion.versionNumber ?? 1} — Chương ${sourceChapterForVersion.number}: ${sourceChapterForVersion.title || '(Không có tiêu đề)'}`
-                                                : `Đang tạo version cho: Chương ${sourceChapterForVersion.number} — ${sourceChapterForVersion.title || '(Không có tiêu đề)'}`}
+                                                ? `Đang chỉnh sửa phiên bản #${editingVersion.versionNumber ?? 1} — Chương ${sourceChapterForVersion.number}: ${sourceChapterForVersion.title || '(Không có tiêu đề)'}`
+                                                : `Đang tạo phiên bản cho: Chương ${sourceChapterForVersion.number} — ${sourceChapterForVersion.title || '(Không có tiêu đề)'}`}
                                         </p>
                                     )}
                                 </div>
@@ -936,7 +936,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                     <div>
                                         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                            Số version <span style={{ color: '#ef4444' }}>*</span>
+                                            Số phiên bản <span style={{ color: '#ef4444' }}>*</span>
                                         </label>
                                         <input
                                             type="number"
@@ -967,7 +967,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                     </div>
                                     <div>
                                         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                            Tiêu đề version <span style={{ color: '#ef4444' }}>*</span>
+                                            Tiêu đề phiên bản <span style={{ color: '#ef4444' }}>*</span>
                                         </label>
                                         <input
                                             type="text"
@@ -975,7 +975,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                             readOnly={readOnly}
                                             disabled={readOnly}
                                             onChange={(e) => !readOnly && setChapterData({ ...chapterData, title: e.target.value })}
-                                            placeholder="Nhập tiêu đề version (vd: Bản chỉnh sửa lỗi chính tả)"
+                                            placeholder="Nhập tiêu đề phiên bản (vd: Bản chỉnh sửa lỗi chính tả)"
                                             style={{
                                                 width: '100%',
                                                 padding: '0.75rem',
@@ -1165,7 +1165,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                             {chapter && !readOnly && (
                                 <div>
                                     <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                        Mô tả thay đổi (ghi chú version)
+                                        Mô tả thay đổi (ghi chú phiên bản)
                                     </label>
                                     <input
                                         type="text"
@@ -1184,7 +1184,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                         }}
                                     />
                                     <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.25rem' }}>
-                                        Tùy chọn. Khi lưu, hệ thống sẽ tạo version nội dung cho chương này.
+                                        Tùy chọn. Khi lưu, hệ thống sẽ tạo phiên bản nội dung cho chương này.
                                     </p>
                                 </div>
                             )}

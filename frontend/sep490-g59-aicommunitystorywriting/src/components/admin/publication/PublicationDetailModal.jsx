@@ -697,7 +697,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                         const originalContent = review?.originalContent ?? review?.OriginalContent ?? chapterContents[selectedChapter.id] ?? '—';
                                                         const tabs = [
                                                             { id: 'original', label: 'Chapter gốc đã xuất bản' },
-                                                            { id: 'version', label: `Version gửi duyệt${versionTitle ? ` — ${versionTitle}` : ''}` }
+                                                            { id: 'version', label: `Phiên bản gửi duyệt${versionTitle ? ` — ${versionTitle}` : ''}` }
                                                         ];
                                                         return (
                                                             <>
@@ -778,87 +778,87 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         if (isVersionEditCase && contentTab !== 'version') {
                             return (
                                 <div style={{ padding: '0.75rem 1.5rem', borderTop: '1px solid #e2e8f0', backgroundColor: '#f1f5f9', fontSize: '0.875rem', color: '#64748b' }}>
-                                    Chuyển sang tab « Version gửi duyệt » để duyệt hoặc từ chối.
+                                    Chuyển sang tab « Phiên bản gửi duyệt » để duyệt hoặc từ chối.
                                 </div>
                             );
                         }
                         return (
-                        <div style={{
-                            padding: '1.5rem',
-                            borderTop: '1px solid #e2e8f0',
-                            display: 'flex',
-                            justifyContent: 'flex-end',
-                            gap: '1rem',
-                            backgroundColor: '#f8fafc'
-                        }}>
-                            <button
-                                onClick={() => canApproveReject && setShowRejectForm(true)}
-                                disabled={isSubmitting || !canApproveReject}
-                                title={orderHint || 'Từ chối chương (kèm lý do)'}
-                                style={{
-                                    padding: '0.75rem 1.5rem',
-                                    backgroundColor: canApproveReject ? '#ffffff' : '#f1f5f9',
-                                    color: canApproveReject ? '#ef4444' : '#94a3b8',
-                                    fontSize: '0.875rem',
-                                    fontWeight: 700,
-                                    borderRadius: '8px',
-                                    border: `2px solid ${canApproveReject ? '#ef4444' : '#e2e8f0'}`,
-                                    cursor: (isSubmitting || !canApproveReject) ? 'not-allowed' : 'pointer',
-                                    transition: 'all 0.2s',
-                                    opacity: (isSubmitting || !canApproveReject) ? 0.5 : 1,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem'
-                                }}
-                                onMouseEnter={(e) => {
-                                    if (!isSubmitting && canApproveReject) {
-                                        e.currentTarget.style.backgroundColor = '#fef2f2';
-                                    }
-                                }}
-                                onMouseLeave={(e) => {
-                                    if (canApproveReject) {
-                                        e.currentTarget.style.backgroundColor = '#ffffff';
-                                    }
-                                }}
-                            >
-                                <XCircle style={{ width: '18px', height: '18px' }} />
-                                Từ chối
-                            </button>
+                            <div style={{
+                                padding: '1.5rem',
+                                borderTop: '1px solid #e2e8f0',
+                                display: 'flex',
+                                justifyContent: 'flex-end',
+                                gap: '1rem',
+                                backgroundColor: '#f8fafc'
+                            }}>
+                                <button
+                                    onClick={() => canApproveReject && setShowRejectForm(true)}
+                                    disabled={isSubmitting || !canApproveReject}
+                                    title={orderHint || 'Từ chối chương (kèm lý do)'}
+                                    style={{
+                                        padding: '0.75rem 1.5rem',
+                                        backgroundColor: canApproveReject ? '#ffffff' : '#f1f5f9',
+                                        color: canApproveReject ? '#ef4444' : '#94a3b8',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 700,
+                                        borderRadius: '8px',
+                                        border: `2px solid ${canApproveReject ? '#ef4444' : '#e2e8f0'}`,
+                                        cursor: (isSubmitting || !canApproveReject) ? 'not-allowed' : 'pointer',
+                                        transition: 'all 0.2s',
+                                        opacity: (isSubmitting || !canApproveReject) ? 0.5 : 1,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        if (!isSubmitting && canApproveReject) {
+                                            e.currentTarget.style.backgroundColor = '#fef2f2';
+                                        }
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        if (canApproveReject) {
+                                            e.currentTarget.style.backgroundColor = '#ffffff';
+                                        }
+                                    }}
+                                >
+                                    <XCircle style={{ width: '18px', height: '18px' }} />
+                                    Từ chối
+                                </button>
 
-                            <button
-                                onClick={() => canApproveReject && openApproveConfirm()}
-                                disabled={isSubmitting || !selectedChapter || !canApproveReject}
-                                title={orderHint || 'Duyệt chương xuất bản'}
-                                style={{
-                                    padding: '0.75rem 1.5rem',
-                                    backgroundColor: canApproveReject ? '#13ec5b' : '#e2e8f0',
-                                    color: canApproveReject ? '#ffffff' : '#94a3b8',
-                                    fontSize: '0.875rem',
-                                    fontWeight: 700,
-                                    borderRadius: '8px',
-                                    border: 'none',
-                                    cursor: (isSubmitting || !selectedChapter || !canApproveReject) ? 'not-allowed' : 'pointer',
-                                    transition: 'all 0.2s',
-                                    opacity: (isSubmitting || !selectedChapter || !canApproveReject) ? 0.5 : 1,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem'
-                                }}
-                                onMouseEnter={(e) => {
-                                    if (!isSubmitting && selectedChapter && canApproveReject) {
-                                        e.currentTarget.style.backgroundColor = '#10d954';
-                                    }
-                                }}
-                                onMouseLeave={(e) => {
-                                    if (canApproveReject) {
-                                        e.currentTarget.style.backgroundColor = '#13ec5b';
-                                    }
-                                }}
-                            >
-                                <CheckCircle style={{ width: '18px', height: '18px' }} />
-                                {isSubmitting ? 'Đang xử lý...' : 'Duyệt chương'}
-                            </button>
-                        </div>
+                                <button
+                                    onClick={() => canApproveReject && openApproveConfirm()}
+                                    disabled={isSubmitting || !selectedChapter || !canApproveReject}
+                                    title={orderHint || 'Duyệt chương xuất bản'}
+                                    style={{
+                                        padding: '0.75rem 1.5rem',
+                                        backgroundColor: canApproveReject ? '#13ec5b' : '#e2e8f0',
+                                        color: canApproveReject ? '#ffffff' : '#94a3b8',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 700,
+                                        borderRadius: '8px',
+                                        border: 'none',
+                                        cursor: (isSubmitting || !selectedChapter || !canApproveReject) ? 'not-allowed' : 'pointer',
+                                        transition: 'all 0.2s',
+                                        opacity: (isSubmitting || !selectedChapter || !canApproveReject) ? 0.5 : 1,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        if (!isSubmitting && selectedChapter && canApproveReject) {
+                                            e.currentTarget.style.backgroundColor = '#10d954';
+                                        }
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        if (canApproveReject) {
+                                            e.currentTarget.style.backgroundColor = '#13ec5b';
+                                        }
+                                    }}
+                                >
+                                    <CheckCircle style={{ width: '18px', height: '18px' }} />
+                                    {isSubmitting ? 'Đang xử lý...' : 'Duyệt chương'}
+                                </button>
+                            </div>
                         );
                     })()}
 

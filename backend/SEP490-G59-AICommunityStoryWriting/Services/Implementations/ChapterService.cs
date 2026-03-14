@@ -468,7 +468,7 @@ namespace Services.Implementations
                 var versionsPending = _versionRepository.GetByChapterId(id)
                     .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
                 if (versionsPending)
-                    throw new InvalidOperationException("Chỉ được gửi một bản duyệt: bản gốc chapter hoặc một version. Đã có version đang chờ duyệt.");
+                    throw new InvalidOperationException("Chỉ được gửi một bản duyệt: bản gốc chương hoặc một phiên bản. Đã có phiên bản đang chờ duyệt.");
             }
 
             EnsureCanSubmitForReview(chapter);

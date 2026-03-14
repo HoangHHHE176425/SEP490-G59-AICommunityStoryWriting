@@ -35,7 +35,7 @@ namespace Services.Implementations
             if (chapter == null) return null;
             var story = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
             if (story == null || story.author_id != authorId)
-                throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được tạo version cho chapter.");
+                throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được tạo phiên bản cho chương.");
 
             var nextNum = ChapterVersionDAO.GetNextVersionNumber(chapterId);
             var content = request.ContentSnapshot ?? chapter.content;
@@ -59,7 +59,7 @@ namespace Services.Implementations
             var v = _versionRepository.GetById(id);
             if (v == null) return false;
             if (v.author_id != authorId)
-                throw new UnauthorizedAccessException("Chỉ tác giả mới được sửa version.");
+                throw new UnauthorizedAccessException("Chỉ tác giả mới được sửa phiên bản.");
             if (v.status != "DRAFT" && v.status != null)
                 throw new InvalidOperationException("Chỉ được sửa version ở trạng thái DRAFT.");
 
@@ -76,9 +76,9 @@ namespace Services.Implementations
             var v = _versionRepository.GetById(id);
             if (v == null) return false;
             if (v.author_id != authorId)
-                throw new UnauthorizedAccessException("Chỉ tác giả mới được xóa version.");
+                throw new UnauthorizedAccessException("Chỉ tác giả mới được xóa phiên bản.");
             if (v.status == "PENDING_REVIEW")
-                throw new InvalidOperationException("Không thể xóa version đang chờ duyệt.");
+                throw new InvalidOperationException("Không thể xóa phiên bản đang chờ duyệt.");
             if (v.status == "PUBLISHED")
                 throw new InvalidOperationException("Không thể xóa version đã xuất bản.");
             _versionRepository.Delete(id);
@@ -90,12 +90,12 @@ namespace Services.Implementations
             var v = _versionRepository.GetById(versionId);
             if (v == null || !v.chapter_id.HasValue) return false;
             if (v.author_id != authorId)
-                throw new UnauthorizedAccessException("Chỉ tác giả mới được gửi duyệt version.");
+                throw new UnauthorizedAccessException("Chỉ tác giả mới được gửi duyệt phiên bản.");
             var statusUpper = (v.status ?? "").Trim().ToUpperInvariant();
             if (statusUpper != "DRAFT" && statusUpper != "REJECTED")
                 throw new InvalidOperationException("Chỉ version Bản nháp hoặc Bị từ chối mới được gửi duyệt.");
             if (string.IsNullOrWhiteSpace(v.content_snapshot))
-                throw new InvalidOperationException("Version chưa có nội dung.");
+                throw new InvalidOperationException("Phiên bản chưa có nội dung.");
 
             var chapter = _chapterRepository.GetById(v.chapter_id.Value);
             if (chapter == null) return false;
@@ -105,7 +105,7 @@ namespace Services.Implementations
 
             var chapterStatusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
             if (chapterStatusUpper == "PENDING_REVIEW")
-                throw new InvalidOperationException("Chapter đã được gửi đi duyệt. Chỉ được gửi một bản: bản gốc chapter hoặc một version.");
+                throw new InvalidOperationException("Chương đã được gửi đi duyệt. Chỉ được gửi một bản: bản gốc chương hoặc một phiên bản.");
 
             // Chỉ cho phép một version chờ duyệt tại một thời điểm. Nếu đã có version khác đang PENDING_REVIEW thì không cho gửi thêm.
             var anyOtherPending = _versionRepository.GetByChapterId(v.chapter_id.Value)
@@ -123,7 +123,15 @@ namespace Services.Implementations
             }
             else
             {
-                // Chapter đang DRAFT: chuyển chapter sang PENDING_REVIEW và đồng bộ title + content từ version để moderator xem nội dung gửi duyệt.
+                // Chapter đang DRAFT: phải gửi theo thứ tự — chương trước phải đã gửi (PUBLISHED hoặc PENDING_REVIEW) thì mới gửi được chương này.
+                if (chapter.order_index > 0 && chapter.story_id.HasValue)
+                {
+                    var previous = _chapterRepository.GetByStoryIdAndOrderIndex(chapter.story_id.Value, chapter.order_index - 1);
+                    var prevStatus = (previous?.status ?? "").Trim().ToUpperInvariant();
+                    if (previous == null || (prevStatus != "PUBLISHED" && prevStatus != "PENDING_REVIEW"))
+                        throw new InvalidOperationException("Phải gửi xuất bản chương theo thứ tự. Chương " + chapter.order_index + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
+                }
+                // Chuyển chapter sang PENDING_REVIEW và đồng bộ title + content từ phiên bản để moderator xem nội dung gửi duyệt.
                 chapter.status = "PENDING_REVIEW";
                 if (!string.IsNullOrWhiteSpace(v.title_snapshot))
                     chapter.title = v.title_snapshot;
@@ -140,9 +148,9 @@ namespace Services.Implementations
             var v = _versionRepository.GetById(versionId);
             if (v == null || !v.chapter_id.HasValue) return false;
             if (v.author_id != authorId)
-                throw new UnauthorizedAccessException("Chỉ tác giả mới được hủy gửi duyệt version.");
+                throw new UnauthorizedAccessException("Chỉ tác giả mới được hủy gửi duyệt phiên bản.");
             if (!string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Chỉ version đang chờ duyệt mới được hủy xuất bản.");
+                throw new InvalidOperationException("Chỉ phiên bản đang chờ duyệt mới được hủy xuất bản.");
 
             var chapter = _chapterRepository.GetById(v.chapter_id.Value);
             if (chapter == null) return false;

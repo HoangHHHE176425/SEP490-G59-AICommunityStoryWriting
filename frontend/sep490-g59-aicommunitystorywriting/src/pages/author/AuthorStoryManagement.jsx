@@ -369,7 +369,7 @@ export function AuthorStoryManagement({ onBack }) {
         const chapterId = chapter?.id ?? chapter?.Id;
         const versionId = versionFromList?.id ?? versionFromList?.Id;
         if (!chapterId || !versionId) {
-            showToast('Không tìm thấy chương hoặc version', 'error');
+            showToast('Không tìm thấy chương hoặc phiên bản', 'error');
             return;
         }
         try {
@@ -394,7 +394,7 @@ export function AuthorStoryManagement({ onBack }) {
             });
             setActiveView('addChapterVersion');
         } catch (error) {
-            const msg = error?.response?.data?.message || error?.message || 'Không thể tải version';
+            const msg = error?.response?.data?.message || error?.message || 'Không thể tải phiên bản';
             showToast(msg, 'error');
         }
     };
@@ -414,10 +414,10 @@ export function AuthorStoryManagement({ onBack }) {
                 const contentSnapshot = chapterData.content ?? '';
                 if (chapterData.editingVersionId) {
                     await updateChapterVersion(chapterId, chapterData.editingVersionId, { titleSnapshot, contentSnapshot });
-                    showToast('Đã cập nhật version', 'success');
+                    showToast('Đã cập nhật phiên bản', 'success');
                 } else {
                     await createChapterVersion(chapterId, { titleSnapshot, contentSnapshot });
-                    showToast('Đã tạo version', 'success');
+                    showToast('Đã tạo phiên bản', 'success');
                 }
                 setActiveView('chapterList');
                 setCurrentChapter(null);
