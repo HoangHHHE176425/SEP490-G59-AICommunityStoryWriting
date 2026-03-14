@@ -312,35 +312,28 @@ export function AuthorStoryManagement({ onBack }) {
         }
     };
 
-    /** Mở màn tạo chương với nội dung pre-fill từ chương đã chọn (tạo version). Cùng giao diện và chức năng như tạo chương mới. */
-    const handleAddVersion = async (story, chapterFromList) => {
+    /** Mở màn tạo version mới: form để trống, chỉ cần chapter id + số chương để hiển thị. */
+    const handleAddVersion = (story, chapterFromList) => {
         const chapterId = chapterFromList?.id ?? chapterFromList?.Id;
         if (!chapterId) {
             showToast('Không tìm thấy ID chương', 'error');
             return;
         }
-        try {
-            const fullChapter = await getChapterById(chapterId);
-            const status = (fullChapter.status ?? fullChapter.Status ?? 'DRAFT').toUpperCase();
-            const accessTypeApi = (fullChapter.accessType ?? fullChapter.AccessType ?? 'FREE').toUpperCase();
-            const mapped = {
-                id: fullChapter.id ?? fullChapter.Id,
-                number: (fullChapter.orderIndex ?? fullChapter.OrderIndex ?? 0) + 1,
-                title: fullChapter.title ?? fullChapter.Title ?? '',
-                content: fullChapter.content ?? fullChapter.Content ?? '',
-                status: status.toLowerCase(),
-                accessType: accessTypeApi === 'PAID' ? 'paid' : 'public',
-                price: fullChapter.coinPrice ?? fullChapter.CoinPrice ?? 0,
-            };
-            setCurrentStory(story);
-            setCurrentChapter(null);
-            setSourceChapterForVersion(mapped);
-            setEditingVersion(null);
-            setActiveView('addChapterVersion');
-        } catch (error) {
-            const msg = error?.response?.data?.message || error?.message || 'Không thể tải nội dung chương';
-            showToast(msg, 'error');
-        }
+        const number = (chapterFromList?.orderIndex ?? chapterFromList?.order_index ?? 0) + 1;
+        const title = chapterFromList?.title ?? chapterFromList?.name ?? `Chương ${number}`;
+        setCurrentStory(story);
+        setCurrentChapter(null);
+        setSourceChapterForVersion({
+            id: chapterId,
+            number,
+            title,
+            content: '',
+            status: 'draft',
+            accessType: 'public',
+            price: 0,
+        });
+        setEditingVersion(null);
+        setActiveView('addChapterVersion');
     };
 
     /** Mở editor chỉnh sửa version đã có: load chi tiết version rồi mở ChapterEditorPage ở chế độ edit version. */
@@ -1467,3 +1460,5 @@ export function AuthorStoryManagement({ onBack }) {
         </div>
     );
 }
+
+export default AuthorStoryManagement;

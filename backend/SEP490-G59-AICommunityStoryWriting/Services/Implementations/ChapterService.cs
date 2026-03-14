@@ -1,3 +1,4 @@
+using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Logging;
@@ -12,14 +13,16 @@ namespace Services.Implementations
     public class ChapterService : IChapterService
     {
         private readonly IChapterRepository _chapterRepository;
+        private readonly IChapterVersionRepository _versionRepository;
         private readonly IAiGeneratedContentRepository _aiContentRepository;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
         private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly ILogger<ChapterService> _logger;
 
-        public ChapterService(IChapterRepository chapterRepository, IAiGeneratedContentRepository aiContentRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
+        public ChapterService(IChapterRepository chapterRepository, IChapterVersionRepository versionRepository, IAiGeneratedContentRepository aiContentRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
         {
             _chapterRepository = chapterRepository;
+            _versionRepository = versionRepository;
             _aiContentRepository = aiContentRepository;
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
@@ -451,6 +454,15 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+
+            var statusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
+            if (statusUpper == "DRAFT")
+            {
+                var versionsPending = _versionRepository.GetByChapterId(id)
+                    .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+                if (versionsPending)
+                    throw new InvalidOperationException("Chỉ được gửi một bản duyệt: bản gốc chapter hoặc một version. Đã có version đang chờ duyệt.");
+            }
 
             EnsureCanSubmitForReview(chapter);
 

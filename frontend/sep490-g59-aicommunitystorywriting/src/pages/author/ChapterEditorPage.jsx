@@ -153,6 +153,18 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 versionNumber: 1,
             };
         }
+        if (sourceChapterForVersion) {
+            return {
+                number: sourceChapterForVersion.number ?? 1,
+                title: '',
+                content: '',
+                status: sourceChapterForVersion.status || 'draft',
+                accessType: sourceChapterForVersion.accessType || 'public',
+                price: sourceChapterForVersion.price ?? 0,
+                changeSummary: '',
+                versionNumber: 1,
+            };
+        }
         return {
             number: 1,
             title: '',
@@ -195,7 +207,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     const isNewChapter = !chapter;
     const isVersionMode = Boolean(sourceChapterForVersion);
 
-    // Pre-fill khi ở chế độ version: ưu tiên dữ liệu từ editingVersion (chỉnh sửa), không thì từ chương gốc (tạo mới)
+    // Pre-fill khi ở chế độ version: chỉnh sửa version thì lấy dữ liệu version; tạo version mới thì để trống (chỉ giữ number, versionNumber)
     useEffect(() => {
         if (!sourceChapterForVersion) return;
         if (editingVersion) {
@@ -213,8 +225,8 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             setChapterData((prev) => ({
                 ...prev,
                 number: sourceChapterForVersion.number ?? prev.number,
-                title: sourceChapterForVersion.title || prev.title,
-                content: sourceChapterForVersion.content || prev.content,
+                title: '',
+                content: '',
                 status: sourceChapterForVersion.status || 'draft',
                 accessType: sourceChapterForVersion.accessType || 'public',
                 price: sourceChapterForVersion.price ?? 0,

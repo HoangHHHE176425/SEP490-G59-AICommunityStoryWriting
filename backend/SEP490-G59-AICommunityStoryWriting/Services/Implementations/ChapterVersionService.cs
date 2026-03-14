@@ -1,4 +1,4 @@
-﻿using BusinessObjects.Entities;
+using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Repositories;
 using Services.DTOs.Chapters;
@@ -102,18 +102,30 @@ namespace Services.Implementations
             if (story == null || story.author_id != authorId)
                 throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được gửi duyệt.");
 
+            var chapterStatusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
+            if (chapterStatusUpper == "PENDING_REVIEW")
+                throw new InvalidOperationException("Chapter đã được gửi đi duyệt. Chỉ được gửi một bản: bản gốc chapter hoặc một version.");
+
             ChapterVersionDAO.SetPendingVersionsToDraft(v.chapter_id.Value, exceptVersionId: versionId);
             v.status = "PENDING_REVIEW";
             _versionRepository.Update(v);
 
-            // Khi gửi version đi duyệt: đồng bộ title + content từ snapshot của version sang chapter.
-            // Như vậy khi moderator approve, chapter đã mang nội dung của version mới.
-            if (!string.IsNullOrWhiteSpace(v.title_snapshot))
-                chapter.title = v.title_snapshot;
-            chapter.content = v.content_snapshot;
-            chapter.updated_at = DateTime.UtcNow;
-            chapter.word_count = CalculateWordCount(v.content_snapshot);
             chapter.status = "PENDING_REVIEW";
+            chapter.updated_at = DateTime.UtcNow;
+
+            if (chapterStatusUpper == "PUBLISHED")
+            {
+                // Chapter đã xuất bản, đang gửi version chỉnh sửa: không ghi đè nội dung chapter để moderator thấy bản gốc và so sánh với version.
+            }
+            else
+            {
+                // Chapter đang DRAFT: đồng bộ title + content từ version sang chapter để moderator xem nội dung gửi duyệt.
+                if (!string.IsNullOrWhiteSpace(v.title_snapshot))
+                    chapter.title = v.title_snapshot;
+                chapter.content = v.content_snapshot;
+                chapter.word_count = CalculateWordCount(v.content_snapshot);
+            }
+
             _chapterRepository.Update(chapter);
             return true;
         }

@@ -898,7 +898,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                         <div style={{ borderRadius: '8px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
                                                             <div style={{
                                                                 display: 'grid',
-                                                                gridTemplateColumns: '80px 1fr 140px 200px',
+                                                                gridTemplateColumns: '80px 1fr 110px 140px 200px',
                                                                 gap: '1rem',
                                                                 padding: '0.75rem 1rem',
                                                                 backgroundColor: '#f9fafb',
@@ -909,18 +909,22 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                 alignItems: 'center',
                                                             }}>
                                                                 <div>Version</div>
-                                                                <div>Mô tả thay đổi</div>
+                                                                <div>Tiêu đề version</div>
+                                                                <div>Trạng thái</div>
                                                                 <div>Ngày tạo</div>
                                                                 <div style={{ textAlign: 'center' }}>Hành động</div>
                                                             </div>
                                                             {versions.map((v, vIndex) => {
-                                                                const vStatus = (v.status || 'DRAFT').toLowerCase();
+                                                                const vStatusKey = (v.status ?? 'DRAFT').toUpperCase();
+                                                                const vStatusLower = (v.status ?? 'DRAFT').toLowerCase();
+                                                                const vStatusDisplay = CHAPTER_STATUS_MAP[vStatusKey] ?? v.status ?? 'DRAFT';
+                                                                const vStatusStyle = getChapterStatusStyle(v.status);
                                                                 return (
                                                                     <div
                                                                         key={v.id}
                                                                         style={{
                                                                             display: 'grid',
-                                                                            gridTemplateColumns: '80px 1fr 140px 200px',
+                                                                            gridTemplateColumns: '80px 1fr 110px 140px 200px',
                                                                             gap: '1rem',
                                                                             padding: '0.875rem 1rem',
                                                                             alignItems: 'center',
@@ -937,6 +941,15 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                         </span>
                                                                         <span style={{ color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                                             {v.change_summary ?? '—'}
+                                                                        </span>
+                                                                        <span style={{
+                                                                            fontSize: '0.75rem',
+                                                                            fontWeight: 600,
+                                                                            padding: '0.25rem 0.5rem',
+                                                                            borderRadius: '9999px',
+                                                                            ...vStatusStyle,
+                                                                        }}>
+                                                                            {vStatusDisplay}
                                                                         </span>
                                                                         <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
                                                                             {v.created_at ? new Date(v.created_at).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
@@ -974,19 +987,19 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                         .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Xóa version thất bại'));
                                                                                 }}
                                                                                 title="Xóa version (chỉ DRAFT)"
-                                                                                disabled={vStatus === 'published'}
+                                                                                disabled={vStatusLower === 'published'}
                                                                                 style={{
                                                                                     display: 'inline-flex',
                                                                                     alignItems: 'center',
                                                                                     gap: '0.25rem',
                                                                                     padding: '0.35rem 0.65rem',
-                                                                                    backgroundColor: vStatus === 'published' ? '#f1f5f9' : '#fff',
+                                                                                    backgroundColor: vStatusLower === 'published' ? '#f1f5f9' : '#fff',
                                                                                     border: '1px solid #fecaca',
                                                                                     borderRadius: '9999px',
                                                                                     fontSize: '0.75rem',
                                                                                     fontWeight: 600,
-                                                                                    color: vStatus === 'published' ? '#94a3b8' : '#dc2626',
-                                                                                    cursor: vStatus === 'published' ? 'not-allowed' : 'pointer',
+                                                                                    color: vStatusLower === 'published' ? '#94a3b8' : '#dc2626',
+                                                                                    cursor: vStatusLower === 'published' ? 'not-allowed' : 'pointer',
                                                                                 }}
                                                                             >
                                                                                 <Trash2 size={12} />
@@ -996,31 +1009,31 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                 type="button"
                                                                                 onClick={(e) => {
                                                                                     e.stopPropagation();
-                                                                                    if (vStatus === 'published') return;
+                                                                                    if (vStatusLower === 'published') return;
                                                                                     submitChapterVersion(chapter.id, v.id)
                                                                                         .then(() => loadVersionsForChapter(chapter.id))
                                                                                         .then(() => loadChapters(currentPage, { silent: true }))
                                                                                         .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Gửi duyệt version thất bại'));
                                                                                 }}
-                                                                                title={vStatus === 'published' ? 'Đã xuất bản' : 'Gửi duyệt version'}
-                                                                                disabled={vStatus === 'published'}
+                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : 'Gửi duyệt version'}
+                                                                                disabled={vStatusLower === 'published'}
                                                                                 style={{
                                                                                     display: 'inline-flex',
                                                                                     alignItems: 'center',
                                                                                     gap: '0.25rem',
                                                                                     padding: '0.35rem 0.65rem',
-                                                                                    backgroundColor: vStatus === 'published' ? '#f1f5f9' : '#13ec5b',
+                                                                                    backgroundColor: vStatusLower === 'published' ? '#f1f5f9' : '#13ec5b',
                                                                                     border: 'none',
                                                                                     borderRadius: '9999px',
                                                                                     fontSize: '0.75rem',
                                                                                     fontWeight: 600,
-                                                                                    color: vStatus === 'published' ? '#94a3b8' : '#fff',
-                                                                                    cursor: vStatus === 'published' ? 'not-allowed' : 'pointer',
-                                                                                    opacity: vStatus === 'published' ? 0.8 : 1,
+                                                                                    color: vStatusLower === 'published' ? '#94a3b8' : '#fff',
+                                                                                    cursor: vStatusLower === 'published' ? 'not-allowed' : 'pointer',
+                                                                                    opacity: vStatusLower === 'published' ? 0.8 : 1,
                                                                                 }}
                                                                             >
                                                                                 <Send size={12} />
-                                                                                {vStatus === 'published' ? 'Đã xuất bản' : 'Xuất bản'}
+                                                                                {vStatusLower === 'published' ? 'Đã xuất bản' : 'Xuất bản'}
                                                                             </button>
                                                                         </div>
                                                                     </div>

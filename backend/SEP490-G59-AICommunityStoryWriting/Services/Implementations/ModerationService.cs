@@ -1,3 +1,4 @@
+using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Logging;
@@ -13,6 +14,7 @@ namespace Services.Implementations
     {
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
+        private readonly IChapterVersionRepository _versionRepository;
         private readonly IStoryService _storyService;
         private readonly IChapterService _chapterService;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
@@ -22,6 +24,7 @@ namespace Services.Implementations
         public ModerationService(
             IStoryRepository storyRepository,
             IChapterRepository chapterRepository,
+            IChapterVersionRepository versionRepository,
             IStoryService storyService,
             IChapterService chapterService,
             ILogger<ModerationService> logger,
@@ -30,6 +33,7 @@ namespace Services.Implementations
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
+            _versionRepository = versionRepository;
             _storyService = storyService;
             _chapterService = chapterService;
             _logger = logger;
@@ -381,6 +385,22 @@ namespace Services.Implementations
                     var missingIndex = currentIndex - 1;
                     throw new InvalidOperationException(
                         $"Phải duyệt chương theo thứ tự. Cần duyệt chương có thứ tự {missingIndex} trước khi duyệt chương {currentIndex}.");
+                }
+            }
+
+            // Nếu có version PENDING_REVIEW (gửi chỉnh sửa bản đã xuất bản), áp dụng nội dung version lên chapter trước khi duyệt.
+            var pendingVersions = _versionRepository.GetByChapterId(chapterId)
+                .Where(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (pendingVersions.Count > 0)
+            {
+                var v = pendingVersions[0];
+                if (!string.IsNullOrWhiteSpace(v.title_snapshot))
+                    chapter.title = v.title_snapshot;
+                if (v.content_snapshot != null)
+                {
+                    chapter.content = v.content_snapshot;
+                    chapter.word_count = chapter.content.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
                 }
             }
 
