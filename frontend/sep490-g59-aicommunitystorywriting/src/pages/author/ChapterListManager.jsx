@@ -218,6 +218,26 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
         return () => clearTimeout(tid);
     }, [expandedChapterId, loadVersionsForChapter]);
 
+    /** Preload danh sách phiên bản cho tất cả chương trên trang để biết có phiên bản đang chờ duyệt (disable nút Xuất bản chương gốc). */
+    const chapterIdsKey = chapters?.length ? chapters.map((c) => c.id).join(',') : '';
+    useEffect(() => {
+        if (!chapterIdsKey) return;
+        const ids = chapterIdsKey.split(',').filter(Boolean);
+        let cancelled = false;
+        Promise.all(ids.map((chapterId) => getChapterVersions(chapterId).catch(() => [])))
+            .then((results) => {
+                if (cancelled) return;
+                setChapterVersionsMap((prev) => {
+                    const next = { ...prev };
+                    ids.forEach((chapterId, i) => {
+                        next[chapterId] = Array.isArray(results[i]) ? results[i] : [];
+                    });
+                    return next;
+                });
+            });
+        return () => { cancelled = true; };
+    }, [chapterIdsKey]);
+
     /** Khi tab được focus lại (vd: duyệt version ở tab khác rồi chuyển về tab này), refetch list version để version đã duyệt biến mất ngay. */
     useEffect(() => {
         const onVisibilityChange = () => {
@@ -233,6 +253,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
     const [actioningVersionId, setActioningVersionId] = useState(null);
     const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
     const [rejectionReasonModal, setRejectionReasonModal] = useState({ open: false, title: '', reason: null, rejectedAt: null, loading: false });
+    const [messageModal, setMessageModal] = useState({ open: false, title: '', message: '' });
 
     const handleDeleteChapter = (chapterId) => {
         if (!chapterId) return;
@@ -343,7 +364,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                     });
                 })
                 .catch((err) => {
-                    alert(err?.message ?? 'Hủy xuất bản thất bại');
+                    const msg = err?.response?.data?.message ?? err?.message ?? 'Hủy xuất bản thất bại';
+                    setMessageModal({ open: true, title: 'Không thể hủy xuất bản', message: msg });
                 })
                 .finally(() => setActioningChapterId(null));
         } else if (action === 'delete') {
@@ -368,7 +390,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
             unsubmitChapterVersion(chapterId, versionId)
                 .then(() => loadVersionsForChapter(chapterId))
                 .then(() => loadChapters(currentPage, { silent: true }))
-                .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Hủy gửi duyệt phiên bản thất bại'))
+                .catch((err) => {
+                    const msg = err?.response?.data?.message ?? err?.message ?? 'Hủy gửi duyệt phiên bản thất bại';
+                    setMessageModal({ open: true, title: 'Không thể hủy gửi duyệt', message: msg });
+                })
                 .finally(() => setActioningVersionId(null));
         } else if (action === 'version_delete' && confirmDialog.versionId) {
             const versionId = confirmDialog.versionId;
@@ -409,6 +434,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
     };
 
     const closeRejectionReasonModal = () => setRejectionReasonModal(prev => ({ ...prev, open: false }));
+    const closeMessageModal = () => setMessageModal(prev => ({ ...prev, open: false }));
 
     return (
         <div>
@@ -827,11 +853,17 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                         <div style={{ display: 'flex', width: '100%' }}>
                                                             {(chapter.status === 'draft' || chapter.status === 'rejected') && (() => {
                                                                 const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(chapter.number - 2) || pendingOrderIndices.has(chapter.number - 2);
+                                                                const canSubmitChapter = canSubmitForPublish && !hasPendingVersion;
+                                                                const chapterPublishTitle = !canSubmitForPublish
+                                                                    ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.`
+                                                                    : hasPendingVersion
+                                                                        ? 'Đã có phiên bản đang chờ duyệt, không thể gửi chương gốc.'
+                                                                        : 'Gửi chương lên để duyệt xuất bản';
                                                                 return (
                                                                     <button
-                                                                        onClick={() => canSubmitForPublish && handlePublishChapter(chapter.id)}
-                                                                        disabled={actioningChapterId === chapter.id || !canSubmitForPublish}
-                                                                        title={!canSubmitForPublish ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.` : 'Gửi chương lên để duyệt xuất bản'}
+                                                                        onClick={() => canSubmitChapter && handlePublishChapter(chapter.id)}
+                                                                        disabled={actioningChapterId === chapter.id || !canSubmitChapter}
+                                                                        title={chapterPublishTitle}
                                                                         style={{
                                                                             display: 'inline-flex',
                                                                             alignItems: 'center',
@@ -839,20 +871,20 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                             gap: '0.25rem',
                                                                             width: '100%',
                                                                             padding: '0.4rem 0.75rem',
-                                                                            backgroundColor: canSubmitForPublish ? '#13ec5b' : '#e2e8f0',
+                                                                            backgroundColor: canSubmitChapter ? '#13ec5b' : '#e2e8f0',
                                                                             border: 'none',
                                                                             borderRadius: '9999px',
                                                                             fontSize: '0.75rem',
                                                                             fontWeight: 600,
-                                                                            color: canSubmitForPublish ? '#fff' : '#94a3b8',
-                                                                            cursor: actioningChapterId === chapter.id || !canSubmitForPublish ? 'not-allowed' : 'pointer',
+                                                                            color: canSubmitChapter ? '#fff' : '#94a3b8',
+                                                                            cursor: actioningChapterId === chapter.id || !canSubmitChapter ? 'not-allowed' : 'pointer',
                                                                             opacity: actioningChapterId === chapter.id ? 0.7 : 1,
                                                                             transition: 'all 0.2s',
                                                                             whiteSpace: 'nowrap'
                                                                         }}
                                                                     >
                                                                         <Send size={12} />
-                                                                        {actioningChapterId === chapter.id ? '...' : 'Xuất bản'}
+                                                                        {actioningChapterId === chapter.id ? '...' : hasPendingVersion ? 'Đã có phiên bản chờ duyệt' : 'Xuất bản'}
                                                                     </button>
                                                                 );
                                                             })()}
@@ -1416,6 +1448,60 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                 }}
                             >
                                 Đóng
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal thông báo (vd: hủy xuất bản bị chặn vì moderator đã nhận duyệt) */}
+            {messageModal.open && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10001,
+                        padding: '1rem'
+                    }}
+                    onClick={closeMessageModal}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '440px',
+                            width: '100%',
+                            boxShadow: '0 20px 60px rgba(0,0,0,0.2)'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.125rem', fontWeight: 600, color: '#1e293b' }}>
+                            {messageModal.title}
+                        </h3>
+                        <p style={{ margin: 0, fontSize: '0.875rem', color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                            {messageModal.message}
+                        </p>
+                        <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                                type="button"
+                                onClick={closeMessageModal}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    backgroundColor: '#f1f5f9',
+                                    color: '#475569',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Đã hiểu
                             </button>
                         </div>
                     </div>

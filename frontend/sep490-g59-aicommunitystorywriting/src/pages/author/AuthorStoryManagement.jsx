@@ -8,7 +8,7 @@ import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
 import { createStory, updateStory, getStories, getStoryById, deleteStory } from '../../api/story/storyApi';
-import { createChapter, updateChapter, getChapterById, getChapters, createChapterVersion, updateChapterVersion, getChapterVersionById } from '../../api/chapter/chapterApi';
+import { createChapter, updateChapter, getChapterById, getChapters, createChapterVersion, updateChapterVersion, getChapterVersionById, submitChapterVersion } from '../../api/chapter/chapterApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -407,18 +407,27 @@ export function AuthorStoryManagement({ onBack }) {
         }
 
         try {
-            // Chế độ version: tạo mới hoặc cập nhật version
+            // Chế độ version: tạo mới hoặc cập nhật version; nếu status === 'published' thì gửi duyệt (giống nút Xuất bản ở danh sách phiên bản)
             if (chapterData.sourceChapterId) {
                 const chapterId = chapterData.sourceChapterId;
                 const titleSnapshot = chapterData.title ?? '';
                 const contentSnapshot = chapterData.content ?? '';
+                const shouldSubmitForReview = chapterData.status === 'published';
+                let versionId = chapterData.editingVersionId;
+
                 if (chapterData.editingVersionId) {
                     await updateChapterVersion(chapterId, chapterData.editingVersionId, { titleSnapshot, contentSnapshot });
-                    showToast('Đã cập nhật phiên bản', 'success');
+                    showToast(shouldSubmitForReview ? 'Đã cập nhật và gửi phiên bản đi duyệt' : 'Đã cập nhật phiên bản', 'success');
                 } else {
-                    await createChapterVersion(chapterId, { titleSnapshot, contentSnapshot });
-                    showToast('Đã tạo phiên bản', 'success');
+                    const created = await createChapterVersion(chapterId, { titleSnapshot, contentSnapshot });
+                    versionId = created?.id ?? created?.Id ?? created?.id;
+                    showToast(shouldSubmitForReview && versionId ? 'Đã tạo và gửi phiên bản đi duyệt' : 'Đã tạo phiên bản', 'success');
                 }
+
+                if (shouldSubmitForReview && versionId) {
+                    await submitChapterVersion(chapterId, versionId);
+                }
+
                 setActiveView('chapterList');
                 setCurrentChapter(null);
                 setSourceChapterForVersion(null);

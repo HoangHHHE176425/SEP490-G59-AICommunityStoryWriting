@@ -220,6 +220,10 @@ namespace AIStory.API.Controllers
                 var unpublished = _chapterService.Unpublish(id);
                 return unpublished ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while unpublishing the chapter", error = ex.Message });

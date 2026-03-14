@@ -172,9 +172,10 @@ namespace Services.Implementations
             if (query.PendingVersionChapterIds != null && query.PendingVersionChapterIds.Count > 0)
             {
                 var ids = query.PendingVersionChapterIds;
+                // Hiển thị chapter chờ duyệt: (1) chapter gốc PENDING_REVIEW hoặc (2) chapter có ít nhất một version PENDING_REVIEW (kể cả chapter đang DRAFT).
                 chaptersQuery = chaptersQuery.Where(c =>
                     c.status == "PENDING_REVIEW" ||
-                    (c.status == "PUBLISHED" && ids.Contains(c.id)));
+                    ids.Contains(c.id));
             }
             else if (query.StatusIn != null && query.StatusIn.Count > 0)
             {
@@ -462,14 +463,11 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
 
-            var statusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
-            if (statusUpper == "DRAFT")
-            {
-                var versionsPending = _versionRepository.GetByChapterId(id)
-                    .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
-                if (versionsPending)
-                    throw new InvalidOperationException("Chỉ được gửi một bản duyệt: bản gốc chương hoặc một phiên bản. Đã có phiên bản đang chờ duyệt.");
-            }
+            // Khi đã có phiên bản nào của chương đang chờ duyệt thì không cho gửi duyệt chapter gốc.
+            var versionsPending = _versionRepository.GetByChapterId(id)
+                .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+            if (versionsPending)
+                throw new InvalidOperationException("Chỉ được gửi một bản duyệt: bản gốc chương hoặc một phiên bản. Đã có phiên bản đang chờ duyệt.");
 
             EnsureCanSubmitForReview(chapter);
 
@@ -488,6 +486,9 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+
+            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, id))
+                throw new InvalidOperationException("Kiểm duyệt viên đã nhận duyệt đơn này, bạn không thể hủy xuất bản. Vui lòng chờ kết quả duyệt.");
 
             chapter.status = "DRAFT";
             chapter.updated_at = DateTime.Now;

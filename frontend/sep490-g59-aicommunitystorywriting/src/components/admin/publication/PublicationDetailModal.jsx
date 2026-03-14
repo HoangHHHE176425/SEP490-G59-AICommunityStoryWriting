@@ -557,10 +557,33 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                         textOverflow: 'ellipsis',
                                                         whiteSpace: 'nowrap'
                                                     }}>
-                                                        {chapter.title}
+                                                        {(() => {
+                                                            if (chapter.id !== selectedChapter?.id) return chapter.title;
+                                                            const review = chapterReviewContent[chapter.id];
+                                                            const hasPending = review?.hasPendingVersion ?? review?.HasPendingVersion;
+                                                            const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
+                                                            const chapterIsPublished = (chapter?.status ?? '').toLowerCase() === 'published';
+                                                            if (!chapterIsPublished && hasPending && pendingVersions?.length > 0) {
+                                                                const t = pendingVersions[0]?.titleSnapshot ?? pendingVersions[0]?.TitleSnapshot ?? '';
+                                                                return (t && t.trim()) ? t.trim() : chapter.title;
+                                                            }
+                                                            return chapter.title;
+                                                        })()}
                                                     </div>
                                                     <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                                                        {chapter.wordCount} từ
+                                                        {(() => {
+                                                            if (chapter.id !== selectedChapter?.id) return `${chapter.wordCount ?? 0} từ`;
+                                                            const review = chapterReviewContent[chapter.id];
+                                                            const hasPending = review?.hasPendingVersion ?? review?.HasPendingVersion;
+                                                            const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
+                                                            const chapterIsPublished = (chapter?.status ?? '').toLowerCase() === 'published';
+                                                            if (!chapterIsPublished && hasPending && pendingVersions?.length > 0) {
+                                                                const content = pendingVersions[0]?.contentSnapshot ?? pendingVersions[0]?.ContentSnapshot ?? '';
+                                                                const count = (typeof content === 'string' && content.trim()) ? content.trim().split(/\s+/).length : 0;
+                                                                return `${count} từ`;
+                                                            }
+                                                            return `${chapter.wordCount ?? 0} từ`;
+                                                        })()}
                                                     </div>
                                                     {publication?.status === 'approved' && chapter.publishedAt && (
                                                         <div style={{ fontSize: '0.6875rem', color: '#10b981', marginTop: '0.25rem' }}>
@@ -586,10 +609,31 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                     CHƯƠNG {selectedChapter.chapterNumber}
                                                 </div>
                                                 <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b', margin: 0, marginBottom: '0.5rem' }}>
-                                                    {selectedChapter.title}
+                                                    {(() => {
+                                                        const review = chapterReviewContent[selectedChapter.id];
+                                                        const hasPending = review?.hasPendingVersion ?? review?.HasPendingVersion;
+                                                        const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
+                                                        const chapterIsPublished = (selectedChapter?.status ?? '').toLowerCase() === 'published';
+                                                        if (!chapterIsPublished && hasPending && pendingVersions?.length > 0) {
+                                                            const t = pendingVersions[0]?.titleSnapshot ?? pendingVersions[0]?.TitleSnapshot ?? '';
+                                                            return t.trim() || selectedChapter.title;
+                                                        }
+                                                        return selectedChapter.title;
+                                                    })()}
                                                 </h3>
                                                 <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
-                                                    {selectedChapter.wordCount} từ
+                                                    {(() => {
+                                                        const review = chapterReviewContent[selectedChapter.id];
+                                                        const hasPending = review?.hasPendingVersion ?? review?.HasPendingVersion;
+                                                        const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
+                                                        const chapterIsPublished = (selectedChapter?.status ?? '').toLowerCase() === 'published';
+                                                        if (!chapterIsPublished && hasPending && pendingVersions?.length > 0) {
+                                                            const content = pendingVersions[0]?.contentSnapshot ?? pendingVersions[0]?.ContentSnapshot ?? '';
+                                                            const count = (typeof content === 'string' && content.trim()) ? content.trim().split(/\s+/).length : 0;
+                                                            return `${count} từ`;
+                                                        }
+                                                        return `${selectedChapter.wordCount ?? 0} từ`;
+                                                    })()}
                                                 </div>
                                                 {publication?.status === 'approved' && selectedChapter.publishedAt && (
                                                     <div style={{ fontSize: '0.8125rem', color: '#10b981', marginTop: '0.375rem' }}>
@@ -624,22 +668,28 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                         </div>
                                                     );
                                                 })()}
-                                                {(publication?.isEditRequest || chapterReviewContent[selectedChapter.id]?.hasPendingVersion || chapterReviewContent[selectedChapter.id]?.HasPendingVersion) && (
-                                                    <div style={{
-                                                        marginTop: '1rem',
-                                                        padding: '0.75rem 1rem',
-                                                        backgroundColor: '#fef3c7',
-                                                        borderLeft: '4px solid #f59e0b',
-                                                        borderRadius: '0.5rem'
-                                                    }}>
-                                                        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#92400e', marginBottom: '0.25rem' }}>
-                                                            Yêu cầu chỉnh sửa (chương đã xuất bản)
+                                                {(() => {
+                                                    const hasPending = publication?.isEditRequest || chapterReviewContent[selectedChapter.id]?.hasPendingVersion || chapterReviewContent[selectedChapter.id]?.HasPendingVersion;
+                                                    const chapterIsPublished = (selectedChapter?.status ?? '').toLowerCase() === 'published';
+                                                    if (!hasPending) return null;
+                                                    if (!chapterIsPublished && !publication?.isEditRequest) return null;
+                                                    return (
+                                                        <div style={{
+                                                            marginTop: '1rem',
+                                                            padding: '0.75rem 1rem',
+                                                            backgroundColor: '#fef3c7',
+                                                            borderLeft: '4px solid #f59e0b',
+                                                            borderRadius: '0.5rem'
+                                                        }}>
+                                                            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#92400e', marginBottom: '0.25rem' }}>
+                                                                Yêu cầu chỉnh sửa (chương đã xuất bản)
+                                                            </div>
+                                                            <div style={{ fontSize: '0.8125rem', color: '#92400e', lineHeight: 1.5 }}>
+                                                                Đây là bản chỉnh sửa nội dung của chương đã xuất bản (thường do yêu cầu sau báo cáo vi phạm). Bạn sẽ xem 2 phiên bản bên dưới: <strong>bản gốc đã xuất bản</strong> và <strong>bản chỉnh sửa gửi duyệt</strong>.
+                                                            </div>
                                                         </div>
-                                                        <div style={{ fontSize: '0.8125rem', color: '#92400e', lineHeight: 1.5 }}>
-                                                            Đây là bản chỉnh sửa nội dung của chương đã xuất bản (thường do yêu cầu sau báo cáo vi phạm). Bạn sẽ xem 2 phiên bản bên dưới: <strong>bản gốc đã xuất bản</strong> và <strong>bản chỉnh sửa gửi duyệt</strong>.
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                    );
+                                                })()}
                                             </div>
 
                                             {/* Thanh kéo chiều cao vùng đọc — đặt ngay dưới header chương, z-index cao để không bị khối khác chặn */}
@@ -694,6 +744,22 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                         const v = pendingVersions[0];
                                                         const versionTitle = v?.titleSnapshot ?? v?.TitleSnapshot ?? '';
                                                         const versionContent = v?.contentSnapshot ?? v?.ContentSnapshot ?? '';
+                                                        const chapterIsPublished = (selectedChapter?.status ?? '').toLowerCase() === 'published';
+                                                        if (!chapterIsPublished && !publication?.isEditRequest) {
+                                                            // Chapter gốc chưa xuất bản: chỉ hiển thị nội dung phiên bản gửi duyệt, không tab.
+                                                            return (
+                                                                <div style={{
+                                                                    flex: 1,
+                                                                    minHeight: 0,
+                                                                    overflowY: 'auto',
+                                                                    padding: '2.5rem 3rem'
+                                                                }}>
+                                                                    <div style={contentStyle}>
+                                                                        {versionContent || '—'}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        }
                                                         const originalContent = review?.originalContent ?? review?.OriginalContent ?? chapterContents[selectedChapter.id] ?? '—';
                                                         const tabs = [
                                                             { id: 'original', label: 'Chapter gốc đã xuất bản' },
@@ -772,10 +838,12 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         )}
                     </div>
 
-                    {/* Footer - Actions. Khi là yêu cầu chỉnh sửa (2 tab): chỉ hiện nút Duyệt/Từ chối ở tab "Version gửi duyệt"; tab Chapter gốc chỉ để đọc. */}
+                    {/* Footer - Actions. Khi là yêu cầu chỉnh sửa (2 tab): chỉ hiện nút Duyệt/Từ chối ở tab "Version gửi duyệt"; tab Chapter gốc chỉ để đọc. Chapter chưa xuất bản thì chỉ có 1 nội dung (version) nên luôn hiện nút. */}
                     {chapters.length > 0 && !showRejectForm && publication?.status === 'pending' && (() => {
                         const isVersionEditCase = publication?.isEditRequest || (selectedChapter?.id && (chapterReviewContent[selectedChapter.id]?.hasPendingVersion ?? chapterReviewContent[selectedChapter.id]?.HasPendingVersion));
-                        if (isVersionEditCase && contentTab !== 'version') {
+                        const chapterIsPublished = (selectedChapter?.status ?? '').toLowerCase() === 'published';
+                        const hasTwoTabs = isVersionEditCase && (chapterIsPublished || publication?.isEditRequest);
+                        if (hasTwoTabs && contentTab !== 'version') {
                             return (
                                 <div style={{ padding: '0.75rem 1.5rem', borderTop: '1px solid #e2e8f0', backgroundColor: '#f1f5f9', fontSize: '0.875rem', color: '#64748b' }}>
                                     Chuyển sang tab « Phiên bản gửi duyệt » để duyệt hoặc từ chối.
