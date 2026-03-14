@@ -1,3 +1,4 @@
+using System;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Repositories;
@@ -159,6 +160,8 @@ namespace Services.Implementations
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, v.chapter_id.Value))
                 throw new InvalidOperationException("Kiểm duyệt viên đã nhận duyệt đơn này, bạn không thể hủy gửi duyệt. Vui lòng chờ kết quả duyệt.");
 
+            EnsureCanUnpublishChapter(chapter);
+
             v.status = "DRAFT";
             _versionRepository.Update(v);
 
@@ -170,6 +173,25 @@ namespace Services.Implementations
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, v.chapter_id.Value);
             return true;
+        }
+
+        /// <summary>Hủy gửi duyệt (version) cũng phải theo thứ tự ngược: chỉ được hủy chương N nếu không còn chương nào có thứ tự > N đang xuất bản hoặc chờ duyệt.</summary>
+        private void EnsureCanUnpublishChapter(chapters chapter)
+        {
+            var storyId = chapter.story_id ?? Guid.Empty;
+            if (storyId == Guid.Empty) return;
+            var allChapters = _chapterRepository.GetByStoryId(storyId).OrderBy(c => c.order_index).ToList();
+            var currentIndex = chapter.order_index;
+            foreach (var c in allChapters)
+            {
+                if (c.order_index <= currentIndex) continue;
+                var status = (c.status ?? "").Trim().ToUpperInvariant();
+                if (status == "PUBLISHED" || status == "PENDING_REVIEW")
+                    throw new InvalidOperationException("Hủy xuất bản phải theo thứ tự ngược. Phải hủy chương " + (c.order_index + 1) + " trước rồi mới hủy chương " + (currentIndex + 1) + ".");
+                var hasPendingVersion = _versionRepository.GetByChapterId(c.id).Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+                if (hasPendingVersion)
+                    throw new InvalidOperationException("Hủy xuất bản phải theo thứ tự ngược. Chương " + (c.order_index + 1) + " đang có phiên bản chờ duyệt, phải xử lý trước rồi mới hủy chương " + (currentIndex + 1) + ".");
+            }
         }
 
         private static ChapterVersionListItemDto MapToListItemDto(chapter_versions v)

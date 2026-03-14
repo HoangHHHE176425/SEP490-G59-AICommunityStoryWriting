@@ -490,6 +490,8 @@ namespace Services.Implementations
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, id))
                 throw new InvalidOperationException("Kiểm duyệt viên đã nhận duyệt đơn này, bạn không thể hủy xuất bản. Vui lòng chờ kết quả duyệt.");
 
+            EnsureCanUnpublish(chapter);
+
             chapter.status = "DRAFT";
             chapter.updated_at = DateTime.Now;
 
@@ -546,6 +548,25 @@ namespace Services.Implementations
             {
                 throw new InvalidOperationException(
                     "Phải gửi xuất bản chương theo thứ tự. Chương " + (chapter.order_index) + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
+            }
+        }
+
+        /// <summary>Hủy xuất bản phải theo thứ tự ngược: chỉ được hủy chương N nếu không còn chương nào có thứ tự > N đang xuất bản hoặc chờ duyệt.</summary>
+        private void EnsureCanUnpublish(chapters chapter)
+        {
+            var storyId = chapter.story_id ?? Guid.Empty;
+            if (storyId == Guid.Empty) return;
+            var allChapters = _chapterRepository.GetByStoryId(storyId).OrderBy(c => c.order_index).ToList();
+            var currentIndex = chapter.order_index;
+            foreach (var c in allChapters)
+            {
+                if (c.order_index <= currentIndex) continue;
+                var status = (c.status ?? "").Trim().ToUpperInvariant();
+                if (status == "PUBLISHED" || status == "PENDING_REVIEW")
+                    throw new InvalidOperationException("Hủy xuất bản phải theo thứ tự ngược. Phải hủy chương " + (c.order_index + 1) + " trước rồi mới hủy chương " + (currentIndex + 1) + ".");
+                var hasPendingVersion = _versionRepository.GetByChapterId(c.id).Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+                if (hasPendingVersion)
+                    throw new InvalidOperationException("Hủy xuất bản phải theo thứ tự ngược. Chương " + (c.order_index + 1) + " đang có phiên bản chờ duyệt, phải xử lý trước rồi mới hủy chương " + (currentIndex + 1) + ".");
             }
         }
 

@@ -284,6 +284,16 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
     const openVersionDeleteConfirm = (chapterId, versionId, versionTitle) => {
         setConfirmDialog({ open: true, action: 'version_delete', chapterId, versionId, versionTitle });
     };
+    /** Hủy xuất bản theo thứ tự ngược: chỉ được hủy chương N nếu không còn chương nào có thứ tự > N đang xuất bản hoặc chờ duyệt (chapter hoặc version). */
+    const canUnpublishChapter = (chapter) => {
+        const orderIndex = chapter.number - 1;
+        for (let k = orderIndex + 1; k < totalCount; k++) {
+            if (publishedOrderIndices.has(k) || pendingOrderIndices.has(k)) return false;
+            const ch = chapters.find((c) => (c.number - 1) === k);
+            if (ch && (chapterVersionsMap[ch.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review')) return false;
+        }
+        return true;
+    };
     const closeConfirmDialog = () => {
         const isVersionAction = confirmDialog.action?.startsWith('version_');
         if ((isVersionAction && !actioningVersionId) || (!isVersionAction && !actioningChapterId))
@@ -895,33 +905,38 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                     </button>
                                                                 );
                                                             })()}
-                                                            {chapter.status === 'pending_review' && (
-                                                                <button
-                                                                    onClick={() => handleUnpublishChapter(chapter.id)}
-                                                                    disabled={actioningChapterId === chapter.id}
-                                                                    style={{
-                                                                        display: 'inline-flex',
-                                                                        alignItems: 'center',
-                                                                        justifyContent: 'center',
-                                                                        gap: '0.25rem',
-                                                                        width: '100%',
-                                                                        padding: '0.4rem 0.75rem',
-                                                                        backgroundColor: '#fff',
-                                                                        border: '1px solid #f59e0b',
-                                                                        borderRadius: '9999px',
-                                                                        fontSize: '0.75rem',
-                                                                        fontWeight: 600,
-                                                                        color: '#b45309',
-                                                                        cursor: actioningChapterId === chapter.id ? 'not-allowed' : 'pointer',
-                                                                        opacity: actioningChapterId === chapter.id ? 0.7 : 1,
-                                                                        transition: 'all 0.2s',
-                                                                        whiteSpace: 'nowrap'
-                                                                    }}
-                                                                >
-                                                                    <Undo2 size={12} />
-                                                                    {actioningChapterId === chapter.id ? '...' : 'Hủy xuất bản'}
-                                                                </button>
-                                                            )}
+                                                            {chapter.status === 'pending_review' && (() => {
+                                                                const canUnpublish = canUnpublishChapter(chapter);
+                                                                const disabled = actioningChapterId === chapter.id || !canUnpublish;
+                                                                return (
+                                                                    <button
+                                                                        onClick={() => !disabled && handleUnpublishChapter(chapter.id)}
+                                                                        disabled={disabled}
+                                                                        title={!canUnpublish ? 'Hủy xuất bản phải theo thứ tự ngược. Phải hủy các chương có thứ tự sau trước.' : 'Hủy xuất bản'}
+                                                                        style={{
+                                                                            display: 'inline-flex',
+                                                                            alignItems: 'center',
+                                                                            justifyContent: 'center',
+                                                                            gap: '0.25rem',
+                                                                            width: '100%',
+                                                                            padding: '0.4rem 0.75rem',
+                                                                            backgroundColor: '#fff',
+                                                                            border: '1px solid #f59e0b',
+                                                                            borderRadius: '9999px',
+                                                                            fontSize: '0.75rem',
+                                                                            fontWeight: 600,
+                                                                            color: canUnpublish ? '#b45309' : '#94a3b8',
+                                                                            cursor: disabled ? 'not-allowed' : 'pointer',
+                                                                            opacity: disabled ? 0.7 : 1,
+                                                                            transition: 'all 0.2s',
+                                                                            whiteSpace: 'nowrap'
+                                                                        }}
+                                                                    >
+                                                                        <Undo2 size={12} />
+                                                                        {actioningChapterId === chapter.id ? '...' : 'Hủy xuất bản'}
+                                                                    </button>
+                                                                );
+                                                            })()}
                                                         </div>
                                                     )}
                                                 </div>
@@ -1185,38 +1200,42 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                 {/* Hàng 2: Xuất bản hoặc Hủy xuất bản — giống chapter */}
                                                                                 {(vStatusLower === 'pending_review' || vStatusLower === 'draft' || vStatusLower === 'rejected') && (
                                                                                     <div style={{ display: 'flex', width: '100%' }}>
-                                                                                        {vStatusLower === 'pending_review' ? (
-                                                                                            <button
-                                                                                                type="button"
-                                                                                                onClick={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    openVersionUnsubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
-                                                                                                }}
-                                                                                                title="Hủy gửi duyệt phiên bản"
-                                                                                                disabled={actioningVersionId === v.id}
-                                                                                                style={{
-                                                                                                    display: 'inline-flex',
-                                                                                                    alignItems: 'center',
-                                                                                                    justifyContent: 'center',
-                                                                                                    gap: '0.25rem',
-                                                                                                    width: '100%',
-                                                                                                    padding: '0.4rem 0.75rem',
-                                                                                                    backgroundColor: actioningVersionId === v.id ? '#e2e8f0' : '#fff',
-                                                                                                    border: '1px solid #f59e0b',
-                                                                                                    borderRadius: '9999px',
-                                                                                                    fontSize: '0.75rem',
-                                                                                                    fontWeight: 600,
-                                                                                                    color: '#b45309',
-                                                                                                    cursor: actioningVersionId === v.id ? 'not-allowed' : 'pointer',
-                                                                                                    opacity: actioningVersionId === v.id ? 0.7 : 1,
-                                                                                                    whiteSpace: 'nowrap',
-                                                                                                    transition: 'all 0.2s'
-                                                                                                }}
-                                                                                            >
-                                                                                                <Undo2 size={12} />
-                                                                                                {actioningVersionId === v.id ? '...' : 'Hủy xuất bản'}
-                                                                                            </button>
-                                                                                        ) : (vStatusLower === 'draft' || vStatusLower === 'rejected') && (
+                                                                                        {vStatusLower === 'pending_review' ? (() => {
+                                                                                            const canUnpublish = canUnpublishChapter(chapter);
+                                                                                            const disabledVersion = actioningVersionId === v.id || !canUnpublish;
+                                                                                            return (
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    onClick={(e) => {
+                                                                                                        e.stopPropagation();
+                                                                                                        if (!disabledVersion) openVersionUnsubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
+                                                                                                    }}
+                                                                                                    title={!canUnpublish ? 'Hủy xuất bản phải theo thứ tự ngược. Phải hủy các chương có thứ tự sau trước.' : 'Hủy gửi duyệt phiên bản'}
+                                                                                                    disabled={disabledVersion}
+                                                                                                    style={{
+                                                                                                        display: 'inline-flex',
+                                                                                                        alignItems: 'center',
+                                                                                                        justifyContent: 'center',
+                                                                                                        gap: '0.25rem',
+                                                                                                        width: '100%',
+                                                                                                        padding: '0.4rem 0.75rem',
+                                                                                                        backgroundColor: disabledVersion ? '#e2e8f0' : '#fff',
+                                                                                                        border: '1px solid #f59e0b',
+                                                                                                        borderRadius: '9999px',
+                                                                                                        fontSize: '0.75rem',
+                                                                                                        fontWeight: 600,
+                                                                                                        color: canUnpublish ? '#b45309' : '#94a3b8',
+                                                                                                        cursor: disabledVersion ? 'not-allowed' : 'pointer',
+                                                                                                        opacity: disabledVersion ? 0.7 : 1,
+                                                                                                        whiteSpace: 'nowrap',
+                                                                                                        transition: 'all 0.2s'
+                                                                                                    }}
+                                                                                                >
+                                                                                                    <Undo2 size={12} />
+                                                                                                    {actioningVersionId === v.id ? '...' : 'Hủy xuất bản'}
+                                                                                                </button>
+                                                                                            );
+                                                                                        })() : (vStatusLower === 'draft' || vStatusLower === 'rejected') && (
                                                                                             <button
                                                                                                 type="button"
                                                                                                 onClick={(e) => {
