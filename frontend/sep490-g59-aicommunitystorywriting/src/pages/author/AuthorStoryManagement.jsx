@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List } from 'lucide-react';
+import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List, Wallet, History, Coins, ArrowDownToLine } from 'lucide-react';
 import { StoryEditor } from './StoryEditor';
 import { StoryInfoEditor } from './StoryInfoEditor';
 import { ChapterListManager } from '../author/ChapterListManager';
@@ -709,6 +709,76 @@ export function AuthorStoryManagement({ onBack }) {
                             <Book style={{ width: '20px', height: '20px' }} />
                             Truyện của tôi
                         </button>
+
+                        <button
+                            onClick={() => {
+                                setActiveMenu('withdraw');
+                                setActiveView('withdraw');
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'withdraw' ? '#f0fdf4' : 'transparent',
+                                border: 'none',
+                                borderLeft: activeMenu === 'withdraw' ? '3px solid #13ec5b' : '3px solid transparent',
+                                borderRadius: '9999px',
+                                marginLeft: '0.5rem',
+                                marginRight: '0.5rem',
+                                textAlign: 'left',
+                                fontSize: '0.875rem',
+                                fontWeight: activeMenu === 'withdraw' ? 600 : 500,
+                                color: activeMenu === 'withdraw' ? '#13ec5b' : '#333333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'withdraw') e.currentTarget.style.backgroundColor = '#f9fafb';
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'withdraw') e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                        >
+                            <Wallet style={{ width: '20px', height: '20px' }} />
+                            Rút tiền
+                        </button>
+
+                        <button
+                            onClick={() => {
+                                setActiveMenu('history');
+                                setActiveView('history');
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'history' ? '#f0fdf4' : 'transparent',
+                                border: 'none',
+                                borderLeft: activeMenu === 'history' ? '3px solid #13ec5b' : '3px solid transparent',
+                                borderRadius: '9999px',
+                                marginLeft: '0.5rem',
+                                marginRight: '0.5rem',
+                                textAlign: 'left',
+                                fontSize: '0.875rem',
+                                fontWeight: activeMenu === 'history' ? 600 : 500,
+                                color: activeMenu === 'history' ? '#13ec5b' : '#333333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'history') e.currentTarget.style.backgroundColor = '#f9fafb';
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'history') e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                        >
+                            <History style={{ width: '20px', height: '20px' }} />
+                            Lịch sử donate và rút tiền
+                        </button>
                     </nav>
 
                     {/* Logout Section */}
@@ -761,7 +831,172 @@ export function AuthorStoryManagement({ onBack }) {
 
                 {/* Main Content */}
                 <div style={{ flex: 1, padding: '2rem' }}>
-                    {activeView === 'profile' ? (
+                    {activeView === 'withdraw' ? (
+                        <div style={{ maxWidth: '720px' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '1rem',
+                                marginBottom: '1.75rem',
+                                padding: '1.5rem 1.75rem',
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                            }}>
+                                <div style={{
+                                    width: '52px', height: '52px', borderRadius: '14px',
+                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    boxShadow: '0 4px 14px rgba(19, 236, 91, 0.3)'
+                                }}>
+                                    <Wallet style={{ width: '28px', height: '28px', color: '#ffffff' }} />
+                                </div>
+                                <div>
+                                    <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: '#1A2332', margin: 0, letterSpacing: '-0.02em' }}>Rút tiền</h2>
+                                    <p style={{ fontSize: '0.875rem', color: '#90A1B9', margin: '6px 0 0 0' }}>Rút số dư từ donate về tài khoản của bạn</p>
+                                </div>
+                            </div>
+
+                            <div style={{
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                padding: '1.75rem',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                marginBottom: '1.5rem'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                                    <Coins style={{ width: '20px', height: '20px', color: '#13ec5b' }} />
+                                    <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>Số dư khả dụng</span>
+                                </div>
+                                <div style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'baseline',
+                                    gap: '0.5rem',
+                                    padding: '1rem 1.25rem',
+                                    backgroundColor: '#f0fdf4',
+                                    borderRadius: '12px',
+                                    border: '1px solid #bbf7d0'
+                                }}>
+                                    <span style={{ fontSize: '1.75rem', fontWeight: 700, color: '#15803d', letterSpacing: '-0.02em' }}>0</span>
+                                    <span style={{ fontSize: '0.875rem', color: '#166534', fontWeight: 500 }}>coin</span>
+                                </div>
+                            </div>
+
+                            <div style={{
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                padding: '1.75rem',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                                    <ArrowDownToLine style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                                    <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>Yêu cầu rút tiền</span>
+                                </div>
+                                <div style={{ marginBottom: '1.25rem' }}>
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Số coin muốn rút</label>
+                                    <input
+                                        type="number"
+                                        placeholder="0"
+                                        min={1}
+                                        style={{
+                                            width: '100%',
+                                            maxWidth: '320px',
+                                            padding: '0.75rem 1rem',
+                                            border: '1px solid #e5e7eb',
+                                            borderRadius: '10px',
+                                            fontSize: '0.9375rem',
+                                            outline: 'none'
+                                        }}
+                                        onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                        onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                    />
+                                </div>
+                                <button
+                                    style={{
+                                        padding: '0.625rem 1.5rem',
+                                        backgroundColor: '#13ec5b',
+                                        border: 'none',
+                                        borderRadius: '10px',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 600,
+                                        color: '#ffffff',
+                                        cursor: 'pointer',
+                                        boxShadow: '0 2px 8px rgba(19, 236, 91, 0.35)',
+                                        transition: 'all 0.2s ease'
+                                    }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#10d452'; e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.4)'; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#13ec5b'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(19, 236, 91, 0.35)'; }}
+                                >
+                                    Gửi yêu cầu rút tiền
+                                </button>
+                            </div>
+                        </div>
+                    ) : activeView === 'history' ? (
+                        <div style={{ maxWidth: '960px' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '1rem',
+                                marginBottom: '1.75rem',
+                                padding: '1.5rem 1.75rem',
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                            }}>
+                                <div style={{
+                                    width: '52px', height: '52px', borderRadius: '14px',
+                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    boxShadow: '0 4px 14px rgba(19, 236, 91, 0.3)'
+                                }}>
+                                    <History style={{ width: '28px', height: '28px', color: '#ffffff' }} />
+                                </div>
+                                <div>
+                                    <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: '#1A2332', margin: 0, letterSpacing: '-0.02em' }}>Lịch sử donate và rút tiền</h2>
+                                    <p style={{ fontSize: '0.875rem', color: '#90A1B9', margin: '6px 0 0 0' }}>Xem lịch sử nhận donate và các lần rút tiền</p>
+                                </div>
+                            </div>
+                            <div style={{
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                overflow: 'hidden'
+                            }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                    <thead>
+                                        <tr style={{ backgroundColor: '#f8fafc' }}>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>THỜI GIAN</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>LOẠI</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>SỐ COIN</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>GHI CHÚ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td colSpan={4} style={{ padding: '3rem 1.5rem', textAlign: 'center' }}>
+                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+                                                    <div style={{
+                                                        width: '56px', height: '56px', borderRadius: '50%',
+                                                        backgroundColor: '#f1f5f9',
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                                    }}>
+                                                        <History style={{ width: '28px', height: '28px', color: '#94a3b8' }} />
+                                                    </div>
+                                                    <p style={{ fontSize: '0.9375rem', fontWeight: 500, color: '#64748b', margin: 0 }}>Chưa có giao dịch nào</p>
+                                                    <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>Donate và rút tiền sẽ hiển thị tại đây</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ) : activeView === 'profile' ? (
                         <div style={{ maxWidth: '900px' }}>
                             {/* Thành tích */}
                             <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', padding: '1.5rem', marginBottom: '1.5rem', border: '1px solid #e0e0e0' }}>
