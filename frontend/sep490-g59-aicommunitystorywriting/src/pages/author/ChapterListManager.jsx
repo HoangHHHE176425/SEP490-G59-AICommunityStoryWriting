@@ -294,8 +294,9 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
         const { action, chapterId } = confirmDialog;
         if (!chapterId) return;
         const chapterFromList = chapters.find((c) => c.id === chapterId);
-        setActioningChapterId(chapterId);
-        setConfirmDialog({ open: false, action: null, chapterId: null });
+        const isVersionAction = action?.startsWith('version_');
+        if (!isVersionAction) setActioningChapterId(chapterId);
+        setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
         if (action === 'publish') {
             const doUpdate = (title, content) =>
                 updateChapter(chapterId, { title, content, status: 'PENDING_REVIEW' })
