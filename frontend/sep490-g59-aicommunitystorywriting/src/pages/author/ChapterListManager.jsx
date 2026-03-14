@@ -231,7 +231,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
 
     const [actioningChapterId, setActioningChapterId] = useState(null);
     const [actioningVersionId, setActioningVersionId] = useState(null);
-    const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, chapterId: null });
+    const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
     const [rejectionReasonModal, setRejectionReasonModal] = useState({ open: false, title: '', reason: null, rejectedAt: null, loading: false });
 
     const handleDeleteChapter = (chapterId) => {
@@ -246,16 +246,27 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
     };
 
     const openPublishConfirm = (chapterId) => {
-        setConfirmDialog({ open: true, action: 'publish', chapterId });
+        setConfirmDialog({ open: true, action: 'publish', chapterId, versionId: null, versionTitle: null });
     };
     const openUnpublishConfirm = (chapterId) => {
-        setConfirmDialog({ open: true, action: 'unpublish', chapterId });
+        setConfirmDialog({ open: true, action: 'unpublish', chapterId, versionId: null, versionTitle: null });
     };
     const openDeleteConfirm = (chapterId) => {
-        setConfirmDialog({ open: true, action: 'delete', chapterId });
+        setConfirmDialog({ open: true, action: 'delete', chapterId, versionId: null, versionTitle: null });
+    };
+    const openVersionSubmitConfirm = (chapterId, versionId, versionTitle) => {
+        setConfirmDialog({ open: true, action: 'version_submit', chapterId, versionId, versionTitle });
+    };
+    const openVersionUnsubmitConfirm = (chapterId, versionId, versionTitle) => {
+        setConfirmDialog({ open: true, action: 'version_unsubmit', chapterId, versionId, versionTitle });
+    };
+    const openVersionDeleteConfirm = (chapterId, versionId, versionTitle) => {
+        setConfirmDialog({ open: true, action: 'version_delete', chapterId, versionId, versionTitle });
     };
     const closeConfirmDialog = () => {
-        if (!actioningChapterId) setConfirmDialog({ open: false, action: null, chapterId: null });
+        const isVersionAction = confirmDialog.action?.startsWith('version_');
+        if ((isVersionAction && !actioningVersionId) || (!isVersionAction && !actioningChapterId))
+            setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
     };
 
     const handleConfirmAction = () => {
@@ -337,6 +348,32 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                 .finally(() => setActioningChapterId(null));
         } else if (action === 'delete') {
             handleDeleteChapter(chapterId);
+        } else if (action === 'version_submit' && confirmDialog.versionId) {
+            const versionId = confirmDialog.versionId;
+            setActioningVersionId(versionId);
+            setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
+            submitChapterVersion(chapterId, versionId)
+                .then(() => loadVersionsForChapter(chapterId))
+                .then(() => loadChapters(currentPage, { silent: true }))
+                .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Gửi duyệt version thất bại'))
+                .finally(() => setActioningVersionId(null));
+        } else if (action === 'version_unsubmit' && confirmDialog.versionId) {
+            const versionId = confirmDialog.versionId;
+            setActioningVersionId(versionId);
+            setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
+            unsubmitChapterVersion(chapterId, versionId)
+                .then(() => loadVersionsForChapter(chapterId))
+                .then(() => loadChapters(currentPage, { silent: true }))
+                .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Hủy gửi duyệt version thất bại'))
+                .finally(() => setActioningVersionId(null));
+        } else if (action === 'version_delete' && confirmDialog.versionId) {
+            const versionId = confirmDialog.versionId;
+            setActioningVersionId(versionId);
+            setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
+            deleteChapterVersion(chapterId, versionId)
+                .then(() => loadVersionsForChapter(chapterId))
+                .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Xóa version thất bại'))
+                .finally(() => setActioningVersionId(null));
         }
     };
 
@@ -345,16 +382,6 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
     };
     const handleUnpublishChapter = (chapterId) => {
         openUnpublishConfirm(chapterId);
-    };
-
-    const handleUnsubmitVersion = (chapterId, versionId) => {
-        if (!window.confirm('Bạn có chắc muốn hủy gửi duyệt version này? Version và chương sẽ về trạng thái Bản nháp.')) return;
-        setActioningVersionId(versionId);
-        unsubmitChapterVersion(chapterId, versionId)
-            .then(() => loadVersionsForChapter(chapterId))
-            .then(() => loadChapters(currentPage, { silent: true }))
-            .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Hủy gửi duyệt version thất bại'))
-            .finally(() => setActioningVersionId(null));
     };
 
     // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp / Bị từ chối
@@ -1005,10 +1032,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                 onClick={(e) => {
                                                                                     e.stopPropagation();
                                                                                     if (!v.id || vStatusLower === 'published' || vStatusLower === 'pending_review') return;
-                                                                                    if (!window.confirm('Bạn có chắc muốn xóa version này?')) return;
-                                                                                    deleteChapterVersion(chapter.id, v.id)
-                                                                                        .then(() => loadVersionsForChapter(chapter.id))
-                                                                                        .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Xóa version thất bại'));
+                                                                                    openVersionDeleteConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                 }}
                                                                                 title={vStatusLower === 'pending_review' ? 'Version đang chờ duyệt, không thể xóa' : vStatusLower === 'published' ? 'Đã xuất bản' : 'Xóa version (chỉ Bản nháp)'}
                                                                                 disabled={vStatusLower === 'published' || vStatusLower === 'pending_review'}
@@ -1034,7 +1058,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                     type="button"
                                                                                     onClick={(e) => {
                                                                                         e.stopPropagation();
-                                                                                        handleUnsubmitVersion(chapter.id, v.id);
+                                                                                        openVersionUnsubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                     }}
                                                                                     title="Hủy gửi duyệt version"
                                                                                     disabled={actioningVersionId === v.id}
@@ -1061,10 +1085,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                     onClick={(e) => {
                                                                                         e.stopPropagation();
                                                                                         if (vStatusLower === 'published') return;
-                                                                                        submitChapterVersion(chapter.id, v.id)
-                                                                                            .then(() => loadVersionsForChapter(chapter.id))
-                                                                                            .then(() => loadChapters(currentPage, { silent: true }))
-                                                                                            .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Gửi duyệt version thất bại'));
+                                                                                        openVersionSubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                     }}
                                                                                     title={vStatusLower === 'published' ? 'Đã xuất bản' : 'Gửi duyệt version'}
                                                                                     disabled={vStatusLower === 'published'}
@@ -1181,11 +1202,17 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                             {confirmDialog.action === 'publish' && 'Xác nhận xuất bản'}
                             {confirmDialog.action === 'unpublish' && 'Xác nhận hủy xuất bản'}
                             {confirmDialog.action === 'delete' && 'Xác nhận xóa chương'}
+                            {confirmDialog.action === 'version_submit' && 'Xác nhận gửi duyệt version'}
+                            {confirmDialog.action === 'version_unsubmit' && 'Xác nhận hủy gửi duyệt version'}
+                            {confirmDialog.action === 'version_delete' && 'Xác nhận xóa version'}
                         </h3>
                         <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
                             {confirmDialog.action === 'publish' && 'Bạn có chắc chắn muốn gửi chương này lên để duyệt xuất bản?'}
                             {confirmDialog.action === 'unpublish' && 'Bạn có chắc chắn muốn hủy xuất bản và đưa chương về bản nháp?'}
                             {confirmDialog.action === 'delete' && 'Bạn có chắc chắn muốn xóa chương này? Hành động này không thể hoàn tác.'}
+                            {confirmDialog.action === 'version_submit' && 'Bạn có chắc chắn muốn gửi version này lên để duyệt xuất bản?'}
+                            {confirmDialog.action === 'version_unsubmit' && 'Bạn có chắc chắn muốn hủy gửi duyệt? Version và chương sẽ về trạng thái Bản nháp.'}
+                            {confirmDialog.action === 'version_delete' && 'Bạn có chắc chắn muốn xóa version này? Hành động này không thể hoàn tác.'}
                         </p>
                         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                             <button
@@ -1210,13 +1237,13 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
                                     color: '#ffffff',
-                                    backgroundColor: confirmDialog.action === 'delete' ? '#dc2626' : '#13ec5b',
+                                    backgroundColor: (confirmDialog.action === 'delete' || confirmDialog.action === 'version_delete') ? '#dc2626' : '#13ec5b',
                                     border: 'none',
                                     borderRadius: '8px',
                                     cursor: 'pointer'
                                 }}
                             >
-                                {confirmDialog.action === 'delete' ? 'Xóa' : 'Xác nhận'}
+                                {(confirmDialog.action === 'delete' || confirmDialog.action === 'version_delete') ? 'Xóa' : 'Xác nhận'}
                             </button>
                         </div>
                     </div>
