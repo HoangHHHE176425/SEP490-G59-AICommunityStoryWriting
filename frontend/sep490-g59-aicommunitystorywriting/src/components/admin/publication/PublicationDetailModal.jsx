@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar } from 'lucide-react';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
-import { approveStory, approveChapter, rejectStory, rejectChapter } from '../../../api/moderator/moderatorApi';
+import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters } from '../../../api/moderator/moderatorApi';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { useToast } from '../../author/story-editor/Toast';
 
-/** Map API chapter list item sang format modal cần */
+/** Map API chapter list item sang format modal cần. Khi API trả về pendingVersionTitle/pendingVersionWordCount (list chờ duyệt) thì dùng cho sidebar ngay. */
 function mapChapterItem(item) {
     const orderIndex = item.orderIndex ?? item.OrderIndex ?? 0;
     return {
@@ -17,6 +17,8 @@ function mapChapterItem(item) {
         wordCount: item.wordCount ?? item.WordCount ?? 0,
         status: (item.status ?? item.Status ?? '').toLowerCase(),
         publishedAt: item.publishedAt ?? item.PublishedAt ?? null,
+        pendingVersionTitle: item.pendingVersionTitle ?? item.PendingVersionTitle ?? null,
+        pendingVersionWordCount: item.pendingVersionWordCount ?? item.PendingVersionWordCount ?? null,
     };
 }
 
@@ -42,6 +44,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [chapters, setChapters] = useState([]);
     const [chaptersLoading, setChaptersLoading] = useState(true);
     const [chapterContents, setChapterContents] = useState({});
+    /** Khi có: moderator xem 2 phiên bản (bản gốc + version chờ duyệt) cho chapter đã PUBLISHED có version gửi chỉnh sửa. */
+    const [chapterReviewContent, setChapterReviewContent] = useState({});
     const [selectedChapter, setSelectedChapter] = useState(null);
     const [showRejectForm, setShowRejectForm] = useState(false);
     const [showRejectConfirm, setShowRejectConfirm] = useState(false);
@@ -56,6 +60,16 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [fetchedRejectionByChapter, setFetchedRejectionByChapter] = useState({});
     /** Set orderIndex (0-based) các chương đã PUBLISHED — để chỉ cho phép duyệt/từ chối theo thứ tự 1,2,3... */
     const [publishedOrderIndices, setPublishedOrderIndices] = useState(new Set());
+    /** Tab nội dung khi xem 2 phiên bản (gốc / version): 'original' | 'version' */
+    const [contentTab, setContentTab] = useState('original');
+    /** Chiều cao vùng đọc nội dung (px), có thể kéo để thay đổi. */
+    const [contentAreaHeight, setContentAreaHeight] = useState(420);
+    const [isResizingContent, setIsResizingContent] = useState(false);
+    const resizeStartRef = useRef({ y: 0, height: 0 });
+    /** Chỉ xóa chapterReviewContent khi mở publication khác; tránh effect re-run (vd publication.chapters ref mới) xóa mất dữ liệu prefetch. */
+    const loadKeyRef = useRef({ storyId: null, pubId: null });
+    /** Request id để bỏ qua kết quả prefetch cũ nếu đã mở publication khác. */
+    const pendingPrefetchIdRef = useRef(0);
 
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
@@ -63,20 +77,34 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         if (!sid) return;
         if (options.showLoading !== false) setChaptersLoading(true);
         const pubStatus = options.publicationStatus ?? 'pending';
-        const params = { storyId: sid, pageSize: 100 };
-        if (pubStatus === 'approved') params.status = 'PUBLISHED';
-        else if (pubStatus === 'pending') params.status = 'PENDING_REVIEW';
-        const promise = getChapters(params);
         if (pubStatus === 'pending') {
+            const prefetchId = ++pendingPrefetchIdRef.current;
+            // Dùng API moderator để lấy đủ: chương PENDING_REVIEW + chương đã PUBLISHED có version chờ duyệt (hiển thị 2 tab Chương gốc / Phiên bản gửi duyệt).
+            const pendingPromise = getPendingChapters({ storyId: sid, pageSize: 100 });
             const publishedPromise = getChapters({ storyId: sid, status: 'PUBLISHED', page: 1, pageSize: 500 });
-            Promise.allSettled([promise, publishedPromise])
+            Promise.allSettled([pendingPromise, publishedPromise])
                 .then(([pendingResult, publishedResult]) => {
                     if (pendingResult.status === 'fulfilled') {
                         const res = pendingResult.value;
                         const items = res?.items ?? res?.Items ?? res?.data ?? [];
                         const mapped = (Array.isArray(items) ? items : []).map(mapChapterItem);
-                        setChapters(mapped);
-                        setSelectedChapter((prev) => (prev && mapped.some((c) => c.id === prev.id)) ? prev : (mapped[0] ?? null));
+                        if (mapped.length === 0) {
+                            setChapters(mapped);
+                            setSelectedChapter(null);
+                        } else {
+                            // "Click một loạt" tất cả chương (gọi review-content cho từng chương) trước khi hiển thị view → sidebar đúng version ngay (kể cả Chương 5).
+                            return Promise.allSettled(mapped.map((c) => getChapterReviewContent(c.id)))
+                                .then((results) => {
+                                    if (prefetchId !== pendingPrefetchIdRef.current) return;
+                                    const next = {};
+                                    results.forEach((r, i) => {
+                                        if (r.status === 'fulfilled' && mapped[i]) next[mapped[i].id] = r.value;
+                                    });
+                                    setChapterReviewContent((prev) => ({ ...prev, ...next }));
+                                    setChapters(mapped);
+                                    setSelectedChapter(mapped[0] ?? null);
+                                });
+                        }
                     }
                     if (publishedResult.status === 'fulfilled') {
                         const pubRes = publishedResult.value;
@@ -88,6 +116,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 .catch(() => setChapters([]))
                 .finally(() => setChaptersLoading(false));
         } else {
+            const params = { storyId: sid, pageSize: 100 };
+            if (pubStatus === 'approved') params.status = 'PUBLISHED';
+            const promise = getChapters(params);
             promise
                 .then((res) => {
                     const items = res?.items ?? res?.Items ?? [];
@@ -101,20 +132,32 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     }, []);
 
     useEffect(() => {
-        storyApprovedInSessionRef.current = false;
-        justRejectedInSessionRef.current = false;
-        setFetchedRejectionByChapter({});
-        setPublishedOrderIndices(new Set());
+        const pubId = publication?.id ?? publication?.storyId ?? storyId ?? '';
+        const newKey = { storyId: storyId ?? null, pubId: pubId ?? null };
+        const keyChanged = loadKeyRef.current.storyId !== newKey.storyId || loadKeyRef.current.pubId !== newKey.pubId;
+
         const id = setTimeout(() => {
             if (!storyId) {
+                loadKeyRef.current = { storyId: null, pubId: null };
                 setChapters([]);
                 setChaptersLoading(false);
                 setSelectedChapter(null);
+                setChapterReviewContent({});
                 return;
             }
+            // Chỉ clear và refetch khi mở publication khác; tránh effect re-run (vd publication.chapters ref mới) xóa chapters + chapterReviewContent → sidebar hiển thị sai.
+            if (!keyChanged) return;
+
+            // Cập nhật ref ngay khi bắt đầu load (trong setTimeout), tránh effect chạy lần 2 trước khi fetch kịp gọi → keyChanged false → bỏ qua fetch → không có dữ liệu.
+            loadKeyRef.current = newKey;
+            storyApprovedInSessionRef.current = false;
+            justRejectedInSessionRef.current = false;
+            setFetchedRejectionByChapter({});
+            setPublishedOrderIndices(new Set());
             setChapters([]);
             setSelectedChapter(null);
             setChapterContents({});
+            setChapterReviewContent({});
             // Tab Đã duyệt / Từ chối: item là story_group có sẵn danh sách chương (đã duyệt hoặc bị từ chối) — chỉ hiển thị các chương đó, không gọi API lấy hết chương.
             if (publication?.type === 'story_group' && Array.isArray(publication?.chapters) && publication.chapters.length > 0) {
                 const mapped = publication.chapters.map(mapStoryGroupChapterToModal);
@@ -126,7 +169,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             fetchChaptersForStory(storyId, { publicationStatus: publication?.status });
         }, 0);
         return () => clearTimeout(id);
-    }, [storyId, publication?.status, publication?.type, publication?.chapters, fetchChaptersForStory]);
+    }, [storyId, publication?.status, publication?.type, publication?.chapters, publication?.id, publication?.storyId, fetchChaptersForStory]);
 
     /** Real-time: khi có claim/approve/reject, refetch danh sách chương trong modal (bỏ qua khi đang xem story_group từ tab Từ chối). */
     const refetchChaptersRef = useRef(() => { });
@@ -143,13 +186,24 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
 
     const loadChapterContent = useCallback(async (chapterId) => {
         try {
-            const data = await getChapterById(chapterId);
+            const data = await getChapterReviewContent(chapterId);
+            setChapterReviewContent((prev) => ({ ...prev, [chapterId]: data }));
             setChapterContents((prev) => ({
                 ...prev,
-                [chapterId]: data?.content ?? data?.Content ?? '',
+                [chapterId]: data?.originalContent ?? data?.OriginalContent ?? '',
             }));
         } catch {
-            setChapterContents((prev) => ({ ...prev, [chapterId]: '(Không tải được nội dung)' }));
+            try {
+                const data = await getChapterById(chapterId);
+                setChapterReviewContent((prev) => ({ ...prev, [chapterId]: null }));
+                setChapterContents((prev) => ({
+                    ...prev,
+                    [chapterId]: data?.content ?? data?.Content ?? '',
+                }));
+            } catch {
+                setChapterReviewContent((prev) => ({ ...prev, [chapterId]: null }));
+                setChapterContents((prev) => ({ ...prev, [chapterId]: '(Không tải được nội dung)' }));
+            }
         }
     }, []);
 
@@ -159,6 +213,38 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         }, 0);
         return () => clearTimeout(id);
     }, [selectedChapter?.id, loadChapterContent]);
+
+    useEffect(() => {
+        setContentTab('original');
+    }, [selectedChapter?.id]);
+
+    const startResize = useCallback((e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resizeStartRef.current = { y: e.clientY, height: contentAreaHeight };
+        setIsResizingContent(true);
+        document.body.style.cursor = 'ns-resize';
+        document.body.style.userSelect = 'none';
+
+        const minH = 300;
+        const maxH = Math.round(window.innerHeight * 0.85);
+        const onMove = (ev) => {
+            const { y, height } = resizeStartRef.current;
+            const delta = ev.clientY - y;
+            const next = Math.min(maxH, Math.max(minH, height + delta));
+            setContentAreaHeight(next);
+            resizeStartRef.current = { y: ev.clientY, height: next };
+        };
+        const onUp = () => {
+            setIsResizingContent(false);
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    }, [contentAreaHeight]);
 
     /** Tab Từ chối: nếu chương chưa có rejectionReason (từ list API) thì gọi GET /chapters/:id/rejection-reason để hiển thị lý do. */
     useEffect(() => {
@@ -212,6 +298,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 delete next[selectedChapter.id];
                 return next;
             });
+            setChapterReviewContent((prev) => {
+                const next = { ...prev };
+                delete next[selectedChapter.id];
+                return next;
+            });
             onRefresh?.();
             if (remaining.length === 0) {
                 onApprove(publication.id);
@@ -243,6 +334,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 setChapters(remaining);
                 setSelectedChapter(remaining[0] ?? null);
                 setChapterContents((prev) => {
+                    const next = { ...prev };
+                    delete next[selectedChapter.id];
+                    return next;
+                });
+                setChapterReviewContent((prev) => {
                     const next = { ...prev };
                     delete next[selectedChapter.id];
                     return next;
@@ -341,9 +437,10 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                     style={{
                         backgroundColor: '#ffffff',
                         borderRadius: '16px',
-                        maxWidth: '1200px',
+                        maxWidth: 'min(1400px, 96vw)',
                         width: '100%',
-                        maxHeight: '90vh',
+                        maxHeight: '94vh',
+                        minHeight: '80vh',
                         display: 'flex',
                         flexDirection: 'column',
                         overflow: 'hidden',
@@ -375,6 +472,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                                     <User style={{ width: '14px', height: '14px' }} />
                                     <span>{publication.author ?? '—'}</span>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                                    <span>Độ tuổi phù hợp: {publication.ageRating ? (({ ALL: 'Phù hợp mọi lứa tuổi', '13+': 'Từ 13 tuổi', '16+': 'Từ 16 tuổi', '18+': 'Từ 18 tuổi' })[String(publication.ageRating).toUpperCase()] ?? publication.ageRating) : '—'}</span>
                                 </div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                                     <Calendar style={{ width: '14px', height: '14px' }} />
@@ -418,12 +518,12 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         </div>
                     </div>
 
-                    {/* Body */}
+                    {/* Body — overflow: auto để khi kéo cao vùng đọc, có thể cuộn xem hết */}
                     <div style={{
                         display: 'flex',
                         flex: 1,
                         minHeight: 0,
-                        overflow: 'hidden'
+                        overflow: 'auto'
                     }}>
                         {chaptersLoading ? (
                             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
@@ -491,10 +591,35 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                         textOverflow: 'ellipsis',
                                                         whiteSpace: 'nowrap'
                                                     }}>
-                                                        {chapter.title}
+                                                        {(() => {
+                                                            if (chapter.displayTitle != null && String(chapter.displayTitle).trim()) return String(chapter.displayTitle).trim();
+                                                            const fromList = chapter.pendingVersionTitle ?? '';
+                                                            if (fromList && String(fromList).trim()) return String(fromList).trim();
+                                                            const review = chapterReviewContent[chapter.id];
+                                                            const hasPending = review?.hasPendingVersion ?? review?.HasPendingVersion;
+                                                            const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
+                                                            if (hasPending && pendingVersions?.length > 0) {
+                                                                const t = pendingVersions[0]?.titleSnapshot ?? pendingVersions[0]?.TitleSnapshot ?? '';
+                                                                return (t && t.trim()) ? t.trim() : (chapter.title ?? '');
+                                                            }
+                                                            return chapter.title ?? '';
+                                                        })()}
                                                     </div>
                                                     <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
-                                                        {chapter.wordCount} từ
+                                                        {(() => {
+                                                            if (chapter.displayWordCount != null && typeof chapter.displayWordCount === 'number' && chapter.displayWordCount >= 0) return `${chapter.displayWordCount} từ`;
+                                                            const countFromList = chapter.pendingVersionWordCount;
+                                                            if (countFromList != null && typeof countFromList === 'number' && countFromList >= 0) return `${countFromList} từ`;
+                                                            const review = chapterReviewContent[chapter.id];
+                                                            const hasPending = review?.hasPendingVersion ?? review?.HasPendingVersion;
+                                                            const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
+                                                            if (hasPending && pendingVersions?.length > 0) {
+                                                                const content = pendingVersions[0]?.contentSnapshot ?? pendingVersions[0]?.ContentSnapshot ?? '';
+                                                                const count = (typeof content === 'string' && content.trim()) ? content.trim().split(/\s+/).length : 0;
+                                                                return `${count} từ`;
+                                                            }
+                                                            return `${chapter.wordCount ?? 0} từ`;
+                                                        })()}
                                                     </div>
                                                     {publication?.status === 'approved' && chapter.publishedAt && (
                                                         <div style={{ fontSize: '0.6875rem', color: '#10b981', marginTop: '0.25rem' }}>
@@ -507,8 +632,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     </div>
                                 )}
 
-                                {/* Main Content */}
-                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                                {/* Main Content — minWidth 0 để flex shrink; nội dung bên trong có thể cao hơn, body sẽ cuộn */}
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
                                     {selectedChapter ? (
                                         <>
                                             <div style={{
@@ -520,10 +645,31 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                     CHƯƠNG {selectedChapter.chapterNumber}
                                                 </div>
                                                 <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b', margin: 0, marginBottom: '0.5rem' }}>
-                                                    {selectedChapter.title}
+                                                    {(() => {
+                                                        const review = chapterReviewContent[selectedChapter.id];
+                                                        const hasPending = review?.hasPendingVersion ?? review?.HasPendingVersion;
+                                                        const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
+                                                        const chapterIsPublished = (selectedChapter?.status ?? '').toLowerCase() === 'published';
+                                                        if (!chapterIsPublished && hasPending && pendingVersions?.length > 0) {
+                                                            const t = pendingVersions[0]?.titleSnapshot ?? pendingVersions[0]?.TitleSnapshot ?? '';
+                                                            return t.trim() || selectedChapter.title;
+                                                        }
+                                                        return selectedChapter.title;
+                                                    })()}
                                                 </h3>
                                                 <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
-                                                    {selectedChapter.wordCount} từ
+                                                    {(() => {
+                                                        const review = chapterReviewContent[selectedChapter.id];
+                                                        const hasPending = review?.hasPendingVersion ?? review?.HasPendingVersion;
+                                                        const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
+                                                        const chapterIsPublished = (selectedChapter?.status ?? '').toLowerCase() === 'published';
+                                                        if (!chapterIsPublished && hasPending && pendingVersions?.length > 0) {
+                                                            const content = pendingVersions[0]?.contentSnapshot ?? pendingVersions[0]?.ContentSnapshot ?? '';
+                                                            const count = (typeof content === 'string' && content.trim()) ? content.trim().split(/\s+/).length : 0;
+                                                            return `${count} từ`;
+                                                        }
+                                                        return `${selectedChapter.wordCount ?? 0} từ`;
+                                                    })()}
                                                 </div>
                                                 {publication?.status === 'approved' && selectedChapter.publishedAt && (
                                                     <div style={{ fontSize: '0.8125rem', color: '#10b981', marginTop: '0.375rem' }}>
@@ -558,24 +704,175 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                         </div>
                                                     );
                                                 })()}
+                                                {(() => {
+                                                    const hasPending = publication?.isEditRequest || chapterReviewContent[selectedChapter.id]?.hasPendingVersion || chapterReviewContent[selectedChapter.id]?.HasPendingVersion;
+                                                    const chapterIsPublished = (selectedChapter?.status ?? '').toLowerCase() === 'published';
+                                                    if (!hasPending) return null;
+                                                    if (!chapterIsPublished && !publication?.isEditRequest) return null;
+                                                    return (
+                                                        <div style={{
+                                                            marginTop: '1rem',
+                                                            padding: '0.75rem 1rem',
+                                                            backgroundColor: '#fef3c7',
+                                                            borderLeft: '4px solid #f59e0b',
+                                                            borderRadius: '0.5rem'
+                                                        }}>
+                                                            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#92400e', marginBottom: '0.25rem' }}>
+                                                                Yêu cầu chỉnh sửa (chương đã xuất bản)
+                                                            </div>
+                                                            <div style={{ fontSize: '0.8125rem', color: '#92400e', lineHeight: 1.5 }}>
+                                                                Đây là bản chỉnh sửa nội dung của chương đã xuất bản (thường do yêu cầu sau báo cáo vi phạm). Bạn sẽ xem 2 phiên bản bên dưới: <strong>bản gốc đã xuất bản</strong> và <strong>bản chỉnh sửa gửi duyệt</strong>.
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
+                                            </div>
+
+                                            {/* Thanh kéo chiều cao vùng đọc — đặt ngay dưới header chương, z-index cao để không bị khối khác chặn */}
+                                            <div
+                                                role="separator"
+                                                aria-label="Kéo để thay đổi chiều cao vùng đọc"
+                                                onMouseDown={startResize}
+                                                style={{
+                                                    height: '20px',
+                                                    minHeight: '20px',
+                                                    cursor: 'ns-resize',
+                                                    flexShrink: 0,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    backgroundColor: isResizingContent ? '#cbd5e1' : '#e2e8f0',
+                                                    borderTop: '1px solid #cbd5e1',
+                                                    borderBottom: '1px solid #cbd5e1',
+                                                    position: 'relative',
+                                                    zIndex: 10
+                                                }}
+                                                title="Kéo lên/xuống để thay đổi chiều cao vùng đọc"
+                                            >
+                                                <span style={{ fontSize: '12px', color: '#64748b', pointerEvents: 'none' }}>⋮⋮</span>
                                             </div>
 
                                             <div style={{
-                                                flex: 1,
-                                                overflowY: 'auto',
-                                                padding: '2rem',
+                                                height: contentAreaHeight,
+                                                minHeight: 300,
+                                                maxHeight: '85vh',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                flexShrink: 0,
                                                 backgroundColor: '#ffffff'
                                             }}>
-                                                <div style={{
-                                                    maxWidth: '800px',
-                                                    margin: '0 auto',
-                                                    fontSize: '1rem',
-                                                    lineHeight: 1.8,
-                                                    color: '#1e293b',
-                                                    whiteSpace: 'pre-wrap'
-                                                }}>
-                                                    {chapterContents[selectedChapter.id] ?? 'Đang tải nội dung...'}
-                                                </div>
+                                                {(() => {
+                                                    const review = chapterReviewContent[selectedChapter.id];
+                                                    const hasPendingVersion = review?.hasPendingVersion ?? review?.HasPendingVersion;
+                                                    const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
+                                                    const contentStyle = {
+                                                        maxWidth: '900px',
+                                                        margin: '0 auto',
+                                                        width: '100%',
+                                                        fontSize: '1.125rem',
+                                                        lineHeight: 2,
+                                                        color: '#1e293b',
+                                                        whiteSpace: 'pre-wrap',
+                                                        letterSpacing: '0.01em',
+                                                        padding: '0 0.5rem'
+                                                    };
+                                                    if (hasPendingVersion && pendingVersions.length > 0) {
+                                                        const v = pendingVersions[0];
+                                                        const versionTitle = v?.titleSnapshot ?? v?.TitleSnapshot ?? '';
+                                                        const versionContent = v?.contentSnapshot ?? v?.ContentSnapshot ?? '';
+                                                        const originalContent = review?.originalContent ?? review?.OriginalContent ?? chapterContents[selectedChapter.id] ?? '—';
+                                                        const hasOriginalToShow = Boolean(originalContent && String(originalContent).trim() && originalContent !== '—');
+                                                        // Ưu tiên ChapterStatus từ API getChapterReviewContent (chuẩn từ backend); fallback sang selectedChapter từ list.
+                                                        const chapterStatusRaw = review?.chapterStatus ?? review?.ChapterStatus ?? selectedChapter?.status ?? selectedChapter?.Status ?? '';
+                                                        const chapterStatus = String(chapterStatusRaw).toLowerCase();
+                                                        const chapterIsPublished = chapterStatus === 'published';
+                                                        const chapterIsDraftOrRejected = chapterStatus === 'draft' || chapterStatus === 'rejected';
+                                                        // 2 tab khi chương gốc đã PUBLISHED (hoặc isEditRequest). Fallback: API trả về cả OriginalContent + version thì coi là so sánh bản gốc/version. Bản nháp/Từ chối → chỉ 1 view (version).
+                                                        const showTwoTabs = !chapterIsDraftOrRejected && (chapterIsPublished || publication?.isEditRequest || (hasOriginalToShow && hasPendingVersion));
+                                                        if (!showTwoTabs) {
+                                                            // Chương gốc chưa xuất bản / bản nháp / từ chối: chỉ hiển thị thông tin version author gửi đi duyệt, không tab.
+                                                            return (
+                                                                <div style={{
+                                                                    flex: 1,
+                                                                    minHeight: 0,
+                                                                    overflowY: 'auto',
+                                                                    padding: '2.5rem 3rem'
+                                                                }}>
+                                                                    <div style={contentStyle}>
+                                                                        {versionContent || '—'}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        const tabs = [
+                                                            { id: 'original', label: 'Chương gốc' },
+                                                            { id: 'version', label: `Phiên bản của tôi${versionTitle ? ` — ${versionTitle}` : ''}` }
+                                                        ];
+                                                        return (
+                                                            <>
+                                                                <div style={{
+                                                                    display: 'flex',
+                                                                    gap: '0.25rem',
+                                                                    padding: '0 1.5rem',
+                                                                    borderBottom: '2px solid #e2e8f0',
+                                                                    backgroundColor: '#f8fafc',
+                                                                    flexShrink: 0
+                                                                }}>
+                                                                    {tabs.map((tab) => (
+                                                                        <button
+                                                                            key={tab.id}
+                                                                            type="button"
+                                                                            onClick={() => setContentTab(tab.id)}
+                                                                            style={{
+                                                                                padding: '0.75rem 1.25rem',
+                                                                                fontSize: '0.875rem',
+                                                                                fontWeight: 600,
+                                                                                color: contentTab === tab.id ? '#0ea5e9' : '#64748b',
+                                                                                backgroundColor: 'transparent',
+                                                                                border: 'none',
+                                                                                borderBottom: contentTab === tab.id ? '2px solid #0ea5e9' : '2px solid transparent',
+                                                                                marginBottom: '-2px',
+                                                                                cursor: 'pointer',
+                                                                                transition: 'color 0.2s, border-color 0.2s'
+                                                                            }}
+                                                                        >
+                                                                            {tab.label}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                                <div style={{
+                                                                    flex: 1,
+                                                                    minHeight: 0,
+                                                                    overflowY: 'auto',
+                                                                    padding: '2.5rem 3rem'
+                                                                }}>
+                                                                    {contentTab === 'original' && (
+                                                                        <div style={contentStyle}>
+                                                                            {originalContent}
+                                                                        </div>
+                                                                    )}
+                                                                    {contentTab === 'version' && (
+                                                                        <div style={contentStyle}>
+                                                                            {versionContent || '—'}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </>
+                                                        );
+                                                    }
+                                                    return (
+                                                        <div style={{
+                                                            flex: 1,
+                                                            minHeight: 0,
+                                                            overflowY: 'auto',
+                                                            padding: '2.5rem 3rem'
+                                                        }}>
+                                                            <div style={contentStyle}>
+                                                                {chapterContents[selectedChapter.id] ?? 'Đang tải nội dung...'}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         </>
                                     ) : null}
@@ -584,85 +881,105 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         )}
                     </div>
 
-                    {/* Footer - Actions - Chỉ hiển thị khi đang chờ duyệt (có chương chờ duyệt), không hiện khi xem lịch sử đã duyệt/từ chối */}
-                    {chapters.length > 0 && !showRejectForm && publication?.status === 'pending' && (
-                        <div style={{
-                            padding: '1.5rem',
-                            borderTop: '1px solid #e2e8f0',
-                            display: 'flex',
-                            justifyContent: 'flex-end',
-                            gap: '1rem',
-                            backgroundColor: '#f8fafc'
-                        }}>
-                            <button
-                                onClick={() => canApproveReject && setShowRejectForm(true)}
-                                disabled={isSubmitting || !canApproveReject}
-                                title={orderHint || 'Từ chối chương (kèm lý do)'}
-                                style={{
-                                    padding: '0.75rem 1.5rem',
-                                    backgroundColor: canApproveReject ? '#ffffff' : '#f1f5f9',
-                                    color: canApproveReject ? '#ef4444' : '#94a3b8',
-                                    fontSize: '0.875rem',
-                                    fontWeight: 700,
-                                    borderRadius: '8px',
-                                    border: `2px solid ${canApproveReject ? '#ef4444' : '#e2e8f0'}`,
-                                    cursor: (isSubmitting || !canApproveReject) ? 'not-allowed' : 'pointer',
-                                    transition: 'all 0.2s',
-                                    opacity: (isSubmitting || !canApproveReject) ? 0.5 : 1,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem'
-                                }}
-                                onMouseEnter={(e) => {
-                                    if (!isSubmitting && canApproveReject) {
-                                        e.currentTarget.style.backgroundColor = '#fef2f2';
-                                    }
-                                }}
-                                onMouseLeave={(e) => {
-                                    if (canApproveReject) {
-                                        e.currentTarget.style.backgroundColor = '#ffffff';
-                                    }
-                                }}
-                            >
-                                <XCircle style={{ width: '18px', height: '18px' }} />
-                                Từ chối
-                            </button>
+                    {/* Footer - Actions. Chỉ khi chương gốc đã PUBLISHED (2 tab): ẩn nút ở tab Chương gốc. Chương bản nháp/từ chối (chỉ 1 nội dung version) thì luôn hiện nút. */}
+                    {chapters.length > 0 && !showRejectForm && publication?.status === 'pending' && (() => {
+                        const review = selectedChapter?.id ? chapterReviewContent[selectedChapter.id] : null;
+                        const hasPendingVersionForChapter = Boolean(review?.hasPendingVersion ?? review?.HasPendingVersion);
+                        const chapterStatusRaw = review?.chapterStatus ?? review?.ChapterStatus ?? selectedChapter?.status ?? selectedChapter?.Status ?? '';
+                        const chapterStatus = String(chapterStatusRaw).toLowerCase();
+                        const chapterIsPublished = chapterStatus === 'published';
+                        const chapterIsDraftOrRejected = chapterStatus === 'draft' || chapterStatus === 'rejected';
+                        const originalContent = review?.originalContent ?? review?.OriginalContent ?? (selectedChapter?.id ? chapterContents[selectedChapter.id] : null);
+                        const hasOriginalToShow = Boolean(originalContent && String(originalContent).trim() && originalContent !== '—');
+                        const isTwoTabCase = hasPendingVersionForChapter && !chapterIsDraftOrRejected && (chapterIsPublished || publication?.isEditRequest || hasOriginalToShow);
+                        const isOnOriginalTab = contentTab === 'original';
+                        const hideButtonsForOriginalTab = isTwoTabCase && isOnOriginalTab;
+                        if (hideButtonsForOriginalTab) {
+                            return (
+                                <div style={{ padding: '0.75rem 1.5rem', borderTop: '1px solid #e2e8f0', backgroundColor: '#f1f5f9', fontSize: '0.875rem', color: '#64748b' }}>
+                                    Chuyển sang tab « Phiên bản của tôi » để duyệt hoặc từ chối.
+                                </div>
+                            );
+                        }
+                        return (
+                            <div style={{
+                                padding: '1.5rem',
+                                borderTop: '1px solid #e2e8f0',
+                                display: 'flex',
+                                justifyContent: 'flex-end',
+                                gap: '1rem',
+                                backgroundColor: '#f8fafc'
+                            }}>
+                                <button
+                                    onClick={() => canApproveReject && setShowRejectForm(true)}
+                                    disabled={isSubmitting || !canApproveReject}
+                                    title={orderHint || 'Từ chối chương (kèm lý do)'}
+                                    style={{
+                                        padding: '0.75rem 1.5rem',
+                                        backgroundColor: canApproveReject ? '#ffffff' : '#f1f5f9',
+                                        color: canApproveReject ? '#ef4444' : '#94a3b8',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 700,
+                                        borderRadius: '8px',
+                                        border: `2px solid ${canApproveReject ? '#ef4444' : '#e2e8f0'}`,
+                                        cursor: (isSubmitting || !canApproveReject) ? 'not-allowed' : 'pointer',
+                                        transition: 'all 0.2s',
+                                        opacity: (isSubmitting || !canApproveReject) ? 0.5 : 1,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        if (!isSubmitting && canApproveReject) {
+                                            e.currentTarget.style.backgroundColor = '#fef2f2';
+                                        }
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        if (canApproveReject) {
+                                            e.currentTarget.style.backgroundColor = '#ffffff';
+                                        }
+                                    }}
+                                >
+                                    <XCircle style={{ width: '18px', height: '18px' }} />
+                                    Từ chối
+                                </button>
 
-                            <button
-                                onClick={() => canApproveReject && openApproveConfirm()}
-                                disabled={isSubmitting || !selectedChapter || !canApproveReject}
-                                title={orderHint || 'Duyệt chương xuất bản'}
-                                style={{
-                                    padding: '0.75rem 1.5rem',
-                                    backgroundColor: canApproveReject ? '#13ec5b' : '#e2e8f0',
-                                    color: canApproveReject ? '#ffffff' : '#94a3b8',
-                                    fontSize: '0.875rem',
-                                    fontWeight: 700,
-                                    borderRadius: '8px',
-                                    border: 'none',
-                                    cursor: (isSubmitting || !selectedChapter || !canApproveReject) ? 'not-allowed' : 'pointer',
-                                    transition: 'all 0.2s',
-                                    opacity: (isSubmitting || !selectedChapter || !canApproveReject) ? 0.5 : 1,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem'
-                                }}
-                                onMouseEnter={(e) => {
-                                    if (!isSubmitting && selectedChapter && canApproveReject) {
-                                        e.currentTarget.style.backgroundColor = '#10d954';
-                                    }
-                                }}
-                                onMouseLeave={(e) => {
-                                    if (canApproveReject) {
-                                        e.currentTarget.style.backgroundColor = '#13ec5b';
-                                    }
-                                }}
-                            >
-                                <CheckCircle style={{ width: '18px', height: '18px' }} />
-                                {isSubmitting ? 'Đang xử lý...' : 'Duyệt chương'}
-                            </button>
-                        </div>
-                    )}
+                                <button
+                                    onClick={() => canApproveReject && openApproveConfirm()}
+                                    disabled={isSubmitting || !selectedChapter || !canApproveReject}
+                                    title={orderHint || 'Duyệt chương xuất bản'}
+                                    style={{
+                                        padding: '0.75rem 1.5rem',
+                                        backgroundColor: canApproveReject ? '#13ec5b' : '#e2e8f0',
+                                        color: canApproveReject ? '#ffffff' : '#94a3b8',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 700,
+                                        borderRadius: '8px',
+                                        border: 'none',
+                                        cursor: (isSubmitting || !selectedChapter || !canApproveReject) ? 'not-allowed' : 'pointer',
+                                        transition: 'all 0.2s',
+                                        opacity: (isSubmitting || !selectedChapter || !canApproveReject) ? 0.5 : 1,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        if (!isSubmitting && selectedChapter && canApproveReject) {
+                                            e.currentTarget.style.backgroundColor = '#10d954';
+                                        }
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        if (canApproveReject) {
+                                            e.currentTarget.style.backgroundColor = '#13ec5b';
+                                        }
+                                    }}
+                                >
+                                    <CheckCircle style={{ width: '18px', height: '18px' }} />
+                                    {isSubmitting ? 'Đang xử lý...' : 'Duyệt chương'}
+                                </button>
+                            </div>
+                        );
+                    })()}
 
                     {/* Rejection Form */}
                     {showRejectForm && (

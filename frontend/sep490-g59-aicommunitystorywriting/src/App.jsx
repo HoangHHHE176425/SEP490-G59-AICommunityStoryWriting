@@ -13,7 +13,7 @@ import Profile from './pages/profile/Profile';
 import Wallet from './pages/wallet/Wallet';
 import Library from './pages/library/Library';
 import { ChapterReader } from './pages/chapter-detail/ChapterReader';
-import { AuthorStoryManagement } from './pages/author/AuthorStoryManagement';
+import AuthorStoryManagement from './pages/author/AuthorStoryManagement';
 import { AuthorDetail } from './pages/author/AuthorDetail';
 import { StoryBrowse } from './pages/story-list/StoryBrowse';
 import AboutUs from './pages/aboutus/AboutUs';
