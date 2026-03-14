@@ -91,8 +91,9 @@ namespace Services.Implementations
             if (v == null || !v.chapter_id.HasValue) return false;
             if (v.author_id != authorId)
                 throw new UnauthorizedAccessException("Chỉ tác giả mới được gửi duyệt version.");
-            if (v.status != "DRAFT" && v.status != null)
-                throw new InvalidOperationException("Chỉ version DRAFT mới được gửi duyệt.");
+            var statusUpper = (v.status ?? "").Trim().ToUpperInvariant();
+            if (statusUpper != "DRAFT" && statusUpper != "REJECTED")
+                throw new InvalidOperationException("Chỉ version Bản nháp hoặc Bị từ chối mới được gửi duyệt.");
             if (string.IsNullOrWhiteSpace(v.content_snapshot))
                 throw new InvalidOperationException("Version chưa có nội dung.");
 
@@ -166,7 +167,9 @@ namespace Services.Implementations
                 VersionNumber = v.version_number,
                 TitleSnapshot = v.title_snapshot,
                 Status = v.status,
-                CreatedAt = v.created_at
+                CreatedAt = v.created_at,
+                RejectionReason = v.rejection_reason,
+                ReviewedAt = v.reviewed_at
             };
         }
 

@@ -487,13 +487,16 @@ namespace Services.Implementations
 
             if (string.Equals(chapter.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
             {
-                // Từ chối version chỉnh sửa của chapter đã xuất bản: giữ chapter PUBLISHED, đưa version về DRAFT.
+                // Từ chối version chỉnh sửa của chapter đã xuất bản: giữ chapter PUBLISHED, đưa version về REJECTED. Lý do lưu qua LogModeration(CHAPTER) để tác giả xem như chapter.
                 var pendingVersions = _versionRepository.GetByChapterId(chapterId)
                     .Where(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
                     .ToList();
                 foreach (var pv in pendingVersions)
                 {
-                    pv.status = "DRAFT";
+                    pv.status = "REJECTED";
+                    pv.rejection_reason = reason.Trim();
+                    pv.reviewed_at = DateTime.Now;
+                    pv.reviewed_by = moderatorId;
                     _versionRepository.Update(pv);
                 }
                 chapter.updated_at = DateTime.Now;

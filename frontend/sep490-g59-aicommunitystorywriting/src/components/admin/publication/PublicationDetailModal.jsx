@@ -772,8 +772,17 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         )}
                     </div>
 
-                    {/* Footer - Actions - Chỉ hiển thị khi đang chờ duyệt (có chương chờ duyệt), không hiện khi xem lịch sử đã duyệt/từ chối */}
-                    {chapters.length > 0 && !showRejectForm && publication?.status === 'pending' && (
+                    {/* Footer - Actions. Khi là yêu cầu chỉnh sửa (2 tab): chỉ hiện nút Duyệt/Từ chối ở tab "Version gửi duyệt"; tab Chapter gốc chỉ để đọc. */}
+                    {chapters.length > 0 && !showRejectForm && publication?.status === 'pending' && (() => {
+                        const isVersionEditCase = publication?.isEditRequest || (selectedChapter?.id && (chapterReviewContent[selectedChapter.id]?.hasPendingVersion ?? chapterReviewContent[selectedChapter.id]?.HasPendingVersion));
+                        if (isVersionEditCase && contentTab !== 'version') {
+                            return (
+                                <div style={{ padding: '0.75rem 1.5rem', borderTop: '1px solid #e2e8f0', backgroundColor: '#f1f5f9', fontSize: '0.875rem', color: '#64748b' }}>
+                                    Chuyển sang tab « Version gửi duyệt » để duyệt hoặc từ chối.
+                                </div>
+                            );
+                        }
+                        return (
                         <div style={{
                             padding: '1.5rem',
                             borderTop: '1px solid #e2e8f0',
@@ -850,7 +859,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 {isSubmitting ? 'Đang xử lý...' : 'Duyệt chương'}
                             </button>
                         </div>
-                    )}
+                        );
+                    })()}
 
                     {/* Rejection Form */}
                     {showRejectForm && (
