@@ -778,38 +778,8 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, onS
                 <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem' }}>
                     <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', padding: '2rem', border: '1px solid #e0e0e0' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                            {/* Khi tạo version: chỉ Số version + chương gốc (read-only). Khi tạo/sửa chương: Số chương + Tên chương */}
-                            {isVersionMode ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                    <div style={{ maxWidth: '200px' }}>
-                                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                            Số version <span style={{ color: '#ef4444' }}>*</span>
-                                        </label>
-                                        <input
-                                            type="number"
-                                            min="1"
-                                            value={chapterData.versionNumber ?? 1}
-                                            onChange={(e) => {
-                                                const v = e.target.value === '' ? 1 : Math.max(1, Number(e.target.value) || 1);
-                                                setChapterData((prev) => ({ ...prev, versionNumber: v }));
-                                            }}
-                                            style={{
-                                                width: '100%',
-                                                padding: '0.75rem',
-                                                backgroundColor: '#f9fafb',
-                                                border: '1px solid #e5e7eb',
-                                                borderRadius: '8px',
-                                                fontSize: '0.875rem',
-                                                outline: 'none',
-                                            }}
-                                        />
-                                    </div>
-                                    <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
-                                        <span style={{ fontWeight: 500 }}>Chương gốc: </span>
-                                        Chương {sourceChapterForVersion?.number ?? ''} — {sourceChapterForVersion?.title || '(Không có tiêu đề)'}
-                                    </div>
-                                </div>
-                            ) : (
+                            {/* Khi tạo/sửa version: không hiển thị Số version, Chương gốc, Chế độ sáng tác. Chỉ hiển thị khi tạo/sửa chương thường. */}
+                            {!isVersionMode && (
                                 <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                     <div>
                                         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
@@ -868,13 +838,9 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, onS
                                 </div>
                             )}
 
-                            {/* Access Type and Price — khi tạo version: chỉ hiển thị, không cho sửa */}
-                            <div style={isVersionMode ? { pointerEvents: 'none', opacity: 0.85, position: 'relative' } : undefined}>
-                                {isVersionMode && (
-                                    <p style={{ fontSize: '0.75rem', color: '#6366f1', marginBottom: '0.5rem', fontWeight: 500 }}>
-                                        Lấy từ chương gốc, không thể chỉnh sửa
-                                    </p>
-                                )}
+                            {/* Chế độ sáng tác — không hiển thị khi tạo/sửa version */}
+                            {!isVersionMode && (
+                            <div>
                                 <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.75rem' }}>
                                     Chế độ sáng tác <span style={{ color: '#ef4444' }}>*</span>
                                 </label>
@@ -883,7 +849,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, onS
                                     {/* Public Option */}
                                     <button
                                         type="button"
-                                        onClick={isVersionMode ? undefined : () => setChapterData({ ...chapterData, accessType: 'public', price: 0 })}
+                                        onClick={() => setChapterData({ ...chapterData, accessType: 'public', price: 0 })}
                                         className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'public'
                                             ? 'border-primary bg-primary/5'
                                             : 'border-slate-200 hover:border-slate-300'
@@ -911,7 +877,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, onS
                                     {/* Paid Option */}
                                     <button
                                         type="button"
-                                        onClick={isVersionMode ? undefined : () => setChapterData({ ...chapterData, accessType: 'paid' })}
+                                        onClick={() => setChapterData({ ...chapterData, accessType: 'paid' })}
                                         className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'paid'
                                             ? 'border-amber-500 bg-amber-50'
                                             : 'border-slate-200 hover:border-slate-300'
@@ -1004,6 +970,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, onS
                                     </div>
                                 )}
                             </div>
+                            )}
 
                             {/* Mô tả thay đổi (version) - chỉ hiện khi chỉnh sửa chương */}
                             {chapter && (
