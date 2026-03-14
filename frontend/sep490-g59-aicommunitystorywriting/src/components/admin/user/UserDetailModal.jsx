@@ -70,12 +70,15 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
     };
 
     const handleAssignModerator = async () => {
-        if (selectedCategoryIds.length === 0) return;
         setSavingModerator(true);
         try {
             await updateUserRole(user.id, 'MODERATOR');
-            await assignModeratorCategories(user.id, selectedCategoryIds);
-            setModeratorCategoryIds(selectedCategoryIds);
+            if (selectedCategoryIds.length > 0) {
+                await assignModeratorCategories(user.id, selectedCategoryIds);
+                setModeratorCategoryIds(selectedCategoryIds);
+            } else {
+                setModeratorCategoryIds([]);
+            }
             onAssignModerator?.();
         } catch (e) {
             console.error(e);
@@ -197,7 +200,7 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                             <BookOpen className="w-4 h-4 text-emerald-600" />
                             <h3 className="font-semibold text-slate-900">Gán moderator (kiểm duyệt theo thể loại truyện)</h3>
                         </div>
-                        <p className="text-sm text-slate-500 mb-3">Chọn các thể loại truyện mà user này được quyền kiểm duyệt. Sau đó nhấn &quot;Gán làm moderator&quot;.</p>
+                        <p className="text-sm text-slate-500 mb-3">Có thể chọn thể loại truyện mà user được quyền kiểm duyệt (tùy chọn). Không chọn thì moderator được quyền kiểm duyệt tất cả thể loại. Nhấn &quot;Gán làm moderator&quot; để cấp quyền.</p>
                         {moderatorCategoryIds.length > 0 && (
                             <p className="text-sm text-emerald-700 mb-2">Đang kiểm duyệt: {moderatorCategoryIds.map(getCategoryName).join(', ') || '—'}</p>
                         )}
@@ -231,7 +234,7 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                         <div className="flex gap-2">
                             <button
                                 type="button"
-                                disabled={savingModerator || selectedCategoryIds.length === 0}
+                                disabled={savingModerator}
                                 onClick={handleAssignModerator}
                                 className="px-4 py-2 bg-emerald-500 text-white rounded-lg font-semibold text-sm hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
                             >

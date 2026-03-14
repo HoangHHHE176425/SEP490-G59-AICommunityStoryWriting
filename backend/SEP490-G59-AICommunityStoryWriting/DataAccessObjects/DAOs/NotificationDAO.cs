@@ -173,5 +173,28 @@ namespace DataAccessObjects.DAOs
             }
             return created;
         }
+
+        /// <summary>Thông báo cho tác giả khi có độc giả ủng hộ (donate). Trả về thông báo đã lưu để gửi real-time (SignalR).</summary>
+        public static notifications NotifyDonationReceived(Guid recipientUserId, string senderDisplayName, int amount, string? message)
+        {
+            if (string.IsNullOrWhiteSpace(senderDisplayName)) senderDisplayName = "Người dùng";
+            var title = "Ủng hộ từ độc giả";
+            var content = $"{senderDisplayName} đã ủng hộ {amount} coin cho bạn.";
+            if (!string.IsNullOrWhiteSpace(message))
+                content += " Lời nhắn: " + message.Trim();
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = recipientUserId,
+                type = "DONATION",
+                title = title,
+                content = content,
+                link_url = "/wallet",
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+            Add(n);
+            return n;
+        }
     }
 }

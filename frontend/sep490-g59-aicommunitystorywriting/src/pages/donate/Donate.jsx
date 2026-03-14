@@ -16,6 +16,8 @@ import {
     Rocket,
     Crown,
 } from 'lucide-react';
+import { donateToAuthor } from '../../api/coins/coinApi';
+import { useToast } from '../../components/author/story-editor/Toast';
 
 export default function Donate() {
     const { authorId } = useParams();
@@ -29,15 +31,43 @@ export default function Donate() {
 
     const [selectedAmount, setSelectedAmount] = useState(100);
     const [message, setMessage] = useState('');
+    const [submitting, setSubmitting] = useState(false);
+    const { showToast, ToastContainer } = useToast();
 
     const effectiveAmount = selectedAmount;
 
-    const handleConfirm = (e) => {
+    const handleConfirm = async (e) => {
         e.preventDefault();
         if (!effectiveAmount || effectiveAmount <= 0) return;
-        // Chỉ demo giao diện, chưa gọi API thật
-        alert(`Cảm ơn bạn đã ủng hộ ${effectiveAmount.toLocaleString()} coin cho ${authorName}! (Demo giao diện)`);
-        navigate(-1);
+        if (!authorId) {
+            showToast('Thiếu thông tin tác giả để ủng hộ.', 'error');
+            return;
+        }
+
+        setSubmitting(true);
+        try {
+            const res = await donateToAuthor({
+                authorId,
+                amount: effectiveAmount,
+                message: message?.trim() || undefined,
+            });
+            if (!res?.success) {
+                showToast(res?.message || 'Không thể thực hiện ủng hộ. Vui lòng thử lại.', 'error');
+                return;
+            }
+
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new Event('wallet:changed'));
+            }
+
+            showToast(`Cảm ơn bạn đã ủng hộ ${effectiveAmount.toLocaleString()} coin cho ${authorName}!`, 'success');
+            // Đợi toast hiển thị rõ hơn rồi mới quay lại trang trước
+            setTimeout(() => {
+                navigate(-1);
+            }, 1800);
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     return (
@@ -211,10 +241,9 @@ export default function Donate() {
 
                             {/* Ghi chú & nút xác nhận */}
                             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pt-2 border-t border-slate-200">
-                                <p className="text-[11px] text-slate-500 md:max-w-sm">
-                                    Đây là bản demo giao diện ủng hộ. Bước thanh toán và trừ coin thực tế sẽ được tích
-                                    hợp sau.
-                                </p>
+                            <p className="text-[11px] text-slate-500 md:max-w-sm">
+                                Số coin sẽ được trừ trực tiếp từ ví của bạn và cộng vào ví coin của tác giả.
+                            </p>
                                 <div className="flex items-center gap-3">
                                     <Link
                                         to="/wallet"
@@ -224,17 +253,18 @@ export default function Donate() {
                                     </Link>
                                     <button
                                         type="submit"
-                                        disabled={!effectiveAmount || effectiveAmount <= 0}
+                                        disabled={!effectiveAmount || effectiveAmount <= 0 || submitting}
                                         className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-xs font-semibold text-white shadow-lg shadow-primary/30 hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
                                     >
                                         <Gift className="w-4 h-4" />
-                                        Xác nhận ủng hộ
+                                        {submitting ? 'Đang xử lý...' : 'Xác nhận ủng hộ'}
                                     </button>
                                 </div>
                             </div>
                     </form>
                 </div>
             </main>
+            <ToastContainer />
             <Footer />
         </div>
     );
