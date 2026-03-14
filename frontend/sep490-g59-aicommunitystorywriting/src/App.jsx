@@ -4,6 +4,7 @@ import { AdminProtectedRoute } from './components/admin/AdminProtectedRoute';
 import Homepage from './pages/homepage/Homepage';
 import { StoryDetail } from './pages/story-detail/StoryDetail';
 import { AdminPage } from './pages/admin/AdminPage';
+import { AdminLogin } from './pages/admin/AdminLogin';
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
 import ForgotPassword from './pages/auth/ForgotPassword';
@@ -27,7 +28,9 @@ export default function App() {
           <Route path="/" element={<AboutUs />} />
           <Route path="/home" element={<Homepage />} />
           <Route path="/story/:storyId" element={<StoryDetail />} />
+          {/* Quản trị: dùng /admin/login. User/guest: dùng /login */}
           <Route path="/admin" element={<AdminProtectedRoute><AdminPage /></AdminProtectedRoute>} />
+          <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />

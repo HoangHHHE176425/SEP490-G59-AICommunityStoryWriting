@@ -6,6 +6,7 @@ import { CategoryManagement } from './category/CategoryManagement';
 import { PublicationManagement } from './publication/PublicationManagement';
 import { UserManagement } from './user/UserManagement';
 import { PolicyManagement } from './policy/PolicyManagement';
+import { AiConfig } from './ai/AiConfig';
 
 export function AdminPage() {
     const { role } = useAuth();
@@ -47,6 +48,8 @@ export function AdminPage() {
                         </p>
                     </div>
                 );
+            case 'ai-config':
+                return <AiConfig />;
             case 'settings':
                 return (
                     <div className="text-center py-12">

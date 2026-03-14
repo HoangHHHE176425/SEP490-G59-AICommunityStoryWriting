@@ -249,7 +249,7 @@ export default function Login() {
                         </form>
 
                         {/* Sign Up Link */}
-                        <div className="mt-6 text-center">
+                        <div className="mt-6 text-center space-y-2">
                             <p className="text-sm text-slate-600 dark:text-slate-400">
                                 Chưa có tài khoản?{' '}
                                 <Link
@@ -259,6 +259,7 @@ export default function Login() {
                                     Đăng ký ngay
                                 </Link>
                             </p>
+                            
                         </div>
                     </div>
                 </div>

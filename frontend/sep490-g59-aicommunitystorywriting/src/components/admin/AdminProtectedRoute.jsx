@@ -1,16 +1,19 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
+/** Các role được dùng trang quản trị và đăng nhập tại /admin/login */
+const ADMIN_PANEL_ROLES = new Set(['ADMIN', 'MODERATOR', 'COMPLIANCE_OFFICER', 'COMPILER_OFFICER']);
+
 /**
- * Bảo vệ route admin: cho phép user có role ADMIN hoặc MODERATOR.
- * Chưa đăng nhập -> redirect /login
- * Đã đăng nhập nhưng không phải ADMIN/MODERATOR -> redirect /home
+ * Bảo vệ route admin: cho phép user có role ADMIN, MODERATOR hoặc COMPLIANCE_OFFICER / COMPILER_OFFICER.
+ * Chưa đăng nhập -> redirect /admin/login.
+ * Đã đăng nhập nhưng không thuộc nhóm trên -> redirect /home.
  */
 export function AdminProtectedRoute({ children }) {
     const { user, loading, isAdmin, role } = useAuth();
     const location = useLocation();
     const roleUpper = (role ?? '').toString().toUpperCase();
-    const canAccessAdmin = isAdmin || roleUpper === 'MODERATOR';
+    const canAccessAdmin = isAdmin || ADMIN_PANEL_ROLES.has(roleUpper);
 
     if (loading) {
         return (
@@ -21,7 +24,7 @@ export function AdminProtectedRoute({ children }) {
     }
 
     if (!user) {
-        return <Navigate to="/login" state={{ from: location }} replace />;
+        return <Navigate to="/admin/login" state={{ from: location }} replace />;
     }
 
     if (!canAccessAdmin) {
