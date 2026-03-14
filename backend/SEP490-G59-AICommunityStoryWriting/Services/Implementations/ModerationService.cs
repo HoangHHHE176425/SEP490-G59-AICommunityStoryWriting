@@ -275,8 +275,9 @@ namespace Services.Implementations
                 return false;
             var hasPendingVersion = _versionRepository.GetByChapterId(chapterId)
                 .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+            // Cho phép nhận duyệt khi: chapter gốc PENDING_REVIEW, hoặc chapter có ít nhất một version PENDING_REVIEW (kể cả chapter đang DRAFT/REJECTED).
             var canClaim = string.Equals(chapter.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase)
-                || (string.Equals(chapter.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase) && hasPendingVersion);
+                || hasPendingVersion;
             if (!canClaim)
                 return false;
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && chapter.story_id.HasValue)
@@ -367,8 +368,9 @@ namespace Services.Implementations
             Console.WriteLine($"[CONSOLE] ApproveChapter chapter found Status={chapter.status} StoryId={chapter.story_id}");
             var hasPendingVersion = _versionRepository.GetByChapterId(chapterId)
                 .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+            // Cho phép duyệt khi: chapter gốc PENDING_REVIEW, hoặc chapter có ít nhất một version PENDING_REVIEW (kể cả chapter đang DRAFT).
             var canApprove = string.Equals(chapter.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase)
-                || (string.Equals(chapter.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase) && hasPendingVersion);
+                || hasPendingVersion;
             if (!canApprove)
             {
                 Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: not pending (current={chapter.status}, hasPendingVersion={hasPendingVersion})");

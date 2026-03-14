@@ -656,7 +656,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                     }));
                                     const hasPendingVersion = versions.some((ver) => (ver.status ?? '').toLowerCase() === 'pending_review');
                                     const chapterIsPendingReview = (chapter.status ?? '').toLowerCase() === 'pending_review';
-                                    const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(chapter.number - 2) || pendingOrderIndices.has(chapter.number - 2);
+                                    const prevOrderIndex = chapter.number - 2;
+                                    const prevChapter = chapters.find((c) => c.number === chapter.number - 1);
+                                    const prevHasPendingVersion = prevChapter && (chapterVersionsMap[prevChapter.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review');
+                                    const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(prevOrderIndex) || pendingOrderIndices.has(prevOrderIndex) || prevHasPendingVersion;
                                     const canSubmitVersion = canSubmitForPublish && !hasPendingVersion && !chapterIsPendingReview;
                                     const versionsLoading = loadingVersionsForChapterId === chapter.id;
                                     const toggleExpand = (e) => {
@@ -853,7 +856,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                     {(chapter.status === 'draft' || chapter.status === 'pending_review' || chapter.status === 'rejected') && (
                                                         <div style={{ display: 'flex', width: '100%' }}>
                                                             {(chapter.status === 'draft' || chapter.status === 'rejected') && (() => {
-                                                                const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(chapter.number - 2) || pendingOrderIndices.has(chapter.number - 2);
+                                                                const prevOrderIndex = chapter.number - 2;
+                                                                const prevChapter = chapters.find((c) => c.number === chapter.number - 1);
+                                                                const prevHasPendingVersion = prevChapter && (chapterVersionsMap[prevChapter.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review');
+                                                                const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(prevOrderIndex) || pendingOrderIndices.has(prevOrderIndex) || prevHasPendingVersion;
                                                                 const canSubmitChapter = canSubmitForPublish && !hasPendingVersion;
                                                                 const chapterPublishTitle = !canSubmitForPublish
                                                                     ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.`
