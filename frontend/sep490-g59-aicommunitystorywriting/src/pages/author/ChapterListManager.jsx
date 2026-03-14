@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle, ChevronDown, ChevronRight, GitBranch } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason, getChapterVersions, deleteChapterVersion, submitChapterVersion } from '../../api/chapter/chapterApi';
+import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason, getChapterVersions, deleteChapterVersion, submitChapterVersion, unsubmitChapterVersion } from '../../api/chapter/chapterApi';
 import { getStoryRejectionReason } from '../../api/story/storyApi';
 import { updateStory } from '../../api/story/storyApi';
 import { Pagination } from '../../components/pagination/Pagination';
@@ -218,7 +218,19 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
         return () => clearTimeout(tid);
     }, [expandedChapterId, loadVersionsForChapter]);
 
+    /** Khi tab được focus lại (vd: duyệt version ở tab khác rồi chuyển về tab này), refetch list version để version đã duyệt biến mất ngay. */
+    useEffect(() => {
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'visible' && expandedChapterId) {
+                loadVersionsForChapter(expandedChapterId);
+            }
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+    }, [expandedChapterId, loadVersionsForChapter]);
+
     const [actioningChapterId, setActioningChapterId] = useState(null);
+    const [actioningVersionId, setActioningVersionId] = useState(null);
     const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, chapterId: null });
     const [rejectionReasonModal, setRejectionReasonModal] = useState({ open: false, title: '', reason: null, rejectedAt: null, loading: false });
 
@@ -333,6 +345,16 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
     };
     const handleUnpublishChapter = (chapterId) => {
         openUnpublishConfirm(chapterId);
+    };
+
+    const handleUnsubmitVersion = (chapterId, versionId) => {
+        if (!window.confirm('Bạn có chắc muốn hủy gửi duyệt version này? Version và chương sẽ về trạng thái Bản nháp.')) return;
+        setActioningVersionId(versionId);
+        unsubmitChapterVersion(chapterId, versionId)
+            .then(() => loadVersionsForChapter(chapterId))
+            .then(() => loadChapters(currentPage, { silent: true }))
+            .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Hủy gửi duyệt version thất bại'))
+            .finally(() => setActioningVersionId(null));
     };
 
     // Trạng thái truyện: PUBLISHED nếu có ≥1 chương PUBLISHED; nếu không thì PENDING_REVIEW nếu có ≥1 chương PENDING_REVIEW; còn lại Bản nháp / Bị từ chối
@@ -957,20 +979,22 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                                                                             <button
                                                                                 type="button"
-                                                                                onClick={(e) => { e.stopPropagation(); onEditVersion?.(chapter, v); }}
-                                                                                title="Chỉnh sửa version"
+                                                                                onClick={(e) => { e.stopPropagation(); if (vStatusLower !== 'pending_review') onEditVersion?.(chapter, v); }}
+                                                                                title={vStatusLower === 'pending_review' ? 'Version đang chờ duyệt, không thể chỉnh sửa' : 'Chỉnh sửa version'}
+                                                                                disabled={vStatusLower === 'pending_review'}
                                                                                 style={{
                                                                                     display: 'inline-flex',
                                                                                     alignItems: 'center',
                                                                                     gap: '0.25rem',
                                                                                     padding: '0.35rem 0.65rem',
-                                                                                    backgroundColor: '#f0fdf4',
-                                                                                    border: '1px solid #86efac',
+                                                                                    backgroundColor: vStatusLower === 'pending_review' ? '#f1f5f9' : '#f0fdf4',
+                                                                                    border: `1px solid ${vStatusLower === 'pending_review' ? '#e2e8f0' : '#86efac'}`,
                                                                                     borderRadius: '9999px',
                                                                                     fontSize: '0.75rem',
                                                                                     fontWeight: 600,
-                                                                                    color: '#15803d',
-                                                                                    cursor: 'pointer',
+                                                                                    color: vStatusLower === 'pending_review' ? '#94a3b8' : '#15803d',
+                                                                                    cursor: vStatusLower === 'pending_review' ? 'not-allowed' : 'pointer',
+                                                                                    opacity: vStatusLower === 'pending_review' ? 0.8 : 1,
                                                                                 }}
                                                                             >
                                                                                 <Pencil size={12} />
@@ -980,61 +1004,89 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                 type="button"
                                                                                 onClick={(e) => {
                                                                                     e.stopPropagation();
-                                                                                    if (!v.id || v.status === 'PUBLISHED' || v.status === 'published') return;
+                                                                                    if (!v.id || vStatusLower === 'published' || vStatusLower === 'pending_review') return;
                                                                                     if (!window.confirm('Bạn có chắc muốn xóa version này?')) return;
                                                                                     deleteChapterVersion(chapter.id, v.id)
                                                                                         .then(() => loadVersionsForChapter(chapter.id))
                                                                                         .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Xóa version thất bại'));
                                                                                 }}
-                                                                                title="Xóa version (chỉ DRAFT)"
-                                                                                disabled={vStatusLower === 'published'}
+                                                                                title={vStatusLower === 'pending_review' ? 'Version đang chờ duyệt, không thể xóa' : vStatusLower === 'published' ? 'Đã xuất bản' : 'Xóa version (chỉ Bản nháp)'}
+                                                                                disabled={vStatusLower === 'published' || vStatusLower === 'pending_review'}
                                                                                 style={{
                                                                                     display: 'inline-flex',
                                                                                     alignItems: 'center',
                                                                                     gap: '0.25rem',
                                                                                     padding: '0.35rem 0.65rem',
-                                                                                    backgroundColor: vStatusLower === 'published' ? '#f1f5f9' : '#fff',
+                                                                                    backgroundColor: (vStatusLower === 'published' || vStatusLower === 'pending_review') ? '#f1f5f9' : '#fff',
                                                                                     border: '1px solid #fecaca',
                                                                                     borderRadius: '9999px',
                                                                                     fontSize: '0.75rem',
                                                                                     fontWeight: 600,
-                                                                                    color: vStatusLower === 'published' ? '#94a3b8' : '#dc2626',
-                                                                                    cursor: vStatusLower === 'published' ? 'not-allowed' : 'pointer',
+                                                                                    color: (vStatusLower === 'published' || vStatusLower === 'pending_review') ? '#94a3b8' : '#dc2626',
+                                                                                    cursor: (vStatusLower === 'published' || vStatusLower === 'pending_review') ? 'not-allowed' : 'pointer',
                                                                                 }}
                                                                             >
                                                                                 <Trash2 size={12} />
                                                                                 Xóa
                                                                             </button>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={(e) => {
-                                                                                    e.stopPropagation();
-                                                                                    if (vStatusLower === 'published') return;
-                                                                                    submitChapterVersion(chapter.id, v.id)
-                                                                                        .then(() => loadVersionsForChapter(chapter.id))
-                                                                                        .then(() => loadChapters(currentPage, { silent: true }))
-                                                                                        .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Gửi duyệt version thất bại'));
-                                                                                }}
-                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : 'Gửi duyệt version'}
-                                                                                disabled={vStatusLower === 'published'}
-                                                                                style={{
-                                                                                    display: 'inline-flex',
-                                                                                    alignItems: 'center',
-                                                                                    gap: '0.25rem',
-                                                                                    padding: '0.35rem 0.65rem',
-                                                                                    backgroundColor: vStatusLower === 'published' ? '#f1f5f9' : '#13ec5b',
-                                                                                    border: 'none',
-                                                                                    borderRadius: '9999px',
-                                                                                    fontSize: '0.75rem',
-                                                                                    fontWeight: 600,
-                                                                                    color: vStatusLower === 'published' ? '#94a3b8' : '#fff',
-                                                                                    cursor: vStatusLower === 'published' ? 'not-allowed' : 'pointer',
-                                                                                    opacity: vStatusLower === 'published' ? 0.8 : 1,
-                                                                                }}
-                                                                            >
-                                                                                <Send size={12} />
-                                                                                {vStatusLower === 'published' ? 'Đã xuất bản' : 'Xuất bản'}
-                                                                            </button>
+                                                                            {vStatusLower === 'pending_review' ? (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        handleUnsubmitVersion(chapter.id, v.id);
+                                                                                    }}
+                                                                                    title="Hủy gửi duyệt version"
+                                                                                    disabled={actioningVersionId === v.id}
+                                                                                    style={{
+                                                                                        display: 'inline-flex',
+                                                                                        alignItems: 'center',
+                                                                                        gap: '0.25rem',
+                                                                                        padding: '0.35rem 0.65rem',
+                                                                                        backgroundColor: actioningVersionId === v.id ? '#e2e8f0' : '#fef3c7',
+                                                                                        border: `1px solid ${actioningVersionId === v.id ? '#cbd5e1' : '#f59e0b'}`,
+                                                                                        borderRadius: '9999px',
+                                                                                        fontSize: '0.75rem',
+                                                                                        fontWeight: 600,
+                                                                                        color: '#92400e',
+                                                                                        cursor: actioningVersionId === v.id ? 'not-allowed' : 'pointer',
+                                                                                        opacity: actioningVersionId === v.id ? 0.7 : 1,
+                                                                                    }}
+                                                                                >
+                                                                                    {actioningVersionId === v.id ? '...' : 'Hủy xuất bản'}
+                                                                                </button>
+                                                                            ) : (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={(e) => {
+                                                                                        e.stopPropagation();
+                                                                                        if (vStatusLower === 'published') return;
+                                                                                        submitChapterVersion(chapter.id, v.id)
+                                                                                            .then(() => loadVersionsForChapter(chapter.id))
+                                                                                            .then(() => loadChapters(currentPage, { silent: true }))
+                                                                                            .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Gửi duyệt version thất bại'));
+                                                                                    }}
+                                                                                    title={vStatusLower === 'published' ? 'Đã xuất bản' : 'Gửi duyệt version'}
+                                                                                    disabled={vStatusLower === 'published'}
+                                                                                    style={{
+                                                                                        display: 'inline-flex',
+                                                                                        alignItems: 'center',
+                                                                                        gap: '0.25rem',
+                                                                                        padding: '0.35rem 0.65rem',
+                                                                                        backgroundColor: vStatusLower === 'published' ? '#f1f5f9' : '#13ec5b',
+                                                                                        border: 'none',
+                                                                                        borderRadius: '9999px',
+                                                                                        fontSize: '0.75rem',
+                                                                                        fontWeight: 600,
+                                                                                        color: vStatusLower === 'published' ? '#94a3b8' : '#fff',
+                                                                                        cursor: vStatusLower === 'published' ? 'not-allowed' : 'pointer',
+                                                                                        opacity: vStatusLower === 'published' ? 0.8 : 1,
+                                                                                    }}
+                                                                                >
+                                                                                    <Send size={12} />
+                                                                                    {vStatusLower === 'published' ? 'Đã xuất bản' : 'Xuất bản'}
+                                                                                </button>
+                                                                            )}
                                                                         </div>
                                                                     </div>
                                                                 );

@@ -130,6 +130,32 @@ namespace Services.Implementations
             return true;
         }
 
+        public bool CancelSubmit(Guid versionId, Guid authorId)
+        {
+            var v = _versionRepository.GetById(versionId);
+            if (v == null || !v.chapter_id.HasValue) return false;
+            if (v.author_id != authorId)
+                throw new UnauthorizedAccessException("Chỉ tác giả mới được hủy gửi duyệt version.");
+            if (!string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Chỉ version đang chờ duyệt mới được hủy xuất bản.");
+
+            var chapter = _chapterRepository.GetById(v.chapter_id.Value);
+            if (chapter == null) return false;
+            var story = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
+            if (story == null || story.author_id != authorId)
+                throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được hủy gửi duyệt.");
+
+            v.status = "DRAFT";
+            _versionRepository.Update(v);
+
+            chapter.status = "DRAFT";
+            chapter.updated_at = DateTime.UtcNow;
+            _chapterRepository.Update(chapter);
+
+            ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, v.chapter_id.Value);
+            return true;
+        }
+
         private static ChapterVersionListItemDto MapToListItemDto(chapter_versions v)
         {
             return new ChapterVersionListItemDto

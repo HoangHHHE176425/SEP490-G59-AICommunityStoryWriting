@@ -265,3 +265,9 @@ export async function submitChapterVersion(chapterId, versionId) {
     const response = await axiosInstance.post(`/chapters/${chapterId}/versions/${versionId}/submit`);
     return response.data;
 }
+
+/** POST /chapters/{chapterId}/versions/{versionId}/unsubmit - Hủy gửi duyệt version (đưa version và chapter về DRAFT). Chỉ version PENDING_REVIEW. */
+export async function unsubmitChapterVersion(chapterId, versionId) {
+    const response = await axiosInstance.post(`/chapters/${chapterId}/versions/${versionId}/unsubmit`);
+    return response.data;
+}

@@ -370,6 +370,23 @@ namespace AIStory.API.Controllers
             catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
         }
 
+        /// <summary>Hủy gửi duyệt version: đưa version và chapter về DRAFT. Chỉ AUTHOR, chỉ version PENDING_REVIEW.</summary>
+        [HttpPost("{chapterId:guid}/versions/{versionId:guid}/unsubmit")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult UnsubmitChapterVersion(Guid chapterId, Guid versionId)
+        {
+            var authorId = GetCurrentUserId();
+            if (!authorId.HasValue)
+                return Unauthorized(new { message = "Không xác định user. Vui lòng đăng nhập." });
+            try
+            {
+                var ok = _chapterVersionService.CancelSubmit(versionId, authorId.Value);
+                return ok ? NoContent() : NotFound(new { message = "Version không tồn tại hoặc không thể hủy gửi duyệt." });
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        }
+
         /// <summary>Gọi Plot Manager (Agent 4) cập nhật memory trong background; không chặn response.</summary>
         private void TriggerPlotManagerUpdate(Guid storyId, Guid chapterId, string content)
         {
