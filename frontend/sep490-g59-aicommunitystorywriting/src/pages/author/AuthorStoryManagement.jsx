@@ -347,13 +347,13 @@ export function AuthorStoryManagement({ onBack }) {
             showToast('Không tìm thấy ID chương', 'error');
             return;
         }
-        const number = (chapterFromList?.orderIndex ?? chapterFromList?.order_index ?? 0) + 1;
+        const number = chapterFromList?.number ?? (chapterFromList?.orderIndex ?? chapterFromList?.OrderIndex ?? chapterFromList?.order_index ?? 0) + 1;
         const title = chapterFromList?.title ?? chapterFromList?.name ?? `Chương ${number}`;
         setCurrentStory(story);
         setCurrentChapter(null);
         setSourceChapterForVersion({
             id: chapterId,
-            number,
+            number: Number(number) || 1,
             title,
             content: '',
             status: 'draft',
@@ -378,10 +378,11 @@ export function AuthorStoryManagement({ onBack }) {
             const titleSnapshot = detail.titleSnapshot ?? detail.TitleSnapshot ?? detail.title_snapshot ?? '';
             const contentSnapshot = detail.contentSnapshot ?? detail.ContentSnapshot ?? detail.content_snapshot ?? '';
             const versionNumber = detail.versionNumber ?? detail.VersionNumber ?? detail.version_number ?? 1;
+            const chapterNumber = chapter.number ?? (chapter.orderIndex ?? chapter.order_index ?? 0) + 1;
             const sourceMapped = {
                 id: chapterId,
-                number: (chapter.orderIndex ?? chapter.order_index ?? 0) + 1,
-                title: chapter.title ?? chapter.name ?? `Chương ${(chapter.orderIndex ?? chapter.order_index ?? 0) + 1}`,
+                number: Number(chapterNumber) || 1,
+                title: chapter.title ?? chapter.name ?? `Chương ${chapterNumber}`,
             };
             setSourceChapterForVersion(sourceMapped);
             setEditingVersion({
@@ -654,21 +655,23 @@ export function AuthorStoryManagement({ onBack }) {
 
     if (activeView === 'addChapter' || activeView === 'editChapter' || activeView === 'addChapterVersion') {
         return (
-            <ChapterEditorPage
-                story={currentStory}
-                chapter={activeView === 'editChapter' ? currentChapter : null}
-                sourceChapterForVersion={activeView === 'addChapterVersion' ? sourceChapterForVersion : null}
-                editingVersion={activeView === 'addChapterVersion' ? editingVersion : null}
-                readOnly={viewChapterOnly}
-                onSave={handleSaveChapter}
-                onCancel={() => {
-                    setActiveView('chapterList');
-                    setCurrentChapter(null);
-                    setSourceChapterForVersion(null);
-                    setEditingVersion(null);
-                    setViewChapterOnly(false);
-                }}
-            />
+            <>
+                <ChapterEditorPage
+                    story={currentStory}
+                    chapter={activeView === 'editChapter' ? currentChapter : null}
+                    sourceChapterForVersion={activeView === 'addChapterVersion' ? sourceChapterForVersion : null}
+                    editingVersion={activeView === 'addChapterVersion' ? editingVersion : null}
+                    readOnly={viewChapterOnly}
+                    onSave={handleSaveChapter}
+                    onCancel={() => {
+                        setActiveView('chapterList');
+                        setCurrentChapter(null);
+                        setSourceChapterForVersion(null);
+                        setEditingVersion(null);
+                        setViewChapterOnly(false);
+                    }}
+                />
+            </>
         );
     }
 

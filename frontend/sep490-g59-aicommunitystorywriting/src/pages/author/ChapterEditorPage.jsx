@@ -179,9 +179,18 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     /** Số chương (1-based) đã tồn tại — dùng để gợi ý số tiếp theo và validate không nhập trùng */
     const [existingChapterNumbers, setExistingChapterNumbers] = useState(new Set());
     const [chapterNumberError, setChapterNumberError] = useState('');
-    /** Danh sách version của chương (khi ở chế độ version) — dùng validate số version không trùng */
+    /** Danh sách version của chương (khi ở chế độ version) — dùng validate số version không trùng + trạng thái (pending_review) */
     const [existingVersionsForChapter, setExistingVersionsForChapter] = useState([]);
     const [versionNumberError, setVersionNumberError] = useState('');
+    /** Điều kiện gửi xuất bản version: publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion (chương trước có version chờ duyệt). */
+    const [versionPublishEligibility, setVersionPublishEligibility] = useState({
+        publishedOrderIndices: new Set(),
+        pendingOrderIndices: new Set(),
+        prevHasPendingVersion: false,
+    });
+    /** Đã load xong dữ liệu để tính canSubmitVersion (tránh nút Xuất bản bật sẵn rồi mới disable). */
+    const [versionEligibilityLoaded, setVersionEligibilityLoaded] = useState(false);
+    const [versionsForChapterLoaded, setVersionsForChapterLoaded] = useState(false);
 
     const [showSettings, setShowSettings] = useState(false);
     const [editorSettings, setEditorSettings] = useState({
@@ -240,18 +249,73 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         const chapterId = sourceChapterForVersion?.id ?? sourceChapterForVersion?.Id;
         if (!isVersionMode || !chapterId) {
             setExistingVersionsForChapter([]);
+            setVersionsForChapterLoaded(false);
             return;
         }
+        setVersionsForChapterLoaded(false);
         getChapterVersions(chapterId)
             .then((list) => {
                 const arr = Array.isArray(list) ? list : [];
                 setExistingVersionsForChapter(arr.map((v) => ({
                     id: v.id ?? v.Id,
                     versionNumber: Number(v.versionNumber ?? v.VersionNumber ?? v.version_number ?? 0) || 0,
+                    status: (v.status ?? v.Status ?? '').toString(),
                 })));
             })
-            .catch(() => setExistingVersionsForChapter([]));
+            .catch(() => setExistingVersionsForChapter([]))
+            .finally(() => setVersionsForChapterLoaded(true));
     }, [isVersionMode, sourceChapterForVersion?.id, sourceChapterForVersion?.Id]);
+
+    // Load điều kiện gửi xuất bản version (thứ tự 1,2,3... và không trùng phiên bản chờ duyệt) — dùng đúng API có status như ChapterListManager
+    useEffect(() => {
+        if (!isVersionMode || !storyId || !sourceChapterForVersion) {
+            setVersionPublishEligibility({ publishedOrderIndices: new Set(), pendingOrderIndices: new Set(), prevHasPendingVersion: false });
+            setVersionEligibilityLoaded(false);
+            return;
+        }
+        setVersionEligibilityLoaded(false);
+        const chapterNumber = Number(sourceChapterForVersion.number ?? 1);
+        const prevOrderIndex = chapterNumber - 2; // 0-based index của chương trước
+        const markLoaded = (publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion) => {
+            setVersionPublishEligibility({ publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion });
+            setVersionEligibilityLoaded(true);
+        };
+        // Gọi riêng PUBLISHED và PENDING_REVIEW giống ChapterListManager để đảm bảo đúng tập chương đã gửi/chờ duyệt
+        Promise.all([
+            getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
+            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 }),
+            getChapters({ storyId, page: 1, pageSize: 500 }),
+        ])
+            .then(([publishedRes, pendingRes, allRes]) => {
+                const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
+                const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
+                const publishedOrderIndices = new Set(
+                    publishedList.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0))
+                );
+                const pendingOrderIndices = new Set(
+                    pendingList.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0))
+                );
+                const allItems = allRes?.items ?? allRes?.Items ?? [];
+                const arr = Array.isArray(allItems) ? allItems : [];
+                const prevChapter = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === prevOrderIndex);
+                if (!prevChapter) {
+                    markLoaded(publishedOrderIndices, pendingOrderIndices, false);
+                    return;
+                }
+                const prevChapterId = prevChapter.id ?? prevChapter.Id;
+                getChapterVersions(prevChapterId)
+                    .then((verList) => {
+                        const vArr = Array.isArray(verList) ? verList : [];
+                        const prevHasPendingVersion = vArr.some((v) => ((v.status ?? v.Status ?? '').toString().toLowerCase() === 'pending_review'));
+                        markLoaded(publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion);
+                    })
+                    .catch(() => markLoaded(publishedOrderIndices, pendingOrderIndices, false));
+            })
+            .catch(() => {
+                setVersionPublishEligibility({ publishedOrderIndices: new Set(), pendingOrderIndices: new Set(), prevHasPendingVersion: false });
+                setVersionEligibilityLoaded(true);
+            });
+    }, [isVersionMode, storyId, sourceChapterForVersion]);
 
     // Load danh sách chương để tính số chương tiếp theo (thêm mới) và validate trùng (số 1-based)
     useEffect(() => {
@@ -398,6 +462,42 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     };
 
     const currentChapterNumber = chapter ? Number(chapter.number ?? chapter.chapterNumber ?? (chapter.orderIndex ?? chapter.OrderIndex ?? 0) + 1) : null;
+
+    /** Điều kiện gửi xuất bản version — giống ChapterListManager: thứ tự 1,2,3...; chương gốc không chờ duyệt; chỉ một phiên bản chờ duyệt. */
+    const chapterNumberForVersion = isVersionMode ? Number(sourceChapterForVersion?.number ?? 1) : 0;
+    const prevOrderIndexVersion = chapterNumberForVersion - 2;
+    const canSubmitForPublishVersion =
+        chapterNumberForVersion === 1 ||
+        versionPublishEligibility.publishedOrderIndices.has(prevOrderIndexVersion) ||
+        versionPublishEligibility.pendingOrderIndices.has(prevOrderIndexVersion) ||
+        versionPublishEligibility.prevHasPendingVersion;
+    const hasOtherPendingVersion =
+        existingVersionsForChapter.some(
+            (v) => (v.status ?? '').toString().toLowerCase() === 'pending_review' && (v.id ?? '') !== (editingVersion?.id ?? editingVersion?.Id ?? '')
+        );
+    const chapterIsPendingReviewVersion = (sourceChapterForVersion?.status ?? '').toString().toLowerCase() === 'pending_review';
+    /** Phiên bản đang chỉnh sửa đã ở trạng thái chờ duyệt thì không cho gửi lại. */
+    const editingVersionIsPendingReview = (editingVersion?.status ?? '').toString().toLowerCase() === 'pending_review';
+    const canSubmitVersion =
+        versionEligibilityLoaded &&
+        versionsForChapterLoaded &&
+        canSubmitForPublishVersion &&
+        !hasOtherPendingVersion &&
+        !chapterIsPendingReviewVersion &&
+        !editingVersionIsPendingReview;
+    const versionPublishTooltip =
+        !versionEligibilityLoaded || !versionsForChapterLoaded
+            ? 'Đang kiểm tra điều kiện gửi xuất bản...'
+            : editingVersionIsPendingReview
+                ? 'Phiên bản này đang chờ duyệt, không thể gửi lại.'
+                : !canSubmitForPublishVersion
+                    ? `Phải gửi chương ${chapterNumberForVersion - 1} trước khi gửi chương ${chapterNumberForVersion}.`
+                    : chapterIsPendingReviewVersion
+                        ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.'
+                        : hasOtherPendingVersion
+                            ? 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.'
+                            : 'Gửi phiên bản lên để duyệt xuất bản';
+
     const validateChapterNumber = (num) => {
         const n = Number(num);
         if (n < 1 || !Number.isInteger(n)) return 'Số chương phải là số nguyên từ 1 trở lên.';
@@ -432,6 +532,10 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 return;
             }
             setVersionNumberError('');
+            if (saveStatus === 'published' && !canSubmitVersion) {
+                showToast(versionPublishTooltip, 'error');
+                return;
+            }
         } else {
             const num = Number(chapterData.number);
             const numError = validateChapterNumber(isNaN(num) ? 0 : num);
@@ -848,7 +952,8 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                     </button>
                                     <button
                                         onClick={() => handleSave('published')}
-                                        disabled={isSaving}
+                                        disabled={isSaving || (isVersionMode && !canSubmitVersion)}
+                                        title={isVersionMode ? versionPublishTooltip : undefined}
                                         className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
                                         <Save style={{ width: '16px', height: '16px' }} />
@@ -931,64 +1036,110 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 </div>
                             )}
 
-                            {/* Khi tạo/sửa version: hiển thị Số version + Tiêu đề version (giống Số chương + Tên chương) */}
+                            {/* Khi tạo/sửa version: hiển thị Số chương (read-only) + Tiêu đề chương gốc, rồi Số phiên bản + Tiêu đề phiên bản */}
                             {isVersionMode && (
-                                <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                            Số phiên bản <span style={{ color: '#ef4444' }}>*</span>
-                                        </label>
-                                        <input
-                                            type="number"
-                                            min="1"
-                                            value={chapterData.versionNumber ?? 1}
-                                            readOnly={readOnly}
-                                            disabled={readOnly}
-                                            onChange={(e) => {
-                                                if (readOnly) return;
-                                                const v = e.target.value === '' ? 1 : Math.max(1, Number(e.target.value) || 1);
-                                                setChapterData((prev) => ({ ...prev, versionNumber: v }));
-                                                setVersionNumberError('');
-                                            }}
-                                            style={{
-                                                width: '100%',
-                                                padding: '0.75rem',
-                                                backgroundColor: readOnly ? '#f1f5f9' : '#f9fafb',
-                                                border: versionNumberError ? '1px solid #ef4444' : '1px solid #e5e7eb',
-                                                borderRadius: '8px',
-                                                fontSize: '0.875rem',
-                                                outline: 'none',
-                                                cursor: readOnly ? 'default' : undefined,
-                                            }}
-                                        />
-                                        {versionNumberError && (
-                                            <p style={{ fontSize: '0.75rem', color: '#ef4444', margin: '0.25rem 0 0 0' }}>{versionNumberError}</p>
-                                        )}
+                                <>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                                Số chương
+                                            </label>
+                                            <input
+                                                type="text"
+                                                readOnly
+                                                disabled
+                                                value={sourceChapterForVersion?.number ?? (chapterData.number ?? 1)}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '0.75rem',
+                                                    backgroundColor: '#f1f5f9',
+                                                    border: '1px solid #e5e7eb',
+                                                    borderRadius: '8px',
+                                                    fontSize: '0.875rem',
+                                                    color: '#475569',
+                                                    cursor: 'default',
+                                                }}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                                Tiêu đề chương gốc
+                                            </label>
+                                            <input
+                                                type="text"
+                                                readOnly
+                                                disabled
+                                                value={sourceChapterForVersion?.title ?? ''}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '0.75rem',
+                                                    backgroundColor: '#f1f5f9',
+                                                    border: '1px solid #e5e7eb',
+                                                    borderRadius: '8px',
+                                                    fontSize: '0.875rem',
+                                                    color: '#475569',
+                                                    cursor: 'default',
+                                                }}
+                                            />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                            Tiêu đề phiên bản <span style={{ color: '#ef4444' }}>*</span>
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={chapterData.title}
-                                            readOnly={readOnly}
-                                            disabled={readOnly}
-                                            onChange={(e) => !readOnly && setChapterData({ ...chapterData, title: e.target.value })}
-                                            placeholder="Nhập tiêu đề phiên bản (vd: Bản chỉnh sửa lỗi chính tả)"
-                                            style={{
-                                                width: '100%',
-                                                padding: '0.75rem',
-                                                backgroundColor: readOnly ? '#f1f5f9' : '#f9fafb',
-                                                border: '1px solid #e5e7eb',
-                                                borderRadius: '8px',
-                                                fontSize: '0.875rem',
-                                                outline: 'none',
-                                                cursor: readOnly ? 'default' : undefined,
-                                            }}
-                                        />
+                                    <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                                Số phiên bản <span style={{ color: '#ef4444' }}>*</span>
+                                            </label>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                value={chapterData.versionNumber ?? 1}
+                                                readOnly={readOnly}
+                                                disabled={readOnly}
+                                                onChange={(e) => {
+                                                    if (readOnly) return;
+                                                    const v = e.target.value === '' ? 1 : Math.max(1, Number(e.target.value) || 1);
+                                                    setChapterData((prev) => ({ ...prev, versionNumber: v }));
+                                                    setVersionNumberError('');
+                                                }}
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '0.75rem',
+                                                    backgroundColor: readOnly ? '#f1f5f9' : '#f9fafb',
+                                                    border: versionNumberError ? '1px solid #ef4444' : '1px solid #e5e7eb',
+                                                    borderRadius: '8px',
+                                                    fontSize: '0.875rem',
+                                                    outline: 'none',
+                                                    cursor: readOnly ? 'default' : undefined,
+                                                }}
+                                            />
+                                            {versionNumberError && (
+                                                <p style={{ fontSize: '0.75rem', color: '#ef4444', margin: '0.25rem 0 0 0' }}>{versionNumberError}</p>
+                                            )}
+                                        </div>
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                                Tiêu đề phiên bản <span style={{ color: '#ef4444' }}>*</span>
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={chapterData.title}
+                                                readOnly={readOnly}
+                                                disabled={readOnly}
+                                                onChange={(e) => !readOnly && setChapterData({ ...chapterData, title: e.target.value })}
+                                                placeholder="Nhập tiêu đề phiên bản (vd: Bản chỉnh sửa lỗi chính tả)"
+                                                style={{
+                                                    width: '100%',
+                                                    padding: '0.75rem',
+                                                    backgroundColor: readOnly ? '#f1f5f9' : '#f9fafb',
+                                                    border: '1px solid #e5e7eb',
+                                                    borderRadius: '8px',
+                                                    fontSize: '0.875rem',
+                                                    outline: 'none',
+                                                    cursor: readOnly ? 'default' : undefined,
+                                                }}
+                                            />
+                                        </div>
                                     </div>
-                                </div>
+                                </>
                             )}
 
                             {/* Chế độ sáng tác — không hiển thị khi tạo/sửa version. Khi readOnly hiển thị dạng chỉ đọc. */}
