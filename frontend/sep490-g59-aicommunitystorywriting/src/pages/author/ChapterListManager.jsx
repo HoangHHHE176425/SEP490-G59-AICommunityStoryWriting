@@ -627,6 +627,9 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                         rejection_reason: v.rejectionReason ?? v.rejection_reason,
                                         reviewed_at: v.reviewedAt ?? v.reviewed_at,
                                     }));
+                                    const hasPendingVersion = versions.some((ver) => (ver.status ?? '').toLowerCase() === 'pending_review');
+                                    const chapterIsPendingReview = (chapter.status ?? '').toLowerCase() === 'pending_review';
+                                    const canSubmitVersion = !hasPendingVersion && !chapterIsPendingReview;
                                     const versionsLoading = loadingVersionsForChapterId === chapter.id;
                                     const toggleExpand = (e) => {
                                         if (e.target.closest('button')) return;
@@ -1152,11 +1155,11 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                 type="button"
                                                                                                 onClick={(e) => {
                                                                                                     e.stopPropagation();
-                                                                                                    if (vStatusLower === 'published') return;
+                                                                                                    if (vStatusLower === 'published' || !canSubmitVersion) return;
                                                                                                     openVersionSubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                                 }}
-                                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : 'Gửi duyệt version'}
-                                                                                                disabled={vStatusLower === 'published'}
+                                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi version.' : 'Chỉ được gửi một version tại một thời điểm. Hãy hủy version đang chờ duyệt trước.') : 'Gửi duyệt version'}
+                                                                                                disabled={vStatusLower === 'published' || !canSubmitVersion}
                                                                                                 style={{
                                                                                                     display: 'inline-flex',
                                                                                                     alignItems: 'center',
@@ -1164,20 +1167,20 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                     gap: '0.25rem',
                                                                                                     width: '100%',
                                                                                                     padding: '0.4rem 0.75rem',
-                                                                                                    backgroundColor: vStatusLower === 'published' ? '#e2e8f0' : '#13ec5b',
+                                                                                                    backgroundColor: (vStatusLower === 'published' || !canSubmitVersion) ? '#e2e8f0' : '#13ec5b',
                                                                                                     border: 'none',
                                                                                                     borderRadius: '9999px',
                                                                                                     fontSize: '0.75rem',
                                                                                                     fontWeight: 600,
-                                                                                                    color: vStatusLower === 'published' ? '#94a3b8' : '#fff',
-                                                                                                    cursor: vStatusLower === 'published' ? 'not-allowed' : 'pointer',
-                                                                                                    opacity: vStatusLower === 'published' ? 0.8 : 1,
+                                                                                                    color: (vStatusLower === 'published' || !canSubmitVersion) ? '#94a3b8' : '#fff',
+                                                                                                    cursor: (vStatusLower === 'published' || !canSubmitVersion) ? 'not-allowed' : 'pointer',
+                                                                                                    opacity: (vStatusLower === 'published' || !canSubmitVersion) ? 0.8 : 1,
                                                                                                     whiteSpace: 'nowrap',
                                                                                                     transition: 'all 0.2s'
                                                                                                 }}
                                                                                             >
                                                                                                 <Send size={12} />
-                                                                                                {vStatusLower === 'published' ? 'Đã xuất bản' : 'Xuất bản'}
+                                                                                                {vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (chapterIsPendingReview ? 'Chương gốc đang chờ duyệt' : 'Đã có version chờ duyệt') : 'Xuất bản'}
                                                                                             </button>
                                                                                         )}
                                                                                     </div>

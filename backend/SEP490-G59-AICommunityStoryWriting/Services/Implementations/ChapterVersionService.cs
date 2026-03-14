@@ -107,7 +107,12 @@ namespace Services.Implementations
             if (chapterStatusUpper == "PENDING_REVIEW")
                 throw new InvalidOperationException("Chapter đã được gửi đi duyệt. Chỉ được gửi một bản: bản gốc chapter hoặc một version.");
 
-            ChapterVersionDAO.SetPendingVersionsToDraft(v.chapter_id.Value, exceptVersionId: versionId);
+            // Chỉ cho phép một version chờ duyệt tại một thời điểm. Nếu đã có version khác đang PENDING_REVIEW thì không cho gửi thêm.
+            var anyOtherPending = _versionRepository.GetByChapterId(v.chapter_id.Value)
+                .Any(x => string.Equals(x.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase) && x.id != versionId);
+            if (anyOtherPending)
+                throw new InvalidOperationException("Chỉ được gửi duyệt một version tại một thời điểm. Đã có version đang chờ duyệt, hãy hủy hoặc chờ duyệt xong rồi gửi version khác.");
+
             v.status = "PENDING_REVIEW";
             _versionRepository.Update(v);
 
