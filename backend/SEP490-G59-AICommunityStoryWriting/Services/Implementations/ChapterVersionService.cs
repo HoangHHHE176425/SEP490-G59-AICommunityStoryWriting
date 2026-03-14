@@ -106,13 +106,8 @@ namespace Services.Implementations
             v.status = "PENDING_REVIEW";
             _versionRepository.Update(v);
 
-            // Khi gửi version đi duyệt: đồng bộ title + content từ snapshot của version sang chapter.
-            // Như vậy khi moderator approve, chapter đã mang nội dung của version mới.
-            if (!string.IsNullOrWhiteSpace(v.title_snapshot))
-                chapter.title = v.title_snapshot;
-            chapter.content = v.content_snapshot;
+            // Chỉ chuyển chapter sang chờ duyệt. Không ghi đè title/content lên chapter cho đến khi moderator duyệt (approve).
             chapter.updated_at = DateTime.UtcNow;
-            chapter.word_count = CalculateWordCount(v.content_snapshot);
             chapter.status = "PENDING_REVIEW";
             _chapterRepository.Update(chapter);
             return true;

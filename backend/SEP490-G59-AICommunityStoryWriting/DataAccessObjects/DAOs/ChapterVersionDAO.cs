@@ -107,6 +107,14 @@ namespace DataAccessObjects.DAOs
                 context.SaveChanges();
         }
 
+        /// <summary>Lấy version đang chờ duyệt (PENDING_REVIEW) của chapter, nếu có.</summary>
+        public static chapter_versions? GetPendingByChapterId(Guid chapterId)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.chapter_versions
+                .FirstOrDefault(v => v.chapter_id == chapterId && v.status == "PENDING_REVIEW");
+        }
+
         /// <summary>Khi moderator duyệt chapter: đánh dấu version đang PENDING_REVIEW của chapter đó thành PUBLISHED.</summary>
         public static void MarkPendingVersionsAsPublished(Guid chapterId)
         {

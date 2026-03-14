@@ -384,6 +384,16 @@ namespace Services.Implementations
                 }
             }
 
+            // Khi duyệt: áp dụng title/content từ version đang PENDING_REVIEW lên chapter (chỉ khi có version chờ duyệt).
+            var pendingVersion = ChapterVersionDAO.GetPendingByChapterId(chapterId);
+            if (pendingVersion != null)
+            {
+                if (!string.IsNullOrWhiteSpace(pendingVersion.title_snapshot))
+                    chapter.title = pendingVersion.title_snapshot;
+                chapter.content = pendingVersion.content_snapshot ?? chapter.content;
+                chapter.word_count = CalculateWordCount(pendingVersion.content_snapshot);
+            }
+
             chapter.status = "PUBLISHED";
             chapter.published_at = DateTime.Now;
             chapter.updated_at = DateTime.Now;
@@ -571,6 +581,12 @@ namespace Services.Implementations
                 created_at = DateTime.Now
             };
             ModerationLogDAO.Add(log);
+        }
+
+        private static int CalculateWordCount(string? content)
+        {
+            if (string.IsNullOrWhiteSpace(content)) return 0;
+            return content.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
         }
     }
 }
