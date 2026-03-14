@@ -151,6 +151,21 @@ namespace Services.Implementations
                     item.ClaimedByDisplayName = claim.Value.DisplayName;
                     item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
                 }
+                // Hiển thị đúng tiêu đề/số từ version chờ duyệt ngay trên sidebar (kể cả chapter đang DRAFT — gửi version đi duyệt). Dùng .ToList() để luôn đánh giá đủ version.
+                var pendingVersionsList = _versionRepository.GetByChapterId(item.Id)
+                    .Where(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(v => v.version_number)
+                    .ToList();
+                var pendingVersion = pendingVersionsList.FirstOrDefault();
+                if (pendingVersion != null)
+                {
+                    item.PendingVersionTitle = string.IsNullOrWhiteSpace(pendingVersion.title_snapshot)
+                        ? (item.Title ?? null)
+                        : pendingVersion.title_snapshot.Trim();
+                    item.PendingVersionWordCount = string.IsNullOrWhiteSpace(pendingVersion.content_snapshot)
+                        ? 0
+                        : pendingVersion.content_snapshot!.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+                }
             }
             return result;
         }

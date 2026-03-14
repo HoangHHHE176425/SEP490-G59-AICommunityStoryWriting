@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar } from 'lucide-react';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
-import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent } from '../../../api/moderator/moderatorApi';
+import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters } from '../../../api/moderator/moderatorApi';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { useToast } from '../../author/story-editor/Toast';
 
-/** Map API chapter list item sang format modal cần */
+/** Map API chapter list item sang format modal cần. Khi API trả về pendingVersionTitle/pendingVersionWordCount (list chờ duyệt) thì dùng cho sidebar ngay. */
 function mapChapterItem(item) {
     const orderIndex = item.orderIndex ?? item.OrderIndex ?? 0;
     return {
@@ -17,6 +17,8 @@ function mapChapterItem(item) {
         wordCount: item.wordCount ?? item.WordCount ?? 0,
         status: (item.status ?? item.Status ?? '').toLowerCase(),
         publishedAt: item.publishedAt ?? item.PublishedAt ?? null,
+        pendingVersionTitle: item.pendingVersionTitle ?? item.PendingVersionTitle ?? null,
+        pendingVersionWordCount: item.pendingVersionWordCount ?? item.PendingVersionWordCount ?? null,
     };
 }
 
@@ -64,6 +66,10 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [contentAreaHeight, setContentAreaHeight] = useState(420);
     const [isResizingContent, setIsResizingContent] = useState(false);
     const resizeStartRef = useRef({ y: 0, height: 0 });
+    /** Chỉ xóa chapterReviewContent khi mở publication khác; tránh effect re-run (vd publication.chapters ref mới) xóa mất dữ liệu prefetch. */
+    const loadKeyRef = useRef({ storyId: null, pubId: null });
+    /** Request id để bỏ qua kết quả prefetch cũ nếu đã mở publication khác. */
+    const pendingPrefetchIdRef = useRef(0);
 
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
@@ -71,20 +77,34 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         if (!sid) return;
         if (options.showLoading !== false) setChaptersLoading(true);
         const pubStatus = options.publicationStatus ?? 'pending';
-        const params = { storyId: sid, pageSize: 100 };
-        if (pubStatus === 'approved') params.status = 'PUBLISHED';
-        else if (pubStatus === 'pending') params.status = 'PENDING_REVIEW';
-        const promise = getChapters(params);
         if (pubStatus === 'pending') {
+            const prefetchId = ++pendingPrefetchIdRef.current;
+            // Dùng API moderator để lấy đủ: chương PENDING_REVIEW + chương đã PUBLISHED có version chờ duyệt (hiển thị 2 tab Chương gốc / Phiên bản gửi duyệt).
+            const pendingPromise = getPendingChapters({ storyId: sid, pageSize: 100 });
             const publishedPromise = getChapters({ storyId: sid, status: 'PUBLISHED', page: 1, pageSize: 500 });
-            Promise.allSettled([promise, publishedPromise])
+            Promise.allSettled([pendingPromise, publishedPromise])
                 .then(([pendingResult, publishedResult]) => {
                     if (pendingResult.status === 'fulfilled') {
                         const res = pendingResult.value;
                         const items = res?.items ?? res?.Items ?? res?.data ?? [];
                         const mapped = (Array.isArray(items) ? items : []).map(mapChapterItem);
-                        setChapters(mapped);
-                        setSelectedChapter((prev) => (prev && mapped.some((c) => c.id === prev.id)) ? prev : (mapped[0] ?? null));
+                        if (mapped.length === 0) {
+                            setChapters(mapped);
+                            setSelectedChapter(null);
+                        } else {
+                            // "Click một loạt" tất cả chương (gọi review-content cho từng chương) trước khi hiển thị view → sidebar đúng version ngay (kể cả Chương 5).
+                            return Promise.allSettled(mapped.map((c) => getChapterReviewContent(c.id)))
+                                .then((results) => {
+                                    if (prefetchId !== pendingPrefetchIdRef.current) return;
+                                    const next = {};
+                                    results.forEach((r, i) => {
+                                        if (r.status === 'fulfilled' && mapped[i]) next[mapped[i].id] = r.value;
+                                    });
+                                    setChapterReviewContent((prev) => ({ ...prev, ...next }));
+                                    setChapters(mapped);
+                                    setSelectedChapter(mapped[0] ?? null);
+                                });
+                        }
                     }
                     if (publishedResult.status === 'fulfilled') {
                         const pubRes = publishedResult.value;
@@ -96,6 +116,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 .catch(() => setChapters([]))
                 .finally(() => setChaptersLoading(false));
         } else {
+            const params = { storyId: sid, pageSize: 100 };
+            if (pubStatus === 'approved') params.status = 'PUBLISHED';
+            const promise = getChapters(params);
             promise
                 .then((res) => {
                     const items = res?.items ?? res?.Items ?? [];
@@ -109,17 +132,28 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     }, []);
 
     useEffect(() => {
-        storyApprovedInSessionRef.current = false;
-        justRejectedInSessionRef.current = false;
-        setFetchedRejectionByChapter({});
-        setPublishedOrderIndices(new Set());
+        const pubId = publication?.id ?? publication?.storyId ?? storyId ?? '';
+        const newKey = { storyId: storyId ?? null, pubId: pubId ?? null };
+        const keyChanged = loadKeyRef.current.storyId !== newKey.storyId || loadKeyRef.current.pubId !== newKey.pubId;
+
         const id = setTimeout(() => {
             if (!storyId) {
+                loadKeyRef.current = { storyId: null, pubId: null };
                 setChapters([]);
                 setChaptersLoading(false);
                 setSelectedChapter(null);
+                setChapterReviewContent({});
                 return;
             }
+            // Chỉ clear và refetch khi mở publication khác; tránh effect re-run (vd publication.chapters ref mới) xóa chapters + chapterReviewContent → sidebar hiển thị sai.
+            if (!keyChanged) return;
+
+            // Cập nhật ref ngay khi bắt đầu load (trong setTimeout), tránh effect chạy lần 2 trước khi fetch kịp gọi → keyChanged false → bỏ qua fetch → không có dữ liệu.
+            loadKeyRef.current = newKey;
+            storyApprovedInSessionRef.current = false;
+            justRejectedInSessionRef.current = false;
+            setFetchedRejectionByChapter({});
+            setPublishedOrderIndices(new Set());
             setChapters([]);
             setSelectedChapter(null);
             setChapterContents({});
@@ -135,7 +169,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             fetchChaptersForStory(storyId, { publicationStatus: publication?.status });
         }, 0);
         return () => clearTimeout(id);
-    }, [storyId, publication?.status, publication?.type, publication?.chapters, fetchChaptersForStory]);
+    }, [storyId, publication?.status, publication?.type, publication?.chapters, publication?.id, publication?.storyId, fetchChaptersForStory]);
 
     /** Real-time: khi có claim/approve/reject, refetch danh sách chương trong modal (bỏ qua khi đang xem story_group từ tab Từ chối). */
     const refetchChaptersRef = useRef(() => { });
@@ -558,26 +592,28 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                         whiteSpace: 'nowrap'
                                                     }}>
                                                         {(() => {
-                                                            if (chapter.id !== selectedChapter?.id) return chapter.title;
+                                                            if (chapter.displayTitle != null && String(chapter.displayTitle).trim()) return String(chapter.displayTitle).trim();
+                                                            const fromList = chapter.pendingVersionTitle ?? '';
+                                                            if (fromList && String(fromList).trim()) return String(fromList).trim();
                                                             const review = chapterReviewContent[chapter.id];
                                                             const hasPending = review?.hasPendingVersion ?? review?.HasPendingVersion;
                                                             const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
-                                                            const chapterIsPublished = (chapter?.status ?? '').toLowerCase() === 'published';
-                                                            if (!chapterIsPublished && hasPending && pendingVersions?.length > 0) {
+                                                            if (hasPending && pendingVersions?.length > 0) {
                                                                 const t = pendingVersions[0]?.titleSnapshot ?? pendingVersions[0]?.TitleSnapshot ?? '';
-                                                                return (t && t.trim()) ? t.trim() : chapter.title;
+                                                                return (t && t.trim()) ? t.trim() : (chapter.title ?? '');
                                                             }
-                                                            return chapter.title;
+                                                            return chapter.title ?? '';
                                                         })()}
                                                     </div>
                                                     <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
                                                         {(() => {
-                                                            if (chapter.id !== selectedChapter?.id) return `${chapter.wordCount ?? 0} từ`;
+                                                            if (chapter.displayWordCount != null && typeof chapter.displayWordCount === 'number' && chapter.displayWordCount >= 0) return `${chapter.displayWordCount} từ`;
+                                                            const countFromList = chapter.pendingVersionWordCount;
+                                                            if (countFromList != null && typeof countFromList === 'number' && countFromList >= 0) return `${countFromList} từ`;
                                                             const review = chapterReviewContent[chapter.id];
                                                             const hasPending = review?.hasPendingVersion ?? review?.HasPendingVersion;
                                                             const pendingVersions = review?.pendingVersions ?? review?.PendingVersions ?? [];
-                                                            const chapterIsPublished = (chapter?.status ?? '').toLowerCase() === 'published';
-                                                            if (!chapterIsPublished && hasPending && pendingVersions?.length > 0) {
+                                                            if (hasPending && pendingVersions?.length > 0) {
                                                                 const content = pendingVersions[0]?.contentSnapshot ?? pendingVersions[0]?.ContentSnapshot ?? '';
                                                                 const count = (typeof content === 'string' && content.trim()) ? content.trim().split(/\s+/).length : 0;
                                                                 return `${count} từ`;
@@ -744,9 +780,17 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                         const v = pendingVersions[0];
                                                         const versionTitle = v?.titleSnapshot ?? v?.TitleSnapshot ?? '';
                                                         const versionContent = v?.contentSnapshot ?? v?.ContentSnapshot ?? '';
-                                                        const chapterIsPublished = (selectedChapter?.status ?? '').toLowerCase() === 'published';
-                                                        if (!chapterIsPublished && !publication?.isEditRequest) {
-                                                            // Chapter gốc chưa xuất bản: chỉ hiển thị nội dung phiên bản gửi duyệt, không tab.
+                                                        const originalContent = review?.originalContent ?? review?.OriginalContent ?? chapterContents[selectedChapter.id] ?? '—';
+                                                        const hasOriginalToShow = Boolean(originalContent && String(originalContent).trim() && originalContent !== '—');
+                                                        // Ưu tiên ChapterStatus từ API getChapterReviewContent (chuẩn từ backend); fallback sang selectedChapter từ list.
+                                                        const chapterStatusRaw = review?.chapterStatus ?? review?.ChapterStatus ?? selectedChapter?.status ?? selectedChapter?.Status ?? '';
+                                                        const chapterStatus = String(chapterStatusRaw).toLowerCase();
+                                                        const chapterIsPublished = chapterStatus === 'published';
+                                                        const chapterIsDraftOrRejected = chapterStatus === 'draft' || chapterStatus === 'rejected';
+                                                        // 2 tab khi chương gốc đã PUBLISHED (hoặc isEditRequest). Fallback: API trả về cả OriginalContent + version thì coi là so sánh bản gốc/version. Bản nháp/Từ chối → chỉ 1 view (version).
+                                                        const showTwoTabs = !chapterIsDraftOrRejected && (chapterIsPublished || publication?.isEditRequest || (hasOriginalToShow && hasPendingVersion));
+                                                        if (!showTwoTabs) {
+                                                            // Chương gốc chưa xuất bản / bản nháp / từ chối: chỉ hiển thị thông tin version author gửi đi duyệt, không tab.
                                                             return (
                                                                 <div style={{
                                                                     flex: 1,
@@ -760,10 +804,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                                 </div>
                                                             );
                                                         }
-                                                        const originalContent = review?.originalContent ?? review?.OriginalContent ?? chapterContents[selectedChapter.id] ?? '—';
                                                         const tabs = [
-                                                            { id: 'original', label: 'Chapter gốc đã xuất bản' },
-                                                            { id: 'version', label: `Phiên bản gửi duyệt${versionTitle ? ` — ${versionTitle}` : ''}` }
+                                                            { id: 'original', label: 'Chương gốc' },
+                                                            { id: 'version', label: `Phiên bản của tôi${versionTitle ? ` — ${versionTitle}` : ''}` }
                                                         ];
                                                         return (
                                                             <>
@@ -838,15 +881,23 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         )}
                     </div>
 
-                    {/* Footer - Actions. Khi là yêu cầu chỉnh sửa (2 tab): chỉ hiện nút Duyệt/Từ chối ở tab "Version gửi duyệt"; tab Chapter gốc chỉ để đọc. Chapter chưa xuất bản thì chỉ có 1 nội dung (version) nên luôn hiện nút. */}
+                    {/* Footer - Actions. Chỉ khi chương gốc đã PUBLISHED (2 tab): ẩn nút ở tab Chương gốc. Chương bản nháp/từ chối (chỉ 1 nội dung version) thì luôn hiện nút. */}
                     {chapters.length > 0 && !showRejectForm && publication?.status === 'pending' && (() => {
-                        const isVersionEditCase = publication?.isEditRequest || (selectedChapter?.id && (chapterReviewContent[selectedChapter.id]?.hasPendingVersion ?? chapterReviewContent[selectedChapter.id]?.HasPendingVersion));
-                        const chapterIsPublished = (selectedChapter?.status ?? '').toLowerCase() === 'published';
-                        const hasTwoTabs = isVersionEditCase && (chapterIsPublished || publication?.isEditRequest);
-                        if (hasTwoTabs && contentTab !== 'version') {
+                        const review = selectedChapter?.id ? chapterReviewContent[selectedChapter.id] : null;
+                        const hasPendingVersionForChapter = Boolean(review?.hasPendingVersion ?? review?.HasPendingVersion);
+                        const chapterStatusRaw = review?.chapterStatus ?? review?.ChapterStatus ?? selectedChapter?.status ?? selectedChapter?.Status ?? '';
+                        const chapterStatus = String(chapterStatusRaw).toLowerCase();
+                        const chapterIsPublished = chapterStatus === 'published';
+                        const chapterIsDraftOrRejected = chapterStatus === 'draft' || chapterStatus === 'rejected';
+                        const originalContent = review?.originalContent ?? review?.OriginalContent ?? (selectedChapter?.id ? chapterContents[selectedChapter.id] : null);
+                        const hasOriginalToShow = Boolean(originalContent && String(originalContent).trim() && originalContent !== '—');
+                        const isTwoTabCase = hasPendingVersionForChapter && !chapterIsDraftOrRejected && (chapterIsPublished || publication?.isEditRequest || hasOriginalToShow);
+                        const isOnOriginalTab = contentTab === 'original';
+                        const hideButtonsForOriginalTab = isTwoTabCase && isOnOriginalTab;
+                        if (hideButtonsForOriginalTab) {
                             return (
                                 <div style={{ padding: '0.75rem 1.5rem', borderTop: '1px solid #e2e8f0', backgroundColor: '#f1f5f9', fontSize: '0.875rem', color: '#64748b' }}>
-                                    Chuyển sang tab « Phiên bản gửi duyệt » để duyệt hoặc từ chối.
+                                    Chuyển sang tab « Phiên bản của tôi » để duyệt hoặc từ chối.
                                 </div>
                             );
                         }
