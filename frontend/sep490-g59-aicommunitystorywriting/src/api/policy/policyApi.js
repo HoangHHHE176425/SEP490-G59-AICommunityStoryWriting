@@ -38,7 +38,7 @@ export async function getMyAuthorPolicyStatus(type = 'AUTHOR') {
       acceptedAt: res?.data?.acceptedAt ?? res?.data?.AcceptedAt ?? null,
     };
   } catch (err) {
-    if (err?.response?.status === 404) return null;
+    if (err?.response?.status === 404 || err?.response?.status === 403) return null;
     throw err;
   }
 }
