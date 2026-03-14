@@ -1,4 +1,4 @@
-﻿using Services.DTOs.Chapters;
+using Services.DTOs.Chapters;
 
 namespace Services.Interfaces
 {
@@ -10,5 +10,7 @@ namespace Services.Interfaces
         bool Update(Guid id, Guid authorId, UpdateChapterVersionRequestDto request);
         bool Delete(Guid id, Guid authorId);
         bool SubmitForReview(Guid versionId, Guid authorId);
+        /// <summary>Hủy gửi duyệt version (đưa version và chapter về DRAFT). Chỉ version PENDING_REVIEW.</summary>
+        bool CancelSubmit(Guid versionId, Guid authorId);
     }
 }
