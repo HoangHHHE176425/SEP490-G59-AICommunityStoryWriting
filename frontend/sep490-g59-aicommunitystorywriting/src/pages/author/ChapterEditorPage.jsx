@@ -337,8 +337,8 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, onS
     };
 
     const handleSave = async (saveStatus) => {
-        if (!isVersionMode && !chapterData.title.trim()) {
-            showToast('Vui lòng nhập tên chương', 'error');
+        if (!chapterData.title.trim()) {
+            showToast(isVersionMode ? 'Vui lòng nhập tiêu đề version' : 'Vui lòng nhập tên chương', 'error');
             return;
         }
         if (!chapterData.content.trim()) {
@@ -838,138 +838,187 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, onS
                                 </div>
                             )}
 
+                            {/* Khi tạo/sửa version: hiển thị Số version + Tiêu đề version (giống Số chương + Tên chương) */}
+                            {isVersionMode && (
+                                <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                            Số version <span style={{ color: '#ef4444' }}>*</span>
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            value={chapterData.versionNumber ?? 1}
+                                            onChange={(e) => {
+                                                const v = e.target.value === '' ? 1 : Math.max(1, Number(e.target.value) || 1);
+                                                setChapterData((prev) => ({ ...prev, versionNumber: v }));
+                                            }}
+                                            style={{
+                                                width: '100%',
+                                                padding: '0.75rem',
+                                                backgroundColor: '#f9fafb',
+                                                border: '1px solid #e5e7eb',
+                                                borderRadius: '8px',
+                                                fontSize: '0.875rem',
+                                                outline: 'none',
+                                            }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                            Tiêu đề version <span style={{ color: '#ef4444' }}>*</span>
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={chapterData.title}
+                                            onChange={(e) => setChapterData({ ...chapterData, title: e.target.value })}
+                                            placeholder="Nhập tiêu đề version (vd: Bản chỉnh sửa lỗi chính tả)"
+                                            style={{
+                                                width: '100%',
+                                                padding: '0.75rem',
+                                                backgroundColor: '#f9fafb',
+                                                border: '1px solid #e5e7eb',
+                                                borderRadius: '8px',
+                                                fontSize: '0.875rem',
+                                                outline: 'none',
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Chế độ sáng tác — không hiển thị khi tạo/sửa version */}
                             {!isVersionMode && (
-                            <div>
-                                <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.75rem' }}>
-                                    Chế độ sáng tác <span style={{ color: '#ef4444' }}>*</span>
-                                </label>
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.75rem' }}>
+                                        Chế độ sáng tác <span style={{ color: '#ef4444' }}>*</span>
+                                    </label>
 
-                                <div style={{ display: 'grid', gridTemplateColumns: chapterData.accessType === 'paid' ? '1fr 1fr 200px' : '1fr 1fr', gap: '1rem' }}>
-                                    {/* Public Option */}
-                                    <button
-                                        type="button"
-                                        onClick={() => setChapterData({ ...chapterData, accessType: 'public', price: 0 })}
-                                        className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'public'
-                                            ? 'border-primary bg-primary/5'
-                                            : 'border-slate-200 hover:border-slate-300'
-                                            }`}
-                                    >
-                                        <div className={`flex items-center justify-center w-10 h-10 rounded-full ${chapterData.accessType === 'public' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'
-                                            }`}>
-                                            <Unlock style={{ width: '20px', height: '20px' }} />
-                                        </div>
-                                        <div style={{ textAlign: 'left', flex: 1 }}>
-                                            <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: chapterData.accessType === 'public' ? '#13ec5b' : '#333333' }}>
-                                                Miễn phí (Public)
+                                    <div style={{ display: 'grid', gridTemplateColumns: chapterData.accessType === 'paid' ? '1fr 1fr 200px' : '1fr 1fr', gap: '1rem' }}>
+                                        {/* Public Option */}
+                                        <button
+                                            type="button"
+                                            onClick={() => setChapterData({ ...chapterData, accessType: 'public', price: 0 })}
+                                            className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'public'
+                                                ? 'border-primary bg-primary/5'
+                                                : 'border-slate-200 hover:border-slate-300'
+                                                }`}
+                                        >
+                                            <div className={`flex items-center justify-center w-10 h-10 rounded-full ${chapterData.accessType === 'public' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'
+                                                }`}>
+                                                <Unlock style={{ width: '20px', height: '20px' }} />
                                             </div>
-                                            <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                                Người đọc có thể đọc miễn phí
+                                            <div style={{ textAlign: 'left', flex: 1 }}>
+                                                <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: chapterData.accessType === 'public' ? '#13ec5b' : '#333333' }}>
+                                                    Miễn phí (Public)
+                                                </div>
+                                                <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                                    Người đọc có thể đọc miễn phí
+                                                </div>
                                             </div>
-                                        </div>
-                                        {chapterData.accessType === 'public' && (
-                                            <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#13ec5b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
-                                            </div>
-                                        )}
-                                    </button>
+                                            {chapterData.accessType === 'public' && (
+                                                <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#13ec5b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+                                                </div>
+                                            )}
+                                        </button>
 
-                                    {/* Paid Option */}
-                                    <button
-                                        type="button"
-                                        onClick={() => setChapterData({ ...chapterData, accessType: 'paid' })}
-                                        className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'paid'
-                                            ? 'border-amber-500 bg-amber-50'
-                                            : 'border-slate-200 hover:border-slate-300'
-                                            }`}
-                                    >
-                                        <div className={`flex items-center justify-center w-10 h-10 rounded-full ${chapterData.accessType === 'paid' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600'
-                                            }`}>
-                                            <Lock style={{ width: '20px', height: '20px' }} />
-                                        </div>
-                                        <div style={{ textAlign: 'left', flex: 1 }}>
-                                            <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: chapterData.accessType === 'paid' ? '#f59e0b' : '#333333' }}>
-                                                Trả phí (Paid)
+                                        {/* Paid Option */}
+                                        <button
+                                            type="button"
+                                            onClick={() => setChapterData({ ...chapterData, accessType: 'paid' })}
+                                            className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'paid'
+                                                ? 'border-amber-500 bg-amber-50'
+                                                : 'border-slate-200 hover:border-slate-300'
+                                                }`}
+                                        >
+                                            <div className={`flex items-center justify-center w-10 h-10 rounded-full ${chapterData.accessType === 'paid' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600'
+                                                }`}>
+                                                <Lock style={{ width: '20px', height: '20px' }} />
                                             </div>
-                                            <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                                Yêu cầu người đọc trả phí
+                                            <div style={{ textAlign: 'left', flex: 1 }}>
+                                                <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: chapterData.accessType === 'paid' ? '#f59e0b' : '#333333' }}>
+                                                    Trả phí (Paid)
+                                                </div>
+                                                <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                                    Yêu cầu người đọc trả phí
+                                                </div>
                                             </div>
-                                        </div>
+                                            {chapterData.accessType === 'paid' && (
+                                                <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+                                                </div>
+                                            )}
+                                        </button>
+
+                                        {/* Price Input (show only when paid) */}
                                         {chapterData.accessType === 'paid' && (
-                                            <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+                                            <div>
+                                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                                    Giá <span style={{ color: '#ef4444' }}>*</span>
+                                                </label>
+                                                <div style={{ position: 'relative' }}>
+                                                    <input
+                                                        type="number"
+                                                        value={chapterData.price}
+                                                        onChange={(e) => setChapterData({ ...chapterData, price: Number(e.target.value) })}
+                                                        min="1"
+                                                        placeholder="0"
+                                                        style={{
+                                                            width: '100%',
+                                                            padding: '0.75rem 0.75rem 0.75rem 2.5rem',
+                                                            backgroundColor: '#fffbeb',
+                                                            border: '1px solid #fbbf24',
+                                                            borderRadius: '8px',
+                                                            fontSize: '0.875rem',
+                                                            fontWeight: 'bold',
+                                                            color: '#92400e',
+                                                            outline: 'none'
+                                                        }}
+                                                    />
+                                                    <Coins style={{
+                                                        position: 'absolute',
+                                                        left: '0.75rem',
+                                                        top: '50%',
+                                                        transform: 'translateY(-50%)',
+                                                        width: '16px',
+                                                        height: '16px',
+                                                        color: '#f59e0b'
+                                                    }} />
+                                                </div>
+                                                <p style={{ fontSize: '0.625rem', color: '#92400e', marginTop: '0.25rem' }}>
+                                                    Đơn vị: Xu
+                                                </p>
                                             </div>
                                         )}
-                                    </button>
+                                    </div>
 
-                                    {/* Price Input (show only when paid) */}
+                                    {/* Info Box */}
                                     {chapterData.accessType === 'paid' && (
-                                        <div>
-                                            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                                Giá <span style={{ color: '#ef4444' }}>*</span>
-                                            </label>
-                                            <div style={{ position: 'relative' }}>
-                                                <input
-                                                    type="number"
-                                                    value={chapterData.price}
-                                                    onChange={(e) => setChapterData({ ...chapterData, price: Number(e.target.value) })}
-                                                    min="1"
-                                                    placeholder="0"
-                                                    style={{
-                                                        width: '100%',
-                                                        padding: '0.75rem 0.75rem 0.75rem 2.5rem',
-                                                        backgroundColor: '#fffbeb',
-                                                        border: '1px solid #fbbf24',
-                                                        borderRadius: '8px',
-                                                        fontSize: '0.875rem',
-                                                        fontWeight: 'bold',
-                                                        color: '#92400e',
-                                                        outline: 'none'
-                                                    }}
-                                                />
-                                                <Coins style={{
-                                                    position: 'absolute',
-                                                    left: '0.75rem',
-                                                    top: '50%',
-                                                    transform: 'translateY(-50%)',
-                                                    width: '16px',
-                                                    height: '16px',
-                                                    color: '#f59e0b'
-                                                }} />
+                                        <div style={{
+                                            marginTop: '1rem',
+                                            padding: '0.75rem 1rem',
+                                            backgroundColor: '#fffbeb',
+                                            border: '1px solid #fcd34d',
+                                            borderRadius: '8px',
+                                            fontSize: '0.75rem',
+                                            color: '#92400e',
+                                            display: 'flex',
+                                            alignItems: 'flex-start',
+                                            gap: '0.5rem'
+                                        }}>
+                                            <span style={{ fontSize: '1rem' }}>💰</span>
+                                            <div>
+                                                <strong>Lưu ý về chương trả phí:</strong>
+                                                <ul style={{ margin: '0.25rem 0 0 1rem', paddingLeft: 0 }}>
+                                                    <li>Người đọc cần có đủ xu để mở khóa chương</li>
+                                                    <li>Sau khi mua, chương sẽ được lưu vĩnh viễn trong tài khoản</li>
+                                                    <li>Bạn sẽ nhận 70% số xu, nền tảng giữ lại 30%</li>
+                                                </ul>
                                             </div>
-                                            <p style={{ fontSize: '0.625rem', color: '#92400e', marginTop: '0.25rem' }}>
-                                                Đơn vị: Xu
-                                            </p>
                                         </div>
                                     )}
                                 </div>
-
-                                {/* Info Box */}
-                                {chapterData.accessType === 'paid' && (
-                                    <div style={{
-                                        marginTop: '1rem',
-                                        padding: '0.75rem 1rem',
-                                        backgroundColor: '#fffbeb',
-                                        border: '1px solid #fcd34d',
-                                        borderRadius: '8px',
-                                        fontSize: '0.75rem',
-                                        color: '#92400e',
-                                        display: 'flex',
-                                        alignItems: 'flex-start',
-                                        gap: '0.5rem'
-                                    }}>
-                                        <span style={{ fontSize: '1rem' }}>💰</span>
-                                        <div>
-                                            <strong>Lưu ý về chương trả phí:</strong>
-                                            <ul style={{ margin: '0.25rem 0 0 1rem', paddingLeft: 0 }}>
-                                                <li>Người đọc cần có đủ xu để mở khóa chương</li>
-                                                <li>Sau khi mua, chương sẽ được lưu vĩnh viễn trong tài khoản</li>
-                                                <li>Bạn sẽ nhận 70% số xu, nền tảng giữ lại 30%</li>
-                                            </ul>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
                             )}
 
                             {/* Mô tả thay đổi (version) - chỉ hiện khi chỉnh sửa chương */}
