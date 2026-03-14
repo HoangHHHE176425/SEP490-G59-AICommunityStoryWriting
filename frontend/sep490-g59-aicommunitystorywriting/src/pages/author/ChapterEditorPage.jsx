@@ -125,7 +125,7 @@ function contentOnlyForChapter(raw) {
     return s.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, editingVersion, onSave, onCancel }) {
+export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, editingVersion, readOnly = false, onSave, onCancel }) {
     const { showToast, ToastContainer } = useToast();
     const storyId = story?.id ?? story?.Id;
     const [chapterData, setChapterData] = useState(() => {
@@ -820,7 +820,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 </button>
                                 <div>
                                     <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>
-                                        {chapter ? 'Chỉnh sửa chương' : isVersionMode ? (editingVersion ? 'Chỉnh sửa version' : 'Tạo version chương') : 'Thêm chương mới'}
+                                        {readOnly ? 'Xem chi tiết chương' : chapter ? 'Chỉnh sửa chương' : isVersionMode ? (editingVersion ? 'Chỉnh sửa version' : 'Tạo version chương') : 'Thêm chương mới'}
                                     </h2>
                                     <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: '0.25rem 0 0 0' }}>
                                         {story?.title}
@@ -835,25 +835,27 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 </div>
                             </div>
 
-                            {/* Right: Save buttons */}
-                            <div style={{ display: 'flex', gap: '0.75rem' }}>
-                                <button
-                                    onClick={() => handleSave('draft')}
-                                    disabled={isSaving}
-                                    className="flex items-center gap-2 px-6 py-2.5 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                                >
-                                    <Save style={{ width: '16px', height: '16px' }} />
-                                    Lưu nháp
-                                </button>
-                                <button
-                                    onClick={() => handleSave('published')}
-                                    disabled={isSaving}
-                                    className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-                                >
-                                    <Save style={{ width: '16px', height: '16px' }} />
-                                    {isSaving ? 'Đang lưu...' : 'Xuất bản'}
-                                </button>
-                            </div>
+                            {/* Right: Save buttons — ẩn khi readOnly (xem chi tiết) */}
+                            {!readOnly && (
+                                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                                    <button
+                                        onClick={() => handleSave('draft')}
+                                        disabled={isSaving}
+                                        className="flex items-center gap-2 px-6 py-2.5 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
+                                        <Save style={{ width: '16px', height: '16px' }} />
+                                        Lưu nháp
+                                    </button>
+                                    <button
+                                        onClick={() => handleSave('published')}
+                                        disabled={isSaving}
+                                        className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
+                                        <Save style={{ width: '16px', height: '16px' }} />
+                                        {isSaving ? 'Đang lưu...' : 'Xuất bản'}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -872,7 +874,10 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                         <input
                                             type="number"
                                             value={chapterData.number}
+                                            readOnly={readOnly}
+                                            disabled={readOnly}
                                             onChange={(e) => {
+                                                if (readOnly) return;
                                                 const v = e.target.value === '' ? '' : Number(e.target.value);
                                                 setChapterData({ ...chapterData, number: v === '' ? '' : v });
                                                 const err = v === '' ? 'Vui lòng nhập số chương.' : validateChapterNumber(v);
@@ -886,11 +891,12 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                             style={{
                                                 width: '100%',
                                                 padding: '0.75rem',
-                                                backgroundColor: '#f9fafb',
+                                                backgroundColor: readOnly ? '#f1f5f9' : '#f9fafb',
                                                 border: `1px solid ${chapterNumberError ? '#ef4444' : '#e5e7eb'}`,
                                                 borderRadius: '8px',
                                                 fontSize: '0.875rem',
-                                                outline: 'none'
+                                                outline: 'none',
+                                                cursor: readOnly ? 'default' : undefined
                                             }}
                                         />
                                         {chapterNumberError && (
@@ -906,16 +912,19 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                         <input
                                             type="text"
                                             value={chapterData.title}
-                                            onChange={(e) => setChapterData({ ...chapterData, title: e.target.value })}
+                                            readOnly={readOnly}
+                                            disabled={readOnly}
+                                            onChange={(e) => !readOnly && setChapterData({ ...chapterData, title: e.target.value })}
                                             placeholder="Nhập tên chương"
                                             style={{
                                                 width: '100%',
                                                 padding: '0.75rem',
-                                                backgroundColor: '#f9fafb',
+                                                backgroundColor: readOnly ? '#f1f5f9' : '#f9fafb',
                                                 border: '1px solid #e5e7eb',
                                                 borderRadius: '8px',
                                                 fontSize: '0.875rem',
-                                                outline: 'none'
+                                                outline: 'none',
+                                                cursor: readOnly ? 'default' : undefined
                                             }}
                                         />
                                     </div>
@@ -933,7 +942,10 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                             type="number"
                                             min="1"
                                             value={chapterData.versionNumber ?? 1}
+                                            readOnly={readOnly}
+                                            disabled={readOnly}
                                             onChange={(e) => {
+                                                if (readOnly) return;
                                                 const v = e.target.value === '' ? 1 : Math.max(1, Number(e.target.value) || 1);
                                                 setChapterData((prev) => ({ ...prev, versionNumber: v }));
                                                 setVersionNumberError('');
@@ -941,11 +953,12 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                             style={{
                                                 width: '100%',
                                                 padding: '0.75rem',
-                                                backgroundColor: '#f9fafb',
+                                                backgroundColor: readOnly ? '#f1f5f9' : '#f9fafb',
                                                 border: versionNumberError ? '1px solid #ef4444' : '1px solid #e5e7eb',
                                                 borderRadius: '8px',
                                                 fontSize: '0.875rem',
                                                 outline: 'none',
+                                                cursor: readOnly ? 'default' : undefined,
                                             }}
                                         />
                                         {versionNumberError && (
@@ -959,112 +972,151 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                         <input
                                             type="text"
                                             value={chapterData.title}
-                                            onChange={(e) => setChapterData({ ...chapterData, title: e.target.value })}
+                                            readOnly={readOnly}
+                                            disabled={readOnly}
+                                            onChange={(e) => !readOnly && setChapterData({ ...chapterData, title: e.target.value })}
                                             placeholder="Nhập tiêu đề version (vd: Bản chỉnh sửa lỗi chính tả)"
                                             style={{
                                                 width: '100%',
                                                 padding: '0.75rem',
-                                                backgroundColor: '#f9fafb',
+                                                backgroundColor: readOnly ? '#f1f5f9' : '#f9fafb',
                                                 border: '1px solid #e5e7eb',
                                                 borderRadius: '8px',
                                                 fontSize: '0.875rem',
                                                 outline: 'none',
+                                                cursor: readOnly ? 'default' : undefined,
                                             }}
                                         />
                                     </div>
                                 </div>
                             )}
 
-                            {/* Chế độ sáng tác — không hiển thị khi tạo/sửa version */}
+                            {/* Chế độ sáng tác — không hiển thị khi tạo/sửa version. Khi readOnly hiển thị dạng chỉ đọc. */}
                             {!isVersionMode && (
                                 <div>
                                     <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.75rem' }}>
-                                        Chế độ sáng tác <span style={{ color: '#ef4444' }}>*</span>
+                                        Chế độ sáng tác {!readOnly && <span style={{ color: '#ef4444' }}>*</span>}
                                     </label>
 
                                     <div style={{ display: 'grid', gridTemplateColumns: chapterData.accessType === 'paid' ? '1fr 1fr 200px' : '1fr 1fr', gap: '1rem' }}>
                                         {/* Public Option */}
-                                        <button
-                                            type="button"
-                                            onClick={() => setChapterData({ ...chapterData, accessType: 'public', price: 0 })}
-                                            className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'public'
-                                                ? 'border-primary bg-primary/5'
-                                                : 'border-slate-200 hover:border-slate-300'
-                                                }`}
-                                        >
-                                            <div className={`flex items-center justify-center w-10 h-10 rounded-full ${chapterData.accessType === 'public' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'
-                                                }`}>
-                                                <Unlock style={{ width: '20px', height: '20px' }} />
+                                        {readOnly ? (
+                                            <div
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.75rem',
+                                                    padding: '1rem',
+                                                    border: `2px solid ${chapterData.accessType === 'public' ? '#13ec5b' : '#e2e8f0'}`,
+                                                    borderRadius: '12px',
+                                                    backgroundColor: chapterData.accessType === 'public' ? 'rgba(19, 236, 91, 0.08)' : '#f8fafc',
+                                                    opacity: chapterData.accessType === 'public' ? 1 : 0.7
+                                                }}
+                                            >
+                                                <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: chapterData.accessType === 'public' ? '#13ec5b' : '#e2e8f0', color: chapterData.accessType === 'public' ? '#fff' : '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    <Unlock style={{ width: '20px', height: '20px' }} />
+                                                </div>
+                                                <div style={{ flex: 1 }}>
+                                                    <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: chapterData.accessType === 'public' ? '#13ec5b' : '#64748b' }}>Miễn phí (Public)</div>
+                                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Người đọc có thể đọc miễn phí</div>
+                                                </div>
                                             </div>
-                                            <div style={{ textAlign: 'left', flex: 1 }}>
-                                                <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: chapterData.accessType === 'public' ? '#13ec5b' : '#333333' }}>
-                                                    Miễn phí (Public)
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => setChapterData({ ...chapterData, accessType: 'public', price: 0 })}
+                                                className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'public' ? 'border-primary bg-primary/5' : 'border-slate-200 hover:border-slate-300'}`}
+                                            >
+                                                <div className={`flex items-center justify-center w-10 h-10 rounded-full ${chapterData.accessType === 'public' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-600'}`}>
+                                                    <Unlock style={{ width: '20px', height: '20px' }} />
                                                 </div>
-                                                <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                                    Người đọc có thể đọc miễn phí
+                                                <div style={{ textAlign: 'left', flex: 1 }}>
+                                                    <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: chapterData.accessType === 'public' ? '#13ec5b' : '#333333' }}>Miễn phí (Public)</div>
+                                                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Người đọc có thể đọc miễn phí</div>
                                                 </div>
-                                            </div>
-                                            {chapterData.accessType === 'public' && (
-                                                <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#13ec5b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
-                                                </div>
-                                            )}
-                                        </button>
+                                                {chapterData.accessType === 'public' && (
+                                                    <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#13ec5b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+                                                    </div>
+                                                )}
+                                            </button>
+                                        )}
 
                                         {/* Paid Option */}
-                                        <button
-                                            type="button"
-                                            onClick={() => setChapterData({ ...chapterData, accessType: 'paid' })}
-                                            className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'paid'
-                                                ? 'border-amber-500 bg-amber-50'
-                                                : 'border-slate-200 hover:border-slate-300'
-                                                }`}
-                                        >
-                                            <div className={`flex items-center justify-center w-10 h-10 rounded-full ${chapterData.accessType === 'paid' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600'
-                                                }`}>
-                                                <Lock style={{ width: '20px', height: '20px' }} />
+                                        {readOnly ? (
+                                            <div
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.75rem',
+                                                    padding: '1rem',
+                                                    border: `2px solid ${chapterData.accessType === 'paid' ? '#f59e0b' : '#e2e8f0'}`,
+                                                    borderRadius: '12px',
+                                                    backgroundColor: chapterData.accessType === 'paid' ? '#fffbeb' : '#f8fafc',
+                                                    opacity: chapterData.accessType === 'paid' ? 1 : 0.7
+                                                }}
+                                            >
+                                                <div style={{ width: '40px', height: '40px', borderRadius: '50%', backgroundColor: chapterData.accessType === 'paid' ? '#f59e0b' : '#e2e8f0', color: chapterData.accessType === 'paid' ? '#fff' : '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                    <Lock style={{ width: '20px', height: '20px' }} />
+                                                </div>
+                                                <div style={{ flex: 1 }}>
+                                                    <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: chapterData.accessType === 'paid' ? '#f59e0b' : '#64748b' }}>Trả phí (Paid)</div>
+                                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Yêu cầu người đọc trả phí</div>
+                                                </div>
                                             </div>
-                                            <div style={{ textAlign: 'left', flex: 1 }}>
-                                                <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: chapterData.accessType === 'paid' ? '#f59e0b' : '#333333' }}>
-                                                    Trả phí (Paid)
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                onClick={() => setChapterData({ ...chapterData, accessType: 'paid' })}
+                                                className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'paid' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 hover:border-slate-300'}`}
+                                            >
+                                                <div className={`flex items-center justify-center w-10 h-10 rounded-full ${chapterData.accessType === 'paid' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600'}`}>
+                                                    <Lock style={{ width: '20px', height: '20px' }} />
                                                 </div>
-                                                <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                                    Yêu cầu người đọc trả phí
+                                                <div style={{ textAlign: 'left', flex: 1 }}>
+                                                    <div style={{ fontSize: '0.875rem', fontWeight: 'bold', color: chapterData.accessType === 'paid' ? '#f59e0b' : '#333333' }}>Trả phí (Paid)</div>
+                                                    <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>Yêu cầu người đọc trả phí</div>
                                                 </div>
-                                            </div>
-                                            {chapterData.accessType === 'paid' && (
-                                                <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
-                                                </div>
-                                            )}
-                                        </button>
+                                                {chapterData.accessType === 'paid' && (
+                                                    <div style={{ width: '20px', height: '20px', borderRadius: '50%', backgroundColor: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ffffff' }} />
+                                                    </div>
+                                                )}
+                                            </button>
+                                        )}
 
-                                        {/* Price Input (show only when paid) */}
+                                        {/* Price — khi paid: input chỉnh sửa hoặc hiển thị readOnly */}
                                         {chapterData.accessType === 'paid' && (
                                             <div>
                                                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                                    Giá <span style={{ color: '#ef4444' }}>*</span>
+                                                    Giá {!readOnly && <span style={{ color: '#ef4444' }}>*</span>}
                                                 </label>
                                                 <div style={{ position: 'relative' }}>
-                                                    <input
-                                                        type="number"
-                                                        value={chapterData.price}
-                                                        onChange={(e) => setChapterData({ ...chapterData, price: Number(e.target.value) })}
-                                                        min="1"
-                                                        placeholder="0"
-                                                        style={{
-                                                            width: '100%',
-                                                            padding: '0.75rem 0.75rem 0.75rem 2.5rem',
-                                                            backgroundColor: '#fffbeb',
-                                                            border: '1px solid #fbbf24',
-                                                            borderRadius: '8px',
-                                                            fontSize: '0.875rem',
-                                                            fontWeight: 'bold',
-                                                            color: '#92400e',
-                                                            outline: 'none'
-                                                        }}
-                                                    />
-                                                    <Coins style={{
+                                                    {readOnly ? (
+                                                        <div style={{ padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fbbf24', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 'bold', color: '#92400e' }}>
+                                                            {chapterData.price ?? 0} xu
+                                                        </div>
+                                                    ) : (
+                                                        <input
+                                                            type="number"
+                                                            value={chapterData.price}
+                                                            onChange={(e) => setChapterData({ ...chapterData, price: Number(e.target.value) })}
+                                                            min="1"
+                                                            placeholder="0"
+                                                            style={{
+                                                                width: '100%',
+                                                                padding: '0.75rem 0.75rem 0.75rem 2.5rem',
+                                                                backgroundColor: '#fffbeb',
+                                                                border: '1px solid #fbbf24',
+                                                                borderRadius: '8px',
+                                                                fontSize: '0.875rem',
+                                                                fontWeight: 'bold',
+                                                                color: '#92400e',
+                                                                outline: 'none'
+                                                            }}
+                                                        />
+                                                    )}
+                                                    {!readOnly && <Coins style={{
                                                         position: 'absolute',
                                                         left: '0.75rem',
                                                         top: '50%',
@@ -1072,7 +1124,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                                         width: '16px',
                                                         height: '16px',
                                                         color: '#f59e0b'
-                                                    }} />
+                                                    }} />}
                                                 </div>
                                                 <p style={{ fontSize: '0.625rem', color: '#92400e', marginTop: '0.25rem' }}>
                                                     Đơn vị: Xu
@@ -1109,8 +1161,8 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 </div>
                             )}
 
-                            {/* Mô tả thay đổi (version) - chỉ hiện khi chỉnh sửa chương */}
-                            {chapter && (
+                            {/* Mô tả thay đổi (version) - chỉ hiện khi chỉnh sửa chương, ẩn khi xem chi tiết */}
+                            {chapter && !readOnly && (
                                 <div>
                                     <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
                                         Mô tả thay đổi (ghi chú version)
@@ -1137,7 +1189,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 </div>
                             )}
 
-                            {/* Toolbar */}
+                            {/* Toolbar — khi readOnly hiển thị dạng chỉ đọc (disabled) */}
                             <div style={{
                                 display: 'flex',
                                 justifyContent: 'space-between',
@@ -1145,43 +1197,70 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 padding: '0.75rem 1rem',
                                 backgroundColor: '#f9fafb',
                                 borderRadius: '8px',
-                                border: '1px solid #e5e7eb'
+                                border: '1px solid #e5e7eb',
+                                opacity: readOnly ? 0.85 : 1
                             }}>
                                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                    <button
-                                        type="button"
-                                        onClick={() => handleAISuggestion('paragraph')}
-                                        className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all"
-                                    >
-                                        <Sparkles style={{ width: '14px', height: '14px' }} />
-                                        AI gợi ý đoạn văn
-                                    </button>
-
-                                    <button
-                                        type="button"
-                                        onClick={() => handleAISuggestion('chapter')}
-                                        className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all"
-                                    >
-                                        <Sparkles style={{ width: '14px', height: '14px' }} />
-                                        AI gợi ý chương
-                                    </button>
+                                    {readOnly ? (
+                                        <>
+                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
+                                                <Sparkles style={{ width: '14px', height: '14px' }} />
+                                                AI gợi ý đoạn văn
+                                            </span>
+                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
+                                                <Sparkles style={{ width: '14px', height: '14px' }} />
+                                                AI gợi ý chương
+                                            </span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <button type="button" onClick={() => handleAISuggestion('paragraph')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
+                                                <Sparkles style={{ width: '14px', height: '14px' }} />
+                                                AI gợi ý đoạn văn
+                                            </button>
+                                            <button type="button" onClick={() => handleAISuggestion('chapter')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
+                                                <Sparkles style={{ width: '14px', height: '14px' }} />
+                                                AI gợi ý chương
+                                            </button>
+                                        </>
+                                    )}
                                 </div>
-
-                                <button
-                                    type="button"
-                                    onClick={() => setShowSettings(!showSettings)}
-                                    className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-full transition-all ${showSettings
-                                        ? 'bg-primary text-white'
-                                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                                        }`}
-                                >
-                                    <Settings style={{ width: '14px', height: '14px' }} />
-                                    Tùy chỉnh hiển thị
-                                </button>
+                                {readOnly ? (
+                                    <span
+                                        style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.5rem',
+                                            padding: '0.5rem 1rem',
+                                            backgroundColor: '#e2e8f0',
+                                            color: '#64748b',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            borderRadius: '9999px'
+                                        }}
+                                    >
+                                        <Settings style={{ width: '14px', height: '14px' }} />
+                                        Tùy chỉnh hiển thị
+                                    </span>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowSettings(!showSettings)}
+                                        className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-full transition-all ${showSettings ? 'bg-primary text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                                    >
+                                        <Settings style={{ width: '14px', height: '14px' }} />
+                                        Tùy chỉnh hiển thị
+                                    </button>
+                                )}
                             </div>
+                            {readOnly && (
+                                <div style={{ padding: '0.75rem 1rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8125rem', color: '#64748b' }}>
+                                    Cỡ chữ: {editorSettings.fontSize}px · Font: {fontFamilies.find(f => f.value === editorSettings.fontFamily)?.name ?? editorSettings.fontFamily} · Nền: {backgroundColors.find(b => b.value === editorSettings.backgroundColor)?.name ?? editorSettings.backgroundColor}
+                                </div>
+                            )}
 
-                            {/* Settings Panel */}
-                            {showSettings && (
+                            {/* Settings Panel — ẩn khi readOnly (đã hiển thị dạng text phía trên) */}
+                            {showSettings && !readOnly && (
                                 <div style={{
                                     padding: '1.5rem',
                                     backgroundColor: '#f9fafb',
@@ -1286,18 +1365,21 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 </label>
                                 <textarea
                                     value={chapterData.content}
-                                    onChange={(e) => setChapterData({ ...chapterData, content: e.target.value })}
+                                    readOnly={readOnly}
+                                    disabled={readOnly}
+                                    onChange={(e) => !readOnly && setChapterData({ ...chapterData, content: e.target.value })}
                                     placeholder="Nhập nội dung chương của bạn...&#10;&#10;Bạn có thể sử dụng AI để gợi ý nội dung bằng cách click vào các nút phía trên."
                                     rows={25}
                                     style={{
                                         width: '100%',
                                         padding: '1rem',
-                                        backgroundColor: editorSettings.backgroundColor,
+                                        backgroundColor: readOnly ? '#f1f5f9' : editorSettings.backgroundColor,
                                         border: '1px solid #e5e7eb',
                                         borderRadius: '8px',
                                         fontSize: `${editorSettings.fontSize}px`,
                                         fontFamily: editorSettings.fontFamily,
                                         outline: 'none',
+                                        cursor: readOnly ? 'default' : undefined,
                                         resize: 'vertical',
                                         lineHeight: '1.8'
                                     }}

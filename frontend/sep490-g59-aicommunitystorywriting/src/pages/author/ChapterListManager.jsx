@@ -53,7 +53,7 @@ function mapChapterFromApi(item) {
 
 const CHAPTERS_PAGE_SIZE = 10;
 
-export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter, onAddVersion, onEditVersion }) {
+export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter, onViewChapter, onAddVersion, onEditVersion }) {
     const storyId = story?.id ?? story?.Id;
     const [chapters, setChapters] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -740,30 +740,56 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                     width: 'fit-content',
                                                     margin: '0 auto'
                                                 }}>
-                                                    {/* Hàng 1: Chỉnh sửa, Xóa — Chỉnh sửa: không cho khi Chờ duyệt; Xóa: chỉ cho khi Bản nháp */}
+                                                    {/* Hàng 1: Xem chi tiết, Chỉnh sửa, Xóa — Chỉnh sửa: không cho khi Chờ duyệt hoặc Đã xuất bản; Xóa: chỉ cho khi Bản nháp */}
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                         <button
-                                                            onClick={() => chapter.status !== 'pending_review' && onEditChapter(chapter)}
-                                                            disabled={chapter.status === 'pending_review'}
-                                                            title={chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể chỉnh sửa' : ''}
+                                                            type="button"
+                                                            onClick={() => onViewChapter?.(chapter)}
+                                                            title="Xem chi tiết chương"
                                                             style={{
                                                                 display: 'inline-flex',
                                                                 alignItems: 'center',
                                                                 gap: '0.25rem',
                                                                 padding: '0.4rem 0.75rem',
-                                                                backgroundColor: chapter.status === 'pending_review' ? '#f1f5f9' : '#f0fdf4',
-                                                                border: `1px solid ${chapter.status === 'pending_review' ? '#e2e8f0' : '#86efac'}`,
+                                                                backgroundColor: '#f0f9ff',
+                                                                border: '1px solid #bae6fd',
                                                                 borderRadius: '9999px',
                                                                 fontSize: '0.75rem',
                                                                 fontWeight: 600,
-                                                                color: chapter.status === 'pending_review' ? '#94a3b8' : '#15803d',
-                                                                cursor: chapter.status === 'pending_review' ? 'not-allowed' : 'pointer',
+                                                                color: '#0369a1',
+                                                                cursor: 'pointer',
+                                                                transition: 'all 0.2s',
+                                                                whiteSpace: 'nowrap'
+                                                            }}
+                                                            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#e0f2fe'; }}
+                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f0f9ff'; }}
+                                                        >
+                                                            <Eye size={12} />
+                                                            Xem chi tiết
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => (chapter.status !== 'pending_review' && chapter.status !== 'published') && onEditChapter(chapter)}
+                                                            disabled={chapter.status === 'pending_review' || chapter.status === 'published'}
+                                                            title={chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể chỉnh sửa' : chapter.status === 'published' ? 'Chương đã xuất bản, không thể chỉnh sửa' : 'Chỉnh sửa chương'}
+                                                            style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.25rem',
+                                                                padding: '0.4rem 0.75rem',
+                                                                backgroundColor: (chapter.status === 'pending_review' || chapter.status === 'published') ? '#f1f5f9' : '#f0fdf4',
+                                                                border: `1px solid ${(chapter.status === 'pending_review' || chapter.status === 'published') ? '#e2e8f0' : '#86efac'}`,
+                                                                borderRadius: '9999px',
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 600,
+                                                                color: (chapter.status === 'pending_review' || chapter.status === 'published') ? '#94a3b8' : '#15803d',
+                                                                cursor: (chapter.status === 'pending_review' || chapter.status === 'published') ? 'not-allowed' : 'pointer',
                                                                 transition: 'all 0.2s',
                                                                 whiteSpace: 'nowrap',
-                                                                opacity: chapter.status === 'pending_review' ? 0.8 : 1
+                                                                opacity: (chapter.status === 'pending_review' || chapter.status === 'published') ? 0.8 : 1
                                                             }}
-                                                            onMouseEnter={(e) => { if (chapter.status !== 'pending_review') e.currentTarget.style.backgroundColor = '#dcfce7'; }}
-                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'pending_review' ? '#f1f5f9' : '#f0fdf4'; }}
+                                                            onMouseEnter={(e) => { if (chapter.status !== 'pending_review' && chapter.status !== 'published') e.currentTarget.style.backgroundColor = '#dcfce7'; }}
+                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = (chapter.status === 'pending_review' || chapter.status === 'published') ? '#f1f5f9' : '#f0fdf4'; }}
                                                         >
                                                             <Pencil size={12} />
                                                             Chỉnh sửa

@@ -87,6 +87,8 @@ export function AuthorStoryManagement({ onBack }) {
     /** Chương gốc khi đang tạo version (mở editor giống tạo chương mới nhưng pre-fill từ chương này). */
     const [sourceChapterForVersion, setSourceChapterForVersion] = useState(null);
     const [editingVersion, setEditingVersion] = useState(null);
+    /** True khi mở màn editor chỉ để xem chi tiết chương (read-only), không lưu/xuất bản. */
+    const [viewChapterOnly, setViewChapterOnly] = useState(false);
     const [stories, setStories] = useState([]);
     const [storiesLoading, setStoriesLoading] = useState(true);
     const [storiesError, setStoriesError] = useState(null);
@@ -279,6 +281,7 @@ export function AuthorStoryManagement({ onBack }) {
     };
 
     const handleEditChapter = async (chapter) => {
+        setViewChapterOnly(false);
         const chapterId = chapter?.id ?? chapter?.Id;
         if (!chapterId) {
             showToast('Không tìm thấy ID chương', 'error');
@@ -286,13 +289,9 @@ export function AuthorStoryManagement({ onBack }) {
         }
 
         try {
-            // Gọi API để lấy đầy đủ thông tin chương
             const fullChapter = await getChapterById(chapterId);
-
-            // Map dữ liệu từ API về format UI
             const status = (fullChapter.status ?? fullChapter.Status ?? 'DRAFT').toUpperCase();
             const accessTypeApi = (fullChapter.accessType ?? fullChapter.AccessType ?? 'FREE').toUpperCase();
-
             const mappedChapter = {
                 id: fullChapter.id ?? fullChapter.Id,
                 number: (fullChapter.orderIndex ?? fullChapter.OrderIndex ?? 0) + 1,
@@ -302,13 +301,42 @@ export function AuthorStoryManagement({ onBack }) {
                 accessType: accessTypeApi === 'PAID' ? 'paid' : 'public',
                 price: fullChapter.coinPrice ?? fullChapter.CoinPrice ?? 0,
             };
-
             setCurrentChapter(mappedChapter);
             setActiveView('editChapter');
         } catch (error) {
             const errorMessage = error?.response?.data?.message || error?.message || 'Không thể tải thông tin chương';
             showToast(errorMessage, 'error');
             console.error('Error loading chapter:', error);
+        }
+    };
+
+    /** Mở màn xem chi tiết chương (read-only, cùng giao diện editor nhưng không chỉnh sửa/lưu). */
+    const handleViewChapter = async (chapter) => {
+        setViewChapterOnly(true);
+        const chapterId = chapter?.id ?? chapter?.Id;
+        if (!chapterId) {
+            showToast('Không tìm thấy ID chương', 'error');
+            return;
+        }
+        try {
+            const fullChapter = await getChapterById(chapterId);
+            const status = (fullChapter.status ?? fullChapter.Status ?? 'DRAFT').toUpperCase();
+            const accessTypeApi = (fullChapter.accessType ?? fullChapter.AccessType ?? 'FREE').toUpperCase();
+            const mappedChapter = {
+                id: fullChapter.id ?? fullChapter.Id,
+                number: (fullChapter.orderIndex ?? fullChapter.OrderIndex ?? 0) + 1,
+                title: fullChapter.title ?? fullChapter.Title ?? '',
+                content: fullChapter.content ?? fullChapter.Content ?? '',
+                status: status.toLowerCase(),
+                accessType: accessTypeApi === 'PAID' ? 'paid' : 'public',
+                price: fullChapter.coinPrice ?? fullChapter.CoinPrice ?? 0,
+            };
+            setCurrentChapter(mappedChapter);
+            setActiveView('editChapter');
+        } catch (error) {
+            const errorMessage = error?.response?.data?.message || error?.message || 'Không thể tải thông tin chương';
+            showToast(errorMessage, 'error');
+            setViewChapterOnly(false);
         }
     };
 
@@ -608,6 +636,7 @@ export function AuthorStoryManagement({ onBack }) {
                 }}
                 onAddChapter={() => handleAddChapter(currentStory)}
                 onEditChapter={(chapter) => handleEditChapter(chapter)}
+                onViewChapter={(chapter) => handleViewChapter(chapter)}
                 onAddVersion={(chapter) => handleAddVersion(currentStory, chapter)}
                 onEditVersion={(chapter, version) => handleEditVersion(chapter, version)}
             />
@@ -621,12 +650,14 @@ export function AuthorStoryManagement({ onBack }) {
                 chapter={activeView === 'editChapter' ? currentChapter : null}
                 sourceChapterForVersion={activeView === 'addChapterVersion' ? sourceChapterForVersion : null}
                 editingVersion={activeView === 'addChapterVersion' ? editingVersion : null}
+                readOnly={viewChapterOnly}
                 onSave={handleSaveChapter}
                 onCancel={() => {
                     setActiveView('chapterList');
                     setCurrentChapter(null);
                     setSourceChapterForVersion(null);
                     setEditingVersion(null);
+                    setViewChapterOnly(false);
                 }}
             />
         );
