@@ -230,7 +230,9 @@ export async function getChapterVersions(chapterId) {
 /** GET /chapters/{chapterId}/versions/{versionId} - Lấy chi tiết một version. */
 export async function getChapterVersionById(chapterId, versionId) {
     const response = await axiosInstance.get(`/chapters/${chapterId}/versions/${versionId}`);
-    return response.data;
+    const raw = response?.data;
+    if (raw == null) return raw;
+    return raw?.data ?? raw;
 }
 
 /** POST /chapters/{chapterId}/versions - Tạo version mới. Body: { titleSnapshot?, contentSnapshot? } */

@@ -4,7 +4,7 @@ import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
 import { indexRag, suggestNextChapter, coCreate } from '../../api/ai/aiApi';
-import { getChapters } from '../../api/chapter/chapterApi';
+import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 
 // Helper function to count words
 const countWords = (text) => {
@@ -128,19 +128,48 @@ function contentOnlyForChapter(raw) {
 export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, editingVersion, onSave, onCancel }) {
     const { showToast, ToastContainer } = useToast();
     const storyId = story?.id ?? story?.Id;
-    const [chapterData, setChapterData] = useState({
-        number: chapter?.number ?? 1,
-        title: chapter?.title || '',
-        content: chapter?.content || '',
-        status: chapter?.status || 'draft',
-        accessType: chapter?.accessType || 'public', // 'public' | 'paid'
-        price: chapter?.price || 0,
-        changeSummary: '', // Mô tả thay đổi (ghi chú version) - chỉ khi chỉnh sửa
-        versionNumber: 1, // Chỉ dùng khi tạo version (số version)
+    const [chapterData, setChapterData] = useState(() => {
+        if (editingVersion) {
+            return {
+                number: sourceChapterForVersion?.number ?? 1,
+                title: editingVersion.titleSnapshot != null ? String(editingVersion.titleSnapshot) : '',
+                content: editingVersion.contentSnapshot != null ? String(editingVersion.contentSnapshot) : '',
+                status: sourceChapterForVersion?.status || 'draft',
+                accessType: sourceChapterForVersion?.accessType || 'public',
+                price: sourceChapterForVersion?.price ?? 0,
+                changeSummary: '',
+                versionNumber: Number(editingVersion.versionNumber) || 1,
+            };
+        }
+        if (chapter) {
+            return {
+                number: chapter?.number ?? 1,
+                title: chapter?.title || '',
+                content: chapter?.content || '',
+                status: chapter?.status || 'draft',
+                accessType: chapter?.accessType || 'public',
+                price: chapter?.price || 0,
+                changeSummary: chapter?.changeSummary ?? '',
+                versionNumber: 1,
+            };
+        }
+        return {
+            number: 1,
+            title: '',
+            content: '',
+            status: 'draft',
+            accessType: 'public',
+            price: 0,
+            changeSummary: '',
+            versionNumber: 1,
+        };
     });
     /** Số chương (1-based) đã tồn tại — dùng để gợi ý số tiếp theo và validate không nhập trùng */
     const [existingChapterNumbers, setExistingChapterNumbers] = useState(new Set());
     const [chapterNumberError, setChapterNumberError] = useState('');
+    /** Danh sách version của chương (khi ở chế độ version) — dùng validate số version không trùng */
+    const [existingVersionsForChapter, setExistingVersionsForChapter] = useState([]);
+    const [versionNumberError, setVersionNumberError] = useState('');
 
     const [showSettings, setShowSettings] = useState(false);
     const [editorSettings, setEditorSettings] = useState({
@@ -166,9 +195,21 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     const isNewChapter = !chapter;
     const isVersionMode = Boolean(sourceChapterForVersion);
 
-    // Pre-fill từ chương gốc khi tạo version (chế độ sáng tác lấy từ chương, không cho sửa)
+    // Pre-fill khi ở chế độ version: ưu tiên dữ liệu từ editingVersion (chỉnh sửa), không thì từ chương gốc (tạo mới)
     useEffect(() => {
-        if (sourceChapterForVersion) {
+        if (!sourceChapterForVersion) return;
+        if (editingVersion) {
+            setChapterData((prev) => ({
+                ...prev,
+                number: sourceChapterForVersion.number ?? prev.number,
+                title: editingVersion.titleSnapshot != null ? String(editingVersion.titleSnapshot) : '',
+                content: editingVersion.contentSnapshot != null ? String(editingVersion.contentSnapshot) : '',
+                status: sourceChapterForVersion.status || 'draft',
+                accessType: sourceChapterForVersion.accessType || 'public',
+                price: sourceChapterForVersion.price ?? 0,
+                versionNumber: Number(editingVersion.versionNumber) || 1,
+            }));
+        } else {
             setChapterData((prev) => ({
                 ...prev,
                 number: sourceChapterForVersion.number ?? prev.number,
@@ -180,19 +221,25 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 versionNumber: prev.versionNumber ?? 1,
             }));
         }
-    }, [sourceChapterForVersion]);
+    }, [sourceChapterForVersion, editingVersion]);
 
-    // Pre-fill từ version khi chỉnh sửa version
+    // Load danh sách version của chương khi ở chế độ version (để validate số version không trùng)
     useEffect(() => {
-        if (editingVersion) {
-            setChapterData((prev) => ({
-                ...prev,
-                title: editingVersion.titleSnapshot ?? prev.title,
-                content: editingVersion.contentSnapshot ?? prev.content,
-                versionNumber: editingVersion.versionNumber ?? prev.versionNumber ?? 1,
-            }));
+        const chapterId = sourceChapterForVersion?.id ?? sourceChapterForVersion?.Id;
+        if (!isVersionMode || !chapterId) {
+            setExistingVersionsForChapter([]);
+            return;
         }
-    }, [editingVersion]);
+        getChapterVersions(chapterId)
+            .then((list) => {
+                const arr = Array.isArray(list) ? list : [];
+                setExistingVersionsForChapter(arr.map((v) => ({
+                    id: v.id ?? v.Id,
+                    versionNumber: Number(v.versionNumber ?? v.VersionNumber ?? v.version_number ?? 0) || 0,
+                })));
+            })
+            .catch(() => setExistingVersionsForChapter([]));
+    }, [isVersionMode, sourceChapterForVersion?.id, sourceChapterForVersion?.Id]);
 
     // Load danh sách chương để tính số chương tiếp theo (thêm mới) và validate trùng (số 1-based)
     useEffect(() => {
@@ -216,7 +263,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             .catch(() => setExistingChapterNumbers(new Set()));
     }, [storyId, isNewChapter, sourceChapterForVersion]);
 
-    // Reload chapter data when chapter prop changes (chỉnh sửa)
+    // Reload chapter data when chapter prop changes (chỉnh sửa chương). Khi chapter=null mà đang ở chế độ version (sourceChapterForVersion) thì không xóa form.
     useEffect(() => {
         if (chapter) {
             setChapterData({
@@ -228,7 +275,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 price: chapter.price || 0,
                 changeSummary: chapter.changeSummary ?? '',
             });
-        } else {
+        } else if (!sourceChapterForVersion) {
             setChapterData((prev) => ({
                 ...prev,
                 title: '',
@@ -239,7 +286,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 changeSummary: '',
             }));
         }
-    }, [chapter]);
+    }, [chapter, sourceChapterForVersion]);
 
     const fontFamilies = [
         { name: 'Arial', value: 'Arial, sans-serif' },
@@ -360,9 +407,19 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         if (isVersionMode) {
             const vNum = Number(chapterData.versionNumber ?? 1);
             if (!Number.isInteger(vNum) || vNum < 1) {
+                setVersionNumberError('Số version phải là số nguyên từ 1 trở lên');
                 showToast('Số version phải là số nguyên từ 1 trở lên', 'error');
                 return;
             }
+            const takenNumbers = existingVersionsForChapter
+                .filter((v) => v.id !== (editingVersion?.id ?? editingVersion?.Id))
+                .map((v) => v.versionNumber);
+            if (takenNumbers.includes(vNum)) {
+                setVersionNumberError(`Số version ${vNum} đã tồn tại, vui lòng chọn số khác`);
+                showToast(`Số version ${vNum} đã tồn tại`, 'error');
+                return;
+            }
+            setVersionNumberError('');
         } else {
             const num = Number(chapterData.number);
             const numError = validateChapterNumber(isNaN(num) ? 0 : num);
@@ -867,17 +924,21 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                             onChange={(e) => {
                                                 const v = e.target.value === '' ? 1 : Math.max(1, Number(e.target.value) || 1);
                                                 setChapterData((prev) => ({ ...prev, versionNumber: v }));
+                                                setVersionNumberError('');
                                             }}
                                             style={{
                                                 width: '100%',
                                                 padding: '0.75rem',
                                                 backgroundColor: '#f9fafb',
-                                                border: '1px solid #e5e7eb',
+                                                border: versionNumberError ? '1px solid #ef4444' : '1px solid #e5e7eb',
                                                 borderRadius: '8px',
                                                 fontSize: '0.875rem',
                                                 outline: 'none',
                                             }}
                                         />
+                                        {versionNumberError && (
+                                            <p style={{ fontSize: '0.75rem', color: '#ef4444', margin: '0.25rem 0 0 0' }}>{versionNumberError}</p>
+                                        )}
                                     </div>
                                     <div>
                                         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>

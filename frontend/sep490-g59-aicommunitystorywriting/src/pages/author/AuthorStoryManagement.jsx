@@ -353,6 +353,10 @@ export function AuthorStoryManagement({ onBack }) {
         }
         try {
             const detail = await getChapterVersionById(chapterId, versionId);
+            const id = detail.id ?? detail.Id;
+            const titleSnapshot = detail.titleSnapshot ?? detail.TitleSnapshot ?? detail.title_snapshot ?? '';
+            const contentSnapshot = detail.contentSnapshot ?? detail.ContentSnapshot ?? detail.content_snapshot ?? '';
+            const versionNumber = detail.versionNumber ?? detail.VersionNumber ?? detail.version_number ?? 1;
             const sourceMapped = {
                 id: chapterId,
                 number: (chapter.orderIndex ?? chapter.order_index ?? 0) + 1,
@@ -360,12 +364,12 @@ export function AuthorStoryManagement({ onBack }) {
             };
             setSourceChapterForVersion(sourceMapped);
             setEditingVersion({
-                id: detail.id ?? detail.Id,
+                id,
                 chapterId,
-                titleSnapshot: detail.titleSnapshot ?? detail.title_snapshot ?? '',
-                contentSnapshot: detail.contentSnapshot ?? detail.content_snapshot ?? '',
-                versionNumber: detail.versionNumber ?? detail.version_number ?? 1,
-                status: detail.status,
+                titleSnapshot,
+                contentSnapshot,
+                versionNumber: Number(versionNumber) || 1,
+                status: detail.status ?? detail.Status,
             });
             setActiveView('addChapterVersion');
         } catch (error) {
