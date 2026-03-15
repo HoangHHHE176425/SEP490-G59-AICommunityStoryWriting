@@ -284,6 +284,33 @@ class ApiService {
         return this.request(`/stories/${storyId}/follow`, { method: 'DELETE' });
     }
 
+    /** Lưu tiến độ đọc: đang đọc đến chapter nào (để hiển thị "Đọc tiếp" trên trang truyện). Cần đăng nhập. */
+    static async saveReadingProgress(storyId, chapterId) {
+        return this.request(`/stories/${storyId}/reading-progress`, {
+            method: 'POST',
+            body: JSON.stringify({ chapterId: chapterId })
+        });
+    }
+
+    // Authors (follow author) API
+    static async getAuthorFollowing(authorId) {
+        const res = await this.request(`/authors/${authorId}/following`);
+        return res && res.following === true;
+    }
+
+    static async followAuthor(authorId) {
+        return this.request(`/authors/${authorId}/follow`, { method: 'POST' });
+    }
+
+    static async unfollowAuthor(authorId) {
+        return this.request(`/authors/${authorId}/follow`, { method: 'DELETE' });
+    }
+
+    /** Thư viện của tôi: truyện theo dõi, tác giả theo dõi, lịch sử đọc. Cần đăng nhập. */
+    static async getMyLibrary() {
+        return this.request('/library');
+    }
+
     static async getStoryComments(storyId) {
         return this.request(`/stories/${storyId}/comments`);
     }
@@ -332,6 +359,28 @@ class ApiService {
 
     static async getChapterById(id) {
         return this.request(`/chapters/${id}`);
+    }
+
+    static async getChapterComments(chapterId) {
+        return this.request(`/chapters/${chapterId}/comments`);
+    }
+
+    static async addChapterComment(chapterId, data) {
+        return this.request(`/chapters/${chapterId}/comments`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    static async getChapterCommentReactions(chapterId, commentId) {
+        return this.request(`/chapters/${chapterId}/comments/${commentId}/reactions`);
+    }
+
+    static async setChapterCommentReaction(chapterId, commentId, reactionType) {
+        return this.request(`/chapters/${chapterId}/comments/${commentId}/reaction`, {
+            method: 'POST',
+            body: JSON.stringify({ reactionType: reactionType || null })
+        });
     }
 
     static async getChaptersByStoryId(storyId) {

@@ -333,6 +333,11 @@ namespace Services.Implementations
             LogModeration("STORY", storyId, "APPROVED", moderatorId, null);
             var storyNotif = NotifyStoryResult(story, "APPROVED", null);
             if (storyNotif != null) _ = PushAuthorNotificationAsync(storyNotif);
+            if (story.author_id.HasValue)
+            {
+                var authorNotifications = NotificationDAO.NotifyAuthorFollowersNewStory(story.author_id.Value, storyId, story.title, _logger);
+                _ = PushStoryFollowNotificationsAsync(authorNotifications);
+            }
             _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
@@ -461,6 +466,11 @@ namespace Services.Implementations
                 _logger.LogWarning("[NOTIFY] ApproveChapter calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id.Value, chapterId);
                 var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapterId, chapter.title, story?.title, _logger);
                 _ = PushStoryFollowNotificationsAsync(createdNotifications);
+                if (story?.author_id != null)
+                {
+                    var authorNotifications = NotificationDAO.NotifyAuthorFollowersNewChapter(story.author_id.Value, chapter.story_id.Value, chapterId, chapter.title, story.title, _logger);
+                    _ = PushStoryFollowNotificationsAsync(authorNotifications);
+                }
             }
             else
             {
