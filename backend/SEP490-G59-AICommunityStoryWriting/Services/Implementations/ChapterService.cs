@@ -676,7 +676,8 @@ namespace Services.Implementations
                 WordCount = chapter.word_count,
                 AiSimilarityPercent = chapter.ai_similarity_percent,
                 PublishedAt = chapter.published_at,
-                CreatedAt = chapter.created_at
+                CreatedAt = chapter.created_at,
+                UpdatedAt = chapter.updated_at
             };
         }
     }

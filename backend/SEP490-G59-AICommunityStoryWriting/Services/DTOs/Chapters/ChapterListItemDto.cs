@@ -16,6 +16,7 @@ namespace Services.DTOs.Chapters
         public decimal? AiSimilarityPercent { get; set; }
         public DateTime? PublishedAt { get; set; }
         public DateTime? CreatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
 
         /// <summary>Trong queue moderator: đã được moderator hiện tại nhận duyệt (lock).</summary>
         public bool IsClaimedByMe { get; set; }
@@ -32,5 +33,16 @@ namespace Services.DTOs.Chapters
         public string? PendingVersionTitle { get; set; }
         /// <summary>Số từ của version chờ duyệt (khi có).</summary>
         public int? PendingVersionWordCount { get; set; }
+
+        /// <summary>Admin: thời điểm gửi duyệt.</summary>
+        public DateTime? PendingSince { get; set; }
+        /// <summary>Admin: hạn duyệt (PendingSince + 7 ngày).</summary>
+        public DateTime? DeadlineAt { get; set; }
+        /// <summary>Admin: trạng thái thời hạn — OnTime, Warning, Overdue.</summary>
+        public string? TimeStatus { get; set; }
+        /// <summary>Admin: thời điểm moderator duyệt/từ chối.</summary>
+        public DateTime? ReviewedAt { get; set; }
+        /// <summary>Admin: tên moderator đã duyệt/từ chối.</summary>
+        public string? ReviewedByModeratorName { get; set; }
     }
 }

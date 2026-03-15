@@ -527,6 +527,101 @@ class ApiService {
         return this.request(`/moderator/chapters/${chapterId}/versions/${versionId}`);
     }
 
+    // Admin Moderation API (chỉ role ADMIN)
+    static async adminGetPendingStories(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.claimFilter) params.append('claimFilter', options.claimFilter);
+        return this.request(`/admin/moderation/pending-stories?${params.toString()}`);
+    }
+
+    static async adminGetPendingChapters(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.storyId) params.append('storyId', options.storyId);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.claimFilter) params.append('claimFilter', options.claimFilter);
+        return this.request(`/admin/moderation/pending-chapters?${params.toString()}`);
+    }
+
+    static async adminGetApprovedStories(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.moderatorId) params.append('moderatorId', options.moderatorId);
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        return this.request(`/admin/moderation/approved-stories?${params.toString()}`);
+    }
+
+    static async adminGetRejectedStories(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.moderatorId) params.append('moderatorId', options.moderatorId);
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        return this.request(`/admin/moderation/rejected-stories?${params.toString()}`);
+    }
+
+    static async adminGetApprovedChapters(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.moderatorId) params.append('moderatorId', options.moderatorId);
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        return this.request(`/admin/moderation/approved-chapters?${params.toString()}`);
+    }
+
+    static async adminGetRejectedChapters(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.moderatorId) params.append('moderatorId', options.moderatorId);
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        return this.request(`/admin/moderation/rejected-chapters?${params.toString()}`);
+    }
+
+    static async adminGetModerationLogs(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.moderatorId) params.append('moderatorId', options.moderatorId);
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        if (options.action) params.append('action', options.action);
+        if (options.targetType) params.append('targetType', options.targetType);
+        return this.request(`/admin/moderation/logs?${params.toString()}`);
+    }
+
+    static async adminGetModeratorPerformance(options = {}) {
+        const params = new URLSearchParams();
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        return this.request(`/admin/moderation/moderator-performance?${params.toString()}`);
+    }
+
     // Notifications API
     static async getNotifications(options = {}) {
         const params = new URLSearchParams();
