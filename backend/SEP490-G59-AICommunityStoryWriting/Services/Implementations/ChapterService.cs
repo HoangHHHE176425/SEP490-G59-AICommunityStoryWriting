@@ -123,6 +123,11 @@ namespace Services.Implementations
                     _logger.LogInformation("ChapterService.Create calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", request.StoryId, chapter.id);
                     var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(request.StoryId, chapter.id, request.Title, story.title, _logger);
                     _ = PushNotificationsToFollowersAsync(createdNotifications);
+                    if (story.author_id.HasValue)
+                    {
+                        var authorNotifications = NotificationDAO.NotifyAuthorFollowersNewChapter(story.author_id.Value, request.StoryId, chapter.id, request.Title, story.title, _logger);
+                        _ = PushNotificationsToFollowersAsync(authorNotifications);
+                    }
                 }
             }
             catch (Exception)
@@ -415,6 +420,11 @@ namespace Services.Implementations
                         _logger.LogInformation("ChapterService.Update calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id, chapter.id);
                         var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapter.id, chapter.title, story?.title, _logger);
                         _ = PushNotificationsToFollowersAsync(createdNotifications);
+                        if (story?.author_id != null)
+                        {
+                            var authorNotifications = NotificationDAO.NotifyAuthorFollowersNewChapter(story.author_id.Value, chapter.story_id.Value, chapter.id, chapter.title, story.title, _logger);
+                            _ = PushNotificationsToFollowersAsync(authorNotifications);
+                        }
                     }
                 }
                 catch (Exception)

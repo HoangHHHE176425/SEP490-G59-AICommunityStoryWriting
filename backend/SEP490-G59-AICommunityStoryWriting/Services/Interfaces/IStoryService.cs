@@ -4,8 +4,10 @@ public interface IStoryService
 {
     StoryResponseDto Create(CreateStoryRequestDto request, Guid authorId, string? coverImageUrl);
     PagedResultDto<StoryListItemDto> GetAll(StoryQueryDto query);
-    StoryResponseDto? GetById(Guid id);
-    StoryResponseDto? GetBySlug(string slug);
+    StoryResponseDto? GetById(Guid id, Guid? userId = null);
+    StoryResponseDto? GetBySlug(string slug, Guid? userId = null);
+    /// <summary>Lưu tiến độ đọc: user đang đọc đến chapter nào của story.</summary>
+    void SaveReadingProgress(Guid storyId, Guid userId, Guid chapterId);
     PagedResultDto<StoryListItemDto> GetByAuthor(Guid authorId, StoryQueryDto query);
     bool Update(Guid id, UpdateStoryRequestDto request);
     bool Delete(Guid id);
