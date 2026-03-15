@@ -170,7 +170,7 @@ namespace Services.Implementations
             return result;
         }
 
-        public PagedResultDto<StoryListItemDto> GetReviewedStories(int page, int pageSize, string status, string? search, string? sortBy, string? sortOrder, IReadOnlyList<Guid>? categoryIdsFilter, Guid? moderatorId, bool isAdmin)
+        public PagedResultDto<StoryListItemDto> GetReviewedStories(int page, int pageSize, string status, string? search, string? sortBy, string? sortOrder, IReadOnlyList<Guid>? categoryIdsFilter, Guid? moderatorId, bool isAdmin, Guid? moderatorIdFilter = null, DateTime? dateFrom = null, DateTime? dateTo = null)
         {
             if (page < 1) page = 1;
             if (pageSize < 1) pageSize = 20;
@@ -178,11 +178,19 @@ namespace Services.Implementations
             if (statusUpper != "PUBLISHED" && statusUpper != "REJECTED")
                 return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
 
+            // Trong moderation_logs, action là "APPROVED" hoặc "REJECTED", không phải "PUBLISHED".
+            var logAction = statusUpper == "PUBLISHED" ? "APPROVED" : statusUpper;
             List<Guid>? includeStoryIds = null;
             List<string>? statusIn = null;
-            if (statusUpper == "REJECTED")
+            if (isAdmin && (moderatorIdFilter.HasValue || dateFrom.HasValue || dateTo.HasValue))
             {
-                // Tab "Từ chối": hiển thị theo hành động cuối = REJECTED (vẫn hiển thị sau khi tác giả gửi lại PENDING_REVIEW cho đến khi moderator duyệt).
+                includeStoryIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsFiltered("STORY", moderatorIdFilter, dateFrom, dateTo, logAction);
+                if (includeStoryIds == null || includeStoryIds.Count == 0)
+                    return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+                statusIn = statusUpper == "REJECTED" ? new List<string> { "REJECTED", "PENDING_REVIEW" } : null;
+            }
+            else if (statusUpper == "REJECTED")
+            {
                 includeStoryIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsWhereLastActionIs("STORY", "REJECTED", isAdmin ? null : moderatorId);
                 if (includeStoryIds == null || includeStoryIds.Count == 0)
                     return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
@@ -190,8 +198,7 @@ namespace Services.Implementations
             }
             else if (!isAdmin && moderatorId.HasValue)
             {
-                var action = "APPROVED";
-                includeStoryIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "STORY", action);
+                includeStoryIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "STORY", "APPROVED");
                 if (includeStoryIds == null || includeStoryIds.Count == 0)
                     return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
             }
@@ -208,10 +215,24 @@ namespace Services.Implementations
                 CategoryIds = isAdmin ? (categoryIdsFilter != null ? categoryIdsFilter.ToList() : null) : null,
                 IncludeStoryIds = includeStoryIds
             };
-            return _storyService.GetAll(query);
+            var result = _storyService.GetAll(query);
+            var storyList = result.Items?.ToList() ?? new List<StoryListItemDto>();
+            if (storyList.Count > 0 && isAdmin)
+            {
+                var logInfo = DataAccessObjects.DAOs.ModerationLogDAO.GetLogInfoByTargets("STORY", storyList.Select(s => s.Id).ToList(), logAction);
+                foreach (var item in storyList)
+                {
+                    if (logInfo.TryGetValue(item.Id, out var info))
+                    {
+                        item.ReviewedAt = info.CreatedAt;
+                        item.ReviewedByModeratorName = info.ModeratorId.HasValue ? NotificationDAO.GetUserDisplayName(info.ModeratorId.Value) : null;
+                    }
+                }
+            }
+            return result;
         }
 
-        public PagedResultDto<ChapterListItemDto> GetReviewedChapters(int page, int pageSize, string status, string? search, string? sortBy, string? sortOrder, IReadOnlyList<Guid>? categoryIdsFilter, Guid? moderatorId, bool isAdmin)
+        public PagedResultDto<ChapterListItemDto> GetReviewedChapters(int page, int pageSize, string status, string? search, string? sortBy, string? sortOrder, IReadOnlyList<Guid>? categoryIdsFilter, Guid? moderatorId, bool isAdmin, Guid? moderatorIdFilter = null, DateTime? dateFrom = null, DateTime? dateTo = null)
         {
             if (page < 1) page = 1;
             if (pageSize < 1) pageSize = 20;
@@ -223,11 +244,19 @@ namespace Services.Implementations
             List<Guid>? includeChapterIds = null;
             List<string>? statusIn = null;
 
+            // Trong moderation_logs, action là "APPROVED" hoặc "REJECTED".
+            var logAction = statusUpper == "PUBLISHED" ? "APPROVED" : statusUpper;
             if (isAdmin && categoryIdsFilter != null && categoryIdsFilter.Count > 0)
                 storyIdsFilter = _storyRepository.GetStoryIdsByCategoryIds(categoryIdsFilter).ToList();
-            if (statusUpper == "REJECTED")
+            if (isAdmin && (moderatorIdFilter.HasValue || dateFrom.HasValue || dateTo.HasValue))
             {
-                // Tab "Từ chối": hiển thị theo hành động cuối = REJECTED (vẫn hiển thị sau khi tác giả gửi lại PENDING_REVIEW cho đến khi moderator duyệt).
+                includeChapterIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsFiltered("CHAPTER", moderatorIdFilter, dateFrom, dateTo, logAction);
+                if (includeChapterIds == null || includeChapterIds.Count == 0)
+                    return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+                statusIn = statusUpper == "REJECTED" ? new List<string> { "REJECTED", "PENDING_REVIEW" } : null;
+            }
+            else if (statusUpper == "REJECTED")
+            {
                 includeChapterIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsWhereLastActionIs("CHAPTER", "REJECTED", isAdmin ? null : moderatorId);
                 if (includeChapterIds == null || includeChapterIds.Count == 0)
                     return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
@@ -235,8 +264,7 @@ namespace Services.Implementations
             }
             else if (!isAdmin && moderatorId.HasValue)
             {
-                var action = "APPROVED";
-                includeChapterIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "CHAPTER", action);
+                includeChapterIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "CHAPTER", "APPROVED");
                 if (includeChapterIds == null || includeChapterIds.Count == 0)
                     return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
             }
@@ -261,7 +289,21 @@ namespace Services.Implementations
                 SortBy = !string.IsNullOrWhiteSpace(sortBy) ? sortBy : "updated_at",
                 SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "desc"
             };
-            return _chapterService.GetAll(query);
+            var result = _chapterService.GetAll(query);
+            var chapterList = result.Items?.ToList() ?? new List<ChapterListItemDto>();
+            if (chapterList.Count > 0 && isAdmin)
+            {
+                var logInfo = DataAccessObjects.DAOs.ModerationLogDAO.GetLogInfoByTargets("CHAPTER", chapterList.Select(c => c.Id).ToList(), logAction);
+                foreach (var item in chapterList)
+                {
+                    if (logInfo.TryGetValue(item.Id, out var info))
+                    {
+                        item.ReviewedAt = info.CreatedAt;
+                        item.ReviewedByModeratorName = info.ModeratorId.HasValue ? NotificationDAO.GetUserDisplayName(info.ModeratorId.Value) : null;
+                    }
+                }
+            }
+            return result;
         }
 
         public bool ClaimStory(Guid storyId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
