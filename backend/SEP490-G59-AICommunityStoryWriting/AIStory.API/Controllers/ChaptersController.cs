@@ -1,3 +1,4 @@
+using System.Linq;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
@@ -219,6 +220,10 @@ namespace AIStory.API.Controllers
                 var unpublished = _chapterService.Unpublish(id);
                 return unpublished ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while unpublishing the chapter", error = ex.Message });
@@ -275,12 +280,14 @@ namespace AIStory.API.Controllers
         }
 
         // ---------- Chapter Versions (AUTHOR) ----------
-        /// <summary>Lấy danh sách version của chapter. Chỉ AUTHOR (tác giả truyện chứa chapter).</summary>
+        /// <summary>Lấy danh sách version của chapter. Chỉ AUTHOR. Version đã được duyệt (PUBLISHED) không hiển thị nữa.</summary>
         [HttpGet("{chapterId:guid}/versions")]
         [Authorize(Roles = "AUTHOR")]
         public IActionResult GetChapterVersions(Guid chapterId)
         {
-            var list = _chapterVersionService.GetByChapterId(chapterId);
+            var list = _chapterVersionService.GetByChapterId(chapterId)
+                .Where(v => !string.Equals(v.Status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
+                .ToList();
             return Ok(list);
         }
 
@@ -362,6 +369,23 @@ namespace AIStory.API.Controllers
             {
                 var ok = _chapterVersionService.SubmitForReview(versionId, authorId.Value);
                 return ok ? NoContent() : NotFound(new { message = "Version không tồn tại hoặc không thể gửi duyệt." });
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        }
+
+        /// <summary>Hủy gửi duyệt version: đưa version và chapter về DRAFT. Chỉ AUTHOR, chỉ version PENDING_REVIEW.</summary>
+        [HttpPost("{chapterId:guid}/versions/{versionId:guid}/unsubmit")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult UnsubmitChapterVersion(Guid chapterId, Guid versionId)
+        {
+            var authorId = GetCurrentUserId();
+            if (!authorId.HasValue)
+                return Unauthorized(new { message = "Không xác định user. Vui lòng đăng nhập." });
+            try
+            {
+                var ok = _chapterVersionService.CancelSubmit(versionId, authorId.Value);
+                return ok ? NoContent() : NotFound(new { message = "Version không tồn tại hoặc không thể hủy gửi duyệt." });
             }
             catch (UnauthorizedAccessException) { return Forbid(); }
             catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }

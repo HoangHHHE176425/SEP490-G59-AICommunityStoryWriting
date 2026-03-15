@@ -36,5 +36,8 @@ namespace Services.Interfaces
         bool ApproveChapter(Guid chapterId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null);
 
         bool RejectChapter(Guid chapterId, Guid moderatorId, string reason, IReadOnlyList<Guid>? allowedCategoryIds = null);
+
+        /// <summary>Lấy nội dung chapter cho moderator: bản gốc (đã xuất bản) + bản version chờ duyệt (nếu có). Dùng để hiển thị 2 phiên bản khi duyệt chỉnh sửa sau báo cáo vi phạm.</summary>
+        ChapterReviewContentDto? GetChapterReviewContent(Guid chapterId);
     }
 }

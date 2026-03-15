@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.Stories
+namespace Services.DTOs.Stories
 {
     public class StoryListItemDto
     {
@@ -15,6 +15,8 @@
         public string? CategoryNames { get; set; }
         public Guid? AuthorId { get; set; }
         public string? AuthorName { get; set; }
+        /// <summary>Độ tuổi phù hợp: ALL, 13+, 16+, 18+</summary>
+        public string? AgeRating { get; set; }
 
         public int? TotalChapters { get; set; }
         /// <summary>Số chapter đã PUBLISHED.</summary>

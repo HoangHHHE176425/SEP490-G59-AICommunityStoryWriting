@@ -27,5 +27,10 @@ namespace Services.DTOs.Chapters
         public string? RejectionReason { get; set; }
         /// <summary>Thời điểm moderator từ chối.</summary>
         public DateTime? RejectedAt { get; set; }
+
+        /// <summary>Tiêu đề version chờ duyệt (khi có); dùng cho sidebar moderator hiển thị ngay không cần gọi review-content.</summary>
+        public string? PendingVersionTitle { get; set; }
+        /// <summary>Số từ của version chờ duyệt (khi có).</summary>
+        public int? PendingVersionWordCount { get; set; }
     }
 }

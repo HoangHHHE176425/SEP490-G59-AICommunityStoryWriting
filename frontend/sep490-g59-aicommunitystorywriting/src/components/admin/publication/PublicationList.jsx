@@ -191,6 +191,22 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                             <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.9375rem' }}> — {pub.chapterTitle}</span>
                                         )}
                                     </h3>
+                                    {pub.type === 'chapter' && pub.isEditRequest && (
+                                        <div style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            marginTop: '0.375rem',
+                                            padding: '0.25rem 0.5rem',
+                                            backgroundColor: '#fef3c7',
+                                            color: '#92400e',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 600,
+                                            borderRadius: '6px',
+                                            border: '1px solid #f59e0b'
+                                        }}>
+                                            Yêu cầu chỉnh sửa (chương đã xuất bản)
+                                        </div>
+                                    )}
                                     <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
                                         {pub.author ? <>Tác giả: <span style={{ fontWeight: 500, color: '#475569' }}>{pub.author}</span></> : null}
                                         {pub.type === 'chapter' && pub.wordCount != null ? ` • ${pub.wordCount} từ` : null}
@@ -262,7 +278,7 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                 </div>
                             </div>
 
-                            {/* Info — cùng cấu trúc cho truyện và nhóm chương (Đã duyệt/Từ chối/Chờ duyệt) */}
+                            {/* Info — Số chương, Độ tuổi phù hợp, Nộp lúc, Duyệt lúc */}
                             <div style={{
                                 display: 'grid',
                                 gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
@@ -279,6 +295,14 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                         </div>
                                     </div>
                                 ) : null}
+                                <div>
+                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                                        Độ tuổi phù hợp
+                                    </div>
+                                    <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
+                                        {pub.ageRating ? ({ ALL: 'Phù hợp mọi lứa tuổi', '13+': 'Từ 13 tuổi', '16+': 'Từ 16 tuổi', '18+': 'Từ 18 tuổi' })[String(pub.ageRating).toUpperCase()] ?? pub.ageRating : '—'}
+                                    </div>
+                                </div>
                                 {pub.type === 'chapter' && pub.wordCount != null && (
                                     <div>
                                         <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>

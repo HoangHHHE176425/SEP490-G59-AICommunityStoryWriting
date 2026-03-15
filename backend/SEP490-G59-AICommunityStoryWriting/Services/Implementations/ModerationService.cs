@@ -1,8 +1,10 @@
+using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Logging;
 using Repositories;
 using Services.DTOs.Chapters;
+using Services.DTOs.Moderation;
 using Services.DTOs.Notifications;
 using Services.DTOs.Stories;
 using Services.Interfaces;
@@ -13,6 +15,7 @@ namespace Services.Implementations
     {
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
+        private readonly IChapterVersionRepository _versionRepository;
         private readonly IStoryService _storyService;
         private readonly IChapterService _chapterService;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
@@ -22,6 +25,7 @@ namespace Services.Implementations
         public ModerationService(
             IStoryRepository storyRepository,
             IChapterRepository chapterRepository,
+            IChapterVersionRepository versionRepository,
             IStoryService storyService,
             IChapterService chapterService,
             ILogger<ModerationService> logger,
@@ -30,6 +34,7 @@ namespace Services.Implementations
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
+            _versionRepository = versionRepository;
             _storyService = storyService;
             _chapterService = chapterService;
             _logger = logger;
@@ -115,9 +120,17 @@ namespace Services.Implementations
                     : new List<Guid>();
             }
 
+            // Chapter chờ duyệt = (status PENDING_REVIEW) hoặc (status PUBLISHED nhưng có version PENDING_REVIEW — chỉnh sửa sau báo cáo vi phạm).
+            var pendingVersionChapterIds = DataAccessObjects.DAOs.ChapterVersionDAO.GetChapterIdsWithPendingReviewVersion();
+            if (excludeChapterIds != null && excludeChapterIds.Count > 0)
+                pendingVersionChapterIds = pendingVersionChapterIds.Where(id => !excludeChapterIds.Contains(id)).ToList();
+            if (includeChapterIds != null && includeChapterIds.Count > 0)
+                pendingVersionChapterIds = pendingVersionChapterIds.Where(id => includeChapterIds.Contains(id)).ToList();
+
             var query = new ChapterQueryDto
             {
-                Status = "PENDING_REVIEW",
+                PendingVersionChapterIds = pendingVersionChapterIds.Count > 0 ? pendingVersionChapterIds : null,
+                Status = pendingVersionChapterIds.Count == 0 ? "PENDING_REVIEW" : null,
                 StoryId = storyId,
                 StoryIds = storyIdsFilter,
                 ExcludeChapterIds = excludeChapterIds != null && excludeChapterIds.Count > 0 ? excludeChapterIds : null,
@@ -137,6 +150,21 @@ namespace Services.Implementations
                     item.ClaimedAt = claim.Value.AssignedAt;
                     item.ClaimedByDisplayName = claim.Value.DisplayName;
                     item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
+                }
+                // Hiển thị đúng tiêu đề/số từ version chờ duyệt ngay trên sidebar (kể cả chapter đang DRAFT — gửi version đi duyệt). Dùng .ToList() để luôn đánh giá đủ version.
+                var pendingVersionsList = _versionRepository.GetByChapterId(item.Id)
+                    .Where(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(v => v.version_number)
+                    .ToList();
+                var pendingVersion = pendingVersionsList.FirstOrDefault();
+                if (pendingVersion != null)
+                {
+                    item.PendingVersionTitle = string.IsNullOrWhiteSpace(pendingVersion.title_snapshot)
+                        ? (item.Title ?? null)
+                        : pendingVersion.title_snapshot.Trim();
+                    item.PendingVersionWordCount = string.IsNullOrWhiteSpace(pendingVersion.content_snapshot)
+                        ? 0
+                        : pendingVersion.content_snapshot!.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
                 }
             }
             return result;
@@ -258,7 +286,14 @@ namespace Services.Implementations
             if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
                 return false;
             var chapter = _chapterRepository.GetById(chapterId);
-            if (chapter == null || chapter.status != "PENDING_REVIEW")
+            if (chapter == null)
+                return false;
+            var hasPendingVersion = _versionRepository.GetByChapterId(chapterId)
+                .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+            // Cho phép nhận duyệt khi: chapter gốc PENDING_REVIEW, hoặc chapter có ít nhất một version PENDING_REVIEW (kể cả chapter đang DRAFT/REJECTED).
+            var canClaim = string.Equals(chapter.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase)
+                || hasPendingVersion;
+            if (!canClaim)
                 return false;
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && chapter.story_id.HasValue)
             {
@@ -346,9 +381,14 @@ namespace Services.Implementations
                 return false;
             }
             Console.WriteLine($"[CONSOLE] ApproveChapter chapter found Status={chapter.status} StoryId={chapter.story_id}");
-            if (chapter.status != "PENDING_REVIEW")
+            var hasPendingVersion = _versionRepository.GetByChapterId(chapterId)
+                .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+            // Cho phép duyệt khi: chapter gốc PENDING_REVIEW, hoặc chapter có ít nhất một version PENDING_REVIEW (kể cả chapter đang DRAFT).
+            var canApprove = string.Equals(chapter.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase)
+                || hasPendingVersion;
+            if (!canApprove)
             {
-                Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: status not PENDING_REVIEW (current={chapter.status})");
+                Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: not pending (current={chapter.status}, hasPendingVersion={hasPendingVersion})");
                 return false;
             }
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && chapter.story_id.HasValue)
@@ -384,14 +424,20 @@ namespace Services.Implementations
                 }
             }
 
-            // Khi duyệt: áp dụng title/content từ version đang PENDING_REVIEW lên chapter (chỉ khi có version chờ duyệt).
-            var pendingVersion = ChapterVersionDAO.GetPendingByChapterId(chapterId);
-            if (pendingVersion != null)
+            // Nếu có version PENDING_REVIEW (gửi chỉnh sửa bản đã xuất bản), áp dụng nội dung version lên chapter trước khi duyệt.
+            var pendingVersions = _versionRepository.GetByChapterId(chapterId)
+                .Where(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (pendingVersions.Count > 0)
             {
-                if (!string.IsNullOrWhiteSpace(pendingVersion.title_snapshot))
-                    chapter.title = pendingVersion.title_snapshot;
-                chapter.content = pendingVersion.content_snapshot ?? chapter.content;
-                chapter.word_count = CalculateWordCount(pendingVersion.content_snapshot);
+                var v = pendingVersions[0];
+                if (!string.IsNullOrWhiteSpace(v.title_snapshot))
+                    chapter.title = v.title_snapshot;
+                if (v.content_snapshot != null)
+                {
+                    chapter.content = v.content_snapshot;
+                    chapter.word_count = chapter.content.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+                }
             }
 
             chapter.status = "PUBLISHED";
@@ -441,7 +487,11 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(chapterId);
             if (chapter == null)
                 return false;
-            if (chapter.status != "PENDING_REVIEW")
+            var hasPendingVersionReject = _versionRepository.GetByChapterId(chapterId)
+                .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+            var canReject = string.Equals(chapter.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase)
+                || (string.Equals(chapter.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase) && hasPendingVersionReject);
+            if (!canReject)
                 return false;
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && chapter.story_id.HasValue)
             {
@@ -452,14 +502,38 @@ namespace Services.Implementations
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId))
                 return false;
 
+            if (string.Equals(chapter.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
+            {
+                // Từ chối version chỉnh sửa của chapter đã xuất bản: giữ chapter PUBLISHED, đưa version về REJECTED. Lý do lưu qua LogModeration(CHAPTER) để tác giả xem như chapter.
+                var pendingVersions = _versionRepository.GetByChapterId(chapterId)
+                    .Where(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                foreach (var pv in pendingVersions)
+                {
+                    pv.status = "REJECTED";
+                    pv.rejection_reason = reason.Trim();
+                    pv.reviewed_at = DateTime.Now;
+                    pv.reviewed_by = moderatorId;
+                    _versionRepository.Update(pv);
+                }
+                chapter.updated_at = DateTime.Now;
+                _chapterRepository.Update(chapter);
+                ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
+                LogModeration("CHAPTER", chapterId, "REJECTED", moderatorId, reason.Trim()); // log cho version bị từ chối
+                var chapterNotif = NotifyChapterResult(chapter, "REJECTED", reason.Trim());
+                if (chapterNotif != null) _ = PushAuthorNotificationAsync(chapterNotif);
+                _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
+                return true;
+            }
+
             chapter.status = "REJECTED";
             chapter.updated_at = DateTime.Now;
             _chapterRepository.Update(chapter);
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
             LogModeration("CHAPTER", chapterId, "REJECTED", moderatorId, reason.Trim());
-            var chapterNotif = NotifyChapterResult(chapter, "REJECTED", reason.Trim());
-            if (chapterNotif != null) _ = PushAuthorNotificationAsync(chapterNotif);
+            var chapterNotif2 = NotifyChapterResult(chapter, "REJECTED", reason.Trim());
+            if (chapterNotif2 != null) _ = PushAuthorNotificationAsync(chapterNotif2);
             _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
         }
@@ -583,10 +657,38 @@ namespace Services.Implementations
             ModerationLogDAO.Add(log);
         }
 
-        private static int CalculateWordCount(string? content)
+        public ChapterReviewContentDto? GetChapterReviewContent(Guid chapterId)
         {
-            if (string.IsNullOrWhiteSpace(content)) return 0;
-            return content.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+            var chapter = _chapterRepository.GetById(chapterId);
+            if (chapter == null) return null;
+
+            var dto = new ChapterReviewContentDto
+            {
+                ChapterId = chapterId,
+                ChapterStatus = chapter.status,
+                OriginalTitle = chapter.title,
+                OriginalContent = chapter.content
+            };
+
+            var pendingVersions = _versionRepository.GetByChapterId(chapterId)
+                .Where(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(v => v.version_number)
+                .ToList();
+
+            if (pendingVersions.Count > 0)
+            {
+                dto.HasPendingVersion = true;
+                dto.PendingVersions = pendingVersions.Select(v => new PendingVersionItemDto
+                {
+                    Id = v.id,
+                    VersionNumber = v.version_number,
+                    TitleSnapshot = v.title_snapshot,
+                    ContentSnapshot = v.content_snapshot,
+                    Status = v.status
+                }).ToList();
+            }
+
+            return dto;
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿@{
+@{
     ViewData["Title"] = "Review chapter";
     var chapterId = ViewBag.ChapterId as Guid? ?? Guid.Empty;
 }
@@ -40,6 +40,7 @@
                             </div>
                         </div>
                         <hr>
+                        <p id="chapterBodyLabel" class="text-muted small mb-2" style="display: none;">Nội dung bản gốc (để so sánh với version gửi chỉnh sửa bên dưới)</p>
                         <div id="chapterBody" class="chapter-body" style="white-space: pre-wrap; font-family: inherit;"></div>
                     </div>
                 </div>
@@ -163,8 +164,11 @@
                 versions = await ApiService.moderatorGetChapterVersions(chapterId);
                 if (!versions || versions.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center">Chưa có version nào.</td></tr>';
+                    document.getElementById('chapterBodyLabel').style.display = 'none';
                     return;
                 }
+                const hasPending = versions.some(v => (v.status || '').toUpperCase() === 'PENDING_REVIEW');
+                document.getElementById('chapterBodyLabel').style.display = hasPending ? 'block' : 'none';
                 tbody.innerHTML = versions.map(v => {
                     const statusBadge = v.status === 'PUBLISHED'
                         ? '<span class="badge bg-success">Đã xuất bản</span>'

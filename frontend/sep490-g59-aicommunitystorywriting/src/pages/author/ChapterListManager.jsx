@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle } from 'lucide-react';
+import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle, ChevronDown, ChevronRight, GitBranch } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason } from '../../api/chapter/chapterApi';
+import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason, getChapterVersions, deleteChapterVersion, submitChapterVersion, unsubmitChapterVersion } from '../../api/chapter/chapterApi';
 import { getStoryRejectionReason } from '../../api/story/storyApi';
 import { updateStory } from '../../api/story/storyApi';
 import { Pagination } from '../../components/pagination/Pagination';
@@ -53,7 +53,7 @@ function mapChapterFromApi(item) {
 
 const CHAPTERS_PAGE_SIZE = 10;
 
-export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter }) {
+export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter, onViewChapter, onAddVersion, onEditVersion }) {
     const storyId = story?.id ?? story?.Id;
     const [chapters, setChapters] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -67,6 +67,12 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     const [publishedOrderIndices, setPublishedOrderIndices] = useState(new Set());
     /** Set orderIndex (0-based) chương đang PENDING_REVIEW — cho phép gửi chương tiếp theo khi chương trước đã gửi (published hoặc pending). */
     const [pendingOrderIndices, setPendingOrderIndices] = useState(new Set());
+    /** Chương đang được mở rộng để xem/tạo version (click vào hàng chương). */
+    const [expandedChapterId, setExpandedChapterId] = useState(null);
+    /** Danh sách version theo chapterId (load từ API khi mở panel). */
+    const [chapterVersionsMap, setChapterVersionsMap] = useState({});
+    /** ChapterId đang load versions (để hiển thị loading). */
+    const [loadingVersionsForChapterId, setLoadingVersionsForChapterId] = useState(null);
 
     const loadChapters = useCallback((page = 1, options = {}) => {
         if (!storyId) return;
@@ -192,9 +198,62 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
         loadChapters(page);
     };
 
+    /** Load danh sách version của một chapter (gọi API). */
+    const loadVersionsForChapter = useCallback((chapterId) => {
+        if (!chapterId) return;
+        setLoadingVersionsForChapterId(chapterId);
+        getChapterVersions(chapterId)
+            .then((list) => {
+                const arr = Array.isArray(list) ? list : [];
+                setChapterVersionsMap((prev) => ({ ...prev, [chapterId]: arr }));
+            })
+            .catch(() => setChapterVersionsMap((prev) => ({ ...prev, [chapterId]: [] })))
+            .finally(() => setLoadingVersionsForChapterId(null));
+    }, []);
+
+    /** Khi mở panel version của một chương thì load versions từ API (defer để tránh setState đồng bộ trong effect). */
+    useEffect(() => {
+        if (!expandedChapterId) return;
+        const tid = setTimeout(() => loadVersionsForChapter(expandedChapterId), 0);
+        return () => clearTimeout(tid);
+    }, [expandedChapterId, loadVersionsForChapter]);
+
+    /** Preload danh sách phiên bản cho tất cả chương trên trang để biết có phiên bản đang chờ duyệt (disable nút Xuất bản chương gốc). */
+    const chapterIdsKey = chapters?.length ? chapters.map((c) => c.id).join(',') : '';
+    useEffect(() => {
+        if (!chapterIdsKey) return;
+        const ids = chapterIdsKey.split(',').filter(Boolean);
+        let cancelled = false;
+        Promise.all(ids.map((chapterId) => getChapterVersions(chapterId).catch(() => [])))
+            .then((results) => {
+                if (cancelled) return;
+                setChapterVersionsMap((prev) => {
+                    const next = { ...prev };
+                    ids.forEach((chapterId, i) => {
+                        next[chapterId] = Array.isArray(results[i]) ? results[i] : [];
+                    });
+                    return next;
+                });
+            });
+        return () => { cancelled = true; };
+    }, [chapterIdsKey]);
+
+    /** Khi tab được focus lại (vd: duyệt version ở tab khác rồi chuyển về tab này), refetch list version để version đã duyệt biến mất ngay. */
+    useEffect(() => {
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'visible' && expandedChapterId) {
+                loadVersionsForChapter(expandedChapterId);
+            }
+        };
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+    }, [expandedChapterId, loadVersionsForChapter]);
+
     const [actioningChapterId, setActioningChapterId] = useState(null);
-    const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, chapterId: null });
+    const [actioningVersionId, setActioningVersionId] = useState(null);
+    const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
     const [rejectionReasonModal, setRejectionReasonModal] = useState({ open: false, title: '', reason: null, rejectedAt: null, loading: false });
+    const [messageModal, setMessageModal] = useState({ open: false, title: '', message: '' });
 
     const handleDeleteChapter = (chapterId) => {
         if (!chapterId) return;
@@ -208,24 +267,46 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     };
 
     const openPublishConfirm = (chapterId) => {
-        setConfirmDialog({ open: true, action: 'publish', chapterId });
+        setConfirmDialog({ open: true, action: 'publish', chapterId, versionId: null, versionTitle: null });
     };
     const openUnpublishConfirm = (chapterId) => {
-        setConfirmDialog({ open: true, action: 'unpublish', chapterId });
+        setConfirmDialog({ open: true, action: 'unpublish', chapterId, versionId: null, versionTitle: null });
     };
     const openDeleteConfirm = (chapterId) => {
-        setConfirmDialog({ open: true, action: 'delete', chapterId });
+        setConfirmDialog({ open: true, action: 'delete', chapterId, versionId: null, versionTitle: null });
+    };
+    const openVersionSubmitConfirm = (chapterId, versionId, versionTitle) => {
+        setConfirmDialog({ open: true, action: 'version_submit', chapterId, versionId, versionTitle });
+    };
+    const openVersionUnsubmitConfirm = (chapterId, versionId, versionTitle) => {
+        setConfirmDialog({ open: true, action: 'version_unsubmit', chapterId, versionId, versionTitle });
+    };
+    const openVersionDeleteConfirm = (chapterId, versionId, versionTitle) => {
+        setConfirmDialog({ open: true, action: 'version_delete', chapterId, versionId, versionTitle });
+    };
+    /** Hủy xuất bản theo thứ tự ngược: chỉ được hủy chương N nếu không còn chương nào có thứ tự > N đang xuất bản hoặc chờ duyệt (chapter hoặc version). */
+    const canUnpublishChapter = (chapter) => {
+        const orderIndex = chapter.number - 1;
+        for (let k = orderIndex + 1; k < totalCount; k++) {
+            if (publishedOrderIndices.has(k) || pendingOrderIndices.has(k)) return false;
+            const ch = chapters.find((c) => (c.number - 1) === k);
+            if (ch && (chapterVersionsMap[ch.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review')) return false;
+        }
+        return true;
     };
     const closeConfirmDialog = () => {
-        if (!actioningChapterId) setConfirmDialog({ open: false, action: null, chapterId: null });
+        const isVersionAction = confirmDialog.action?.startsWith('version_');
+        if ((isVersionAction && !actioningVersionId) || (!isVersionAction && !actioningChapterId))
+            setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
     };
 
     const handleConfirmAction = () => {
         const { action, chapterId } = confirmDialog;
         if (!chapterId) return;
         const chapterFromList = chapters.find((c) => c.id === chapterId);
-        setActioningChapterId(chapterId);
-        setConfirmDialog({ open: false, action: null, chapterId: null });
+        const isVersionAction = action?.startsWith('version_');
+        if (!isVersionAction) setActioningChapterId(chapterId);
+        setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
         if (action === 'publish') {
             const doUpdate = (title, content) =>
                 updateChapter(chapterId, { title, content, status: 'PENDING_REVIEW' })
@@ -294,11 +375,45 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                     });
                 })
                 .catch((err) => {
-                    alert(err?.message ?? 'Hủy xuất bản thất bại');
+                    const msg = err?.response?.data?.message ?? err?.message ?? 'Hủy xuất bản thất bại';
+                    setMessageModal({ open: true, title: 'Không thể hủy xuất bản', message: msg });
                 })
                 .finally(() => setActioningChapterId(null));
         } else if (action === 'delete') {
             handleDeleteChapter(chapterId);
+        } else if (action === 'version_submit' && confirmDialog.versionId) {
+            const versionId = confirmDialog.versionId;
+            setActioningVersionId(versionId);
+            setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
+            submitChapterVersion(chapterId, versionId)
+                .then(() => loadVersionsForChapter(chapterId))
+                .then(() => loadChapters(currentPage, { silent: true }))
+                .catch((err) => {
+                    const msg = err?.response?.data?.message ?? err?.message ?? 'Gửi duyệt phiên bản thất bại';
+                    const hint = (msg && (msg.includes('DRAFT') || msg.includes('Bản nháp'))) ? '\n\nPhiên bản bị từ chối vẫn được phép gửi lại. Nếu lỗi lặp lại, hãy làm mới trang (F5) và thử lại.' : '';
+                    alert(msg + hint);
+                })
+                .finally(() => setActioningVersionId(null));
+        } else if (action === 'version_unsubmit' && confirmDialog.versionId) {
+            const versionId = confirmDialog.versionId;
+            setActioningVersionId(versionId);
+            setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
+            unsubmitChapterVersion(chapterId, versionId)
+                .then(() => loadVersionsForChapter(chapterId))
+                .then(() => loadChapters(currentPage, { silent: true }))
+                .catch((err) => {
+                    const msg = err?.response?.data?.message ?? err?.message ?? 'Hủy gửi duyệt phiên bản thất bại';
+                    setMessageModal({ open: true, title: 'Không thể hủy gửi duyệt', message: msg });
+                })
+                .finally(() => setActioningVersionId(null));
+        } else if (action === 'version_delete' && confirmDialog.versionId) {
+            const versionId = confirmDialog.versionId;
+            setActioningVersionId(versionId);
+            setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
+            deleteChapterVersion(chapterId, versionId)
+                .then(() => loadVersionsForChapter(chapterId))
+                .catch((err) => alert(err?.response?.data?.message ?? err?.message ?? 'Xóa phiên bản thất bại'))
+                .finally(() => setActioningVersionId(null));
         }
     };
 
@@ -330,6 +445,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
     };
 
     const closeRejectionReasonModal = () => setRejectionReasonModal(prev => ({ ...prev, open: false }));
+    const closeMessageModal = () => setMessageModal(prev => ({ ...prev, open: false }));
 
     return (
         <div>
@@ -536,204 +652,636 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                     </button>
                                 </div>
                             ) : (
-                                chapters.map((chapter, index) => (
-                                    <div
-                                        key={chapter.id}
-                                        style={{
-                                            display: 'grid',
-                                            gridTemplateColumns: '90px 1fr 320px',
-                                            padding: '1rem 1.5rem',
-                                            alignItems: 'center',
-                                            borderBottom: index < chapters.length - 1 ? '1px solid #f3f4f6' : 'none',
-                                            transition: 'background-color 0.2s'
-                                        }}
-                                        onMouseEnter={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#fafafa';
-                                        }}
-                                        onMouseLeave={(e) => {
-                                            e.currentTarget.style.backgroundColor = '#ffffff';
-                                        }}
-                                    >
-                                        {/* Order */}
-                                        <div>
-                                            <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#334155' }}>
-                                                Chương {chapter.number}
-                                            </span>
-                                        </div>
+                                chapters.map((chapter, index) => {
+                                    const isExpanded = expandedChapterId === chapter.id;
+                                    const versionsRaw = chapterVersionsMap[chapter.id] ?? [];
+                                    const versions = versionsRaw.map((v) => ({
+                                        id: v.id ?? v.Id,
+                                        version_number: v.versionNumber ?? v.version_number,
+                                        change_summary: v.titleSnapshot ?? v.change_summary ?? '—',
+                                        created_at: v.createdAt ?? v.created_at,
+                                        status: v.status ?? 'DRAFT',
+                                        rejection_reason: v.rejectionReason ?? v.rejection_reason,
+                                        reviewed_at: v.reviewedAt ?? v.reviewed_at,
+                                    }));
+                                    const hasPendingVersion = versions.some((ver) => (ver.status ?? '').toLowerCase() === 'pending_review');
+                                    const chapterIsPendingReview = (chapter.status ?? '').toLowerCase() === 'pending_review';
+                                    const prevOrderIndex = chapter.number - 2;
+                                    const prevChapter = chapters.find((c) => c.number === chapter.number - 1);
+                                    const prevHasPendingVersion = prevChapter && (chapterVersionsMap[prevChapter.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review');
+                                    const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(prevOrderIndex) || pendingOrderIndices.has(prevOrderIndex) || prevHasPendingVersion;
+                                    const canSubmitVersion = canSubmitForPublish && !hasPendingVersion && !chapterIsPendingReview;
+                                    const versionsLoading = loadingVersionsForChapterId === chapter.id;
+                                    const toggleExpand = (e) => {
+                                        if (e.target.closest('button')) return;
+                                        setExpandedChapterId((prev) => (prev === chapter.id ? null : chapter.id));
+                                    };
+                                    const handleCreateVersion = (e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        onAddVersion?.(chapter);
+                                    };
+                                    return (
+                                        <div key={chapter.id} style={{ borderBottom: index < chapters.length - 1 ? '1px solid #f3f4f6' : 'none' }}>
+                                            <div
+                                                style={{
+                                                    display: 'grid',
+                                                    gridTemplateColumns: '90px 1fr 320px',
+                                                    padding: '1rem 1.5rem',
+                                                    alignItems: 'center',
+                                                    transition: 'background-color 0.2s',
+                                                    backgroundColor: isExpanded ? '#f8fafc' : '#ffffff',
+                                                }}
+                                                onMouseEnter={(e) => {
+                                                    if (!isExpanded) e.currentTarget.style.backgroundColor = '#fafafa';
+                                                }}
+                                                onMouseLeave={(e) => {
+                                                    if (!isExpanded) e.currentTarget.style.backgroundColor = '#ffffff';
+                                                }}
+                                            >
+                                                {/* Order + Chevron (click to expand) */}
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={toggleExpand}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(e); } }}
+                                                    style={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '0.5rem',
+                                                        cursor: 'pointer',
+                                                        outline: 'none',
+                                                    }}
+                                                >
+                                                    {isExpanded ? (
+                                                        <ChevronDown size={18} color="#6366f1" style={{ flexShrink: 0 }} />
+                                                    ) : (
+                                                        <ChevronRight size={18} color="#94a3b8" style={{ flexShrink: 0 }} />
+                                                    )}
+                                                    <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#334155' }}>
+                                                        Chương {chapter.number}
+                                                    </span>
+                                                </div>
 
-                                        {/* Title and Info */}
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', minWidth: 0 }}>
-                                            <div style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                {chapter.title}
-                                            </div>
-                                            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                                <span style={{
-                                                    padding: '0.15rem 0.5rem',
-                                                    borderRadius: '9999px',
-                                                    fontSize: '0.6875rem',
-                                                    fontWeight: 600,
-                                                    ...getChapterStatusStyle(chapter.status)
-                                                }}>
-                                                    {chapter.statusDisplay}
-                                                </span>
-                                                {chapter.status === 'rejected' && (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => openChapterRejectionReason(chapter.title, chapter.id)}
-                                                        style={{
+                                                {/* Title and Info (click to expand) */}
+                                                <div
+                                                    role="button"
+                                                    tabIndex={0}
+                                                    onClick={toggleExpand}
+                                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(e); } }}
+                                                    style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', minWidth: 0, cursor: 'pointer', outline: 'none' }}
+                                                >
+                                                    <div style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                        {chapter.title}
+                                                    </div>
+                                                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                                        <span style={{
                                                             padding: '0.15rem 0.5rem',
+                                                            borderRadius: '9999px',
                                                             fontSize: '0.6875rem',
                                                             fontWeight: 600,
-                                                            color: '#b91c1c',
-                                                            backgroundColor: 'transparent',
-                                                            border: '1px solid #fecaca',
-                                                            borderRadius: '6px',
-                                                            cursor: 'pointer'
-                                                        }}
-                                                    >
-                                                        Lý do từ chối
-                                                    </button>
-                                                )}
-                                                <span style={{ fontSize: '0.6875rem', color: '#94a3b8' }}>{chapter.updatedAt}</span>
-                                                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.6875rem', color: '#64748b' }}>
-                                                    <Eye size={11} /> {chapter.views}
-                                                    <MessageSquare size={11} /> {chapter.comments}
-                                                    👍 {chapter.likes}
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        {/* Actions: hàng 1 = Chỉnh sửa, Xóa; hàng 2 = Xuất bản/Hủy xuất bản = tổng width + gap của hàng 1 */}
-                                        <div style={{
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            alignItems: 'stretch',
-                                            justifyContent: 'center',
-                                            gap: '0.5rem',
-                                            width: 'fit-content',
-                                            margin: '0 auto'
-                                        }}>
-                                            {/* Hàng 1: Chỉnh sửa, Xóa — Chỉnh sửa: không cho khi Chờ duyệt; Xóa: chỉ cho khi Bản nháp */}
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                <button
-                                                    onClick={() => chapter.status !== 'pending_review' && onEditChapter(chapter)}
-                                                    disabled={chapter.status === 'pending_review'}
-                                                    title={chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể chỉnh sửa' : ''}
-                                                    style={{
-                                                        display: 'inline-flex',
-                                                        alignItems: 'center',
-                                                        gap: '0.25rem',
-                                                        padding: '0.4rem 0.75rem',
-                                                        backgroundColor: chapter.status === 'pending_review' ? '#f1f5f9' : '#f0fdf4',
-                                                        border: `1px solid ${chapter.status === 'pending_review' ? '#e2e8f0' : '#86efac'}`,
-                                                        borderRadius: '9999px',
-                                                        fontSize: '0.75rem',
-                                                        fontWeight: 600,
-                                                        color: chapter.status === 'pending_review' ? '#94a3b8' : '#15803d',
-                                                        cursor: chapter.status === 'pending_review' ? 'not-allowed' : 'pointer',
-                                                        transition: 'all 0.2s',
-                                                        whiteSpace: 'nowrap',
-                                                        opacity: chapter.status === 'pending_review' ? 0.8 : 1
-                                                    }}
-                                                    onMouseEnter={(e) => { if (chapter.status !== 'pending_review') e.currentTarget.style.backgroundColor = '#dcfce7'; }}
-                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'pending_review' ? '#f1f5f9' : '#f0fdf4'; }}
-                                                >
-                                                    <Pencil size={12} />
-                                                    Chỉnh sửa
-                                                </button>
-                                                <button
-                                                    onClick={() => chapter.status === 'draft' && openDeleteConfirm(chapter.id)}
-                                                    disabled={chapter.status !== 'draft'}
-                                                    title={chapter.status === 'draft' ? 'Xóa chương' : 'Chỉ được xóa chương khi ở trạng thái Bản nháp'}
-                                                    style={{
-                                                        display: 'inline-flex',
-                                                        alignItems: 'center',
-                                                        gap: '0.25rem',
-                                                        padding: '0.4rem 0.75rem',
-                                                        backgroundColor: chapter.status === 'draft' ? '#fff' : '#f1f5f9',
-                                                        border: `1px solid ${chapter.status === 'draft' ? '#fecaca' : '#e2e8f0'}`,
-                                                        borderRadius: '9999px',
-                                                        fontSize: '0.75rem',
-                                                        fontWeight: 600,
-                                                        color: chapter.status === 'draft' ? '#dc2626' : '#94a3b8',
-                                                        cursor: chapter.status === 'draft' ? 'pointer' : 'not-allowed',
-                                                        transition: 'all 0.2s',
-                                                        whiteSpace: 'nowrap',
-                                                        opacity: chapter.status === 'draft' ? 1 : 0.8
-                                                    }}
-                                                    onMouseEnter={(e) => { if (chapter.status === 'draft') e.currentTarget.style.backgroundColor = '#fef2f2'; }}
-                                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'draft' ? '#fff' : '#f1f5f9'; }}
-                                                >
-                                                    <Trash2 size={12} />
-                                                    Xóa
-                                                </button>
-                                            </div>
-                                            {/* Hàng 2: Xuất bản hoặc Hủy xuất bản (draft/rejected = Xuất bản; pending_review = Hủy xuất bản) */}
-                                            {(chapter.status === 'draft' || chapter.status === 'pending_review' || chapter.status === 'rejected') && (
-                                                <div style={{ display: 'flex', width: '100%' }}>
-                                                    {(chapter.status === 'draft' || chapter.status === 'rejected') && (() => {
-                                                        const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(chapter.number - 2) || pendingOrderIndices.has(chapter.number - 2);
-                                                        return (
+                                                            ...getChapterStatusStyle(chapter.status)
+                                                        }}>
+                                                            {chapter.statusDisplay}
+                                                        </span>
+                                                        {chapter.status === 'rejected' && (
                                                             <button
-                                                                onClick={() => canSubmitForPublish && handlePublishChapter(chapter.id)}
-                                                                disabled={actioningChapterId === chapter.id || !canSubmitForPublish}
-                                                                title={!canSubmitForPublish ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.` : 'Gửi chương lên để duyệt xuất bản'}
+                                                                type="button"
+                                                                onClick={() => openChapterRejectionReason(chapter.title, chapter.id)}
                                                                 style={{
-                                                                    display: 'inline-flex',
-                                                                    alignItems: 'center',
-                                                                    justifyContent: 'center',
-                                                                    gap: '0.25rem',
-                                                                    width: '100%',
-                                                                    padding: '0.4rem 0.75rem',
-                                                                    backgroundColor: canSubmitForPublish ? '#13ec5b' : '#e2e8f0',
-                                                                    border: 'none',
-                                                                    borderRadius: '9999px',
-                                                                    fontSize: '0.75rem',
+                                                                    padding: '0.15rem 0.5rem',
+                                                                    fontSize: '0.6875rem',
                                                                     fontWeight: 600,
-                                                                    color: canSubmitForPublish ? '#fff' : '#94a3b8',
-                                                                    cursor: actioningChapterId === chapter.id || !canSubmitForPublish ? 'not-allowed' : 'pointer',
-                                                                    opacity: actioningChapterId === chapter.id ? 0.7 : 1,
-                                                                    transition: 'all 0.2s',
-                                                                    whiteSpace: 'nowrap'
+                                                                    color: '#b91c1c',
+                                                                    backgroundColor: 'transparent',
+                                                                    border: '1px solid #fecaca',
+                                                                    borderRadius: '6px',
+                                                                    cursor: 'pointer'
                                                                 }}
                                                             >
-                                                                <Send size={12} />
-                                                                {actioningChapterId === chapter.id ? '...' : 'Xuất bản'}
+                                                                Lý do từ chối
                                                             </button>
-                                                        );
-                                                    })()}
-                                                    {chapter.status === 'pending_review' && (
+                                                        )}
+                                                        <span style={{ fontSize: '0.6875rem', color: '#94a3b8' }}>{chapter.updatedAt}</span>
+                                                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.6875rem', color: '#64748b' }}>
+                                                            <Eye size={11} /> {chapter.views}
+                                                            <MessageSquare size={11} /> {chapter.comments}
+                                                            👍 {chapter.likes}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Actions: hàng 1 = Chỉnh sửa, Xóa; hàng 2 = Xuất bản/Hủy xuất bản = tổng width + gap của hàng 1 */}
+                                                <div style={{
+                                                    display: 'flex',
+                                                    flexDirection: 'column',
+                                                    alignItems: 'stretch',
+                                                    justifyContent: 'center',
+                                                    gap: '0.5rem',
+                                                    width: 'fit-content',
+                                                    margin: '0 auto'
+                                                }}>
+                                                    {/* Hàng 1: Xem chi tiết, Chỉnh sửa, Xóa — Chỉnh sửa: không cho khi Chờ duyệt hoặc Đã xuất bản; Xóa: chỉ cho khi Bản nháp */}
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                                         <button
-                                                            onClick={() => handleUnpublishChapter(chapter.id)}
-                                                            disabled={actioningChapterId === chapter.id}
+                                                            type="button"
+                                                            onClick={() => onViewChapter?.(chapter)}
+                                                            title="Xem chi tiết chương"
                                                             style={{
                                                                 display: 'inline-flex',
                                                                 alignItems: 'center',
-                                                                justifyContent: 'center',
                                                                 gap: '0.25rem',
-                                                                width: '100%',
                                                                 padding: '0.4rem 0.75rem',
-                                                                backgroundColor: '#fff',
-                                                                border: '1px solid #f59e0b',
+                                                                backgroundColor: '#f0f9ff',
+                                                                border: '1px solid #bae6fd',
                                                                 borderRadius: '9999px',
                                                                 fontSize: '0.75rem',
                                                                 fontWeight: 600,
-                                                                color: '#b45309',
-                                                                cursor: actioningChapterId === chapter.id ? 'not-allowed' : 'pointer',
-                                                                opacity: actioningChapterId === chapter.id ? 0.7 : 1,
+                                                                color: '#0369a1',
+                                                                cursor: 'pointer',
                                                                 transition: 'all 0.2s',
                                                                 whiteSpace: 'nowrap'
                                                             }}
+                                                            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#e0f2fe'; }}
+                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f0f9ff'; }}
                                                         >
-                                                            <Undo2 size={12} />
-                                                            {actioningChapterId === chapter.id ? '...' : 'Hủy xuất bản'}
+                                                            <Eye size={12} />
+                                                            Xem chi tiết
                                                         </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => (chapter.status !== 'pending_review' && chapter.status !== 'published') && onEditChapter(chapter)}
+                                                            disabled={chapter.status === 'pending_review' || chapter.status === 'published'}
+                                                            title={chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể chỉnh sửa' : chapter.status === 'published' ? 'Chương đã xuất bản, không thể chỉnh sửa' : 'Chỉnh sửa chương'}
+                                                            style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.25rem',
+                                                                padding: '0.4rem 0.75rem',
+                                                                backgroundColor: (chapter.status === 'pending_review' || chapter.status === 'published') ? '#f1f5f9' : '#f0fdf4',
+                                                                border: `1px solid ${(chapter.status === 'pending_review' || chapter.status === 'published') ? '#e2e8f0' : '#86efac'}`,
+                                                                borderRadius: '9999px',
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 600,
+                                                                color: (chapter.status === 'pending_review' || chapter.status === 'published') ? '#94a3b8' : '#15803d',
+                                                                cursor: (chapter.status === 'pending_review' || chapter.status === 'published') ? 'not-allowed' : 'pointer',
+                                                                transition: 'all 0.2s',
+                                                                whiteSpace: 'nowrap',
+                                                                opacity: (chapter.status === 'pending_review' || chapter.status === 'published') ? 0.8 : 1
+                                                            }}
+                                                            onMouseEnter={(e) => { if (chapter.status !== 'pending_review' && chapter.status !== 'published') e.currentTarget.style.backgroundColor = '#dcfce7'; }}
+                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = (chapter.status === 'pending_review' || chapter.status === 'published') ? '#f1f5f9' : '#f0fdf4'; }}
+                                                        >
+                                                            <Pencil size={12} />
+                                                            Chỉnh sửa
+                                                        </button>
+                                                        <button
+                                                            onClick={() => chapter.status === 'draft' && openDeleteConfirm(chapter.id)}
+                                                            disabled={chapter.status !== 'draft'}
+                                                            title={chapter.status === 'draft' ? 'Xóa chương' : 'Chỉ được xóa chương khi ở trạng thái Bản nháp'}
+                                                            style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.25rem',
+                                                                padding: '0.4rem 0.75rem',
+                                                                backgroundColor: chapter.status === 'draft' ? '#fff' : '#f1f5f9',
+                                                                border: `1px solid ${chapter.status === 'draft' ? '#fecaca' : '#e2e8f0'}`,
+                                                                borderRadius: '9999px',
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 600,
+                                                                color: chapter.status === 'draft' ? '#dc2626' : '#94a3b8',
+                                                                cursor: chapter.status === 'draft' ? 'pointer' : 'not-allowed',
+                                                                transition: 'all 0.2s',
+                                                                whiteSpace: 'nowrap',
+                                                                opacity: chapter.status === 'draft' ? 1 : 0.8
+                                                            }}
+                                                            onMouseEnter={(e) => { if (chapter.status === 'draft') e.currentTarget.style.backgroundColor = '#fef2f2'; }}
+                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'draft' ? '#fff' : '#f1f5f9'; }}
+                                                        >
+                                                            <Trash2 size={12} />
+                                                            Xóa
+                                                        </button>
+                                                    </div>
+                                                    {/* Hàng 2: Xuất bản hoặc Hủy xuất bản (draft/rejected = Xuất bản; pending_review = Hủy xuất bản) */}
+                                                    {(chapter.status === 'draft' || chapter.status === 'pending_review' || chapter.status === 'rejected') && (
+                                                        <div style={{ display: 'flex', width: '100%' }}>
+                                                            {(chapter.status === 'draft' || chapter.status === 'rejected') && (() => {
+                                                                const prevOrderIndex = chapter.number - 2;
+                                                                const prevChapter = chapters.find((c) => c.number === chapter.number - 1);
+                                                                const prevHasPendingVersion = prevChapter && (chapterVersionsMap[prevChapter.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review');
+                                                                const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(prevOrderIndex) || pendingOrderIndices.has(prevOrderIndex) || prevHasPendingVersion;
+                                                                const canSubmitChapter = canSubmitForPublish && !hasPendingVersion;
+                                                                const chapterPublishTitle = !canSubmitForPublish
+                                                                    ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.`
+                                                                    : hasPendingVersion
+                                                                        ? 'Đã có phiên bản đang chờ duyệt, không thể gửi chương gốc.'
+                                                                        : 'Gửi chương lên để duyệt xuất bản';
+                                                                return (
+                                                                    <button
+                                                                        onClick={() => canSubmitChapter && handlePublishChapter(chapter.id)}
+                                                                        disabled={actioningChapterId === chapter.id || !canSubmitChapter}
+                                                                        title={chapterPublishTitle}
+                                                                        style={{
+                                                                            display: 'inline-flex',
+                                                                            alignItems: 'center',
+                                                                            justifyContent: 'center',
+                                                                            gap: '0.25rem',
+                                                                            width: '100%',
+                                                                            padding: '0.4rem 0.75rem',
+                                                                            backgroundColor: canSubmitChapter ? '#13ec5b' : '#e2e8f0',
+                                                                            border: 'none',
+                                                                            borderRadius: '9999px',
+                                                                            fontSize: '0.75rem',
+                                                                            fontWeight: 600,
+                                                                            color: canSubmitChapter ? '#fff' : '#94a3b8',
+                                                                            cursor: actioningChapterId === chapter.id || !canSubmitChapter ? 'not-allowed' : 'pointer',
+                                                                            opacity: actioningChapterId === chapter.id ? 0.7 : 1,
+                                                                            transition: 'all 0.2s',
+                                                                            whiteSpace: 'nowrap'
+                                                                        }}
+                                                                    >
+                                                                        <Send size={12} />
+                                                                        {actioningChapterId === chapter.id ? '...' : hasPendingVersion ? 'Đã có phiên bản chờ duyệt' : 'Xuất bản'}
+                                                                    </button>
+                                                                );
+                                                            })()}
+                                                            {chapter.status === 'pending_review' && (() => {
+                                                                const canUnpublish = canUnpublishChapter(chapter);
+                                                                const disabled = actioningChapterId === chapter.id || !canUnpublish;
+                                                                return (
+                                                                    <button
+                                                                        onClick={() => !disabled && handleUnpublishChapter(chapter.id)}
+                                                                        disabled={disabled}
+                                                                        title={!canUnpublish ? 'Hủy xuất bản phải theo thứ tự ngược. Phải hủy các chương có thứ tự sau trước.' : 'Hủy xuất bản'}
+                                                                        style={{
+                                                                            display: 'inline-flex',
+                                                                            alignItems: 'center',
+                                                                            justifyContent: 'center',
+                                                                            gap: '0.25rem',
+                                                                            width: '100%',
+                                                                            padding: '0.4rem 0.75rem',
+                                                                            backgroundColor: '#fff',
+                                                                            border: '1px solid #f59e0b',
+                                                                            borderRadius: '9999px',
+                                                                            fontSize: '0.75rem',
+                                                                            fontWeight: 600,
+                                                                            color: canUnpublish ? '#b45309' : '#94a3b8',
+                                                                            cursor: disabled ? 'not-allowed' : 'pointer',
+                                                                            opacity: disabled ? 0.7 : 1,
+                                                                            transition: 'all 0.2s',
+                                                                            whiteSpace: 'nowrap'
+                                                                        }}
+                                                                    >
+                                                                        <Undo2 size={12} />
+                                                                        {actioningChapterId === chapter.id ? '...' : 'Hủy xuất bản'}
+                                                                    </button>
+                                                                );
+                                                            })()}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Panel version khi mở rộng — đồng bộ màu hệ thống, có nút Chỉnh sửa / Xóa / Xuất bản */}
+                                            {isExpanded && (
+                                                <div
+                                                    onClick={(e) => { e.stopPropagation(); }}
+                                                    role="presentation"
+                                                    style={{
+                                                        marginLeft: '3rem',
+                                                        marginRight: '1.5rem',
+                                                        marginBottom: '1rem',
+                                                        padding: '1.25rem 1.5rem',
+                                                        backgroundColor: '#ffffff',
+                                                        borderRadius: '12px',
+                                                        border: '1px solid #e5e7eb',
+                                                        boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                                                    }}
+                                                >
+                                                    <div style={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'space-between',
+                                                        flexWrap: 'wrap',
+                                                        gap: '1rem',
+                                                        marginBottom: '1.25rem',
+                                                        paddingBottom: '1rem',
+                                                        borderBottom: '1px solid #f3f4f6',
+                                                    }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                            <div style={{
+                                                                width: '36px',
+                                                                height: '36px',
+                                                                borderRadius: '10px',
+                                                                background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                            }}>
+                                                                <GitBranch size={18} color="#fff" />
+                                                            </div>
+                                                            <span style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: '1rem', fontWeight: 700, color: '#1A2332' }}>
+                                                                Phiên bản chương
+                                                            </span>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleCreateVersion}
+                                                            style={{
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.5rem',
+                                                                padding: '0.5rem 1rem',
+                                                                backgroundColor: '#13ec5b',
+                                                                color: '#fff',
+                                                                border: 'none',
+                                                                borderRadius: '9999px',
+                                                                fontSize: '0.8125rem',
+                                                                fontWeight: 700,
+                                                                cursor: 'pointer',
+                                                                boxShadow: '0 2px 8px rgba(19, 236, 91, 0.3)',
+                                                                fontFamily: "'Plus Jakarta Sans', sans-serif",
+                                                            }}
+                                                            onMouseEnter={(e) => {
+                                                                e.currentTarget.style.backgroundColor = '#10d452';
+                                                                e.currentTarget.style.transform = 'translateY(-1px)';
+                                                            }}
+                                                            onMouseLeave={(e) => {
+                                                                e.currentTarget.style.backgroundColor = '#13ec5b';
+                                                                e.currentTarget.style.transform = 'translateY(0)';
+                                                            }}
+                                                        >
+                                                            <Plus size={16} />
+                                                            Tạo phiên bản
+                                                        </button>
+                                                    </div>
+
+                                                    {versionsLoading ? (
+                                                        <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0, padding: '1.5rem', textAlign: 'center' }}>
+                                                            Đang tải danh sách phiên bản...
+                                                        </p>
+                                                    ) : versions.length === 0 ? (
+                                                        <p style={{
+                                                            fontSize: '0.875rem',
+                                                            color: '#64748b',
+                                                            margin: 0,
+                                                            padding: '1.5rem',
+                                                            textAlign: 'center',
+                                                            backgroundColor: '#f8fafc',
+                                                            borderRadius: '8px',
+                                                            border: '1px dashed #e2e8f0',
+                                                        }}>
+                                                            Chưa có phiên bản nào. Bấm &quot;Tạo phiên bản&quot; để lưu bản sao nội dung hiện tại.
+                                                        </p>
+                                                    ) : (
+                                                        <div style={{ borderRadius: '8px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                                                            <div style={{
+                                                                display: 'grid',
+                                                                gridTemplateColumns: '80px 1fr 110px 140px 320px',
+                                                                gap: '1rem',
+                                                                padding: '0.75rem 1rem',
+                                                                backgroundColor: '#f9fafb',
+                                                                borderBottom: '1px solid #e5e7eb',
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 600,
+                                                                color: '#6b7280',
+                                                                alignItems: 'center',
+                                                            }}>
+                                                                <div>Phiên bản</div>
+                                                                <div>Tiêu đề phiên bản</div>
+                                                                <div>Trạng thái</div>
+                                                                <div>Ngày tạo</div>
+                                                                <div style={{ textAlign: 'center' }}>Hành động</div>
+                                                            </div>
+                                                            {versions.map((v, vIndex) => {
+                                                                const vStatusKey = (v.status ?? 'DRAFT').toUpperCase();
+                                                                const vStatusLower = (v.status ?? 'DRAFT').toLowerCase();
+                                                                const vStatusDisplay = CHAPTER_STATUS_MAP[vStatusKey] ?? v.status ?? 'DRAFT';
+                                                                const vStatusStyle = getChapterStatusStyle(v.status);
+                                                                return (
+                                                                    <div
+                                                                        key={v.id}
+                                                                        style={{
+                                                                            display: 'grid',
+                                                                            gridTemplateColumns: '80px 1fr 110px 140px 320px',
+                                                                            gap: '1rem',
+                                                                            padding: '0.875rem 1rem',
+                                                                            alignItems: 'center',
+                                                                            borderBottom: vIndex < versions.length - 1 ? '1px solid #f3f4f6' : 'none',
+                                                                            fontSize: '0.8125rem',
+                                                                            color: '#334155',
+                                                                            transition: 'background-color 0.2s',
+                                                                        }}
+                                                                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#fafafa'; }}
+                                                                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#fff'; }}
+                                                                    >
+                                                                        <span style={{ fontWeight: 700, color: '#6366f1' }}>
+                                                                            #{v.version_number}
+                                                                        </span>
+                                                                        <span style={{ color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                            {v.change_summary ?? '—'}
+                                                                        </span>
+                                                                        <span style={{
+                                                                            fontSize: '0.75rem',
+                                                                            fontWeight: 600,
+                                                                            padding: '0.25rem 0.5rem',
+                                                                            borderRadius: '9999px',
+                                                                            ...vStatusStyle,
+                                                                        }}>
+                                                                            {vStatusDisplay}
+                                                                        </span>
+                                                                        <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                                                                            {v.created_at ? new Date(v.created_at).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                                                                        </span>
+                                                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                                            <div style={{
+                                                                                display: 'flex',
+                                                                                flexDirection: 'column',
+                                                                                alignItems: 'stretch',
+                                                                                justifyContent: 'center',
+                                                                                gap: '0.5rem',
+                                                                                width: 'fit-content',
+                                                                                margin: '0 auto'
+                                                                            }}>
+                                                                                {/* Hàng 1: Lý do từ chối (nếu rejected), Chỉnh sửa, Xóa — giống chapter */}
+                                                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                                                    {vStatusLower === 'rejected' && (
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                if (v.rejection_reason) {
+                                                                                                    setRejectionReasonModal({
+                                                                                                        open: true,
+                                                                                                        title: `Lý do từ chối: ${v.title_snapshot || v.titleSnapshot || `Phiên bản #${v.version_number}`}`,
+                                                                                                        reason: v.rejection_reason,
+                                                                                                        rejectedAt: v.reviewed_at ?? null,
+                                                                                                        loading: false
+                                                                                                    });
+                                                                                                } else {
+                                                                                                    openChapterRejectionReason(v.title_snapshot || v.titleSnapshot || `Phiên bản #${v.version_number}`, chapter.id);
+                                                                                                }
+                                                                                            }}
+                                                                                            title="Xem lý do từ chối phiên bản"
+                                                                                            style={{
+                                                                                                display: 'inline-flex',
+                                                                                                alignItems: 'center',
+                                                                                                gap: '0.25rem',
+                                                                                                padding: '0.4rem 0.75rem',
+                                                                                                backgroundColor: '#fef2f2',
+                                                                                                border: '1px solid #fecaca',
+                                                                                                borderRadius: '9999px',
+                                                                                                fontSize: '0.75rem',
+                                                                                                fontWeight: 600,
+                                                                                                color: '#b91c1c',
+                                                                                                cursor: 'pointer',
+                                                                                                whiteSpace: 'nowrap',
+                                                                                                transition: 'all 0.2s'
+                                                                                            }}
+                                                                                        >
+                                                                                            <AlertCircle size={12} />
+                                                                                            Lý do từ chối
+                                                                                        </button>
+                                                                                    )}
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={(e) => { e.stopPropagation(); if (vStatusLower !== 'pending_review') onEditVersion?.(chapter, v); }}
+                                                                                        title={vStatusLower === 'pending_review' ? 'Phiên bản đang chờ duyệt, không thể chỉnh sửa' : 'Chỉnh sửa phiên bản'}
+                                                                                        disabled={vStatusLower === 'pending_review'}
+                                                                                        style={{
+                                                                                            display: 'inline-flex',
+                                                                                            alignItems: 'center',
+                                                                                            gap: '0.25rem',
+                                                                                            padding: '0.4rem 0.75rem',
+                                                                                            backgroundColor: vStatusLower === 'pending_review' ? '#f1f5f9' : '#f0fdf4',
+                                                                                            border: `1px solid ${vStatusLower === 'pending_review' ? '#e2e8f0' : '#86efac'}`,
+                                                                                            borderRadius: '9999px',
+                                                                                            fontSize: '0.75rem',
+                                                                                            fontWeight: 600,
+                                                                                            color: vStatusLower === 'pending_review' ? '#94a3b8' : '#15803d',
+                                                                                            cursor: vStatusLower === 'pending_review' ? 'not-allowed' : 'pointer',
+                                                                                            opacity: vStatusLower === 'pending_review' ? 0.8 : 1,
+                                                                                            whiteSpace: 'nowrap',
+                                                                                            transition: 'all 0.2s'
+                                                                                        }}
+                                                                                    >
+                                                                                        <Pencil size={12} />
+                                                                                        Chỉnh sửa
+                                                                                    </button>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            if (!v.id || vStatusLower === 'published' || vStatusLower === 'pending_review') return;
+                                                                                            openVersionDeleteConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
+                                                                                        }}
+                                                                                        title={vStatusLower === 'pending_review' ? 'Phiên bản đang chờ duyệt, không thể xóa' : vStatusLower === 'published' ? 'Đã xuất bản' : 'Xóa phiên bản'}
+                                                                                        disabled={vStatusLower === 'published' || vStatusLower === 'pending_review'}
+                                                                                        style={{
+                                                                                            display: 'inline-flex',
+                                                                                            alignItems: 'center',
+                                                                                            gap: '0.25rem',
+                                                                                            padding: '0.4rem 0.75rem',
+                                                                                            backgroundColor: (vStatusLower === 'published' || vStatusLower === 'pending_review') ? '#f1f5f9' : '#fff',
+                                                                                            border: '1px solid #fecaca',
+                                                                                            borderRadius: '9999px',
+                                                                                            fontSize: '0.75rem',
+                                                                                            fontWeight: 600,
+                                                                                            color: (vStatusLower === 'published' || vStatusLower === 'pending_review') ? '#94a3b8' : '#dc2626',
+                                                                                            cursor: (vStatusLower === 'published' || vStatusLower === 'pending_review') ? 'not-allowed' : 'pointer',
+                                                                                            whiteSpace: 'nowrap',
+                                                                                            transition: 'all 0.2s'
+                                                                                        }}
+                                                                                    >
+                                                                                        <Trash2 size={12} />
+                                                                                        Xóa
+                                                                                    </button>
+                                                                                </div>
+                                                                                {/* Hàng 2: Xuất bản hoặc Hủy xuất bản — giống chapter */}
+                                                                                {(vStatusLower === 'pending_review' || vStatusLower === 'draft' || vStatusLower === 'rejected') && (
+                                                                                    <div style={{ display: 'flex', width: '100%' }}>
+                                                                                        {vStatusLower === 'pending_review' ? (() => {
+                                                                                            const canUnpublish = canUnpublishChapter(chapter);
+                                                                                            const disabledVersion = actioningVersionId === v.id || !canUnpublish;
+                                                                                            return (
+                                                                                                <button
+                                                                                                    type="button"
+                                                                                                    onClick={(e) => {
+                                                                                                        e.stopPropagation();
+                                                                                                        if (!disabledVersion) openVersionUnsubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
+                                                                                                    }}
+                                                                                                    title={!canUnpublish ? 'Hủy xuất bản phải theo thứ tự ngược. Phải hủy các chương có thứ tự sau trước.' : 'Hủy gửi duyệt phiên bản'}
+                                                                                                    disabled={disabledVersion}
+                                                                                                    style={{
+                                                                                                        display: 'inline-flex',
+                                                                                                        alignItems: 'center',
+                                                                                                        justifyContent: 'center',
+                                                                                                        gap: '0.25rem',
+                                                                                                        width: '100%',
+                                                                                                        padding: '0.4rem 0.75rem',
+                                                                                                        backgroundColor: disabledVersion ? '#e2e8f0' : '#fff',
+                                                                                                        border: '1px solid #f59e0b',
+                                                                                                        borderRadius: '9999px',
+                                                                                                        fontSize: '0.75rem',
+                                                                                                        fontWeight: 600,
+                                                                                                        color: canUnpublish ? '#b45309' : '#94a3b8',
+                                                                                                        cursor: disabledVersion ? 'not-allowed' : 'pointer',
+                                                                                                        opacity: disabledVersion ? 0.7 : 1,
+                                                                                                        whiteSpace: 'nowrap',
+                                                                                                        transition: 'all 0.2s'
+                                                                                                    }}
+                                                                                                >
+                                                                                                    <Undo2 size={12} />
+                                                                                                    {actioningVersionId === v.id ? '...' : 'Hủy xuất bản'}
+                                                                                                </button>
+                                                                                            );
+                                                                                        })() : (vStatusLower === 'draft' || vStatusLower === 'rejected') && (
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={(e) => {
+                                                                                                    e.stopPropagation();
+                                                                                                    if (vStatusLower === 'published' || !canSubmitVersion) return;
+                                                                                                    openVersionSubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
+                                                                                                }}
+                                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (!canSubmitForPublish ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.' : 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.') : 'Gửi duyệt phiên bản'}
+                                                                                                disabled={vStatusLower === 'published' || !canSubmitVersion}
+                                                                                                style={{
+                                                                                                    display: 'inline-flex',
+                                                                                                    alignItems: 'center',
+                                                                                                    justifyContent: 'center',
+                                                                                                    gap: '0.25rem',
+                                                                                                    width: '100%',
+                                                                                                    padding: '0.4rem 0.75rem',
+                                                                                                    backgroundColor: (vStatusLower === 'published' || !canSubmitVersion) ? '#e2e8f0' : '#13ec5b',
+                                                                                                    border: 'none',
+                                                                                                    borderRadius: '9999px',
+                                                                                                    fontSize: '0.75rem',
+                                                                                                    fontWeight: 600,
+                                                                                                    color: (vStatusLower === 'published' || !canSubmitVersion) ? '#94a3b8' : '#fff',
+                                                                                                    cursor: (vStatusLower === 'published' || !canSubmitVersion) ? 'not-allowed' : 'pointer',
+                                                                                                    opacity: (vStatusLower === 'published' || !canSubmitVersion) ? 0.8 : 1,
+                                                                                                    whiteSpace: 'nowrap',
+                                                                                                    transition: 'all 0.2s'
+                                                                                                }}
+                                                                                            >
+                                                                                                <Send size={12} />
+                                                                                                {vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (!canSubmitForPublish ? `Gửi chương ${chapter.number - 1} trước` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt' : 'Đã có phiên bản chờ duyệt') : 'Xuất bản'}
+                                                                                            </button>
+                                                                                        )}
+                                                                                    </div>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
                                                     )}
                                                 </div>
                                             )}
                                         </div>
-                                    </div>
-                                ))
+                                    );
+                                })
                             )}
                         </div>
 
@@ -817,11 +1365,17 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                             {confirmDialog.action === 'publish' && 'Xác nhận xuất bản'}
                             {confirmDialog.action === 'unpublish' && 'Xác nhận hủy xuất bản'}
                             {confirmDialog.action === 'delete' && 'Xác nhận xóa chương'}
+                            {confirmDialog.action === 'version_submit' && 'Xác nhận gửi duyệt phiên bản'}
+                            {confirmDialog.action === 'version_unsubmit' && 'Xác nhận hủy gửi duyệt phiên bản'}
+                            {confirmDialog.action === 'version_delete' && 'Xác nhận xóa phiên bản'}
                         </h3>
                         <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
                             {confirmDialog.action === 'publish' && 'Bạn có chắc chắn muốn gửi chương này lên để duyệt xuất bản?'}
                             {confirmDialog.action === 'unpublish' && 'Bạn có chắc chắn muốn hủy xuất bản và đưa chương về bản nháp?'}
                             {confirmDialog.action === 'delete' && 'Bạn có chắc chắn muốn xóa chương này? Hành động này không thể hoàn tác.'}
+                            {confirmDialog.action === 'version_submit' && 'Bạn có chắc chắn muốn gửi phiên bản này lên để duyệt xuất bản?'}
+                            {confirmDialog.action === 'version_unsubmit' && 'Bạn có chắc chắn muốn hủy gửi duyệt? Phiên bản và chương sẽ về trạng thái Bản nháp.'}
+                            {confirmDialog.action === 'version_delete' && 'Bạn có chắc chắn muốn xóa phiên bản này? Hành động này không thể hoàn tác.'}
                         </p>
                         <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                             <button
@@ -846,13 +1400,13 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
                                     color: '#ffffff',
-                                    backgroundColor: confirmDialog.action === 'delete' ? '#dc2626' : '#13ec5b',
+                                    backgroundColor: (confirmDialog.action === 'delete' || confirmDialog.action === 'version_delete') ? '#dc2626' : '#13ec5b',
                                     border: 'none',
                                     borderRadius: '8px',
                                     cursor: 'pointer'
                                 }}
                             >
-                                {confirmDialog.action === 'delete' ? 'Xóa' : 'Xác nhận'}
+                                {(confirmDialog.action === 'delete' || confirmDialog.action === 'version_delete') ? 'Xóa' : 'Xác nhận'}
                             </button>
                         </div>
                     </div>
@@ -920,6 +1474,60 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter 
                                 }}
                             >
                                 Đóng
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Modal thông báo (vd: hủy xuất bản bị chặn vì moderator đã nhận duyệt) */}
+            {messageModal.open && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10001,
+                        padding: '1rem'
+                    }}
+                    onClick={closeMessageModal}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '440px',
+                            width: '100%',
+                            boxShadow: '0 20px 60px rgba(0,0,0,0.2)'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.125rem', fontWeight: 600, color: '#1e293b' }}>
+                            {messageModal.title}
+                        </h3>
+                        <p style={{ margin: 0, fontSize: '0.875rem', color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                            {messageModal.message}
+                        </p>
+                        <div style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                                type="button"
+                                onClick={closeMessageModal}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    backgroundColor: '#f1f5f9',
+                                    color: '#475569',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Đã hiểu
                             </button>
                         </div>
                     </div>
