@@ -1,0 +1,190 @@
+﻿@{
+    ViewData["Title"] = "Thư viện của tôi";
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="mb-0"><i class="bi bi-collection"></i> Thư viện của tôi</h2>
+        <a class="btn btn-outline-secondary btn-sm" href="/"><i class="bi bi-arrow-left"></i> Trang chủ</a>
+    </div>
+
+    <div id="libraryLoading" class="text-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-2 text-muted">Đang tải...</p>
+    </div>
+
+    <div id="libraryContent" style="display: none;">
+        <!-- Lịch sử đọc dở -->
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="bi bi-bookmark-check"></i> Đang đọc dở</h5>
+            </div>
+            <div class="card-body">
+                <div id="readingHistoryList"></div>
+                <p id="readingHistoryEmpty" class="text-muted mb-0" style="display: none;">Chưa có lịch sử đọc. Vào truyện và bấm "Lưu lịch sử đọc" khi đọc đến một chương.</p>
+            </div>
+        </div>
+
+        <!-- Truyện đang theo dõi -->
+        <div class="card mb-4">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-bookmark-star"></i> Truyện đang theo dõi</h5>
+            </div>
+            <div class="card-body">
+                <div id="followedStoriesList"></div>
+                <p id="followedStoriesEmpty" class="text-muted mb-0" style="display: none;">Chưa theo dõi truyện nào. Vào trang truyện và bấm "Theo dõi truyện".</p>
+            </div>
+        </div>
+
+        <!-- Tác giả đang theo dõi -->
+        <div class="card mb-4">
+            <div class="card-header bg-info text-white">
+                <h5 class="mb-0"><i class="bi bi-person-hearts"></i> Tác giả đang theo dõi</h5>
+            </div>
+            <div class="card-body">
+                <div id="followedAuthorsList"></div>
+                <p id="followedAuthorsEmpty" class="text-muted mb-0" style="display: none;">Chưa theo dõi tác giả nào. Vào trang truyện và bấm "Theo dõi tác giả".</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="libraryError" class="alert alert-warning" style="display: none;">
+        <i class="bi bi-exclamation-triangle"></i> <span id="libraryErrorText"></span>
+        <a href="/Auth/Login" class="alert-link">Đăng nhập</a> để xem thư viện.
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            if (typeof AuthHelper === 'undefined' || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) {
+                document.getElementById('libraryLoading').style.display = 'none';
+                document.getElementById('libraryError').style.display = 'block';
+                document.getElementById('libraryErrorText').textContent = 'Bạn chưa đăng nhập. ';
+                return;
+            }
+            loadLibrary();
+        });
+
+        async function loadLibrary() {
+            try {
+                const data = await ApiService.getMyLibrary();
+                document.getElementById('libraryLoading').style.display = 'none';
+                document.getElementById('libraryContent').style.display = 'block';
+                renderReadingHistory(data.readingHistory || []);
+                renderFollowedStories(data.followedStories || []);
+                renderFollowedAuthors(data.followedAuthors || []);
+            } catch (e) {
+                document.getElementById('libraryLoading').style.display = 'none';
+                const errEl = document.getElementById('libraryError');
+                const textEl = document.getElementById('libraryErrorText');
+                errEl.style.display = 'block';
+                if (e && (e.message || '').indexOf('401') !== -1) {
+                    textEl.textContent = 'Phiên đăng nhập hết hạn. ';
+                } else {
+                    textEl.textContent = (e && e.message) || 'Không tải được thư viện. ';
+                }
+            }
+        }
+
+        function escapeHtml(text) {
+            if (text == null) return '';
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function formatDate(d) {
+            if (!d) return '';
+            if (typeof Utils !== 'undefined' && Utils.formatDate) return Utils.formatDate(d);
+            try {
+                const dt = new Date(d);
+                return isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('vi-VN');
+            } catch (_) { return ''; }
+        }
+
+        function renderReadingHistory(items) {
+            const container = document.getElementById('readingHistoryList');
+            const empty = document.getElementById('readingHistoryEmpty');
+            if (!items || items.length === 0) {
+                container.innerHTML = '';
+                empty.style.display = 'block';
+                return;
+            }
+            empty.style.display = 'none';
+            container.innerHTML = items.map(function (item) {
+                const storyUrl = '/Home/Story/' + item.storyId;
+                const chapterUrl = '/Chapters/Read/' + item.lastReadChapterId;
+                const cover = item.coverImage ? 'http://localhost:5000' + item.coverImage : '';
+                const chapterLabel = item.lastReadChapterTitle
+                    ? (item.lastReadChapterOrder != null ? 'Chương ' + item.lastReadChapterOrder + ': ' : '') + escapeHtml(item.lastReadChapterTitle)
+                    : 'Chương đang đọc';
+                return `
+                    <div class="d-flex align-items-center border-bottom py-3">
+                        <div class="me-3" style="width: 56px; height: 72px; flex-shrink: 0;">
+                            ${cover
+                                ? '<img src="' + cover + '" class="img-fluid rounded" style="width:56px;height:72px;object-fit:cover" alt="">'
+                                : '<div class="bg-secondary rounded d-flex align-items-center justify-content-center" style="width:56px;height:72px"><i class="bi bi-book text-white"></i></div>'}
+                        </div>
+                        <div class="flex-grow-1 min-width-0">
+                            <a href="${storyUrl}" class="fw-medium text-decoration-none text-dark">${escapeHtml(item.storyTitle)}</a>
+                            <div class="small text-muted">${chapterLabel}</div>
+                            <div class="small text-muted">Đọc lúc: ${formatDate(item.lastReadAt)}</div>
+                        </div>
+                        <a class="btn btn-primary btn-sm" href="${chapterUrl}"><i class="bi bi-book-half"></i> Đọc tiếp</a>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderFollowedStories(items) {
+            const container = document.getElementById('followedStoriesList');
+            const empty = document.getElementById('followedStoriesEmpty');
+            if (!items || items.length === 0) {
+                container.innerHTML = '';
+                empty.style.display = 'block';
+                return;
+            }
+            empty.style.display = 'none';
+            container.innerHTML = items.map(function (item) {
+                const url = '/Home/Story/' + item.id;
+                const cover = item.coverImage ? 'http://localhost:5000' + item.coverImage : '';
+                const updated = item.latestUpdatedAt ? formatDate(item.latestUpdatedAt) : '';
+                return `
+                    <div class="d-flex align-items-center border-bottom py-3">
+                        <div class="me-3" style="width: 56px; height: 72px; flex-shrink: 0;">
+                            ${cover
+                                ? '<img src="' + cover + '" class="img-fluid rounded" style="width:56px;height:72px;object-fit:cover" alt="">'
+                                : '<div class="bg-secondary rounded d-flex align-items-center justify-content-center" style="width:56px;height:72px"><i class="bi bi-book text-white"></i></div>'}
+                        </div>
+                        <div class="flex-grow-1 min-width-0">
+                            <a href="${url}" class="fw-medium text-decoration-none text-dark">${escapeHtml(item.title)}</a>
+                            ${item.authorName ? '<div class="small text-muted">' + escapeHtml(item.authorName) + '</div>' : ''}
+                            <div class="small text-muted">${item.publishedChaptersCount != null ? item.publishedChaptersCount + ' chương' : ''} ${updated ? ' · Cập nhật: ' + updated : ''}</div>
+                        </div>
+                        <a class="btn btn-outline-primary btn-sm" href="${url}"><i class="bi bi-book"></i> Xem</a>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderFollowedAuthors(items) {
+            const container = document.getElementById('followedAuthorsList');
+            const empty = document.getElementById('followedAuthorsEmpty');
+            if (!items || items.length === 0) {
+                container.innerHTML = '';
+                empty.style.display = 'block';
+                return;
+            }
+            empty.style.display = 'none';
+            container.innerHTML = '<div class="d-flex flex-wrap gap-2">' + items.map(function (item) {
+                return `
+                    <span class="badge bg-light text-dark border p-2"><i class="bi bi-person"></i> ${escapeHtml(item.authorName)}</span>
+                `;
+            }).join('') + '</div>';
+        }
+    </script>
+}
