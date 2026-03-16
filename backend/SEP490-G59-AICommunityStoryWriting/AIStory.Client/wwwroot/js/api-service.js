@@ -3,7 +3,13 @@ const API_BASE_URL = (typeof window !== 'undefined' && window.__API_BASE_URL) ? 
 
 // API Service Class
 class ApiService {
-    static async request(url, options = {}) {
+    /**
+     * Gửi request tới API. Khi gặp 401 Unauthorized, thử refresh token rồi gửi lại request một lần.
+     * @param {string} url - Đường dẫn API (vd: /chapters/xxx)
+     * @param {RequestInit} options - fetch options
+     * @param {boolean} skipRetry - Không thử refresh khi 401 (dùng cho request refresh tránh lặp vô hạn)
+     */
+    static async request(url, options = {}, skipRetry = false) {
         try {
             // Tự động thêm Authorization header nếu có token
             const headers = {
@@ -18,6 +24,7 @@ class ApiService {
 
             const response = await fetch(`${API_BASE_URL}${url}`, {
                 headers: headers,
+                credentials: 'include', // Gửi cookie (refresh token) khi gọi API
                 ...options
             });
 
@@ -27,6 +34,18 @@ class ApiService {
             }
 
             if (!response.ok) {
+                // 401: thử refresh token rồi gửi lại (trừ khi đang gọi refresh hoặc đã skipRetry)
+                if (response.status === 401 && !skipRetry && url.indexOf('/auth/refresh') === -1 &&
+                    typeof AuthHelper !== 'undefined' && AuthHelper.getToken()) {
+                    const refreshed = await ApiService._tryRefreshToken();
+                    if (refreshed) {
+                        return ApiService.request(url, options, true);
+                    }
+                    // Refresh thất bại: xóa token và báo đăng nhập lại
+                    AuthHelper.removeToken();
+                    throw new Error('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.');
+                }
+
                 let errorMessage = response.statusText;
                 try {
                     const errorBody = await response.json();
@@ -52,6 +71,26 @@ class ApiService {
                 throw new Error('Không thể kết nối đến server. Vui lòng kiểm tra kết nối mạng.');
             }
             throw error;
+        }
+    }
+
+    /** Gọi API refresh token (dùng cookie), cập nhật token mới vào AuthHelper. Trả về true nếu thành công. */
+    static async _tryRefreshToken() {
+        try {
+            const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include'
+            });
+            if (!res.ok) return false;
+            const data = await res.json().catch(() => null);
+            if (data && data.accessToken && typeof AuthHelper !== 'undefined') {
+                AuthHelper.setToken(data.accessToken);
+                return true;
+            }
+            return false;
+        } catch {
+            return false;
         }
     }
 
@@ -245,6 +284,33 @@ class ApiService {
         return this.request(`/stories/${storyId}/follow`, { method: 'DELETE' });
     }
 
+    /** Lưu tiến độ đọc: đang đọc đến chapter nào (để hiển thị "Đọc tiếp" trên trang truyện). Cần đăng nhập. */
+    static async saveReadingProgress(storyId, chapterId) {
+        return this.request(`/stories/${storyId}/reading-progress`, {
+            method: 'POST',
+            body: JSON.stringify({ chapterId: chapterId })
+        });
+    }
+
+    // Authors (follow author) API
+    static async getAuthorFollowing(authorId) {
+        const res = await this.request(`/authors/${authorId}/following`);
+        return res && res.following === true;
+    }
+
+    static async followAuthor(authorId) {
+        return this.request(`/authors/${authorId}/follow`, { method: 'POST' });
+    }
+
+    static async unfollowAuthor(authorId) {
+        return this.request(`/authors/${authorId}/follow`, { method: 'DELETE' });
+    }
+
+    /** Thư viện của tôi: truyện theo dõi, tác giả theo dõi, lịch sử đọc. Cần đăng nhập. */
+    static async getMyLibrary() {
+        return this.request('/library');
+    }
+
     static async getStoryComments(storyId) {
         return this.request(`/stories/${storyId}/comments`);
     }
@@ -295,6 +361,28 @@ class ApiService {
         return this.request(`/chapters/${id}`);
     }
 
+    static async getChapterComments(chapterId) {
+        return this.request(`/chapters/${chapterId}/comments`);
+    }
+
+    static async addChapterComment(chapterId, data) {
+        return this.request(`/chapters/${chapterId}/comments`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    static async getChapterCommentReactions(chapterId, commentId) {
+        return this.request(`/chapters/${chapterId}/comments/${commentId}/reactions`);
+    }
+
+    static async setChapterCommentReaction(chapterId, commentId, reactionType) {
+        return this.request(`/chapters/${chapterId}/comments/${commentId}/reaction`, {
+            method: 'POST',
+            body: JSON.stringify({ reactionType: reactionType || null })
+        });
+    }
+
     static async getChaptersByStoryId(storyId) {
         return this.request(`/chapters/story/${storyId}`);
     }
@@ -320,6 +408,41 @@ class ApiService {
     static async deleteChapter(id) {
         return this.request(`/chapters/${id}`, {
             method: 'DELETE'
+        });
+    }
+
+    // Chapter versions (AUTHOR)
+    static async getChapterVersions(chapterId) {
+        return this.request(`/chapters/${chapterId}/versions`);
+    }
+
+    static async getChapterVersion(chapterId, versionId) {
+        return this.request(`/chapters/${chapterId}/versions/${versionId}`);
+    }
+
+    static async createChapterVersion(chapterId, data) {
+        return this.request(`/chapters/${chapterId}/versions`, {
+            method: 'POST',
+            body: JSON.stringify(data || {})
+        });
+    }
+
+    static async updateChapterVersion(chapterId, versionId, data) {
+        return this.request(`/chapters/${chapterId}/versions/${versionId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data || {})
+        });
+    }
+
+    static async deleteChapterVersion(chapterId, versionId) {
+        return this.request(`/chapters/${chapterId}/versions/${versionId}`, {
+            method: 'DELETE'
+        });
+    }
+
+    static async submitChapterVersion(chapterId, versionId) {
+        return this.request(`/chapters/${chapterId}/versions/${versionId}/submit`, {
+            method: 'POST'
         });
     }
 
@@ -394,6 +517,109 @@ class ApiService {
             method: 'POST',
             body: JSON.stringify({ reason: reason })
         });
+    }
+
+    static async moderatorGetChapterVersions(chapterId) {
+        return this.request(`/moderator/chapters/${chapterId}/versions`);
+    }
+
+    static async moderatorGetChapterVersion(chapterId, versionId) {
+        return this.request(`/moderator/chapters/${chapterId}/versions/${versionId}`);
+    }
+
+    // Admin Moderation API (chỉ role ADMIN)
+    static async adminGetPendingStories(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.claimFilter) params.append('claimFilter', options.claimFilter);
+        return this.request(`/admin/moderation/pending-stories?${params.toString()}`);
+    }
+
+    static async adminGetPendingChapters(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.storyId) params.append('storyId', options.storyId);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.claimFilter) params.append('claimFilter', options.claimFilter);
+        return this.request(`/admin/moderation/pending-chapters?${params.toString()}`);
+    }
+
+    static async adminGetApprovedStories(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.moderatorId) params.append('moderatorId', options.moderatorId);
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        return this.request(`/admin/moderation/approved-stories?${params.toString()}`);
+    }
+
+    static async adminGetRejectedStories(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.moderatorId) params.append('moderatorId', options.moderatorId);
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        return this.request(`/admin/moderation/rejected-stories?${params.toString()}`);
+    }
+
+    static async adminGetApprovedChapters(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.moderatorId) params.append('moderatorId', options.moderatorId);
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        return this.request(`/admin/moderation/approved-chapters?${params.toString()}`);
+    }
+
+    static async adminGetRejectedChapters(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.search) params.append('search', options.search);
+        if (options.sortBy) params.append('sortBy', options.sortBy);
+        if (options.sortOrder) params.append('sortOrder', options.sortOrder);
+        if (options.moderatorId) params.append('moderatorId', options.moderatorId);
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        return this.request(`/admin/moderation/rejected-chapters?${params.toString()}`);
+    }
+
+    static async adminGetModerationLogs(options = {}) {
+        const params = new URLSearchParams();
+        params.append('page', options.page ?? 1);
+        params.append('pageSize', options.pageSize ?? 20);
+        if (options.moderatorId) params.append('moderatorId', options.moderatorId);
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        if (options.action) params.append('action', options.action);
+        if (options.targetType) params.append('targetType', options.targetType);
+        return this.request(`/admin/moderation/logs?${params.toString()}`);
+    }
+
+    static async adminGetModeratorPerformance(options = {}) {
+        const params = new URLSearchParams();
+        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
+        if (options.dateTo) params.append('dateTo', options.dateTo);
+        return this.request(`/admin/moderation/moderator-performance?${params.toString()}`);
     }
 
     // Notifications API

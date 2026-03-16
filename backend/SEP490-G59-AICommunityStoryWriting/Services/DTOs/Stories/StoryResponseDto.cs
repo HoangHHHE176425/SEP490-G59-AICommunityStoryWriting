@@ -41,5 +41,12 @@
 
         /// <summary>User hiện tại đã theo dõi story này chưa (chỉ có khi đăng nhập).</summary>
         public bool? UserIsFollowing { get; set; }
+
+        /// <summary>Chương đang đọc dở (id) - có khi user đã đăng nhập và từng đọc truyện này.</summary>
+        public Guid? LastReadChapterId { get; set; }
+        /// <summary>Tiêu đề chương đang đọc dở - để hiển thị "Đọc tiếp chương X".</summary>
+        public string? LastReadChapterTitle { get; set; }
+        /// <summary>Thời điểm đọc chương đó lần cuối.</summary>
+        public DateTime? LastReadAt { get; set; }
     }
 }

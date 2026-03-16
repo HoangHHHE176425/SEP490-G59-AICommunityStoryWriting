@@ -103,6 +103,8 @@ export function StoryDetail() {
                         id: storyRes?.id ?? storyRes?.Id,
                         title: storyRes?.title ?? storyRes?.Title ?? 'Không có tiêu đề',
                         author: {
+                            id: authorId,
+                            userId: authorId,
                             name: storyRes?.authorName ?? storyRes?.AuthorName ?? 'Ẩn danh',
                             avatar: '',
                             followers: 0
@@ -118,7 +120,10 @@ export function StoryDetail() {
                         chapters: totalChapters,
                         words: 0,
                         lastUpdate: storyRes?.updatedAt ? formatTimeAgo(storyRes.updatedAt) : 'Chưa cập nhật',
-                        description: storyRes?.summary ?? storyRes?.Summary ?? 'Chưa có giới thiệu.'
+                        description: storyRes?.summary ?? storyRes?.Summary ?? 'Chưa có giới thiệu.',
+                        lastReadChapterId: storyRes?.lastReadChapterId ?? storyRes?.LastReadChapterId ?? null,
+                        lastReadChapterTitle: storyRes?.lastReadChapterTitle ?? storyRes?.LastReadChapterTitle ?? null,
+                        lastReadAt: (storyRes?.lastReadAt ?? storyRes?.LastReadAt) ? formatTimeAgo(storyRes?.lastReadAt ?? storyRes?.LastReadAt) : null,
                     };
                     const newCount = 3; // số chương mới nhất được gắn nhãn MỚI
                     setChapters(rawItems.map((ch, idx) => {
@@ -148,6 +153,8 @@ export function StoryDetail() {
                         .then((profile) => {
                             if (cancelled) return;
                             storyPayload.author = {
+                                id: profile.id ?? authorId,
+                                userId: profile.id ?? authorId,
                                 name: profile.displayName ?? storyPayload.author.name,
                                 avatar: profile.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '',
                                 followers: Number(profile.stats?.totalReads ?? profile.stats?.TotalReads ?? 0) || 0
@@ -331,14 +338,14 @@ export function StoryDetail() {
         }
     };
 
-    const handleSubmitCommentReport = (reason, details) => {
-        console.log('Comment report submitted:', reportingCommentId, reason, details);
-        // Handle comment report submission
+    const handleSubmitCommentReport = (payload) => {
+        console.log('Comment report submitted:', { ...payload, targetId: reportingCommentId });
+        showToast('Đã gửi báo cáo. Chúng tôi sẽ xem xét trong thời gian sớm nhất.', 'success');
     };
 
-    const handleSubmitStoryReport = (reason, details) => {
-        console.log('Story report submitted:', reason, details);
-        // Handle story report submission
+    const handleSubmitStoryReport = (payload) => {
+        console.log('Story report submitted:', payload);
+        showToast('Đã gửi báo cáo. Chúng tôi sẽ xem xét trong thời gian sớm nhất.', 'success');
     };
 
     if (loading) {
@@ -430,7 +437,7 @@ export function StoryDetail() {
                             </div>
 
                             <div className="p-6">
-                                {activeTab === 'chapters' && <ChapterList chapters={chapters} storyId={storyId} />}
+                                {activeTab === 'chapters' && <ChapterList chapters={chapters} storyId={storyId} lastReadChapterId={story.lastReadChapterId} />}
 
                                 {activeTab === 'comments' && (
                                     <CommentSection
@@ -539,10 +546,11 @@ export function StoryDetail() {
 
             <ReportModal
                 isOpen={isReportCommentModalOpen}
-                onClose={() => setIsReportCommentModalOpen(false)}
+                onClose={() => { setIsReportCommentModalOpen(false); setReportingCommentId(null); }}
                 onSubmit={handleSubmitCommentReport}
                 title="Báo cáo bình luận"
                 type="comment"
+                targetId={reportingCommentId}
             />
 
             <ReportModal
@@ -551,6 +559,8 @@ export function StoryDetail() {
                 onSubmit={handleSubmitStoryReport}
                 title="Báo cáo truyện"
                 type="story"
+                storyId={storyId}
+                storyTitle={story?.title}
             />
             <ToastContainer />
             <Footer />

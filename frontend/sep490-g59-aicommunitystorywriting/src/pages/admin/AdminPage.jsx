@@ -6,12 +6,14 @@ import { CategoryManagement } from './category/CategoryManagement';
 import { PublicationManagement } from './publication/PublicationManagement';
 import { UserManagement } from './user/UserManagement';
 import { PolicyManagement } from './policy/PolicyManagement';
+import { AiConfig } from './ai/AiConfig';
+import ViolationManagement from './violation/ViolationManagement';
 
 export function AdminPage() {
     const { role } = useAuth();
     const roleUpper = (role ?? '').toString().toUpperCase();
-    const isModeratorOnly = roleUpper === 'MODERATOR';
-    const [activePage, setActivePage] = useState(isModeratorOnly ? 'publication' : 'categories');
+    const hasLimitedAdminMenu = roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE';
+    const [activePage, setActivePage] = useState(hasLimitedAdminMenu ? 'publication' : 'categories');
 
     const renderPage = () => {
         switch (activePage) {
@@ -34,6 +36,8 @@ export function AdminPage() {
                 );
             case 'users':
                 return <UserManagement />;
+            case 'violations':
+                return <ViolationManagement />;
             case 'policies':
                 return <PolicyManagement />;
             case 'comments':
@@ -47,6 +51,8 @@ export function AdminPage() {
                         </p>
                     </div>
                 );
+            case 'ai-config':
+                return <AiConfig />;
             case 'settings':
                 return (
                     <div className="text-center py-12">

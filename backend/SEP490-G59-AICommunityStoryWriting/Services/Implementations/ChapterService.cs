@@ -1,3 +1,4 @@
+using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,15 +14,24 @@ namespace Services.Implementations
     public class ChapterService : IChapterService
     {
         private readonly IChapterRepository _chapterRepository;
+        private readonly IChapterVersionRepository _versionRepository;
         private readonly IAiGeneratedContentRepository _aiContentRepository;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
         private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly ILogger<ChapterService> _logger;
 
-        public ChapterService(IChapterRepository chapterRepository, IAiGeneratedContentRepository aiContentRepository, IServiceScopeFactory scopeFactory, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
+        public ChapterService(
+            IChapterRepository chapterRepository,
+            IChapterVersionRepository versionRepository,
+            IAiGeneratedContentRepository aiContentRepository,
+            IServiceScopeFactory scopeFactory,
+            ILogger<ChapterService> logger,
+            IModerationHubNotifier? moderationHubNotifier = null,
+            INotificationHubNotifier? notificationHubNotifier = null)
         {
             _chapterRepository = chapterRepository;
+            _versionRepository = versionRepository;
             _aiContentRepository = aiContentRepository;
             _scopeFactory = scopeFactory;
             _logger = logger;
@@ -123,6 +133,11 @@ namespace Services.Implementations
                     _logger.LogInformation("ChapterService.Create calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", request.StoryId, chapter.id);
                     var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(request.StoryId, chapter.id, request.Title, story.title, _logger);
                     _ = PushNotificationsToFollowersAsync(createdNotifications);
+                    if (story.author_id.HasValue)
+                    {
+                        var authorNotifications = NotificationDAO.NotifyAuthorFollowersNewChapter(story.author_id.Value, request.StoryId, chapter.id, request.Title, story.title, _logger);
+                        _ = PushNotificationsToFollowersAsync(authorNotifications);
+                    }
                     TriggerRagIndexInBackground(request.StoryId, chapter.id);
                 }
             }
@@ -170,7 +185,15 @@ namespace Services.Implementations
                     (c.title != null && c.title.ToLower().Contains(searchLower)));
             }
 
-            if (query.StatusIn != null && query.StatusIn.Count > 0)
+            if (query.PendingVersionChapterIds != null && query.PendingVersionChapterIds.Count > 0)
+            {
+                var ids = query.PendingVersionChapterIds;
+                // Hiển thị chapter chờ duyệt: (1) chapter gốc PENDING_REVIEW hoặc (2) chapter có ít nhất một version PENDING_REVIEW (kể cả chapter đang DRAFT).
+                chaptersQuery = chaptersQuery.Where(c =>
+                    c.status == "PENDING_REVIEW" ||
+                    ids.Contains(c.id));
+            }
+            else if (query.StatusIn != null && query.StatusIn.Count > 0)
             {
                 var statusList = query.StatusIn;
                 chaptersQuery = chaptersQuery.Where(c => c.status != null && statusList.Contains(c.status));
@@ -408,6 +431,11 @@ namespace Services.Implementations
                         _logger.LogInformation("ChapterService.Update calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id, chapter.id);
                         var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapter.id, chapter.title, story?.title, _logger);
                         _ = PushNotificationsToFollowersAsync(createdNotifications);
+                        if (story?.author_id != null)
+                        {
+                            var authorNotifications = NotificationDAO.NotifyAuthorFollowersNewChapter(story.author_id.Value, chapter.story_id.Value, chapter.id, chapter.title, story.title, _logger);
+                            _ = PushNotificationsToFollowersAsync(authorNotifications);
+                        }
                         TriggerRagIndexInBackground(chapter.story_id.Value, chapter.id);
                     }
                 }
@@ -457,6 +485,12 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
 
+            // Khi đã có phiên bản nào của chương đang chờ duyệt thì không cho gửi duyệt chapter gốc.
+            var versionsPending = _versionRepository.GetByChapterId(id)
+                .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+            if (versionsPending)
+                throw new InvalidOperationException("Chỉ được gửi một bản duyệt: bản gốc chương hoặc một phiên bản. Đã có phiên bản đang chờ duyệt.");
+
             EnsureCanSubmitForReview(chapter);
 
             // Author "Publish" = gửi chờ duyệt. Chỉ moderator approve mới chuyển sang PUBLISHED và set published_at.
@@ -474,6 +508,11 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+
+            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, id))
+                throw new InvalidOperationException("Kiểm duyệt viên đã nhận duyệt đơn này, bạn không thể hủy xuất bản. Vui lòng chờ kết quả duyệt.");
+
+            EnsureCanUnpublish(chapter);
 
             chapter.status = "DRAFT";
             chapter.updated_at = DateTime.Now;
@@ -513,18 +552,43 @@ namespace Services.Implementations
             return true;
         }
 
-        /// <summary>Tác giả chỉ được gửi xuất bản chương theo thứ tự 1, 2, 3... Chương trước phải đã gửi (PUBLISHED hoặc PENDING_REVIEW) thì mới gửi được chương tiếp theo.</summary>
+        /// <summary>Tác giả chỉ được gửi xuất bản chương theo thứ tự 1, 2, 3... Chương trước phải đã gửi (PUBLISHED, PENDING_REVIEW, hoặc có ít nhất một version PENDING_REVIEW) thì mới gửi được chương tiếp theo.</summary>
         private void EnsureCanSubmitForReview(chapters chapter)
         {
             if (chapter.order_index <= 0)
                 return;
             var storyId = chapter.story_id ?? Guid.Empty;
             var previous = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, chapter.order_index - 1);
-            var prevStatus = (previous?.status ?? "").ToUpper();
-            if (previous == null || (prevStatus != "PUBLISHED" && prevStatus != "PENDING_REVIEW"))
+            if (previous == null)
             {
                 throw new InvalidOperationException(
                     "Phải gửi xuất bản chương theo thứ tự. Chương " + (chapter.order_index) + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
+            }
+            var prevStatus = (previous.status ?? "").Trim().ToUpperInvariant();
+            var prevHasPendingVersion = _versionRepository.GetByChapterId(previous.id).Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+            if (prevStatus != "PUBLISHED" && prevStatus != "PENDING_REVIEW" && !prevHasPendingVersion)
+            {
+                throw new InvalidOperationException(
+                    "Phải gửi xuất bản chương theo thứ tự. Chương " + (chapter.order_index) + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
+            }
+        }
+
+        /// <summary>Hủy xuất bản phải theo thứ tự ngược: chỉ được hủy chương N nếu không còn chương nào có thứ tự > N đang xuất bản hoặc chờ duyệt.</summary>
+        private void EnsureCanUnpublish(chapters chapter)
+        {
+            var storyId = chapter.story_id ?? Guid.Empty;
+            if (storyId == Guid.Empty) return;
+            var allChapters = _chapterRepository.GetByStoryId(storyId).OrderBy(c => c.order_index).ToList();
+            var currentIndex = chapter.order_index;
+            foreach (var c in allChapters)
+            {
+                if (c.order_index <= currentIndex) continue;
+                var status = (c.status ?? "").Trim().ToUpperInvariant();
+                if (status == "PUBLISHED" || status == "PENDING_REVIEW")
+                    throw new InvalidOperationException("Hủy xuất bản phải theo thứ tự ngược. Phải hủy chương " + (c.order_index + 1) + " trước rồi mới hủy chương " + (currentIndex + 1) + ".");
+                var hasPendingVersion = _versionRepository.GetByChapterId(c.id).Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+                if (hasPendingVersion)
+                    throw new InvalidOperationException("Hủy xuất bản phải theo thứ tự ngược. Chương " + (c.order_index + 1) + " đang có phiên bản chờ duyệt, phải xử lý trước rồi mới hủy chương " + (currentIndex + 1) + ".");
             }
         }
 
@@ -643,7 +707,8 @@ namespace Services.Implementations
                 WordCount = chapter.word_count,
                 AiSimilarityPercent = chapter.ai_similarity_percent,
                 PublishedAt = chapter.published_at,
-                CreatedAt = chapter.created_at
+                CreatedAt = chapter.created_at,
+                UpdatedAt = chapter.updated_at
             };
         }
     }

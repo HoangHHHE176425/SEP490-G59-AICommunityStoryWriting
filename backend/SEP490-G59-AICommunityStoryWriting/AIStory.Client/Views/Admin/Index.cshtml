@@ -1,0 +1,460 @@
+﻿@{
+    ViewData["Title"] = "Admin - Theo dõi kiểm duyệt";
+}
+
+<style>
+    .admin-dashboard .stat-card {
+        border-radius: 12px;
+        border: none;
+        box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    }
+
+    .admin-dashboard .nav-pills .nav-link {
+        border-radius: 10px;
+        font-weight: 500;
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+
+        .admin-dashboard .nav-pills .nav-link:not(.active) {
+            color: #495057;
+            background: #f8f9fa;
+        }
+
+        .admin-dashboard .nav-pills .nav-link.active {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+            color: #fff;
+        }
+
+    .admin-dashboard .filter-panel {
+        background: #f8f9fa;
+        border-radius: 10px;
+        border: 1px solid #e9ecef;
+    }
+
+    .admin-dashboard .badge-time-on {
+        background: #198754;
+        color: #fff;
+    }
+
+    .admin-dashboard .badge-time-warning {
+        background: #ffc107;
+        color: #000;
+    }
+
+    .admin-dashboard .badge-time-overdue {
+        background: #dc3545;
+        color: #fff;
+    }
+
+    .admin-dashboard .table-performance th {
+        white-space: nowrap;
+    }
+</style>
+
+<div class="container-fluid mt-4 admin-dashboard">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2 class="mb-1"><i class="bi bi-gear-wide-connected text-secondary"></i> Admin – Theo dõi hoạt động duyệt</h2>
+            <p class="text-muted small mb-0">Xem danh sách nội dung chờ duyệt / đã duyệt / từ chối, moderation logs và hiệu suất moderator. Thời hạn duyệt mặc định: 7 ngày (có thể gia hạn với truyện/chapter dài).</p>
+        </div>
+    </div>
+
+    <div id="adminRequireRole" class="alert alert-warning" style="display: none;">
+        Bạn cần đăng nhập với quyền <strong>Admin</strong> để xem trang này. <a href="/Auth/Login">Đăng nhập</a>
+    </div>
+
+    <div id="adminContent" style="display: none;">
+        <!-- Bộ lọc chung (áp dụng cho Approved/Rejected/Logs) -->
+        <div class="filter-panel p-3 mb-3">
+            <h6 class="mb-2"><i class="bi bi-funnel"></i> Bộ lọc (Moderator, ngày, hành động)</h6>
+            <div class="row g-2 align-items-end">
+                <div class="col-md-2">
+                    <label class="form-label small mb-0">Moderator</label>
+                    <select class="form-select form-select-sm" id="filterModerator">
+                        <option value="">Tất cả</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-0">Từ ngày</label>
+                    <input type="date" class="form-control form-control-sm" id="filterDateFrom">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-0">Đến ngày</label>
+                    <input type="date" class="form-control form-control-sm" id="filterDateTo">
+                </div>
+                <div class="col-md-2" id="filterActionWrap">
+                    <label class="form-label small mb-0">Hành động (Logs)</label>
+                    <select class="form-select form-select-sm" id="filterAction">
+                        <option value="">Tất cả</option>
+                        <option value="APPROVED">Duyệt</option>
+                        <option value="REJECTED">Từ chối</option>
+                    </select>
+                </div>
+                <div class="col-md-2" id="filterTargetTypeWrap">
+                    <label class="form-label small mb-0">Loại (Logs)</label>
+                    <select class="form-select form-select-sm" id="filterTargetType">
+                        <option value="">Tất cả</option>
+                        <option value="STORY">Truyện</option>
+                        <option value="CHAPTER">Chapter</option>
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="button" class="btn btn-primary btn-sm" id="btnApplyFilter"><i class="bi bi-funnel"></i> Áp dụng bộ lọc</button>
+                </div>
+            </div>
+        </div>
+
+        <ul class="nav nav-pills mb-3 flex-wrap" id="adminTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-pending-stories" data-bs-toggle="tab" data-bs-target="#panel-pending-stories" type="button"><i class="bi bi-book me-1"></i> Pending Stories</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-pending-chapters" data-bs-toggle="tab" data-bs-target="#panel-pending-chapters" type="button"><i class="bi bi-journal-text me-1"></i> Pending Chapters</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-approved-stories" data-bs-toggle="tab" data-bs-target="#panel-approved-stories" type="button"><i class="bi bi-check-circle me-1"></i> Approved Stories</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-rejected-stories" data-bs-toggle="tab" data-bs-target="#panel-rejected-stories" type="button"><i class="bi bi-x-circle me-1"></i> Rejected Stories</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-approved-chapters" data-bs-toggle="tab" data-bs-target="#panel-approved-chapters" type="button"><i class="bi bi-check-circle me-1"></i> Approved Chapters</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-rejected-chapters" data-bs-toggle="tab" data-bs-target="#panel-rejected-chapters" type="button"><i class="bi bi-x-circle me-1"></i> Rejected Chapters</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-logs" data-bs-toggle="tab" data-bs-target="#panel-logs" type="button"><i class="bi bi-list-ul me-1"></i> Moderation Logs</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-performance" data-bs-toggle="tab" data-bs-target="#panel-performance" type="button"><i class="bi bi-bar-chart me-1"></i> Moderator Performance</button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="adminTabContent">
+            <div class="tab-pane fade show active" id="panel-pending-stories">
+                <div class="card">
+                    <div class="card-body">
+                        <p class="text-muted small">Truyện chờ duyệt. Cờ: <span class="badge badge-time-on">Đúng hạn</span> <span class="badge badge-time-warning">Sắp hết hạn (≤2 ngày)</span> <span class="badge badge-time-overdue">Quá hạn</span> (thời hạn 7 ngày)</p>
+                        <div id="pendingStoriesContainer">Đang tải...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-pending-chapters">
+                <div class="card">
+                    <div class="card-body">
+                        <p class="text-muted small">Chapter chờ duyệt. Cờ thời hạn tương tự.</p>
+                        <div id="pendingChaptersContainer">Đang tải...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-approved-stories">
+                <div class="card">
+                    <div class="card-body">
+                        <button type="button" class="btn btn-sm btn-outline-primary mb-2" onclick="loadApprovedStories()"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                        <div id="approvedStoriesContainer">Chọn bộ lọc (Moderator, ngày) rồi tải.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-rejected-stories">
+                <div class="card">
+                    <div class="card-body">
+                        <button type="button" class="btn btn-sm btn-outline-primary mb-2" onclick="loadRejectedStories()"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                        <div id="rejectedStoriesContainer">Chọn bộ lọc rồi tải.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-approved-chapters">
+                <div class="card">
+                    <div class="card-body">
+                        <button type="button" class="btn btn-sm btn-outline-primary mb-2" onclick="loadApprovedChapters()"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                        <div id="approvedChaptersContainer">Chọn bộ lọc rồi tải.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-rejected-chapters">
+                <div class="card">
+                    <div class="card-body">
+                        <button type="button" class="btn btn-sm btn-outline-primary mb-2" onclick="loadRejectedChapters()"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                        <div id="rejectedChaptersContainer">Chọn bộ lọc rồi tải.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-logs">
+                <div class="card">
+                    <div class="card-body">
+                        <button type="button" class="btn btn-sm btn-outline-primary mb-2" onclick="loadModerationLogs(1)"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                        <div id="moderationLogsContainer">Chọn bộ lọc (Moderator, ngày, Action, Loại) rồi tải.</div>
+                        <nav id="logsPagination" class="mt-2"></nav>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-performance">
+                <div class="card">
+                    <div class="card-body">
+                        <p class="text-muted small">Thống kê theo moderator (Approved / Rejected / Total) — giúp phát hiện moderator làm sai nhiều.</p>
+                        <button type="button" class="btn btn-sm btn-outline-primary mb-2" onclick="loadModeratorPerformance()"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered table-performance">
+                                <thead><tr><th>Moderator</th><th>Approved</th><th>Rejected</th><th>Total</th></tr></thead>
+                                <tbody id="performanceTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        (function() {
+            if (typeof AuthHelper === 'undefined' || !AuthHelper.isAdmin()) {
+                document.getElementById('adminRequireRole').style.display = 'block';
+                return;
+            }
+            document.getElementById('adminContent').style.display = 'block';
+
+            function getFilterParams() {
+                var mod = document.getElementById('filterModerator');
+                var fromEl = document.getElementById('filterDateFrom');
+                var toEl = document.getElementById('filterDateTo');
+                var from = fromEl && fromEl.value ? fromEl.value.trim() : '';
+                var to = toEl && toEl.value ? toEl.value.trim() : '';
+                var o = { page: 1, pageSize: 20 };
+                if (mod && mod.value) o.moderatorId = mod.value;
+                if (from) o.dateFrom = from;
+                if (to) o.dateTo = to;
+                return o;
+            }
+
+            function getLogsFilterParams(page) {
+                var p = getFilterParams();
+                p.page = page || 1;
+                p.pageSize = 20;
+                var actionEl = document.getElementById('filterAction');
+                var typeEl = document.getElementById('filterTargetType');
+                if (actionEl && actionEl.value) p.action = actionEl.value;
+                if (typeEl && typeEl.value) p.targetType = typeEl.value;
+                return p;
+            }
+
+            function reloadActiveTab() {
+                var activePane = document.querySelector('#adminTabContent .tab-pane.active');
+                if (!activePane) return;
+                var id = activePane.id;
+                if (id === 'panel-pending-stories') loadPendingStories();
+                else if (id === 'panel-pending-chapters') loadPendingChapters();
+                else if (id === 'panel-approved-stories') loadApprovedStories();
+                else if (id === 'panel-rejected-stories') loadRejectedStories();
+                else if (id === 'panel-approved-chapters') loadApprovedChapters();
+                else if (id === 'panel-rejected-chapters') loadRejectedChapters();
+                else if (id === 'panel-logs') loadModerationLogs(1);
+                else if (id === 'panel-performance') loadModeratorPerformance();
+            }
+
+            function timeStatusBadge(ts) {
+                if (!ts) return '';
+                var c = 'badge-time-on';
+                if (ts === 'Warning') c = 'badge-time-warning';
+                else if (ts === 'Overdue') c = 'badge-time-overdue';
+                var t = ts === 'OnTime' ? 'Đúng hạn' : (ts === 'Warning' ? 'Sắp hết hạn' : 'Quá hạn');
+                return '<span class="badge ' + c + '">' + t + '</span>';
+            }
+
+            function formatDate(d) {
+                if (!d) return '–';
+                var x = new Date(d);
+                return isNaN(x.getTime()) ? d : x.toLocaleString('vi-VN');
+            }
+
+            async function loadModeratorPerformance() {
+                var el = document.getElementById('performanceTableBody');
+                el.innerHTML = '<tr><td colspan="4" class="text-center">Đang tải...</td></tr>';
+                var params = getFilterParams();
+                try {
+                    var list = await ApiService.adminGetModeratorPerformance(params);
+                    if (!list || list.length === 0) {
+                        el.innerHTML = '<tr><td colspan="4" class="text-muted">Chưa có dữ liệu</td></tr>';
+                        return;
+                    }
+                    var modSelect = document.getElementById('filterModerator');
+                    var opts = modSelect.querySelectorAll('option');
+                    for (var i = opts.length - 1; i >= 1; i--) opts[i].remove();
+                    list.forEach(function(p) {
+                        var opt = document.createElement('option');
+                        opt.value = p.moderatorId;
+                        opt.textContent = (p.moderatorName || p.moderatorId) + ' (' + p.total + ')';
+                        modSelect.appendChild(opt);
+                    });
+                    el.innerHTML = list.map(function(p) {
+                        return '<tr><td>' + (p.moderatorName || p.moderatorId) + '</td><td>' + p.approvedCount + '</td><td>' + p.rejectedCount + '</td><td>' + p.total + '</td></tr>';
+                    }).join('');
+                } catch (e) {
+                    el.innerHTML = '<tr><td colspan="4" class="text-danger">Lỗi: ' + (e.message || e) + '</td></tr>';
+                }
+            }
+
+            async function loadPendingStories() {
+                var c = document.getElementById('pendingStoriesContainer');
+                c.innerHTML = 'Đang tải...';
+                try {
+                    var r = await ApiService.adminGetPendingStories({ page: 1, pageSize: 20 });
+                    var items = r && r.items ? r.items : [];
+                    var total = (r && r.totalCount !== undefined) ? r.totalCount : 0;
+                    if (items.length === 0) {
+                        c.innerHTML = '<p class="text-muted mb-0">Không có truyện chờ duyệt.</p>';
+                        return;
+                    }
+                    c.innerHTML = '<table class="table table-sm"><thead><tr><th>Tiêu đề</th><th>Trạng thái</th><th>Đã nhận bởi</th><th>Nhận lúc</th><th>Gửi lúc</th><th>Hạn duyệt</th><th>Cờ</th></tr></thead><tbody>' +
+                        items.map(function(s) {
+                            return '<tr><td><a href="/Home/Story?slug=' + encodeURIComponent(s.slug || '') + '">' + (s.title || s.id) + '</a></td><td>' + (s.status || '') + '</td><td>' + (s.claimedByDisplayName || '–') + '</td><td>' + formatDate(s.claimedAt) + '</td><td>' + formatDate(s.pendingSince || s.updatedAt) + '</td><td>' + formatDate(s.deadlineAt) + '</td><td>' + timeStatusBadge(s.timeStatus) + '</td></tr>';
+                        }).join('') + '</tbody></table><p class="small text-muted">Tổng: ' + total + ' (Admin thấy tất cả, kể cả đã được moderator nhận duyệt)</p>';
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger">Lỗi: ' + (e.message || e) + '</p>';
+                }
+            }
+
+            async function loadPendingChapters() {
+                var c = document.getElementById('pendingChaptersContainer');
+                c.innerHTML = 'Đang tải...';
+                try {
+                    var r = await ApiService.adminGetPendingChapters({ page: 1, pageSize: 20 });
+                    var items = r && r.items ? r.items : [];
+                    var total = (r && r.totalCount !== undefined) ? r.totalCount : 0;
+                    if (items.length === 0) {
+                        c.innerHTML = '<p class="text-muted mb-0">Không có chapter chờ duyệt.</p>';
+                        return;
+                    }
+                    c.innerHTML = '<table class="table table-sm"><thead><tr><th>Chapter</th><th>Truyện</th><th>Đã nhận bởi</th><th>Nhận lúc</th><th>Gửi lúc</th><th>Hạn duyệt</th><th>Cờ</th></tr></thead><tbody>' +
+                        items.map(function(ch) {
+                            var link = ch.storyId && ch.id ? '/Chapters/Read?storyId=' + encodeURIComponent(ch.storyId) + '&chapterId=' + encodeURIComponent(ch.id) : '#';
+                            return '<tr><td><a href="' + link + '">' + (ch.title || ch.id) + '</a></td><td>' + (ch.storyTitle || '') + '</td><td>' + (ch.claimedByDisplayName || '–') + '</td><td>' + formatDate(ch.claimedAt) + '</td><td>' + formatDate(ch.pendingSince || ch.updatedAt || ch.createdAt) + '</td><td>' + formatDate(ch.deadlineAt) + '</td><td>' + timeStatusBadge(ch.timeStatus) + '</td></tr>';
+                        }).join('') + '</tbody></table><p class="small text-muted">Tổng: ' + total + ' (Admin thấy tất cả, kể cả đã được moderator nhận duyệt)</p>';
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger">Lỗi: ' + (e.message || e) + '</p>';
+                }
+            }
+
+            function renderReviewedList(containerId, items, totalCount, type) {
+                var c = document.getElementById(containerId);
+                if (!items || items.length === 0) {
+                    c.innerHTML = '<p class="text-muted mb-0">Không có bản ghi.</p>';
+                    return;
+                }
+                var isStory = type === 'story';
+                var rows = items.map(function(x) {
+                    var title = x.title || x.id;
+                    var slug = x.slug;
+                    var link = isStory && slug ? '/Home/Story?slug=' + encodeURIComponent(slug) : (x.storyId && x.id ? '/Chapters/Read?storyId=' + encodeURIComponent(x.storyId) + '&chapterId=' + encodeURIComponent(x.id) : '#');
+                    var extra = isStory ? '' : ('<td>' + (x.storyTitle || '') + '</td>');
+                    return '<tr><td><a href="' + link + '">' + title + '</a></td>' + extra + '<td>' + formatDate(x.reviewedAt) + '</td><td>' + (x.reviewedByModeratorName || '–') + '</td></tr>';
+                });
+                var header = isStory ? '<tr><th>Tiêu đề</th><th>Duyệt lúc</th><th>Moderator</th></tr>' : '<tr><th>Chapter</th><th>Truyện</th><th>Duyệt lúc</th><th>Moderator</th></tr>';
+                c.innerHTML = '<table class="table table-sm"><thead>' + header + '</thead><tbody>' + rows.join('') + '</tbody></table><p class="small text-muted">Tổng: ' + (totalCount || items.length) + '</p>';
+            }
+
+            async function loadApprovedStories() {
+                var c = document.getElementById('approvedStoriesContainer');
+                c.innerHTML = 'Đang tải...';
+                try {
+                    var r = await ApiService.adminGetApprovedStories(getFilterParams());
+                    renderReviewedList('approvedStoriesContainer', r && r.items ? r.items : [], r && r.totalCount !== undefined ? r.totalCount : 0, 'story');
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger">Lỗi: ' + (e.message || e) + '</p>';
+                }
+            }
+
+            async function loadRejectedStories() {
+                var c = document.getElementById('rejectedStoriesContainer');
+                c.innerHTML = 'Đang tải...';
+                try {
+                    var r = await ApiService.adminGetRejectedStories(getFilterParams());
+                    renderReviewedList('rejectedStoriesContainer', r && r.items ? r.items : [], r && r.totalCount !== undefined ? r.totalCount : 0, 'story');
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger">Lỗi: ' + (e.message || e) + '</p>';
+                }
+            }
+
+            async function loadApprovedChapters() {
+                var c = document.getElementById('approvedChaptersContainer');
+                c.innerHTML = 'Đang tải...';
+                try {
+                    var r = await ApiService.adminGetApprovedChapters(getFilterParams());
+                    renderReviewedList('approvedChaptersContainer', r && r.items ? r.items : [], r && r.totalCount !== undefined ? r.totalCount : 0, 'chapter');
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger">Lỗi: ' + (e.message || e) + '</p>';
+                }
+            }
+
+            async function loadRejectedChapters() {
+                var c = document.getElementById('rejectedChaptersContainer');
+                c.innerHTML = 'Đang tải...';
+                try {
+                    var r = await ApiService.adminGetRejectedChapters(getFilterParams());
+                    renderReviewedList('rejectedChaptersContainer', r && r.items ? r.items : [], r && r.totalCount !== undefined ? r.totalCount : 0, 'chapter');
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger">Lỗi: ' + (e.message || e) + '</p>';
+                }
+            }
+
+            var logsCurrentPage = 1;
+            async function loadModerationLogs(page) {
+                logsCurrentPage = page || 1;
+                var c = document.getElementById('moderationLogsContainer');
+                c.innerHTML = 'Đang tải...';
+                var params = getLogsFilterParams(logsCurrentPage);
+                try {
+                    var r = await ApiService.adminGetModerationLogs(params);
+                    var items = (r && r.items) ? r.items : [];
+                    var total = (r && r.totalCount !== undefined) ? r.totalCount : 0;
+                    if (items.length === 0) {
+                        c.innerHTML = '<p class="text-muted mb-0">Không có log.</p>';
+                        document.getElementById('logsPagination').innerHTML = '';
+                        return;
+                    }
+                    c.innerHTML = '<table class="table table-sm"><thead><tr><th>Thời gian</th><th>Loại</th><th>Tiêu đề</th><th>Hành động</th><th>Moderator</th><th>Lý do</th></tr></thead><tbody>' +
+                        items.map(function(l) {
+                            return '<tr><td>' + formatDate(l.createdAt) + '</td><td>' + (l.targetType || '') + '</td><td>' + (l.targetTitle || l.targetId || '') + '</td><td>' + (l.action || '') + '</td><td>' + (l.moderatorName || '–') + '</td><td>' + (l.rejectionReason || '–') + '</td></tr>';
+                        }).join('') + '</tbody></table>';
+                    var totalPages = Math.max(1, Math.ceil(total / (params.pageSize || 20)));
+                    var pag = document.getElementById('logsPagination');
+                    if (totalPages <= 1) pag.innerHTML = ''; else {
+                        var buf = '';
+                        if (logsCurrentPage > 1) buf += '<a href="#" class="btn btn-sm btn-outline-secondary me-1" onclick="loadModerationLogs(' + (logsCurrentPage - 1) + '); return false;">Trước</a>';
+                        buf += ' Trang ' + logsCurrentPage + ' / ' + totalPages + ' ';
+                        if (logsCurrentPage < totalPages) buf += '<a href="#" class="btn btn-sm btn-outline-secondary ms-1" onclick="loadModerationLogs(' + (logsCurrentPage + 1) + '); return false;">Sau</a>';
+                        pag.innerHTML = buf;
+                    }
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger">Lỗi: ' + (e.message || e) + '</p>';
+                }
+            }
+
+            document.getElementById('tab-pending-stories').addEventListener('shown.bs.tab', loadPendingStories);
+            document.getElementById('tab-pending-chapters').addEventListener('shown.bs.tab', loadPendingChapters);
+            document.getElementById('tab-approved-stories').addEventListener('shown.bs.tab', loadApprovedStories);
+            document.getElementById('tab-rejected-stories').addEventListener('shown.bs.tab', loadRejectedStories);
+            document.getElementById('tab-approved-chapters').addEventListener('shown.bs.tab', loadApprovedChapters);
+            document.getElementById('tab-rejected-chapters').addEventListener('shown.bs.tab', loadRejectedChapters);
+            document.getElementById('tab-logs').addEventListener('shown.bs.tab', function() { loadModerationLogs(1); });
+            document.getElementById('tab-performance').addEventListener('shown.bs.tab', loadModeratorPerformance);
+
+            window.loadApprovedStories = loadApprovedStories;
+            window.loadRejectedStories = loadRejectedStories;
+            window.loadApprovedChapters = loadApprovedChapters;
+            window.loadRejectedChapters = loadRejectedChapters;
+            window.loadModerationLogs = loadModerationLogs;
+            window.loadModeratorPerformance = loadModeratorPerformance;
+            window.reloadActiveTab = reloadActiveTab;
+
+            var btnApply = document.getElementById('btnApplyFilter');
+            if (btnApply) btnApply.addEventListener('click', function() { reloadActiveTab(); });
+
+            loadPendingStories();
+            loadModeratorPerformance();
+        })();
+    </script>
+}

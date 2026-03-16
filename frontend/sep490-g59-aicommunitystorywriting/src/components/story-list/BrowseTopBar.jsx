@@ -38,7 +38,7 @@ export function BrowseTopBar({
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Tìm kiếm truyện, tác giả..."
+                        placeholder="Tìm kiếm truyện, tác giả, thể loại..."
                         style={{
                             width: '100%',
                             padding: '0.75rem 1rem 0.75rem 3rem',

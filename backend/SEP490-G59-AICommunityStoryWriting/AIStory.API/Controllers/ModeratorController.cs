@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Repositories.Interfaces;
 using Services.DTOs.Moderation;
 using Services.Interfaces;
 using System.IdentityModel.Tokens.Jwt;
@@ -8,20 +7,20 @@ using System.Security.Claims;
 
 namespace AIStory.API.Controllers
 {
-    /// <summary>API kiểm duyệt: moderator duyệt hoặc từ chối truyện/chapter (có lý do khi từ chối).</summary>
+    /// <summary>API kiểm duyệt: moderator duyệt hoặc từ chối truyện/chapter (có lý do khi từ chối). Moderator có thể nhận duyệt tất cả category.</summary>
     [ApiController]
     [Route("api/moderator")]
     [Authorize(Roles = "MODERATOR,ADMIN")]
     public class ModeratorController : ControllerBase
     {
         private readonly IModerationService _moderationService;
-        private readonly IModeratorCategoryAssignmentRepository _moderatorCategoryRepo;
+        private readonly IChapterVersionService _chapterVersionService;
         private readonly ILogger<ModeratorController> _logger;
 
-        public ModeratorController(IModerationService moderationService, IModeratorCategoryAssignmentRepository moderatorCategoryRepo, ILogger<ModeratorController> logger)
+        public ModeratorController(IModerationService moderationService, IChapterVersionService chapterVersionService, ILogger<ModeratorController> logger)
         {
             _moderationService = moderationService;
-            _moderatorCategoryRepo = moderatorCategoryRepo;
+            _chapterVersionService = chapterVersionService;
             _logger = logger;
         }
 
@@ -35,7 +34,7 @@ namespace AIStory.API.Controllers
 
         private bool IsAdmin() => User.IsInRole("ADMIN");
 
-        /// <summary>Lấy danh sách truyện đang chờ duyệt (PENDING_REVIEW). Moderator chỉ thấy truyện thuộc category được gán; ADMIN thấy tất cả.</summary>
+        /// <summary>Lấy danh sách truyện đang chờ duyệt (PENDING_REVIEW). Moderator và ADMIN đều thấy tất cả.</summary>
         [HttpGet("stories/pending")]
         public async Task<IActionResult> GetPendingStories(
             [FromQuery] int page = 1,
@@ -47,15 +46,10 @@ namespace AIStory.API.Controllers
         {
             try
             {
-                IReadOnlyList<Guid>? categoryIdsFilter = null;
                 var moderatorId = GetCurrentUserId();
-                if (!IsAdmin())
-                {
-                    if (!moderatorId.HasValue)
-                        return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
-                    categoryIdsFilter = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
-                }
-                var result = _moderationService.GetPendingStories(page, pageSize, search, sortBy, sortOrder, categoryIdsFilter, moderatorId, claimFilter);
+                if (!moderatorId.HasValue)
+                    return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+                var result = _moderationService.GetPendingStories(page, pageSize, search, sortBy, sortOrder, categoryIdsFilter: null, moderatorId, claimFilter);
                 return Ok(result);
             }
             catch (Exception ex)
@@ -65,7 +59,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy danh sách chapter đang chờ duyệt (PENDING_REVIEW). Moderator chỉ thấy chapter thuộc truyện có category được gán; ADMIN thấy tất cả.</summary>
+        /// <summary>Lấy danh sách chapter đang chờ duyệt (PENDING_REVIEW). Moderator và ADMIN đều thấy tất cả.</summary>
         [HttpGet("chapters/pending")]
         public async Task<IActionResult> GetPendingChapters(
             [FromQuery] int page = 1,
@@ -78,15 +72,10 @@ namespace AIStory.API.Controllers
         {
             try
             {
-                IReadOnlyList<Guid>? categoryIdsFilter = null;
                 var moderatorId = GetCurrentUserId();
-                if (!IsAdmin())
-                {
-                    if (!moderatorId.HasValue)
-                        return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
-                    categoryIdsFilter = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
-                }
-                var result = _moderationService.GetPendingChapters(page, pageSize, storyId, search, sortBy, sortOrder, categoryIdsFilter, moderatorId, claimFilter);
+                if (!moderatorId.HasValue)
+                    return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+                var result = _moderationService.GetPendingChapters(page, pageSize, storyId, search, sortBy, sortOrder, categoryIdsFilter: null, moderatorId, claimFilter);
                 return Ok(result);
             }
             catch (Exception ex)
@@ -96,7 +85,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lịch sử truyện đã duyệt (PUBLISHED) hoặc từ chối (REJECTED). Moderator chỉ thấy truyện do mình duyệt/từ chối; ADMIN thấy theo category.</summary>
+        /// <summary>Lịch sử truyện đã duyệt (PUBLISHED) hoặc từ chối (REJECTED). Moderator thấy truyện do mình duyệt/từ chối; ADMIN thấy tất cả.</summary>
         [HttpGet("stories/reviewed")]
         public async Task<IActionResult> GetReviewedStories(
             [FromQuery] string status = "PUBLISHED",
@@ -108,12 +97,9 @@ namespace AIStory.API.Controllers
         {
             try
             {
-                IReadOnlyList<Guid>? categoryIdsFilter = null;
                 var moderatorId = GetCurrentUserId();
                 var isAdmin = IsAdmin();
-                if (!isAdmin && moderatorId.HasValue)
-                    categoryIdsFilter = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
-                var result = _moderationService.GetReviewedStories(page, pageSize, status, search, sortBy, sortOrder, categoryIdsFilter, moderatorId, isAdmin);
+                var result = _moderationService.GetReviewedStories(page, pageSize, status, search, sortBy, sortOrder, categoryIdsFilter: null, moderatorId, isAdmin);
                 return Ok(result);
             }
             catch (Exception ex)
@@ -123,7 +109,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lịch sử chapter đã duyệt (PUBLISHED) hoặc từ chối (REJECTED). Moderator chỉ thấy chapter do mình duyệt/từ chối; ADMIN thấy theo category.</summary>
+        /// <summary>Lịch sử chapter đã duyệt (PUBLISHED) hoặc từ chối (REJECTED). Moderator thấy chapter do mình duyệt/từ chối; ADMIN thấy tất cả.</summary>
         [HttpGet("chapters/reviewed")]
         public async Task<IActionResult> GetReviewedChapters(
             [FromQuery] string status = "PUBLISHED",
@@ -135,12 +121,9 @@ namespace AIStory.API.Controllers
         {
             try
             {
-                IReadOnlyList<Guid>? categoryIdsFilter = null;
                 var moderatorId = GetCurrentUserId();
                 var isAdmin = IsAdmin();
-                if (!isAdmin && moderatorId.HasValue)
-                    categoryIdsFilter = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
-                var result = _moderationService.GetReviewedChapters(page, pageSize, status, search, sortBy, sortOrder, categoryIdsFilter, moderatorId, isAdmin);
+                var result = _moderationService.GetReviewedChapters(page, pageSize, status, search, sortBy, sortOrder, categoryIdsFilter: null, moderatorId, isAdmin);
                 return Ok(result);
             }
             catch (Exception ex)
@@ -158,15 +141,11 @@ namespace AIStory.API.Controllers
             if (!moderatorId.HasValue)
                 return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
 
-            IReadOnlyList<Guid>? allowedCategoryIds = null;
-            if (!IsAdmin())
-                allowedCategoryIds = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
-
             try
             {
-                var ok = _moderationService.ClaimStory(id, moderatorId.Value, allowedCategoryIds);
+                var ok = _moderationService.ClaimStory(id, moderatorId.Value, allowedCategoryIds: null);
                 if (!ok)
-                    return NotFound(new { message = "Truyện không tồn tại, không ở trạng thái chờ duyệt, không thuộc category bạn được gán, hoặc đã được moderator khác nhận duyệt." });
+                    return NotFound(new { message = "Truyện không tồn tại, không ở trạng thái chờ duyệt, hoặc đã được moderator khác nhận duyệt." });
                 return NoContent();
             }
             catch (Exception ex)
@@ -184,15 +163,11 @@ namespace AIStory.API.Controllers
             if (!moderatorId.HasValue)
                 return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
 
-            IReadOnlyList<Guid>? allowedCategoryIds = null;
-            if (!IsAdmin())
-                allowedCategoryIds = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
-
             try
             {
-                var ok = _moderationService.ApproveStory(id, moderatorId.Value, allowedCategoryIds);
+                var ok = _moderationService.ApproveStory(id, moderatorId.Value, allowedCategoryIds: null);
                 if (!ok)
-                    return NotFound(new { message = "Truyện không tồn tại, không ở trạng thái chờ duyệt (PENDING_REVIEW), hoặc không thuộc category bạn được gán." });
+                    return NotFound(new { message = "Truyện không tồn tại hoặc không ở trạng thái chờ duyệt (PENDING_REVIEW)." });
                 return NoContent();
             }
             catch (Exception ex)
@@ -202,7 +177,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Từ chối truyện (bắt buộc gửi lý do trong body). Moderator chỉ từ chối được truyện thuộc category được gán.</summary>
+        /// <summary>Từ chối truyện (bắt buộc gửi lý do trong body).</summary>
         [HttpPost("stories/{id:guid}/reject")]
         public async Task<IActionResult> RejectStory(Guid id, [FromBody] RejectRequestDto request)
         {
@@ -212,15 +187,11 @@ namespace AIStory.API.Controllers
             if (request == null || string.IsNullOrWhiteSpace(request.Reason))
                 return BadRequest(new { message = "Vui lòng nhập lý do từ chối (reason)." });
 
-            IReadOnlyList<Guid>? allowedCategoryIds = null;
-            if (!IsAdmin())
-                allowedCategoryIds = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
-
             try
             {
-                var ok = _moderationService.RejectStory(id, moderatorId.Value, request.Reason.Trim(), allowedCategoryIds);
+                var ok = _moderationService.RejectStory(id, moderatorId.Value, request.Reason.Trim(), allowedCategoryIds: null);
                 if (!ok)
-                    return NotFound(new { message = "Truyện không tồn tại, không ở trạng thái chờ duyệt (PENDING_REVIEW), hoặc không thuộc category bạn được gán." });
+                    return NotFound(new { message = "Truyện không tồn tại hoặc không ở trạng thái chờ duyệt (PENDING_REVIEW)." });
                 return NoContent();
             }
             catch (ArgumentException ex)
@@ -242,15 +213,11 @@ namespace AIStory.API.Controllers
             if (!moderatorId.HasValue)
                 return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
 
-            IReadOnlyList<Guid>? allowedCategoryIds = null;
-            if (!IsAdmin())
-                allowedCategoryIds = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
-
             try
             {
-                var ok = _moderationService.ClaimChapter(id, moderatorId.Value, allowedCategoryIds);
+                var ok = _moderationService.ClaimChapter(id, moderatorId.Value, allowedCategoryIds: null);
                 if (!ok)
-                    return NotFound(new { message = "Chapter không tồn tại, không ở trạng thái chờ duyệt, không thuộc category bạn được gán, hoặc đã được moderator khác nhận duyệt." });
+                    return NotFound(new { message = "Chapter không tồn tại, không ở trạng thái chờ duyệt, hoặc đã được moderator khác nhận duyệt." });
                 return NoContent();
             }
             catch (Exception ex)
@@ -270,16 +237,12 @@ namespace AIStory.API.Controllers
             if (!moderatorId.HasValue)
                 return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
 
-            IReadOnlyList<Guid>? allowedCategoryIds = null;
-            if (!IsAdmin())
-                allowedCategoryIds = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
-
             try
             {
-                var ok = _moderationService.ApproveChapter(id, moderatorId.Value, allowedCategoryIds);
+                var ok = _moderationService.ApproveChapter(id, moderatorId.Value, allowedCategoryIds: null);
                 Console.WriteLine($"[CONSOLE] ApproveChapter result ok={ok}");
                 if (!ok)
-                    return NotFound(new { message = "Chapter không tồn tại, không ở trạng thái chờ duyệt (PENDING_REVIEW), hoặc không thuộc category bạn được gán." });
+                    return NotFound(new { message = "Chapter không tồn tại hoặc không ở trạng thái chờ duyệt (PENDING_REVIEW)." });
                 return NoContent();
             }
             catch (InvalidOperationException ex)
@@ -294,7 +257,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Từ chối chapter (bắt buộc gửi lý do trong body). Moderator chỉ từ chối được chapter thuộc truyện có category được gán.</summary>
+        /// <summary>Từ chối chapter (bắt buộc gửi lý do trong body).</summary>
         [HttpPost("chapters/{id:guid}/reject")]
         public async Task<IActionResult> RejectChapter(Guid id, [FromBody] RejectRequestDto request)
         {
@@ -304,15 +267,11 @@ namespace AIStory.API.Controllers
             if (request == null || string.IsNullOrWhiteSpace(request.Reason))
                 return BadRequest(new { message = "Vui lòng nhập lý do từ chối (reason)." });
 
-            IReadOnlyList<Guid>? allowedCategoryIds = null;
-            if (!IsAdmin())
-                allowedCategoryIds = await _moderatorCategoryRepo.GetCategoryIdsAsync(moderatorId.Value);
-
             try
             {
-                var ok = _moderationService.RejectChapter(id, moderatorId.Value, request.Reason.Trim(), allowedCategoryIds);
+                var ok = _moderationService.RejectChapter(id, moderatorId.Value, request.Reason.Trim(), allowedCategoryIds: null);
                 if (!ok)
-                    return NotFound(new { message = "Chapter không tồn tại, không ở trạng thái chờ duyệt (PENDING_REVIEW), hoặc không thuộc category bạn được gán." });
+                    return NotFound(new { message = "Chapter không tồn tại hoặc không ở trạng thái chờ duyệt (PENDING_REVIEW)." });
                 return NoContent();
             }
             catch (InvalidOperationException ex)
@@ -328,6 +287,47 @@ namespace AIStory.API.Controllers
                 _logger.LogError(ex, "RejectChapter {ChapterId} failed", id);
                 return StatusCode(500, new { message = "Lỗi từ chối chapter", error = ex.Message });
             }
+        }
+
+        /// <summary>Moderator xem danh sách version của một chapter.</summary>
+        [HttpGet("chapters/{id:guid}/versions")]
+        public IActionResult GetChapterVersions(Guid id)
+        {
+            var moderatorId = GetCurrentUserId();
+            if (!moderatorId.HasValue)
+                return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+            var list = _chapterVersionService.GetByChapterId(id)
+                .Where(v =>
+                    string.Equals(v.Status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(v.Status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            return Ok(list);
+        }
+
+        /// <summary>Moderator xem chi tiết một version (nội dung snapshot).</summary>
+        [HttpGet("chapters/{chapterId:guid}/versions/{versionId:guid}")]
+        public IActionResult GetChapterVersion(Guid chapterId, Guid versionId)
+        {
+            var moderatorId = GetCurrentUserId();
+            if (!moderatorId.HasValue)
+                return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+            var v = _chapterVersionService.GetById(versionId);
+            if (v == null || v.ChapterId != chapterId)
+                return NotFound(new { message = "Version không tồn tại." });
+            return Ok(v);
+        }
+
+        /// <summary>Nội dung chapter cho màn duyệt: bản gốc đã xuất bản + bản version chờ duyệt (khi chapter đã PUBLISHED và có version gửi chỉnh sửa). Moderator dùng để xem 2 phiên bản.</summary>
+        [HttpGet("chapters/{id:guid}/review-content")]
+        public IActionResult GetChapterReviewContent(Guid id)
+        {
+            var moderatorId = GetCurrentUserId();
+            if (!moderatorId.HasValue)
+                return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+            var content = _moderationService.GetChapterReviewContent(id);
+            if (content == null)
+                return NotFound(new { message = "Chapter không tồn tại." });
+            return Ok(content);
         }
     }
 }

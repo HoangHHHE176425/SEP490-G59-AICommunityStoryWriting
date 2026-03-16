@@ -45,7 +45,7 @@ namespace AIStory.API.Controllers
         /// <summary>
         /// Dành cho màn hình "đăng ký làm tác giả": lấy policy active theo type và trạng thái đã accept của user hiện tại.
         /// </summary>
-        [Authorize(Policy = "AuthorOnly")]
+        [Authorize(Policy = "UserOnly")]
         [HttpGet("me/author-status")]
         public async Task<IActionResult> GetMyAuthorStatus([FromQuery] string type = "AUTHOR")
         {
@@ -58,7 +58,7 @@ namespace AIStory.API.Controllers
         /// <summary>
         /// Accept policy (lưu vào author_policy_acceptances). Dùng khi user apply làm tác giả hoặc tác giả accept các policy liên quan.
         /// </summary>
-        [Authorize(Policy = "AuthorOnly")]
+        [Authorize(Policy = "UserOnly")]
         [HttpPost("{policyId:guid}/accept-author")]
         public async Task<IActionResult> AcceptAsAuthor([FromRoute] Guid policyId)
         {

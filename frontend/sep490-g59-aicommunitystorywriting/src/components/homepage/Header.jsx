@@ -1,15 +1,19 @@
-import { Search, Bell, Edit, PenLine, Menu, X, ChevronDown, Wallet, User, Library, LogOut } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { Search, Bell, Edit, Menu, X, ChevronDown, Wallet, User, Library, LogOut } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { getAllCategories } from '../../api/category/categoryApi';
 import { getNotifications, getUnreadCount, markNotificationAsRead, markAllNotificationsAsRead } from '../../api/notification/notificationApi';
 import * as coinApi from '../../api/coins/coinApi';
+import { useToast } from '../author/story-editor/Toast';
 
 export function Header() {
     const navigate = useNavigate();
     const { user, logout, isAuthenticated, role } = useAuth();
+    const { showToast, ToastContainer } = useToast();
+    const showToastRef = useRef(showToast);
+    showToastRef.current = showToast;
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isGenreOpen, setIsGenreOpen] = useState(false);
     const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -25,6 +29,8 @@ export function Header() {
     const userCoinsFallback = user?.stats?.currentCoins ?? 0;
     const [walletCoins, setWalletCoins] = useState(null);
     const displayedCoins = walletCoins ?? userCoinsFallback;
+
+    const [searchKeyword, setSearchKeyword] = useState('');
 
     const fetchNotifications = useCallback(() => {
         if (!isAuthenticated) return;
@@ -52,13 +58,16 @@ export function Header() {
         const handler = (e) => {
             const n = e?.detail;
             if (n && (n.id ?? n.Id)) {
+                const title = n.title ?? n.Title ?? '';
+                const content = n.content ?? n.Content ?? '';
+                const type = (n.type ?? n.Type ?? '').toUpperCase();
                 setNotifications((prev) => {
                     const id = n.id ?? n.Id;
                     if (prev.some((x) => (x.id ?? x.Id) === id)) return prev;
                     const item = {
                         id,
-                        title: n.title ?? n.Title ?? '',
-                        content: n.content ?? n.Content ?? '',
+                        title,
+                        content,
                         linkUrl: n.linkUrl ?? n.LinkUrl,
                         isRead: n.isRead ?? n.IsRead ?? false,
                         createdAt: n.createdAt ?? n.CreatedAt,
@@ -67,6 +76,14 @@ export function Header() {
                     return [item, ...prev];
                 });
                 setUnreadCount((c) => c + 1);
+                // Realtime toast: hiển thị popup khi có thông báo mới (vd: ủng hộ, duyệt truyện/chương)
+                const toastMsg = content || title || 'Bạn có thông báo mới';
+                const toastType = type === 'DONATION' ? 'success' : 'info';
+                showToastRef.current(toastMsg, toastType, 5000);
+                // Khi có ủng hộ (DONATION), cập nhật số dư ví ngay không cần F5
+                if (type === 'DONATION') {
+                    window.dispatchEvent(new CustomEvent('wallet:changed'));
+                }
             }
             fetchNotifications();
         };
@@ -109,6 +126,16 @@ export function Header() {
         navigate('/policy?type=AUTHOR&from=become-author&next=/author');
     };
 
+    const handleSearchSubmit = (e) => {
+        e?.preventDefault?.();
+        const q = (searchKeyword ?? '').trim();
+        if (q) {
+            navigate(`/story-list?search=${encodeURIComponent(q)}`);
+        } else {
+            navigate('/story-list');
+        }
+    };
+
     useEffect(() => {
         let cancelled = false;
         getAllCategories({ includeInactive: false })
@@ -136,19 +163,17 @@ export function Header() {
     }, []);
 
     return (
+        <>
         <header className="sticky top-0 z-50 w-full bg-slate-900/95 backdrop-blur-md border-b border-slate-700/50">
             <div className="max-w-[1280px] mx-auto px-4 h-16 flex items-center justify-between gap-8">
                 {/* Logo & Brand */}
-                <Link to="/home" className="flex items-center gap-2 shrink-0 hover:opacity-80 transition-opacity">
-                    <div className="size-9 bg-primary rounded-lg flex items-center justify-center text-white">
-                        <PenLine className="w-5 h-5" />
-                    </div>
-                    <h1 className="text-xl font-bold tracking-tight text-white">CSW_AI</h1>
+                <Link to="/home" className="flex items-center shrink-0 hover:opacity-90 transition-opacity" aria-label="CSW-AI - Trang chủ">
+                    <img src="/logo.png" alt="CSW-AI" className="h-12 w-auto object-contain" />
                 </Link>
 
-                {/* Search Bar (Center) */}
+                {/* Search Bar (Center) - Tìm kiếm truyện, tác giả, thể loại */}
                 <div className="flex-1 max-w-2xl hidden md:block">
-                    <div className="relative group">
+                    <form onSubmit={handleSearchSubmit} className="relative group">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 group-focus-within:text-primary transition-colors">
                             <Search className="w-5 h-5" />
                         </div>
@@ -156,8 +181,11 @@ export function Header() {
                             className="block w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-full text-sm focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-slate-500 outline-none text-white"
                             placeholder="Tìm kiếm truyện, tác giả, thể loại..."
                             type="text"
+                            value={searchKeyword}
+                            onChange={(e) => setSearchKeyword(e.target.value)}
+                            aria-label="Tìm kiếm truyện, tác giả, thể loại"
                         />
-                    </div>
+                    </form>
                 </div>
 
                 {/* Main Nav & User Actions */}
@@ -173,7 +201,7 @@ export function Header() {
                         ) : (
                             <>
                                 <Link to="/home" className="hover:text-primary transition-colors">Trang chủ</Link>
-                                <Link to="/about-us" className="hover:text-primary transition-colors">About us</Link>
+                                <Link to="/about-us" className="hover:text-primary transition-colors">Về chúng tôi</Link>
                                 <Link to="/story-list" className="hover:text-primary transition-colors">Khám phá truyện</Link>
                             </>
                         )}
@@ -389,16 +417,18 @@ export function Header() {
                             </Link>
                         )}
 
-                        <div className="relative mb-2">
+                        <form onSubmit={handleSearchSubmit} className="relative mb-2">
                             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
                                 <Search className="w-5 h-5" />
                             </div>
                             <input
                                 className="block w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-700 rounded-full text-sm outline-none text-white placeholder:text-slate-500"
-                                placeholder="Tìm kiếm..."
+                                placeholder="Tìm kiếm truyện, tác giả, thể loại..."
                                 type="text"
+                                value={searchKeyword}
+                                onChange={(e) => setSearchKeyword(e.target.value)}
                             />
-                        </div>
+                        </form>
 
                         <div className="flex flex-col gap-3">
                             <Link to="/home" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Trang chủ</Link>
@@ -513,5 +543,7 @@ export function Header() {
             )}
 
         </header>
+        <ToastContainer />
+    </>
     );
 }

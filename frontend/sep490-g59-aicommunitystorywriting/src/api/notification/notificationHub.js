@@ -63,6 +63,9 @@ export function createNotificationHubConnection(onNewNotification) {
         async stop() {
             try {
                 connection.off(NEW_NOTIFICATION);
+                // Tránh stop() trong lúc negotiation → lỗi "The connection was stopped during negotiation".
+                // Đợi start() xong (thành công hoặc thất bại) rồi mới stop.
+                await startPromise.catch(() => {});
                 await connection.stop();
             } catch {
                 // ignore when already stopped
