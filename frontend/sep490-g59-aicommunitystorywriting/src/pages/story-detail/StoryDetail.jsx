@@ -120,7 +120,10 @@ export function StoryDetail() {
                         chapters: totalChapters,
                         words: 0,
                         lastUpdate: storyRes?.updatedAt ? formatTimeAgo(storyRes.updatedAt) : 'Chưa cập nhật',
-                        description: storyRes?.summary ?? storyRes?.Summary ?? 'Chưa có giới thiệu.'
+                        description: storyRes?.summary ?? storyRes?.Summary ?? 'Chưa có giới thiệu.',
+                        lastReadChapterId: storyRes?.lastReadChapterId ?? storyRes?.LastReadChapterId ?? null,
+                        lastReadChapterTitle: storyRes?.lastReadChapterTitle ?? storyRes?.LastReadChapterTitle ?? null,
+                        lastReadAt: (storyRes?.lastReadAt ?? storyRes?.LastReadAt) ? formatTimeAgo(storyRes?.lastReadAt ?? storyRes?.LastReadAt) : null,
                     };
                     const newCount = 3; // số chương mới nhất được gắn nhãn MỚI
                     setChapters(rawItems.map((ch, idx) => {
@@ -399,6 +402,25 @@ export function StoryDetail() {
                             }}
                         />
 
+                        {/* Đang đọc dở + Đọc tiếp (khi đã login và có lastRead) */}
+                        {story.lastReadChapterId && story.lastReadChapterTitle && (
+                            <div className="mt-4 p-4 rounded-xl bg-primary/5 dark:bg-primary/10 border border-primary/20 dark:border-primary/30 flex flex-wrap items-center justify-between gap-3">
+                                <p className="text-slate-700 dark:text-slate-300 text-sm">
+                                    Đang đọc dở: <span className="font-semibold text-slate-900 dark:text-white">{story.lastReadChapterTitle}</span>
+                                    {story.lastReadAt && (
+                                        <span className="ml-2 text-slate-500 dark:text-slate-400 text-xs">({story.lastReadAt})</span>
+                                    )}
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => navigate(`/chapter?storyId=${storyId}&chapterId=${story.lastReadChapterId}`)}
+                                    className="flex items-center gap-2 px-5 py-2 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all"
+                                >
+                                    Đọc tiếp
+                                </button>
+                            </div>
+                        )}
+
                         {/* Tabs */}
                         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 mt-6">
                             <div className="border-b border-slate-200 dark:border-slate-800">
@@ -434,7 +456,7 @@ export function StoryDetail() {
                             </div>
 
                             <div className="p-6">
-                                {activeTab === 'chapters' && <ChapterList chapters={chapters} storyId={storyId} />}
+                                {activeTab === 'chapters' && <ChapterList chapters={chapters} storyId={storyId} lastReadChapterId={story.lastReadChapterId} />}
 
                                 {activeTab === 'comments' && (
                                     <CommentSection

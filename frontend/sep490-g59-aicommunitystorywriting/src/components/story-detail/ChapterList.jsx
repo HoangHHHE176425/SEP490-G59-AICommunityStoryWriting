@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { BookOpen, Clock, Eye, ChevronRight, Lock, X } from 'lucide-react';
 
-export function ChapterList({ chapters, storyId }) {
+export function ChapterList({ chapters, storyId, lastReadChapterId }) {
     const navigate = useNavigate();
     const [paymentModalChapter, setPaymentModalChapter] = useState(null);
 
@@ -29,12 +29,13 @@ export function ChapterList({ chapters, storyId }) {
                     const isLink = !!to && to !== '#' && !isLocked;
                     const Wrapper = isLink ? Link : 'div';
                     const wrapperProps = isLink ? { to } : {};
+                    const isLastRead = !!lastReadChapterId && chapter.chapterId === lastReadChapterId;
                     return (
                         <Wrapper
                             key={chapter.id}
                             {...wrapperProps}
                             onClick={isLocked ? (e) => handleLockedClick(e, chapter) : undefined}
-                            className="flex items-center justify-between p-4 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors group cursor-pointer"
+                            className={`flex items-center justify-between p-4 rounded-lg transition-colors group cursor-pointer ${isLastRead ? 'bg-primary/10 dark:bg-primary/20 border border-primary/30 dark:border-primary/40' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                         >
                             <div className="flex items-center gap-3 flex-1 min-w-0">
                                 {chapter.isLocked ? (

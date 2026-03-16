@@ -8,7 +8,7 @@ import { ChapterNavigation } from '../../components/chapter-detail/ChapterNaviga
 import { ChapterComments } from '../../components/chapter-detail/ChapterComments';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { getStoryById } from '../../api/story/storyApi';
+import { getStoryById, saveReadingProgress } from '../../api/story/storyApi';
 import { getChapterById, getChapters, getChapterComments, addChapterComment, setChapterCommentReaction } from '../../api/chapter/chapterApi';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -103,6 +103,9 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                             coinPrice: chPrice,
                         };
                     }));
+                    if (user?.id && urlStoryId && urlChapterId) {
+                        saveReadingProgress(urlStoryId, urlChapterId).catch(() => {});
+                    }
                 })
                 .catch((err) => {
                     if (!cancelled) {
