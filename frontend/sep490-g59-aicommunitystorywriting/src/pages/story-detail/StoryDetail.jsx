@@ -338,14 +338,14 @@ export function StoryDetail() {
         }
     };
 
-    const handleSubmitCommentReport = (reason, details) => {
-        console.log('Comment report submitted:', reportingCommentId, reason, details);
-        // Handle comment report submission
+    const handleSubmitCommentReport = (payload) => {
+        console.log('Comment report submitted:', { ...payload, targetId: reportingCommentId });
+        showToast('Đã gửi báo cáo. Chúng tôi sẽ xem xét trong thời gian sớm nhất.', 'success');
     };
 
-    const handleSubmitStoryReport = (reason, details) => {
-        console.log('Story report submitted:', reason, details);
-        // Handle story report submission
+    const handleSubmitStoryReport = (payload) => {
+        console.log('Story report submitted:', payload);
+        showToast('Đã gửi báo cáo. Chúng tôi sẽ xem xét trong thời gian sớm nhất.', 'success');
     };
 
     if (loading) {
@@ -546,10 +546,11 @@ export function StoryDetail() {
 
             <ReportModal
                 isOpen={isReportCommentModalOpen}
-                onClose={() => setIsReportCommentModalOpen(false)}
+                onClose={() => { setIsReportCommentModalOpen(false); setReportingCommentId(null); }}
                 onSubmit={handleSubmitCommentReport}
                 title="Báo cáo bình luận"
                 type="comment"
+                targetId={reportingCommentId}
             />
 
             <ReportModal
@@ -558,6 +559,8 @@ export function StoryDetail() {
                 onSubmit={handleSubmitStoryReport}
                 title="Báo cáo truyện"
                 type="story"
+                storyId={storyId}
+                storyTitle={story?.title}
             />
             <ToastContainer />
             <Footer />

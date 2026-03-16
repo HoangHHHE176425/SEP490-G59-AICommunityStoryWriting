@@ -17,6 +17,7 @@ import {
     CheckSquare,
     Shield,
     Brain,
+    AlertTriangle,
 } from 'lucide-react';
 
 const ROLE_LABELS = {
@@ -32,6 +33,7 @@ const ALL_MENU_ITEMS = [
     { id: 'categories', label: 'Quản lý thể loại', icon: Bookmark },
     { id: 'publication', label: 'Quản lý xuất bản', icon: CheckSquare },
     { id: 'stories', label: 'Quản lý truyện', icon: FileText },
+    { id: 'violations', label: 'Quản lý vi phạm', icon: AlertTriangle },
     { id: 'users', label: 'Quản lý người dùng', icon: Users },
     { id: 'comments', label: 'Quản lý bình luận', icon: MessageSquare },
     { id: 'policies', label: 'Quản lý Policy', icon: Shield },
