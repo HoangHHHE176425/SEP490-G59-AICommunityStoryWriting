@@ -28,7 +28,10 @@ public class CoCreationResponse
     /// <summary>Số lần Agent 2 viết lại theo feedback (0 = không sửa).</summary>
     public int RevisionCount { get; set; }
 
-    /// <summary>Feedback cuối từ Agent 3 nếu vẫn chưa đạt (để tác giả tham khảo).</summary>
+    /// <summary>Feedback từ Agent 3 ở mỗi lần chưa đạt (khiến hệ thống chạy vòng sửa). revisionCount=1 → 1 phần tử (feedback lần 1); revisionCount=2 → 2 phần tử. Null hoặc rỗng khi revisionCount=0.</summary>
+    public List<string>? RevisionFeedbacks { get; set; }
+
+    /// <summary>Feedback cuối từ Agent 3 nếu vẫn chưa đạt sau tất cả vòng sửa (để tác giả tham khảo). Khi Approved=true thì thường null.</summary>
     public string? ReviewFeedback { get; set; }
 
     /// <summary>ID chương nháp (DRAFT) vừa tạo — mỗi lần co-create thành công tạo một chương + một bản ai_generated_content.</summary>

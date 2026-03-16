@@ -308,7 +308,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 onApprove(publication.id);
             }
         } catch (err) {
-            showToast(err?.response?.data?.message ?? err?.message ?? 'Không thể duyệt xuất bản. Vui lòng thử lại.', 'error');
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể duyệt xuất bản. Vui lòng thử lại.';
+            console.error('[PublicationDetailModal] Duyệt xuất bản thất bại:', msg, err?.response?.data ?? err);
+            showToast(msg, 'error');
         } finally {
             setIsSubmitting(false);
         }
@@ -381,7 +383,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 onClose?.();
             }
         } catch (err) {
-            showToast(err?.response?.data?.message ?? err?.message ?? 'Không thể từ chối. Vui lòng thử lại.', 'error');
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể từ chối. Vui lòng thử lại.';
+            console.error('[PublicationDetailModal] Từ chối thất bại:', msg, err?.response?.data ?? err);
+            showToast(msg, 'error');
         } finally {
             setShowRejectForm(false);
             setRejectionReason('');

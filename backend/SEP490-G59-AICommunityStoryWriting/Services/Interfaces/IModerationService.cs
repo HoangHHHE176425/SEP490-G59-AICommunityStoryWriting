@@ -16,11 +16,11 @@ namespace Services.Interfaces
         /// <param name="claimFilter">all = tất cả; unclaimed = chỉ chưa ai nhận; claimed = chỉ đã nhận duyệt (của tôi, hoặc tất cả nếu ADMIN).</param>
         PagedResultDto<ChapterListItemDto> GetPendingChapters(int page = 1, int pageSize = 20, Guid? storyId = null, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null);
 
-        /// <summary>Lấy danh sách truyện đã duyệt hoặc từ chối (status = PUBLISHED | REJECTED). Non-Admin: chỉ truyện do moderator này duyệt/từ chối (theo moderator_logs).</summary>
-        PagedResultDto<StoryListItemDto> GetReviewedStories(int page, int pageSize, string status, string? search, string? sortBy, string? sortOrder, IReadOnlyList<Guid>? categoryIdsFilter, Guid? moderatorId, bool isAdmin);
+        /// <summary>Lấy danh sách truyện đã duyệt hoặc từ chối (status = PUBLISHED | REJECTED). Non-Admin: chỉ truyện do moderator này duyệt/từ chối (theo moderator_logs). Admin có thể lọc theo moderatorIdFilter, dateFrom, dateTo.</summary>
+        PagedResultDto<StoryListItemDto> GetReviewedStories(int page, int pageSize, string status, string? search, string? sortBy, string? sortOrder, IReadOnlyList<Guid>? categoryIdsFilter, Guid? moderatorId, bool isAdmin, Guid? moderatorIdFilter = null, DateTime? dateFrom = null, DateTime? dateTo = null);
 
-        /// <summary>Lấy danh sách chapter đã duyệt hoặc từ chối (status = PUBLISHED | REJECTED). Non-Admin: chỉ chapter do moderator này duyệt/từ chối (theo moderator_logs).</summary>
-        PagedResultDto<ChapterListItemDto> GetReviewedChapters(int page, int pageSize, string status, string? search, string? sortBy, string? sortOrder, IReadOnlyList<Guid>? categoryIdsFilter, Guid? moderatorId, bool isAdmin);
+        /// <summary>Lấy danh sách chapter đã duyệt hoặc từ chối (status = PUBLISHED | REJECTED). Admin có thể lọc theo moderatorIdFilter, dateFrom, dateTo.</summary>
+        PagedResultDto<ChapterListItemDto> GetReviewedChapters(int page, int pageSize, string status, string? search, string? sortBy, string? sortOrder, IReadOnlyList<Guid>? categoryIdsFilter, Guid? moderatorId, bool isAdmin, Guid? moderatorIdFilter = null, DateTime? dateFrom = null, DateTime? dateTo = null);
 
         /// <summary>Moderator "nhận duyệt" truyện → lock, người khác không thấy trong queue. Trả về true nếu claim thành công.</summary>
         bool ClaimStory(Guid storyId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null);

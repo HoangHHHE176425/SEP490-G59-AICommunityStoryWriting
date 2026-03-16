@@ -21,6 +21,11 @@
         </div>
     </div>
 
+    <div class="alert alert-light border mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2" id="continueReadingBlock" style="display:none;">
+        <span><i class="bi bi-bookmark-check text-primary"></i> <strong>Đang đọc dở:</strong> <span id="continueReadingChapterTitle"></span></span>
+        <a class="btn btn-primary btn-sm" id="continueReadingLink" href="#"><i class="bi bi-book-half"></i> Đọc tiếp</a>
+    </div>
+
     <div class="row g-3">
         <div class="col-lg-8">
             <div class="card mb-3">
@@ -161,6 +166,7 @@
         let chapters = [];
         let replyingToCommentId = null;
         let replyingToDisplayName = null;
+        let userIsFollowingAuthor = false;
 
         document.addEventListener('DOMContentLoaded', async function () {
             await AuthHelper.loadUserInfo().catch(() => {});
@@ -177,8 +183,38 @@
 
         async function loadStory() {
             story = await ApiService.getStoryById(storyId);
+            if (story && story.authorId && typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated()) {
+                try {
+                    userIsFollowingAuthor = await ApiService.getAuthorFollowing(story.authorId);
+                } catch (_) {
+                    userIsFollowingAuthor = false;
+                }
+            } else {
+                userIsFollowingAuthor = false;
+            }
             renderHeader();
             renderStats();
+            renderContinueReading();
+        }
+
+        function renderContinueReading() {
+            const block = document.getElementById('continueReadingBlock');
+            const link = document.getElementById('continueReadingLink');
+            const titleSpan = document.getElementById('continueReadingChapterTitle');
+            if (!block || !story) return;
+            const chapterId = story.lastReadChapterId || story.LastReadChapterId;
+            const chapterTitle = (story.lastReadChapterTitle || story.LastReadChapterTitle || '').trim() || 'Chương đang đọc';
+            if (chapterId) {
+                block.style.display = 'flex';
+                if (link) {
+                    link.href = '/Chapters/Read/' + encodeURIComponent(chapterId);
+                    link.textContent = '';
+                    link.innerHTML = '<i class="bi bi-book-half"></i> Đọc tiếp';
+                }
+                if (titleSpan) titleSpan.textContent = chapterTitle;
+            } else {
+                block.style.display = 'none';
+            }
         }
 
         async function loadChapters() {
@@ -200,14 +236,37 @@
         }
 
         function renderHeader() {
-            const isFollowing = story.userIsFollowing === true;
+            const isFollowingStory = story.userIsFollowing === true;
             const canFollow = typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated();
-            const followBtn = canFollow
-                ? (isFollowing
-                    ? `<button type="button" class="btn btn-outline-secondary btn-sm" id="btnFollowStory" onclick="toggleFollowStory()" title="Bỏ theo dõi"><i class="bi bi-bell-fill"></i> Đang theo dõi</button>`
-                    : `<button type="button" class="btn btn-primary btn-sm" id="btnFollowStory" onclick="toggleFollowStory()" title="Nhận thông báo khi có chương mới"><i class="bi bi-bell"></i> Theo dõi</button>`)
-                : `<span class="text-muted small" title="Đăng nhập để theo dõi truyện"><i class="bi bi-bell"></i> Theo dõi</span>`;
-            const followHint = canFollow ? '<p class="small text-muted mb-0 mt-1"><i class="bi bi-info-circle"></i> Thông báo chương mới hiện ở <strong>chuông <i class="bi bi-bell"></i> trên thanh menu</strong>.</p>' : '';
+
+            // Nút 1: Theo dõi truyện (thông báo khi có chương mới của truyện này)
+            const followStoryBtn = canFollow
+                ? (isFollowingStory
+                    ? `<button type="button" class="btn btn-outline-secondary btn-sm" id="btnFollowStory" onclick="toggleFollowStory()" title="Bỏ theo dõi truyện này"><i class="bi bi-bookmark-fill"></i> Đang theo dõi truyện</button>`
+                    : `<button type="button" class="btn btn-primary btn-sm" id="btnFollowStory" onclick="toggleFollowStory()" title="Nhận thông báo khi truyện này có chương mới"><i class="bi bi-bookmark"></i> Theo dõi truyện</button>`)
+                : `<span class="text-muted small" title="Đăng nhập để theo dõi truyện"><i class="bi bi-bookmark"></i> Theo dõi truyện</span>`;
+
+            const authorId = story.authorId || null;
+            const authorName = (story.authorName || '').trim() || 'Tác giả';
+            const currentUserId = typeof AuthHelper !== 'undefined' && AuthHelper.getUserId ? AuthHelper.getUserId() : null;
+            const isOwnAuthor = authorId && currentUserId && String(authorId).toLowerCase() === String(currentUserId).toLowerCase();
+            const showAuthorFollow = authorId && canFollow && !isOwnAuthor;
+
+            // Nút 2: Theo dõi tác giả (thông báo khi tác giả có truyện/chương mới)
+            const followAuthorBtn = showAuthorFollow
+                ? (userIsFollowingAuthor
+                    ? `<button type="button" class="btn btn-outline-secondary btn-sm" id="btnFollowAuthor" onclick="toggleFollowAuthor()" title="Bỏ theo dõi tác giả"><i class="bi bi-person-check-fill"></i> Đang theo dõi tác giả</button>`
+                    : `<button type="button" class="btn btn-outline-primary btn-sm" id="btnFollowAuthor" onclick="toggleFollowAuthor()" title="Nhận thông báo khi tác giả có truyện hoặc chương mới"><i class="bi bi-person-plus"></i> Theo dõi tác giả</button>`)
+                : (authorId && !isOwnAuthor ? '' : '');
+
+            const followHint = canFollow
+                ? '<p class="small text-muted mb-0 mt-1"><i class="bi bi-info-circle"></i> Thông báo hiện ở <strong>chuông <i class="bi bi-bell"></i> trên thanh menu</strong>.</p>'
+                : '';
+
+            const authorLabel = authorId
+                ? `<div class="text-muted small mt-1"><i class="bi bi-person"></i> Tác giả: ${escapeHtml(authorName)}</div>`
+                : '';
+
             const el = document.getElementById('storyHeaderCard');
             el.innerHTML = `
                 <div class="card-body">
@@ -220,13 +279,16 @@
                                    </div>`}
                         </div>
                         <div class="flex-grow-1">
-                            <div class="d-flex justify-content-between align-items-start gap-2">
-                                <h3 class="mb-1">${story.title}</h3>
-                                <div>${followBtn}</div>
+                            <h3 class="mb-2">${story.title}</h3>
+                            ${authorLabel}
+                            <div class="text-muted mb-2">${story.summary || ''}</div>
+                            <div class="d-flex flex-wrap gap-2 align-items-center mt-2">
+                                <span class="small text-secondary me-1">Theo dõi:</span>
+                                ${followStoryBtn}
+                                ${followAuthorBtn}
                             </div>
                             ${followHint}
-                            <div class="text-muted mb-2">${story.summary || ''}</div>
-                            <div class="d-flex flex-wrap gap-2">
+                            <div class="d-flex flex-wrap gap-2 mt-2">
                                 <span class="badge bg-primary">${story.categoryNames || 'N/A'}</span>
                                 <span class="badge bg-secondary">${story.status || 'N/A'}</span>
                                 <span class="badge bg-success">${(story.avgRating ?? story.AvgRating) ? (story.avgRating ?? story.AvgRating).toFixed(1) : '0.0'}/5</span>
@@ -235,6 +297,27 @@
                     </div>
                 </div>
             `;
+        }
+
+        async function toggleFollowAuthor() {
+            if (!story || !story.authorId || !AuthHelper || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) return;
+            const btn = document.getElementById('btnFollowAuthor');
+            if (!btn) return;
+            try {
+                btn.disabled = true;
+                if (userIsFollowingAuthor) {
+                    await ApiService.unfollowAuthor(story.authorId);
+                    userIsFollowingAuthor = false;
+                } else {
+                    await ApiService.followAuthor(story.authorId);
+                    userIsFollowingAuthor = true;
+                }
+                renderHeader();
+            } catch (e) {
+                alert(e?.message || e);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
         }
 
         async function toggleFollowStory() {
@@ -274,14 +357,18 @@
 
         function renderChapterList(publishedChapters) {
             const el = document.getElementById('chaptersList');
+            const lastReadId = story ? (story.lastReadChapterId || story.LastReadChapterId) : null;
             if (!publishedChapters || publishedChapters.length === 0) {
                 el.innerHTML = `<div class="alert alert-info mb-0">Chưa có chapter PUBLISHED.</div>`;
                 return;
             }
-            el.innerHTML = publishedChapters.map(ch => `
-                <div class="d-flex justify-content-between align-items-center border-bottom py-2">
+            el.innerHTML = publishedChapters.map(ch => {
+                const isLastRead = lastReadId && ch.id === lastReadId;
+                const badge = isLastRead ? ' <span class="badge bg-info ms-1">Đang đọc</span>' : '';
+                return `
+                <div class="d-flex justify-content-between align-items-center border-bottom py-2 ${isLastRead ? 'bg-light' : ''}">
                     <div>
-                        <div class="fw-medium">Chương ${ch.orderIndex}: ${ch.title}</div>
+                        <div class="fw-medium">Chương ${ch.orderIndex}: ${ch.title}${badge}</div>
                         <div class="text-muted small">
                             ${ch.publishedAt ? Utils.formatDate(ch.publishedAt) : ''}
                             ${ch.wordCount ? ' · ' + Utils.formatNumber(ch.wordCount) + ' từ' : ''}
@@ -293,7 +380,8 @@
                         </a>
                     </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
         }
 
         function escapeHtml(text) {

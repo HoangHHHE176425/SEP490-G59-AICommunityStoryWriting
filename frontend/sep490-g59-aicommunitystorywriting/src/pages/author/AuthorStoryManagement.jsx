@@ -615,7 +615,15 @@ export function AuthorStoryManagement({ onBack }) {
         }
     };
 
-    const { showToast, ToastContainer } = useToast();
+    const { showToast, ToastContainer, clearToasts } = useToast();
+
+    /** Chỉ xóa toasts khi vừa chuyển SANG màn danh sách chương (từ màn khác), tránh xóa mỗi lần re-render gây nhấp nháy. */
+    const prevActiveViewRef = useRef(activeView);
+    useEffect(() => {
+        const prev = prevActiveViewRef.current;
+        prevActiveViewRef.current = activeView;
+        if (prev !== 'chapterList' && activeView === 'chapterList') clearToasts();
+    }, [activeView, clearToasts]);
 
     const getCategoryId = (c) => (typeof c === 'object' && c?.id ? c.id : c);
 
@@ -682,19 +690,22 @@ export function AuthorStoryManagement({ onBack }) {
 
     if (activeView === 'chapterList') {
         return (
-            <ChapterListManager
-                story={currentStory}
-                onBack={() => {
-                    setActiveView('stories');
-                    setCurrentStory(null);
-                    loadStories(storiesCurrentPage);
-                }}
-                onAddChapter={() => handleAddChapter(currentStory)}
-                onEditChapter={(chapter) => handleEditChapter(chapter)}
-                onViewChapter={(chapter) => handleViewChapter(chapter)}
-                onAddVersion={(chapter) => handleAddVersion(currentStory, chapter)}
-                onEditVersion={(chapter, version) => handleEditVersion(chapter, version)}
-            />
+            <>
+                <ChapterListManager
+                    story={currentStory}
+                    onBack={() => {
+                        setActiveView('stories');
+                        setCurrentStory(null);
+                        loadStories(storiesCurrentPage);
+                    }}
+                    onAddChapter={() => handleAddChapter(currentStory)}
+                    onEditChapter={(chapter) => handleEditChapter(chapter)}
+                    onViewChapter={(chapter) => handleViewChapter(chapter)}
+                    onAddVersion={(chapter) => handleAddVersion(currentStory, chapter)}
+                    onEditVersion={(chapter, version) => handleEditVersion(chapter, version)}
+                />
+                <ToastContainer />
+            </>
         );
     }
 

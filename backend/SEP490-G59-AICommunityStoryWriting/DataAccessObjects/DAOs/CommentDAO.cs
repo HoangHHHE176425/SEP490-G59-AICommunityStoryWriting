@@ -6,7 +6,7 @@ namespace DataAccessObjects.DAOs
 {
     public class CommentDAO
     {
-        /// <summary>Đếm số comment theo story_id (Guid). Mặc định chỉ đếm comment status = APPROVED.</summary>
+        /// <summary>Đếm số comment theo story_id (Guid). Bao gồm cả comment của story (chapter_id null) và tất cả comment của các chapter thuộc story. Mặc định chỉ đếm status = APPROVED.</summary>
         public static int GetCountByStoryId(Guid storyId, string status = "APPROVED")
         {
             using var context = new StoryPlatformDbContext();
@@ -20,13 +20,26 @@ namespace DataAccessObjects.DAOs
             return context.comments.AsNoTracking().FirstOrDefault(c => c.id == id);
         }
 
+        /// <summary>Lấy comment cấp story (chapter_id null) — không gồm comment của từng chapter.</summary>
         public static IReadOnlyList<comments> GetStoryComments(Guid storyId, string status = "APPROVED")
         {
             using var context = new StoryPlatformDbContext();
             return context.comments.AsNoTracking()
                 .Include(c => c.userNavigation)
                 .ThenInclude(u => u.user_profiles)
-                .Where(c => c.story_id == storyId && c.status == status)
+                .Where(c => c.story_id == storyId && c.chapter_id == null && c.status == status)
+                .OrderBy(c => c.created_at)
+                .ToList();
+        }
+
+        /// <summary>Lấy comment của một chapter (chapter_id = chapterId).</summary>
+        public static IReadOnlyList<comments> GetChapterComments(Guid chapterId, string status = "APPROVED")
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.comments.AsNoTracking()
+                .Include(c => c.userNavigation)
+                .ThenInclude(u => u.user_profiles)
+                .Where(c => c.chapter_id == chapterId && c.status == status)
                 .OrderBy(c => c.created_at)
                 .ToList();
         }
@@ -53,6 +66,31 @@ namespace DataAccessObjects.DAOs
             context.SaveChanges();
 
             // Re-load with navigation for mapping in upper layer
+            return context.comments.AsNoTracking()
+                .Include(c => c.userNavigation)
+                .ThenInclude(u => u.user_profiles)
+                .First(c => c.id == entity.id);
+        }
+
+        /// <summary>Thêm comment cho chapter (story_id và chapter_id đều set; tổng comment story = GetCountByStoryId).</summary>
+        public static comments AddChapterComment(Guid storyId, Guid chapterId, Guid userId, string content, Guid? parentId = null, string status = "APPROVED")
+        {
+            using var context = new StoryPlatformDbContext();
+            var entity = new comments
+            {
+                id = Guid.NewGuid(),
+                user_id = userId,
+                story_id = storyId,
+                chapter_id = chapterId,
+                parent_id = parentId,
+                content = content,
+                likes_count = 0,
+                status = status,
+                created_at = DateTime.Now,
+                updated_at = DateTime.Now
+            };
+            context.comments.Add(entity);
+            context.SaveChanges();
             return context.comments.AsNoTracking()
                 .Include(c => c.userNavigation)
                 .ThenInclude(u => u.user_profiles)

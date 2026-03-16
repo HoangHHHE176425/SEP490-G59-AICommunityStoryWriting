@@ -61,5 +61,95 @@ namespace DataAccessObjects.DAOs
             }
             return result;
         }
+
+        /// <summary>Lấy danh sách target_id từ moderation_logs với bộ lọc (Admin: theo moderator, khoảng ngày, action).</summary>
+        public static List<Guid> GetTargetIdsFiltered(string targetType, Guid? moderatorId, DateTime? dateFrom, DateTime? dateTo, string action)
+        {
+            var actionUpper = (action ?? "").Trim().ToUpperInvariant();
+            if (string.IsNullOrEmpty(actionUpper)) return new List<Guid>();
+            using var context = new StoryPlatformDbContext();
+            var query = context.moderation_logs
+                .AsNoTracking()
+                .Where(m => m.target_type == targetType && m.target_id.HasValue && m.action != null && m.action.ToUpper() == actionUpper);
+            if (moderatorId.HasValue)
+                query = query.Where(m => m.moderator_id == moderatorId.Value);
+            if (dateFrom.HasValue)
+                query = query.Where(m => m.created_at >= dateFrom.Value);
+            if (dateTo.HasValue)
+                query = query.Where(m => m.created_at <= dateTo.Value);
+            return query.Select(m => m.target_id!.Value).Distinct().ToList();
+        }
+
+        /// <summary>Lấy thông tin log (created_at, moderator_id) cho từng target — bản ghi mới nhất theo action.</summary>
+        public static Dictionary<Guid, (DateTime CreatedAt, Guid? ModeratorId)> GetLogInfoByTargets(string targetType, IReadOnlyList<Guid> targetIds, string action)
+        {
+            if (targetIds == null || targetIds.Count == 0)
+                return new Dictionary<Guid, (DateTime, Guid?)>();
+            var actionUpper = (action ?? "").Trim().ToUpperInvariant();
+            using var context = new StoryPlatformDbContext();
+            var logs = context.moderation_logs
+                .AsNoTracking()
+                .Where(m => m.target_type == targetType && m.target_id.HasValue &&
+                    targetIds.Contains(m.target_id.Value) &&
+                    m.action != null && m.action.ToUpper() == actionUpper)
+                .OrderByDescending(m => m.created_at)
+                .Select(m => new { m.target_id, m.created_at, m.moderator_id })
+                .ToList();
+            var result = new Dictionary<Guid, (DateTime, Guid?)>();
+            foreach (var m in logs)
+            {
+                var id = m.target_id!.Value;
+                if (!result.ContainsKey(id) && m.created_at.HasValue)
+                    result[id] = (m.created_at.Value, m.moderator_id);
+            }
+            return result;
+        }
+
+        /// <summary>Lấy trang log kiểm duyệt (Admin) với bộ lọc. Trả về danh sách entity để controller map sang DTO và điền title/moderator name.</summary>
+        public static (List<moderation_logs> Logs, int TotalCount) GetModerationLogsPage(Guid? moderatorId, DateTime? dateFrom, DateTime? dateTo, string? action, string? targetType, int page, int pageSize)
+        {
+            using var context = new StoryPlatformDbContext();
+            var query = context.moderation_logs.AsNoTracking().Where(m => true);
+            if (moderatorId.HasValue)
+                query = query.Where(m => m.moderator_id == moderatorId.Value);
+            if (dateFrom.HasValue)
+                query = query.Where(m => m.created_at >= dateFrom.Value);
+            if (dateTo.HasValue)
+                query = query.Where(m => m.created_at <= dateTo.Value);
+            var actionUpper = (action ?? "").Trim().ToUpperInvariant();
+            var targetTypeUpper = (targetType ?? "").Trim().ToUpperInvariant();
+            if (!string.IsNullOrEmpty(actionUpper))
+                query = query.Where(m => m.action != null && m.action.ToUpper() == actionUpper);
+            if (!string.IsNullOrEmpty(targetTypeUpper))
+                query = query.Where(m => m.target_type != null && m.target_type.ToUpper() == targetTypeUpper);
+
+            var total = query.Count();
+            var list = query
+                .OrderByDescending(m => m.created_at)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+            return (list, total);
+        }
+
+        /// <summary>Thống kê theo moderator: số APPROVED, REJECTED (Admin).</summary>
+        public static List<(Guid ModeratorId, int ApprovedCount, int RejectedCount)> GetModeratorPerformance(DateTime? dateFrom, DateTime? dateTo)
+        {
+            using var context = new StoryPlatformDbContext();
+            var query = context.moderation_logs
+                .AsNoTracking()
+                .Where(m => m.moderator_id.HasValue && m.action != null &&
+                    (m.action.ToUpper() == "APPROVED" || m.action.ToUpper() == "REJECTED"));
+            if (dateFrom.HasValue)
+                query = query.Where(m => m.created_at >= dateFrom.Value);
+            if (dateTo.HasValue)
+                query = query.Where(m => m.created_at <= dateTo.Value);
+
+            var grouped = query
+                .GroupBy(m => m.moderator_id!.Value)
+                .Select(g => new { ModeratorId = g.Key, Approved = g.Count(m => m.action != null && m.action.ToUpper() == "APPROVED"), Rejected = g.Count(m => m.action != null && m.action.ToUpper() == "REJECTED") })
+                .ToList();
+            return grouped.Select(x => (x.ModeratorId, x.Approved, x.Rejected)).ToList();
+        }
     }
 }

@@ -9,7 +9,7 @@ namespace Services.Interfaces
         /// Gợi ý 3 hướng đi khác nhau cho chương tiếp theo.
         /// Chỉ tác giả của truyện mới gọi được.
         /// </summary>
-        /// <param name="request">StoryId bắt buộc; AfterChapterId tùy chọn.</param>
+        /// <param name="request">StoryId bắt buộc. Luôn gợi ý sau chương mới nhất.</param>
         /// <param name="authorUserId">ID user hiện tại (phải là author của truyện).</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>3 gợi ý (title, summary, direction) hoặc exception nếu không đủ quyền / story không tồn tại / AI lỗi.</returns>

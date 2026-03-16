@@ -14,7 +14,11 @@
                     </a>
                     <span class="ms-2" id="storyTitleHeader">Đang tải...</span>
                 </div>
-                <div>
+                <div class="d-flex align-items-center gap-1 flex-wrap">
+                    <button class="btn btn-sm btn-outline-primary" id="btnSaveReadingProgress" onclick="saveReadingProgress()" title="Lưu lại đang đọc đến chương này (để tiếp tục sau)" style="display:none;">
+                        <i class="bi bi-bookmark-check"></i> Lưu lịch sử đọc
+                    </button>
+                    <span class="text-muted small" id="saveProgressResult"></span>
                     <button class="btn btn-sm btn-outline-secondary" onclick="toggleFullscreen()" title="Toàn màn hình">
                         <i class="bi bi-arrows-fullscreen"></i>
                     </button>
@@ -66,6 +70,47 @@
                 <!-- Chapter Stats -->
                 <div class="mt-4 text-center text-muted small">
                     <div id="chapterStats"></div>
+                </div>
+
+                <!-- Bình luận chapter -->
+                <div class="card mt-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <strong>Bình luận</strong>
+                        <span class="badge bg-secondary" id="chapterCommentsCount">0</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-warning small mb-3" id="chapterCommentRuleHint">
+                            Để comment: bạn cần <strong>đăng nhập</strong> và <strong>đọc ít nhất 1 chapter</strong> của truyện này.
+                        </div>
+                        <div class="mb-3">
+                            <textarea class="form-control" id="chapterNewCommentContent" rows="2" placeholder="Viết bình luận..."></textarea>
+                            <div class="d-flex justify-content-between align-items-center mt-2">
+                                <small class="text-muted">Tối đa 2000 ký tự</small>
+                                <button class="btn btn-primary btn-sm" id="chapterSubmitCommentBtn" onclick="submitChapterComment()">
+                                    <i class="bi bi-send"></i> Gửi bình luận
+                                </button>
+                            </div>
+                            <div class="mt-2 small" id="chapterCommentSubmitResult"></div>
+                        </div>
+                        <div id="chapterCommentsList">
+                            <div class="text-center"><div class="spinner-border text-primary" role="status"></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal fade" id="chapterCommentReactionsModal" tabindex="-1">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="bi bi-emoji-smile me-1"></i> Người đã thả cảm xúc</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                            </div>
+                            <div class="modal-body" id="chapterCommentReactionsModalBody"></div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -131,6 +176,18 @@
         let storyId = null;
         let allChapters = [];
         let currentChapterIndex = -1;
+        let replyingToCommentId = null;
+        let replyingToDisplayName = null;
+
+        const CHAPTER_COMMENT_REACTIONS = [
+            { type: 'LIKE', icon: 'bi-hand-thumbs-up', label: 'Thích' },
+            { type: 'DISLIKE', icon: 'bi-hand-thumbs-down', label: 'Không thích' },
+            { type: 'FUNNY', icon: 'bi-emoji-laughing', label: 'Buồn cười' },
+            { type: 'SAD', icon: 'bi-emoji-frown', label: 'Buồn' },
+            { type: 'ANGRY', icon: 'bi-emoji-angry', label: 'Phẫn nộ' },
+            { type: 'LOVE', icon: 'bi-heart-fill', label: 'Yêu thích' },
+            { type: 'WOW', icon: 'bi-emoji-surprise', label: 'Wow' }
+        ];
 
         document.addEventListener('DOMContentLoaded', function() {
             // Bắt buộc đăng nhập mới được đọc chapter
@@ -164,6 +221,8 @@
 
                 // Render chapter first so user can read even if other calls fail
                 renderChapter();
+                updateSaveProgressButton();
+                loadChapterComments();
 
                 // Load story info - non-critical, show warning if fails
                 try {
@@ -242,6 +301,200 @@
                     ''
                 }
             `;
+        }
+
+        function updateSaveProgressButton() {
+            const btn = document.getElementById('btnSaveReadingProgress');
+            if (!btn) return;
+            if (storyId && chapterId && typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated()) {
+                btn.style.display = 'inline-block';
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        async function saveReadingProgress() {
+            const resultEl = document.getElementById('saveProgressResult');
+            if (!storyId || !chapterId) return;
+            if (typeof AuthHelper === 'undefined' || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) {
+                if (resultEl) resultEl.textContent = 'Vui lòng đăng nhập để lưu lịch sử đọc.';
+                return;
+            }
+            const btn = document.getElementById('btnSaveReadingProgress');
+            if (btn) btn.disabled = true;
+            if (resultEl) resultEl.textContent = '';
+            try {
+                await ApiService.saveReadingProgress(storyId, chapterId);
+                if (resultEl) { resultEl.textContent = 'Đã lưu.'; resultEl.className = 'text-success small'; }
+            } catch (e) {
+                if (resultEl) { resultEl.textContent = (e && e.message) || 'Lỗi'; resultEl.className = 'text-danger small'; }
+            }
+            if (btn) btn.disabled = false;
+        }
+
+        function escapeHtml(text) {
+            if (text == null) return '';
+            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+
+        async function loadChapterComments() {
+            if (!chapterId) return;
+            try {
+                const list = await ApiService.getChapterComments(chapterId);
+                renderChapterComments(list || []);
+            } catch (e) {
+                document.getElementById('chapterCommentsList').innerHTML =
+                    '<div class="alert alert-danger mb-0">Không tải được bình luận.</div>';
+            }
+        }
+
+        function renderChapterComments(list) {
+            const container = document.getElementById('chapterCommentsList');
+            const countEl = document.getElementById('chapterCommentsCount');
+            if (countEl) countEl.textContent = (list || []).length;
+            if (!list || list.length === 0) {
+                container.innerHTML = '<div class="text-muted">Chưa có bình luận.</div>';
+                return;
+            }
+            const byParent = new Map();
+            const roots = [];
+            for (const c of list) {
+                const pid = c.parentId || null;
+                if (!pid) roots.push(c);
+                if (!byParent.has(pid)) byParent.set(pid, []);
+                byParent.get(pid).push(c);
+            }
+            function renderNode(c, depth) {
+                const name = escapeHtml(c.userDisplayName || 'Ẩn danh');
+                const time = c.createdAt && typeof Utils !== 'undefined' && Utils.formatDate ? Utils.formatDate(c.createdAt) : (c.createdAt || '');
+                const content = escapeHtml(c.content || '');
+                const canReply = typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated();
+                const reactionCounts = c.reactionCounts || {};
+                const userReactionType = c.userReactionType || null;
+                const isReplyingHere = replyingToCommentId === c.id;
+                const replyBadge = isReplyingHere ? '<span class="badge bg-info text-dark ms-2">Đang trả lời</span>' : '';
+                const replyBtn = canReply ? '<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" onclick="startReplyChapter(\'' + c.id + '\', \'' + name.replace(/'/g, "\\'") + '\')">Trả lời</button>' : '';
+                const reactionBtns = CHAPTER_COMMENT_REACTIONS.map(function(r) {
+                    const count = reactionCounts[r.type] ?? 0;
+                    const isActive = userReactionType === r.type;
+                    const cur = (userReactionType || '').replace(/'/g, "\\'");
+                    if (canReply) {
+                        return '<button type="button" class="btn btn-link btn-sm p-0 px-1 text-decoration-none ' + (isActive ? 'text-primary fw-bold' : 'text-muted') + '" title="' + r.label + '" onclick="setChapterCommentReaction(\'' + c.id + '\', \'' + r.type + '\', \'' + cur + '\')"><i class="bi ' + r.icon + '"></i> <span class="reaction-count">' + count + '</span></button>';
+                    }
+                    return '<span class="text-muted small px-1"><i class="bi ' + r.icon + '"></i> ' + count + '</span>';
+                }).join('');
+                const totalReactions = Object.values(reactionCounts).reduce(function(a, b) { return a + b; }, 0);
+                const totalReactionsHtml = totalReactions > 0 ? ' <span class="text-muted small text-decoration-underline" style="cursor:pointer" onclick="openChapterCommentReactionsModal(\'' + c.id + '\')" role="button">(' + totalReactions + ' reaction)</span>' : '';
+                const children = byParent.get(c.id) || [];
+                const indent = Math.min(depth, 6) * 16;
+                return '<div class="py-2 comment-node" style="margin-left:' + indent + 'px;" data-comment-id="' + c.id + '">' +
+                    '<div class="d-flex justify-content-between align-items-start gap-2"><div class="fw-medium">' + name + replyBadge + '</div><div class="text-muted small">' + time + '</div></div>' +
+                    '<div class="mb-1">' + content + '</div>' +
+                    '<div class="small d-flex gap-2 align-items-center flex-wrap">' + replyBtn + '<span class="d-flex gap-1 align-items-center flex-wrap">' + reactionBtns + '</span>' + totalReactionsHtml + '</div>' +
+                    (children.length ? children.map(function(ch) { return renderNode(ch, depth + 1); }).join('') : '') +
+                    '</div>' + (depth === 0 ? '<div class="border-bottom"></div>' : '');
+            }
+            container.innerHTML = roots.map(function(c) { return renderNode(c, 0); }).join('');
+            renderChapterReplyStateUI();
+        }
+
+        function renderChapterReplyStateUI() {
+            const textarea = document.getElementById('chapterNewCommentContent');
+            const btn = document.getElementById('chapterSubmitCommentBtn');
+            let stateEl = document.getElementById('chapterReplyStateBar');
+            if (!stateEl) {
+                stateEl = document.createElement('div');
+                stateEl.id = 'chapterReplyStateBar';
+                stateEl.className = 'alert alert-info small py-2 d-flex justify-content-between align-items-center';
+                stateEl.style.display = 'none';
+                stateEl.innerHTML = '<div id="chapterReplyStateText"></div><button type="button" class="btn btn-sm btn-outline-secondary" onclick="cancelReplyChapter()">Hủy trả lời</button>';
+                document.getElementById('chapterCommentRuleHint').parentElement.insertBefore(stateEl, document.getElementById('chapterCommentRuleHint').nextSibling);
+            }
+            if (replyingToCommentId) {
+                stateEl.style.display = 'flex';
+                document.getElementById('chapterReplyStateText').innerHTML = 'Đang trả lời <strong>' + escapeHtml(replyingToDisplayName || 'comment') + '</strong>';
+                textarea.placeholder = 'Trả lời ' + (replyingToDisplayName || 'comment') + '...';
+                btn.innerHTML = '<i class="bi bi-send"></i> Gửi trả lời';
+            } else {
+                stateEl.style.display = 'none';
+                textarea.placeholder = 'Viết bình luận...';
+                btn.innerHTML = '<i class="bi bi-send"></i> Gửi bình luận';
+            }
+        }
+
+        function startReplyChapter(commentId, displayName) {
+            replyingToCommentId = commentId;
+            replyingToDisplayName = displayName;
+            renderChapterReplyStateUI();
+            document.getElementById('chapterNewCommentContent').focus();
+        }
+
+        function cancelReplyChapter() {
+            replyingToCommentId = null;
+            replyingToDisplayName = null;
+            renderChapterReplyStateUI();
+        }
+
+        async function submitChapterComment() {
+            const resultEl = document.getElementById('chapterCommentSubmitResult');
+            resultEl.innerHTML = '';
+            if (typeof AuthHelper === 'undefined' || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) {
+                resultEl.innerHTML = '<span class="text-danger">Vui lòng đăng nhập để bình luận.</span>';
+                return;
+            }
+            const content = (document.getElementById('chapterNewCommentContent').value || '').trim();
+            if (!content) {
+                resultEl.innerHTML = '<span class="text-danger">Nội dung không được để trống.</span>';
+                return;
+            }
+            try {
+                await ApiService.addChapterComment(chapterId, { content: content, parentId: replyingToCommentId });
+                document.getElementById('chapterNewCommentContent').value = '';
+                cancelReplyChapter();
+                resultEl.innerHTML = '<span class="text-success">Đã gửi bình luận.</span>';
+                await loadChapterComments();
+            } catch (e) {
+                resultEl.innerHTML = '<span class="text-danger">' + (e && e.message ? e.message : e) + '</span>';
+            }
+        }
+
+        async function setChapterCommentReaction(commentId, reactionType, currentUserReaction) {
+            if (typeof AuthHelper === 'undefined' || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) return;
+            const toSet = (currentUserReaction === reactionType) ? null : reactionType;
+            try {
+                await ApiService.setChapterCommentReaction(chapterId, commentId, toSet);
+                await loadChapterComments();
+            } catch (e) {
+                console.error(e);
+                await loadChapterComments();
+            }
+        }
+
+        async function openChapterCommentReactionsModal(commentId) {
+            const modalEl = document.getElementById('chapterCommentReactionsModal');
+            const bodyEl = document.getElementById('chapterCommentReactionsModalBody');
+            if (!modalEl || !bodyEl) return;
+            bodyEl.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary"></div></div>';
+            if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                var modal = new bootstrap.Modal(modalEl);
+                modal.show();
+            }
+            try {
+                const list = await ApiService.getChapterCommentReactions(chapterId, commentId) || [];
+                const typeToIcon = {}; const typeToLabel = {};
+                CHAPTER_COMMENT_REACTIONS.forEach(function(r) { typeToIcon[r.type] = r.icon; typeToLabel[r.type] = r.label; });
+                if (list.length === 0) {
+                    bodyEl.innerHTML = '<p class="text-muted mb-0">Chưa có ai thả cảm xúc.</p>';
+                } else {
+                    bodyEl.innerHTML = '<ul class="list-group list-group-flush">' + list.map(function(item) {
+                        var icon = typeToIcon[item.reactionType] || 'bi-emoji-smile';
+                        var name = escapeHtml(item.userDisplayName || 'Ẩn danh');
+                        return '<li class="list-group-item d-flex align-items-center gap-2 py-2"><i class="bi ' + icon + ' text-primary"></i><span>' + name + '</span></li>';
+                    }).join('') + '</ul>';
+                }
+            } catch (e) {
+                bodyEl.innerHTML = '<p class="text-danger mb-0">Không tải được danh sách.</p>';
+            }
         }
 
         function updateNavigation() {
