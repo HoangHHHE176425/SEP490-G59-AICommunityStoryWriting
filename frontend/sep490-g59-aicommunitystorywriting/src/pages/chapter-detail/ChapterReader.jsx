@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { ChapterNavBar } from '../../components/chapter-detail/ChapterNavBar';
 import { ChapterSettings } from '../../components/chapter-detail/ChapterSettings';
@@ -9,7 +9,8 @@ import { ChapterComments } from '../../components/chapter-detail/ChapterComments
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getStoryById } from '../../api/story/storyApi';
-import { getChapterById, getChapters } from '../../api/chapter/chapterApi';
+import { getChapterById, getChapters, getChapterComments, addChapterComment, setChapterCommentReaction } from '../../api/chapter/chapterApi';
+import { useAuth } from '../../contexts/AuthContext';
 
 function formatTimeAgo(dateStr) {
     if (!dateStr) return '';
@@ -28,6 +29,7 @@ function formatTimeAgo(dateStr) {
 export function ChapterReader({ onBack, onNavigateToStory }) {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
+    const { user } = useAuth();
     const urlStoryId = searchParams.get('storyId');
     const urlChapterId = searchParams.get('chapterId');
 
@@ -45,6 +47,10 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
     const [allChapters, setAllChapters] = useState([]);
     const [loading, setLoading] = useState(!!(urlStoryId && urlChapterId));
     const [error, setError] = useState(null);
+
+    const [comments, setComments] = useState([]);
+    const [commentsLoading, setCommentsLoading] = useState(false);
+    const [commentError, setCommentError] = useState(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -116,6 +122,42 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         };
     }, [urlStoryId, urlChapterId]);
 
+    const loadComments = useCallback(() => {
+        if (!urlChapterId) return;
+        setCommentsLoading(true);
+        setCommentError(null);
+        getChapterComments(urlChapterId)
+            .then((data) => setComments(Array.isArray(data) ? data : []))
+            .catch(() => setComments([]))
+            .finally(() => setCommentsLoading(false));
+    }, [urlChapterId]);
+
+    useEffect(() => {
+        if (urlChapterId) loadComments();
+    }, [urlChapterId, loadComments]);
+
+    const handleSubmitComment = useCallback(async (content, parentId) => {
+        if (!urlChapterId) return;
+        setCommentError(null);
+        try {
+            await addChapterComment(urlChapterId, { content: content.trim(), parentId: parentId || null });
+            loadComments();
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không gửi được bình luận.';
+            setCommentError(msg);
+        }
+    }, [urlChapterId, loadComments]);
+
+    const handleLikeComment = useCallback(async (commentId) => {
+        if (!urlChapterId || !user?.id) return;
+        try {
+            await setChapterCommentReaction(urlChapterId, commentId, 'LIKE');
+            loadComments();
+        } catch {
+            setCommentError('Không cập nhật được reaction.');
+        }
+    }, [urlChapterId, user?.id, loadComments]);
+
     const storyForNav = story || { title: '', author: '' };
     const chapterForNav = chapter || {
         number: 0,
@@ -138,30 +180,6 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         isPaidLocked: false,
         coinPrice: 0,
     };
-
-    const comments = [
-        {
-            id: 1,
-            user: { name: 'Độc Giả 123', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=50&h=50&fit=crop' },
-            content: 'Chương này hay quá! Trận chiến với Ma Đế được miêu tả rất sống động và hấp dẫn!',
-            time: '3 giờ trước',
-            likes: 234,
-        },
-        {
-            id: 2,
-            user: { name: 'Phong Vân', avatar: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=50&h=50&fit=crop' },
-            content: 'Tác giả viết văn rất hay, cảm xúc nhân vật được thể hiện rõ ràng. Mong chờ chương tiếp theo!',
-            time: '5 giờ trước',
-            likes: 189,
-        },
-        {
-            id: 3,
-            user: { name: 'Long Thiên', avatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=50&h=50&fit=crop' },
-            content: 'Phần chiến đấu quá đỉnh! Đọc xong muốn xem tiếp luôn 🔥',
-            time: '6 giờ trước',
-            likes: 156,
-        },
-    ];
 
     const handleBackClick = () => {
         if (onBack) {
@@ -312,7 +330,13 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
             {/* Comments Section */}
             <ChapterComments
                 comments={comments}
+                commentsLoading={commentsLoading}
+                commentError={commentError}
+                isLoggedIn={!!user?.id}
+                onSubmitComment={handleSubmitComment}
+                onLikeComment={handleLikeComment}
                 onReportComment={(id) => console.log('Report comment:', id)}
+                formatTimeAgo={formatTimeAgo}
             />
 
             {/* Footer */}

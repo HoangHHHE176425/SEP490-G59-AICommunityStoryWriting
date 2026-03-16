@@ -271,3 +271,35 @@ export async function unsubmitChapterVersion(chapterId, versionId) {
     const response = await axiosInstance.post(`/chapters/${chapterId}/versions/${versionId}/unsubmit`);
     return response.data;
 }
+
+// ---------- Chapter Comments (AllowAnonymous list; POST cần đăng nhập + đã đọc ít nhất 1 chương) ----------
+
+/** GET api/chapters/{id}/comments - Danh sách comment của chapter (AllowAnonymous). */
+export async function getChapterComments(chapterId) {
+    const response = await axiosInstance.get(`/chapters/${chapterId}/comments`);
+    return response.data;
+}
+
+/** POST api/chapters/{id}/comments - Thêm comment (body: content, parentId?). Yêu cầu đăng nhập và đã đọc ít nhất 1 chapter của truyện. */
+export async function addChapterComment(chapterId, body) {
+    const payload = {
+        content: (body?.content ?? '').trim(),
+        parentId: body?.parentId ?? null,
+    };
+    const response = await axiosInstance.post(`/chapters/${chapterId}/comments`, payload);
+    return response.data;
+}
+
+/** GET api/chapters/{chapterId}/comments/{commentId}/reactions - Danh sách người đã reaction (cho modal). */
+export async function getChapterCommentReactions(chapterId, commentId) {
+    const response = await axiosInstance.get(`/chapters/${chapterId}/comments/${commentId}/reactions`);
+    return response.data;
+}
+
+/** POST api/chapters/{chapterId}/comments/{commentId}/reaction - Đặt/bỏ reaction (LIKE, DISLIKE, FUNNY, SAD, ANGRY, LOVE, WOW). reactionType = null/'' để bỏ. */
+export async function setChapterCommentReaction(chapterId, commentId, reactionType) {
+    const response = await axiosInstance.post(`/chapters/${chapterId}/comments/${commentId}/reaction`, {
+        reactionType: reactionType ?? null,
+    });
+    return response.data;
+}
