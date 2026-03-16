@@ -9,6 +9,7 @@ import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
 import { createStory, updateStory, getStories, getStoryById, deleteStory } from '../../api/story/storyApi';
 import { createChapter, updateChapter, getChapterById, getChapters, createChapterVersion, updateChapterVersion, getChapterVersionById, submitChapterVersion } from '../../api/chapter/chapterApi';
+import * as coinApi from '../../api/coins/coinApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -98,6 +99,16 @@ export function AuthorStoryManagement({ onBack }) {
 
     const STORIES_PAGE_SIZE = 10;
     const authorId = user?.id ?? user?.Id;
+
+    // Lịch sử donate + rút tiền (author)
+    const [authorActivityItems, setAuthorActivityItems] = useState([]);
+    const [authorActivityLoading, setAuthorActivityLoading] = useState(false);
+    const [authorActivityError, setAuthorActivityError] = useState(null);
+    // Rút tiền: số dư ví, số coin nhập, trạng thái gửi
+    const [withdrawBalance, setWithdrawBalance] = useState(null);
+    const [withdrawAmount, setWithdrawAmount] = useState('');
+    const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+    const [withdrawError, setWithdrawError] = useState(null);
 
     const loadStories = useCallback((page = 1, options = {}) => {
         if (!authorId) {
@@ -200,6 +211,40 @@ export function AuthorStoryManagement({ onBack }) {
     useEffect(() => {
         queueMicrotask(() => loadStories(1));
     }, [loadStories]);
+
+    useEffect(() => {
+        if (activeView !== 'history' || !authorId) return;
+        setAuthorActivityLoading(true);
+        setAuthorActivityError(null);
+        coinApi.getAuthorActivity({ page: 1, pageSize: 100 })
+            .then((res) => {
+                if (res?.success && res?.data?.items) {
+                    setAuthorActivityItems(res.data.items);
+                } else {
+                    setAuthorActivityItems([]);
+                    if (!res?.success) setAuthorActivityError(res?.message ?? 'Không tải được lịch sử.');
+                }
+            })
+            .catch(() => {
+                setAuthorActivityItems([]);
+                setAuthorActivityError('Không tải được lịch sử donate và rút tiền.');
+            })
+            .finally(() => setAuthorActivityLoading(false));
+    }, [activeView, authorId]);
+
+    useEffect(() => {
+        if (activeView !== 'withdraw' || !authorId) return;
+        setWithdrawError(null);
+        coinApi.getMyWallet()
+            .then((res) => {
+                if (res?.success && res?.data != null) {
+                    setWithdrawBalance(res.data.balanceCoin ?? res.data.balance_coin ?? 0);
+                } else {
+                    setWithdrawBalance(0);
+                }
+            })
+            .catch(() => setWithdrawBalance(0));
+    }, [activeView, authorId]);
 
     /** Real-time: refetch danh sách truyện khi tab đang hiển thị (moderator duyệt/từ chối → trạng thái truyện thay đổi). */
     const STORIES_POLL_INTERVAL_MS = 1000;
@@ -1011,7 +1056,7 @@ export function AuthorStoryManagement({ onBack }) {
                                     borderRadius: '12px',
                                     border: '1px solid #bbf7d0'
                                 }}>
-                                    <span style={{ fontSize: '1.75rem', fontWeight: 700, color: '#15803d', letterSpacing: '-0.02em' }}>0</span>
+                                    <span style={{ fontSize: '1.75rem', fontWeight: 700, color: '#15803d', letterSpacing: '-0.02em' }}>{withdrawBalance != null ? Number(withdrawBalance).toLocaleString() : '—'}</span>
                                     <span style={{ fontSize: '0.875rem', color: '#166534', fontWeight: 500 }}>coin</span>
                                 </div>
                             </div>
@@ -1027,12 +1072,18 @@ export function AuthorStoryManagement({ onBack }) {
                                     <ArrowDownToLine style={{ width: '20px', height: '20px', color: '#6b7280' }} />
                                     <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>Yêu cầu rút tiền</span>
                                 </div>
+                                {withdrawError && (
+                                    <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '0.75rem' }}>{withdrawError}</p>
+                                )}
                                 <div style={{ marginBottom: '1.25rem' }}>
                                     <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Số coin muốn rút</label>
                                     <input
                                         type="number"
                                         placeholder="0"
                                         min={1}
+                                        max={withdrawBalance != null ? withdrawBalance : undefined}
+                                        value={withdrawAmount}
+                                        onChange={(e) => setWithdrawAmount(e.target.value.replace(/[^0-9]/g, '') || '')}
                                         style={{
                                             width: '100%',
                                             maxWidth: '320px',
@@ -1047,6 +1098,8 @@ export function AuthorStoryManagement({ onBack }) {
                                     />
                                 </div>
                                 <button
+                                    type="button"
+                                    disabled={withdrawSubmitting || !withdrawAmount || (withdrawBalance != null && Number(withdrawAmount) > withdrawBalance) || Number(withdrawAmount) < 1}
                                     style={{
                                         padding: '0.625rem 1.5rem',
                                         backgroundColor: '#13ec5b',
@@ -1055,14 +1108,31 @@ export function AuthorStoryManagement({ onBack }) {
                                         fontSize: '0.875rem',
                                         fontWeight: 600,
                                         color: '#ffffff',
-                                        cursor: 'pointer',
+                                        cursor: withdrawSubmitting ? 'not-allowed' : 'pointer',
+                                        opacity: (withdrawSubmitting || !withdrawAmount || (withdrawBalance != null && Number(withdrawAmount) > withdrawBalance)) ? 0.6 : 1,
                                         boxShadow: '0 2px 8px rgba(19, 236, 91, 0.35)',
                                         transition: 'all 0.2s ease'
                                     }}
-                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#10d452'; e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.4)'; }}
+                                    onMouseEnter={(e) => { if (!e.currentTarget.disabled) { e.currentTarget.style.backgroundColor = '#10d452'; e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.4)'; } }}
                                     onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#13ec5b'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(19, 236, 91, 0.35)'; }}
+                                    onClick={async () => {
+                                        const amount = Number(withdrawAmount);
+                                        if (!amount || amount < 1) return;
+                                        setWithdrawSubmitting(true);
+                                        setWithdrawError(null);
+                                        const res = await coinApi.createWithdrawRequest({ amountCoins: amount });
+                                        setWithdrawSubmitting(false);
+                                        if (res?.success) {
+                                            setWithdrawAmount('');
+                                            showToast('Đã gửi yêu cầu rút tiền. Quản trị viên sẽ xử lý.', 'success');
+                                            coinApi.getMyWallet().then((r) => { if (r?.success && r?.data) setWithdrawBalance(r.data.balanceCoin ?? r.data.balance_coin ?? 0); });
+                                            coinApi.getAuthorActivity({ page: 1, pageSize: 100 }).then((ar) => { if (ar?.success && ar?.data?.items) setAuthorActivityItems(ar.data.items); });
+                                        } else {
+                                            setWithdrawError(res?.message ?? 'Không gửi được yêu cầu rút tiền.');
+                                        }
+                                    }}
                                 >
-                                    Gửi yêu cầu rút tiền
+                                    {withdrawSubmitting ? 'Đang gửi...' : 'Gửi yêu cầu rút tiền'}
                                 </button>
                             </div>
                         </div>
@@ -1109,21 +1179,51 @@ export function AuthorStoryManagement({ onBack }) {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <tr>
-                                            <td colSpan={4} style={{ padding: '3rem 1.5rem', textAlign: 'center' }}>
-                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
-                                                    <div style={{
-                                                        width: '56px', height: '56px', borderRadius: '50%',
-                                                        backgroundColor: '#f1f5f9',
-                                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                                    }}>
-                                                        <History style={{ width: '28px', height: '28px', color: '#94a3b8' }} />
+                                        {authorActivityLoading ? (
+                                            <tr>
+                                                <td colSpan={4} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
+                                            </tr>
+                                        ) : authorActivityError ? (
+                                            <tr>
+                                                <td colSpan={4} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorActivityError}</td>
+                                            </tr>
+                                        ) : authorActivityItems.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={4} style={{ padding: '3rem 1.5rem', textAlign: 'center' }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+                                                        <div style={{
+                                                            width: '56px', height: '56px', borderRadius: '50%',
+                                                            backgroundColor: '#f1f5f9',
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                                        }}>
+                                                            <History style={{ width: '28px', height: '28px', color: '#94a3b8' }} />
+                                                        </div>
+                                                        <p style={{ fontSize: '0.9375rem', fontWeight: 500, color: '#64748b', margin: 0 }}>Chưa có giao dịch nào</p>
+                                                        <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>Donate và rút tiền sẽ hiển thị tại đây</p>
                                                     </div>
-                                                    <p style={{ fontSize: '0.9375rem', fontWeight: 500, color: '#64748b', margin: 0 }}>Chưa có giao dịch nào</p>
-                                                    <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>Donate và rút tiền sẽ hiển thị tại đây</p>
-                                                </div>
-                                            </td>
-                                        </tr>
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            authorActivityItems.map((item) => {
+                                                const createdAt = item.createdAt ?? item.CreatedAt;
+                                                const timeStr = createdAt ? new Date(createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+                                                const typeLabel = (item.type || item.Type) === 'WITHDRAW' ? 'Rút tiền' : 'Donate';
+                                                const amount = item.amount ?? item.Amount ?? 0;
+                                                const note = (item.type || item.Type) === 'DONATE'
+                                                    ? (item.senderDisplayName ?? item.SenderDisplayName ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}` : (item.note ?? item.Note) || '—')
+                                                    : (item.withdrawStatus ?? item.WithdrawStatus) === 'PENDING' ? 'Chờ xử lý' : (item.note ?? item.Note) || (item.withdrawStatus ?? item.WithdrawStatus) || '—';
+                                                return (
+                                                    <tr key={item.id ?? item.Id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                        <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{timeStr}</td>
+                                                        <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{typeLabel}</td>
+                                                        <td style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: (item.type || item.Type) === 'WITHDRAW' ? '#dc2626' : '#15803d' }}>
+                                                            {(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin
+                                                        </td>
+                                                        <td style={{ padding: '1rem 1.25rem', color: '#64748b', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
