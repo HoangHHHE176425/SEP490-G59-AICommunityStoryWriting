@@ -48,10 +48,15 @@ export function ChapterList({ chapters, storyId, lastReadChapterId }) {
                                     </div>
                                 )}
                                 <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                         <p className="font-semibold text-slate-900 dark:text-white group-hover:text-primary transition-colors truncate">
                                             Chương {chapter.id}: {chapter.title}
                                         </p>
+                                        {isLastRead && (
+                                            <span className="px-2 py-0.5 bg-primary text-white text-xs font-bold rounded shrink-0">
+                                                Đang đọc
+                                            </span>
+                                        )}
                                         {chapter.isNew && (
                                             <span className="px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded shrink-0">
                                                 MỚI
