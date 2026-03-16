@@ -5,6 +5,8 @@ import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getProfileByUserId } from '../../api/account/accountApi';
 import { getStoriesByAuthor } from '../../api/story/storyApi';
+import { getAuthorFollowing, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
+import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 function formatJoinDate(dateStr) {
@@ -20,11 +22,14 @@ function formatJoinDate(dateStr) {
 
 export function AuthorDetail() {
     const { authorId } = useParams();
+    const { user } = useAuth();
     const [profile, setProfile] = useState(null);
     const [stories, setStories] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [isFollowing, setIsFollowing] = useState(false);
+    const [followLoading, setFollowLoading] = useState(false);
+    const [followError, setFollowError] = useState(null);
 
     const loadData = useCallback(async () => {
         if (!authorId) {
@@ -56,14 +61,45 @@ export function AuthorDetail() {
         loadData();
     }, [loadData]);
 
+    useEffect(() => {
+        if (!authorId || !user?.id) {
+            if (!user?.id) setIsFollowing(false);
+            return;
+        }
+        getAuthorFollowing(authorId)
+            .then((data) => setIsFollowing(!!(data?.following ?? data?.Following)))
+            .catch(() => setIsFollowing(false));
+    }, [authorId, user?.id]);
+
+    const handleFollowToggle = useCallback(async () => {
+        if (!authorId || followLoading) return;
+        setFollowLoading(true);
+        setFollowError(null);
+        try {
+            if (isFollowing) {
+                await unfollowAuthor(authorId);
+                setIsFollowing(false);
+            } else {
+                await followAuthor(authorId);
+                setIsFollowing(true);
+            }
+            const p = await getProfileByUserId(authorId);
+            setProfile(p);
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? (isFollowing ? 'Không bỏ theo dõi được.' : 'Không theo dõi được.');
+            setFollowError(msg);
+        } finally {
+            setFollowLoading(false);
+        }
+    }, [authorId, isFollowing, followLoading]);
+
     const displayName = profile?.displayName ?? 'Tác giả';
     const avatarUrl = profile?.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '';
     const joinDate = formatJoinDate(profile?.joinDate);
     const totalReads = profile?.stats?.totalReads ?? 0;
     const storiesWritten = profile?.stats?.storiesWritten ?? stories.length ?? 0;
     const likes = profile?.stats?.likes ?? 0;
-    const baseFollowers = profile?.stats?.followers ?? 0;
-    const followers = isFollowing ? baseFollowers + 1 : baseFollowers;
+    const followers = profile?.stats?.followers ?? 0;
     const recommendations = profile?.stats?.recommendations ?? 0;
 
     return (
@@ -115,14 +151,17 @@ export function AuthorDetail() {
                                 <div className="flex flex-wrap gap-3 mt-4">
                                     <button
                                         type="button"
-                                        onClick={() => setIsFollowing((prev) => !prev)}
-                                        className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold transition-all ${
+                                        onClick={handleFollowToggle}
+                                        disabled={followLoading}
+                                        className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold transition-all disabled:opacity-70 ${
                                             isFollowing
                                                 ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
                                                 : 'bg-primary text-white hover:bg-primary/90 shadow-md'
                                         }`}
                                     >
-                                        {isFollowing ? (
+                                        {followLoading ? (
+                                            'Đang xử lý...'
+                                        ) : isFollowing ? (
                                             <>
                                                 <UserMinus className="w-4 h-4" />
                                                 Bỏ theo dõi
@@ -142,6 +181,9 @@ export function AuthorDetail() {
                                         Ủng hộ
                                     </Link>
                                 </div>
+                                {followError && (
+                                    <p className="mt-2 text-sm text-red-600">{followError}</p>
+                                )}
 
                                 {/* Thành tích */}
                                 <div className="mt-4">

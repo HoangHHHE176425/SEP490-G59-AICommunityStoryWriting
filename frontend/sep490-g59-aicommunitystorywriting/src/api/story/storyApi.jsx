@@ -198,6 +198,17 @@ export async function recordStoryView(storyId) {
 }
 
 /**
+ * Lưu tiến độ đọc: đang đọc đến chapter nào. Cần đăng nhập.
+ * POST api/stories/{id}/reading-progress, body { chapterId: "guid" }.
+ * @param {string} storyId - Guid truyện
+ * @param {string} chapterId - Guid chương
+ * @returns {Promise<void>}
+ */
+export async function saveReadingProgress(storyId, chapterId) {
+    await axiosInstance.post(`/stories/${storyId}/reading-progress`, { chapterId });
+}
+
+/**
  * Lấy lý do từ chối truyện (cho tác giả). GET /stories/{id}/rejection-reason.
  * @param {string} id - Guid truyện
  * @returns {Promise<{ reason: string|null, rejectedAt: string|null }>}

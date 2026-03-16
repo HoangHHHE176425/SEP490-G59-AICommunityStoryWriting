@@ -541,10 +541,11 @@ namespace Services.Implementations
                 return false;
             var hasPendingVersionReject = _versionRepository.GetByChapterId(chapterId)
                 .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+            // Cho phép từ chối: chương đang PENDING_REVIEW (từ chối chương) HOẶC có ít nhất một version PENDING_REVIEW (từ chối version, bất kể trạng thái chương gốc).
             var canReject = string.Equals(chapter.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase)
-                || (string.Equals(chapter.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase) && hasPendingVersionReject);
+                || hasPendingVersionReject;
             if (!canReject)
-                return false;
+                throw new InvalidOperationException("Chương không ở trạng thái chờ duyệt hoặc không có phiên bản chờ duyệt (PENDING_REVIEW).");
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && chapter.story_id.HasValue)
             {
                 var story = StoryDAO.GetById(chapter.story_id.Value);
@@ -552,11 +553,12 @@ namespace Services.Implementations
                     return false;
             }
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId))
-                return false;
+                throw new InvalidOperationException("Chương đã được moderator khác nhận duyệt. Chỉ moderator đã nhận mới có thể từ chối.");
 
-            if (string.Equals(chapter.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
+            // Có version chờ duyệt: từ chối (các) version đó, không đổi trạng thái chương gốc (dù chương đang PUBLISHED, DRAFT hay REJECTED).
+            // Không ghi LogModeration("CHAPTER", ...) ở đây: lý do từ chối version đã lưu trên từng version (rejection_reason). API "lý do từ chối chương" (GetLatestRejection CHAPTER) chỉ dùng cho khi chương gốc bị từ chối, tránh lý do version đè lên lý do chương.
+            if (hasPendingVersionReject)
             {
-                // Từ chối version chỉnh sửa của chapter đã xuất bản: giữ chapter PUBLISHED, đưa version về REJECTED. Lý do lưu qua LogModeration(CHAPTER) để tác giả xem như chapter.
                 var pendingVersions = _versionRepository.GetByChapterId(chapterId)
                     .Where(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
                     .ToList();
@@ -571,13 +573,13 @@ namespace Services.Implementations
                 chapter.updated_at = DateTime.Now;
                 _chapterRepository.Update(chapter);
                 ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
-                LogModeration("CHAPTER", chapterId, "REJECTED", moderatorId, reason.Trim()); // log cho version bị từ chối
                 var chapterNotif = NotifyChapterResult(chapter, "REJECTED", reason.Trim());
                 if (chapterNotif != null) _ = PushAuthorNotificationAsync(chapterNotif);
                 _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
                 return true;
             }
 
+            // Chương gốc đang PENDING_REVIEW: từ chối cả chương.
             chapter.status = "REJECTED";
             chapter.updated_at = DateTime.Now;
             _chapterRepository.Update(chapter);
