@@ -1,5 +1,6 @@
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Repositories;
 using Services.DTOs.Chapters;
@@ -15,6 +16,7 @@ namespace Services.Implementations
         private readonly IChapterRepository _chapterRepository;
         private readonly IStoryService _storyService;
         private readonly IChapterService _chapterService;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
         private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly ILogger<ModerationService> _logger;
@@ -24,6 +26,7 @@ namespace Services.Implementations
             IChapterRepository chapterRepository,
             IStoryService storyService,
             IChapterService chapterService,
+            IServiceScopeFactory scopeFactory,
             ILogger<ModerationService> logger,
             IModerationHubNotifier? moderationHubNotifier = null,
             INotificationHubNotifier? notificationHubNotifier = null)
@@ -32,6 +35,7 @@ namespace Services.Implementations
             _chapterRepository = chapterRepository;
             _storyService = storyService;
             _chapterService = chapterService;
+            _scopeFactory = scopeFactory;
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
             _notificationHubNotifier = notificationHubNotifier;
@@ -396,6 +400,7 @@ namespace Services.Implementations
                 _logger.LogWarning("[NOTIFY] ApproveChapter calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id.Value, chapterId);
                 var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapterId, chapter.title, story?.title, _logger);
                 _ = PushStoryFollowNotificationsAsync(createdNotifications);
+                TriggerRagIndexInBackground(chapter.story_id.Value, chapterId);
             }
             else
             {
@@ -556,6 +561,25 @@ namespace Services.Implementations
                     _logger.LogWarning(ex, "Push notification to follower failed. UserId={UserId} NotificationId={NotificationId}", n.user_id, n.id);
                 }
             }
+        }
+
+        /// <summary>Chạy index RAG cho truyện trong nền khi moderator duyệt chương (PUBLISHED). RAG dùng cho co-create / suggest-next-chapter.</summary>
+        private void TriggerRagIndexInBackground(Guid storyId, Guid chapterId)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var rag = scope.ServiceProvider.GetRequiredService<IStoryRagService>();
+                    await rag.EnsureIndexedAsync(storyId, chapterId, default);
+                    _logger.LogInformation("RAG index completed after chapter approve StoryId={StoryId} ChapterId={ChapterId}", storyId, chapterId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "RAG index after chapter approve failed StoryId={StoryId} ChapterId={ChapterId}", storyId, chapterId);
+                }
+            });
         }
 
         private static void LogModeration(string targetType, Guid targetId, string action, Guid moderatorId, string? rejectionReason)

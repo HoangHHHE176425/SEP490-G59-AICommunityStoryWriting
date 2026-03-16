@@ -1,5 +1,6 @@
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Repositories;
 using Services.DTOs.Chapters;
@@ -13,14 +14,16 @@ namespace Services.Implementations
     {
         private readonly IChapterRepository _chapterRepository;
         private readonly IAiGeneratedContentRepository _aiContentRepository;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
         private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly ILogger<ChapterService> _logger;
 
-        public ChapterService(IChapterRepository chapterRepository, IAiGeneratedContentRepository aiContentRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
+        public ChapterService(IChapterRepository chapterRepository, IAiGeneratedContentRepository aiContentRepository, IServiceScopeFactory scopeFactory, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
         {
             _chapterRepository = chapterRepository;
             _aiContentRepository = aiContentRepository;
+            _scopeFactory = scopeFactory;
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
             _notificationHubNotifier = notificationHubNotifier;
@@ -120,6 +123,7 @@ namespace Services.Implementations
                     _logger.LogInformation("ChapterService.Create calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", request.StoryId, chapter.id);
                     var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(request.StoryId, chapter.id, request.Title, story.title, _logger);
                     _ = PushNotificationsToFollowersAsync(createdNotifications);
+                    TriggerRagIndexInBackground(request.StoryId, chapter.id);
                 }
             }
             catch (Exception)
@@ -404,6 +408,7 @@ namespace Services.Implementations
                         _logger.LogInformation("ChapterService.Update calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id, chapter.id);
                         var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapter.id, chapter.title, story?.title, _logger);
                         _ = PushNotificationsToFollowersAsync(createdNotifications);
+                        TriggerRagIndexInBackground(chapter.story_id.Value, chapter.id);
                     }
                 }
                 catch (Exception)
@@ -550,6 +555,25 @@ namespace Services.Implementations
                     _logger.LogWarning(ex, "Push notification to follower failed. UserId={UserId} NotificationId={NotificationId}", n.user_id, n.id);
                 }
             }
+        }
+
+        /// <summary>Chạy index RAG cho truyện trong nền khi chương được xuất bản (PUBLISHED). RAG dùng cho co-create / suggest-next-chapter; index ngoài luồng để co-create không phải chờ.</summary>
+        private void TriggerRagIndexInBackground(Guid storyId, Guid chapterId)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var rag = scope.ServiceProvider.GetRequiredService<IStoryRagService>();
+                    await rag.EnsureIndexedAsync(storyId, chapterId, default);
+                    _logger.LogInformation("RAG index completed after chapter publish StoryId={StoryId} ChapterId={ChapterId}", storyId, chapterId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "RAG index after chapter publish failed StoryId={StoryId} ChapterId={ChapterId}", storyId, chapterId);
+                }
+            });
         }
 
         private int CalculateWordCount(string? content)

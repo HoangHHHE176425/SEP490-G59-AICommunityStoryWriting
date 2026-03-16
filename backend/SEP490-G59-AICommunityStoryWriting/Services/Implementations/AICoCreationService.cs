@@ -21,8 +21,16 @@ public class AICoCreationService : IAICoCreationService
 
     /// <summary>Quy tắc bắt buộc (Constitutional): đưa vào system prompt mọi agent.</summary>
     private const string ConstitutionalRules = """
-Quy tắc bắt buộc: Bám sát thông tin trong ngữ cảnh (Story memory, Character/Event/Story State, RAG). Không viết ngược lại sự kiện đã nêu. Giữ đúng mạch truyện và logic cốt truyện của các chương trước; không thêm tình tiết mâu thuẫn hoặc lệch hướng. Chỉ trả về đúng định dạng yêu cầu, không thêm giải thích ngoài.
+Quy tắc bắt buộc:
+- Ngữ cảnh truyện được truyền vào là DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU (các chương đã có, RAG, Character Memory, Event Memory, Story State) — mô tả phần truyện đã xảy ra cho đến thời điểm hiện tại.
+- Chỉ được lên dàn ý và viết nội dung cho phần TIẾP THEO trên dòng thời gian (sau điểm kết thúc hiện tại); không được quay lại, viết lại hoặc mở rộng chi tiết cho các sự kiện đã xảy ra trước đó.
+- Cần bám sát đặc biệt các đoạn/chương gần nhất để nối tiếp đúng mạch truyện; không được tạo thêm tình tiết mâu thuẫn với cốt truyện hoặc trạng thái nhân vật đã nêu.
+- Phải giữ nguyên và tôn trọng tên nhân vật, địa danh và thuật ngữ đã xuất hiện trong ngữ cảnh; không được dịch, phiên âm hoặc thay thế bằng tên/biến thể khác.
+- Luôn tuân thủ đúng định dạng đầu ra được yêu cầu; không thêm giải thích, chú thích hoặc văn bản ngoài cấu trúc đã chỉ định.
 """;
+
+    /// <summary>Tiêu đề gắn lên block ngữ cảnh để agent biết đây là dữ liệu từ DB.</summary>
+    private const string DbContextLabel = "=== DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU (ngữ cảnh truyện: nội dung các chương trước, nhân vật, sự kiện, trạng thái) — Dùng làm tham chiếu bắt buộc ===";
 
     private readonly IStoryRepository _storyRepository;
     private readonly IChapterRepository _chapterRepository;
@@ -67,10 +75,10 @@ Quy tắc bắt buộc: Bám sát thông tin trong ngữ cảnh (Story memory, C
         var storyLanguage = StoryLanguageHelper.DetectFromStoryContext(contextBlock);
         var languageInstruction = StoryLanguageHelper.GetLanguageInstruction(storyLanguage);
 
-        // --- Agent 1 (Planner): Dàn ý hoặc phát hiện mâu thuẫn ý tưởng ---
+        // --- Agent 1 (Story Analyzer / Planner): Dàn ý theo kiến trúc Prompt + RAG + Memory + Agent Role ---
         var (p1, m1, k1, u1) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentPlanner);
         var clientPlanner = AIClientHelper.CreateChatClient(p1, m1, k1, u1);
-        var outlineJson = await RunAgent1OutlineAsync(clientPlanner, contextBlock, request.AuthorIdea, languageInstruction, cancellationToken);
+        var outlineJson = await RunAgent1OutlineAsync(clientPlanner, story, contextBlock, request.AuthorIdea, languageInstruction, cancellationToken);
         LogUsage(authorUserId, request.StoryId, null, ActionOutline, m1, 0, 0);
 
         var ideaFeedback = TryParseIdeaContradiction(outlineJson);
@@ -119,10 +127,13 @@ Quy tắc bắt buộc: Bám sát thông tin trong ngữ cảnh (Story memory, C
 
         int revisionCount = 0;
         string? lastFeedback = feedback;
+        var revisionFeedbacks = new List<string>();
 
         while (!approved && revisionCount < maxRevisions)
         {
             revisionCount++;
+            if (!string.IsNullOrWhiteSpace(lastFeedback))
+                revisionFeedbacks.Add(lastFeedback);
             draft = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, lastFeedback, languageInstruction, cancellationToken);
             draft = StripTrailingFeedbackFromDraft(draft);
             LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
@@ -143,6 +154,7 @@ Quy tắc bắt buộc: Bám sát thông tin trong ngữ cảnh (Story memory, C
                         FinalContent = draft,
                         Approved = true,
                         RevisionCount = revisionCount,
+                        RevisionFeedbacks = revisionFeedbacks.Count > 0 ? revisionFeedbacks : null,
                         ReviewFeedback = null,
                         ChapterId = chapterId,
                         AiGeneratedContentId = aiContentId
@@ -159,7 +171,8 @@ Quy tắc bắt buộc: Bám sát thông tin trong ngữ cảnh (Story memory, C
             FinalContent = draft,
             Approved = approved,
             RevisionCount = revisionCount,
-            ReviewFeedback = lastFeedback,
+            RevisionFeedbacks = revisionFeedbacks.Count > 0 ? revisionFeedbacks : null,
+            ReviewFeedback = approved ? null : lastFeedback,
             ChapterId = saved.ChapterId,
             AiGeneratedContentId = saved.AiGeneratedContentId
         };
@@ -230,20 +243,44 @@ Quy tắc bắt buộc: Bám sát thông tin trong ngữ cảnh (Story memory, C
     }
 
     private static string GetAgent1SystemPrompt() => """
-Bạn là trợ lý viết dàn ý cho tác giả truyện. Dựa trên ngữ cảnh truyện (Story memory, Character/Event/Story State, RAG) và ý tưởng tác giả, viết dàn ý dạng các scene.
+Role: You are a Story Analyzer AI responsible for analyzing user ideas and generating a structured story outline.
 
-Bước 1 — Kiểm tra mâu thuẫn: Nếu ý tưởng tác giả MÂU THUẪN với ngữ cảnh (ví dụ: nhân vật đã chết/đã mất tích trong truyện nhưng ý tưởng lại nhắc nhân vật đó đang hành động, dạy dỗ, xuất hiện; hoặc sự kiện đã xảy ra nhưng ý tưởng mô tả ngược lại), thì KHÔNG tạo dàn ý. Trả về DUY NHẤT JSON:
-{ "ideaContradiction": true, "feedback": "Mô tả ngắn cho tác giả (vd: Trong truyện sư phụ đã chết ở chương 2, không thể có cảnh sư phụ dạy chiêu mới.)" }
-Ngôn ngữ feedback trùng truyện (Việt hoặc Anh).
+Task: The context below describes what has ALREADY happened in the story (RAG + Character Memory + Event Memory + Story State). Generate a structured outline ONLY for the NEXT scene/chapter — i.e. events that occur AFTER the current end of the story. Use the Story Information (Title, Summary) and the database context to ensure consistency. Pay special attention to the most recent chapters/paragraphs in the context to determine the "current endpoint" and continue from there.
 
-Bước 2 — Nếu không mâu thuẫn: Dàn ý phải NỐI TIẾP mạch truyện, đúng logic và timeline; bám sát ý tưởng tác giả. Trả về DUY NHẤT JSON:
-{ "scenes": [ { "title": "Tiêu đề scene", "summary": "Tóm tắt ngắn", "characters": ["Nhân vật 1", "Nhân vật 2"] } ] }
-Ít nhất 1 scene; tối đa 10 scene. Ngôn ngữ trùng truyện (Việt hoặc Anh).
+Constraints:
+* The outline must be for what happens NEXT in the timeline only. Do not include or reference events that have already occurred in earlier chapters (e.g. if a funeral has already taken place, do not outline "this chapter will show the character's dying moments").
+* Use character names exactly as they appear in the context — do not translate or substitute (e.g. if the context says "Xuân" or "Xuân Tóc Đỏ", never write "Spring" or another name).
+* Keep the outline consistent with the story tone and existing context.
+* Ensure logical progression from the current story endpoint.
+* Do not contradict existing story events (Event Memory) or character state (Character Memory / Story State).
+* Focus on major narrative elements for the next scene only.
+
+Language: The platform is mostly Vietnamese. Write the outline and any feedback in Vietnamese when the story is in Vietnamese; if the story is clearly in another language (e.g. English), use that language. Do not mix languages.
+
+If the user idea CONTRADICTS the context (e.g. a character is dead or missing in Character Memory but the idea has them acting; or an event in Event Memory is reversed by the idea), do NOT generate an outline. Output ONLY this JSON (no other text, no markdown):
+{ "ideaContradiction": true, "feedback": "Giải thích ngắn cho tác giả (tiếng Việt nếu truyện tiếng Việt)." }
+
+Otherwise, output the structured outline in the following format. Use the same language as the story (prefer Vietnamese for Vietnamese stories). Scene Outline: at least 2–3 main points, at most 5–7. Output ONLY the outline in this exact format — no markdown (no ```), no extra explanation before or after:
+
+Scene Objective:
+(Mục đích của scene này)
+
+Scene Outline:
+1.
+2.
+3.
+
+## Characters Involved:
+
+## Potential Conflict:
+
+## Expected Outcome:
 """ + "\n\n" + ConstitutionalRules;
 
-    private async Task<string> RunAgent1OutlineAsync(ChatClient client, string contextBlock, string authorIdea, string languageInstruction, CancellationToken ct)
+    private async Task<string> RunAgent1OutlineAsync(ChatClient client, stories story, string contextBlock, string authorIdea, string languageInstruction, CancellationToken ct)
     {
-        var userPrompt = $"Ngữ cảnh truyện:\n\n{contextBlock}\n\nÝ tưởng tác giả:\n{authorIdea}\n\n{languageInstruction}\n\nTrả về JSON dàn ý (scenes) theo đúng cấu trúc.";
+        var storyInfo = $"Story Information:\nTitle: {story.title}\nSummary: {story.summary ?? ""}\n\nUser Idea:\n{authorIdea}";
+        var userPrompt = $"{storyInfo}\n\n---\n{DbContextLabel}\n\n{contextBlock}\n\n---\n{languageInstruction}\n\nNgữ cảnh trên là phần truyện ĐÃ XẢY RA. Chỉ sinh outline cho phần TIẾP THEO (sau điểm kết thúc hiện tại), không outline sự kiện đã xảy ra. Trả lời bằng tiếng Việt nếu truyện tiếng Việt. Sinh outline theo đúng format (Scene Objective, Scene Outline 2–7 ý, Characters Involved, Potential Conflict, Expected Outcome); chỉ output nội dung outline, không markdown hay giải thích thừa. Nếu ý tưởng mâu thuẫn với ngữ cảnh thì chỉ trả về JSON ideaContradiction.";
         var messages = new List<ChatMessage>
         {
             new SystemChatMessage(GetAgent1SystemPrompt()),
@@ -334,21 +371,25 @@ Bước 2 — Nếu không mâu thuẫn: Dàn ý phải NỐI TIẾP mạch truy
         return null;
     }
 
-    /// <summary>Parse outline JSON thành text để đưa vào Agent 2; nếu parse lỗi thì trả về raw.</summary>
-    private static string FormatOutlineForPrompt(string outlineJson)
+    /// <summary>Chuẩn hóa outline để đưa vào Agent 2: nếu là format Story Analyzer (Scene Objective, Scene Outline, ...) thì trả về nguyên bản; nếu là JSON scenes thì format lại.</summary>
+    private static string FormatOutlineForPrompt(string outlineRaw)
     {
+        var raw = outlineRaw.Trim();
+        if (raw.StartsWith("```"))
+        {
+            var start = raw.IndexOf('\n') + 1;
+            var end = raw.IndexOf("```", start, StringComparison.Ordinal);
+            if (end > start) raw = raw[start..end].Trim();
+        }
+        // Format Story Analyzer (Scene Objective, Scene Outline, Characters Involved, ...) — giữ nguyên
+        if (raw.Contains("Scene Objective", StringComparison.OrdinalIgnoreCase) || raw.Contains("Scene Outline", StringComparison.OrdinalIgnoreCase) || raw.Contains("Characters Involved", StringComparison.OrdinalIgnoreCase))
+            return raw;
+        // JSON scenes (legacy) — parse và format
         try
         {
-            var raw = outlineJson.Trim();
-            if (raw.StartsWith("```"))
-            {
-                var start = raw.IndexOf('\n') + 1;
-                var end = raw.IndexOf("```", start, StringComparison.Ordinal);
-                if (end > start) raw = raw[start..end];
-            }
             var root = JsonDocument.Parse(raw).RootElement;
             if (!root.TryGetProperty("scenes", out var scenes) || scenes.GetArrayLength() == 0)
-                return outlineJson;
+                return outlineRaw;
             var lines = new List<string>();
             int i = 1;
             foreach (var scene in scenes.EnumerateArray())
@@ -363,22 +404,33 @@ Bước 2 — Nếu không mâu thuẫn: Dàn ý phải NỐI TIẾP mạch truy
         }
         catch
         {
-            return outlineJson;
+            return outlineRaw;
         }
     }
 
-    private static string GetAgent2SystemPrompt() => """
-Bạn là trợ lý viết nội dung truyện. Viết đoạn/chương nháp theo ĐÚNG dàn ý (các scene) được cung cấp.
+    /// <summary>Checklist ràng buộc cho Agent 2: đối chiếu trước khi viết để giảm mâu thuẫn với Agent 3.</summary>
+    private const string Agent2Checklist = """
+Before writing, verify from the database context above: (1) The context is what has ALREADY happened; write only the NEXT chapter (events after the current story endpoint). Do not write past events (e.g. deathbed scene if a funeral has already occurred). (2) Do not let any character who is dead or missing in Character Memory appear or act in the draft. (3) Do not reverse or contradict any event already listed in Event Memory. (4) Follow the Scene Outline order and content; do not add events that conflict with Story State. If the outline or context is unclear, infer consistently with the existing story.
+""";
 
-Yêu cầu: Bám sát mạch truyện đang diễn ra và cốt truyện của các chương trước (timeline, nhân vật, quy tắc thế giới trong ngữ cảnh). Phong cách và giọng văn phù hợp truyện. Không viết ngược lại sự kiện đã xảy ra; nhân vật phải nhất quán với trạng thái đã nêu. Chỉ trả về nội dung văn bản, không tiêu đề hay giải thích. Ngôn ngữ trùng truyện.
+    private static string GetAgent2SystemPrompt() => """
+Role: You are a Story Writer AI. You receive database context (RAG + Character Memory + Event Memory + Story State) and a structured outline. The context describes what has ALREADY happened in the story. Your task is to write the draft for the NEXT chapter/scene only — content that comes AFTER the current end of the story. Do not write scenes that would be in the past (e.g. if the context already mentions a funeral, do not write the character's deathbed scene).
+
+Requirements: Use the database context as the single source of truth — follow timeline, character state and events; do not reverse or contradict what has already happened; characters must match Character Memory and Story State. Use character names exactly as in the context — never translate or substitute (e.g. if context has "Xuân" or "Xuân Tóc Đỏ", write "Xuân" or "Xuân Tóc Đỏ", never "Spring"). Stick closely to the most recent story content to continue the narrative. Match the story's tone and style. Write in the same language as the story (the platform is mostly Vietnamese, so prefer Vietnamese for Vietnamese stories).
+
+Checklist (verify before writing): (1) All character names are spelled exactly as in the context (no translation, e.g. Xuân not Spring). (2) No character marked dead/missing in Character Memory may appear. (3) No event in Event Memory may be reversed or contradicted. (4) Scene order and content must follow the outline. (5) The draft must be for events that happen AFTER the story endpoint in the context, never rehashing past events. Satisfy this checklist so the draft passes consistency check.
+
+Length: Write approximately 800 words (khoảng 800 từ). Do not exceed this; keep the chapter focused and concise.
+
+Output: Return ONLY the draft narrative text. No markdown (no ```), no section titles, no "Chapter X" or "Scene" headers, no explanation before or after. Just the story content that a reader would see.
 """ + "\n\n" + ConstitutionalRules;
 
     private async Task<string> RunAgent2WriteAsync(ChatClient client, string contextBlock, string outline, string? feedback, string languageInstruction, CancellationToken ct)
     {
-        var userPrompt = $"Ngữ cảnh truyện:\n\n{contextBlock}\n\nDàn ý cần viết:\n{outline}";
+        var userPrompt = $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý cần viết:\n{outline}";
         if (!string.IsNullOrWhiteSpace(feedback))
-            userPrompt += $"\n\nGóp ý cần sửa (bắt buộc tuân thủ):\n{feedback}";
-        userPrompt += $"\n\n{languageInstruction}\n\nViết nội dung theo dàn ý (và góp ý nếu có).";
+            userPrompt += $"\n\n[Bản nháp trước bị đánh giá chưa đạt — sửa đúng các điểm sau rồi viết lại]\nGóp ý bắt buộc tuân thủ:\n{feedback}\n\nViết lại toàn bộ chương, sửa đúng theo góp ý trên và giữ phần logic đã đúng.";
+        userPrompt += $"\n\n{languageInstruction}\n\nViết bằng tiếng Việt nếu truyện tiếng Việt. Độ dài: khoảng 800 từ. Chỉ output nội dung chương (văn bản truyện), không markdown hay giải thích.";
 
         var messages = new List<ChatMessage>
         {
@@ -405,20 +457,22 @@ Yêu cầu: Bám sát mạch truyện đang diễn ra và cốt truyện của c
     }
 
     private static string GetAgent3SystemPrompt() => """
-Bạn là Consistency Checker: kiểm duyệt nội dung truyện để đảm bảo bản nháp bám sát cốt truyện và không lệch logic. Đọc ngữ cảnh (Story memory, Character Memory, Event Memory, Story State, RAG), dàn ý và bản nháp.
+Role: You are a Consistency Checker AI. You receive database context (RAG + Character Memory + Event Memory + Story State), the outline, and the draft. Compare the draft against the context and outline to detect contradictions or logic errors.
 
-Kiểm tra bắt buộc: (1) Mạch truyện — nội dung nối tiếp tự nhiên với các chương trước, không đứt mạch hoặc đổi hướng vô lý. (2) Timeline — sự kiện đúng thứ tự, không đảo ngược đã xảy ra. (3) Character — nhân vật đúng tính cách và trạng thái đã nêu (vd. đã chết thì không xuất hiện). (4) World rules — quy tắc thế giới truyện được tôn trọng. (5) Logic cốt truyện — không mâu thuẫn với sự kiện/chi tiết đã có. Bất kỳ mâu thuẫn hoặc lệch cốt truyện = chưa đạt.
+Checks (against the database context): (1) Character names — names in the draft must match the context exactly. If the context uses a name (e.g. "Xuân", "Xuân Tóc Đỏ") and the draft uses a different name or translation (e.g. "Spring"), that is a critical "character" violation. (2) Timeline position — the context is what has ALREADY happened; the draft must describe only what happens NEXT (after the current story endpoint). If the draft describes events that have already occurred in the context (e.g. context says a funeral has taken place but the draft is about the character's dying moments), that is a critical "timeline" violation. (3) Story flow — draft continues naturally from the most recent chapters. (4) Timeline — events match Event Memory, nothing reversed. (5) Character — characters match Character Memory / Story State (e.g. dead characters must not appear). (6) World rules — story world rules are respected. (7) Logic — no contradiction with existing events or details.
 
-Trả về DUY NHẤT một JSON hợp lệ, không markdown:
-{ "approved": true } khi đạt.
-{ "approved": false, "feedback": "Mô tả ngắn vấn đề để AI/tác giả sửa", "violations": [ { "type": "timeline|character|world_rules|logic|story_flow|contradiction|other", "quote": "đoạn trích (tùy chọn)" } ] } khi cần sửa.
+Severity: For each violation, set "severity": "critical" or "minor". Use "critical" when: a character name in the draft does not match the context (e.g. context has "Xuân" but draft has "Spring"); the draft rehashes or describes past events that are already in the context; a character who is dead in context appears in the draft; an event that already happened is described as not happened or reversed. Use "minor" for style, vague wording, or ambiguous interpretation that does not clearly contradict the context. Approved = false ONLY when at least one violation is "critical". If all issues are "minor" (or none), set approved: true so the draft is accepted and the author can refine later.
 
-Ngôn ngữ feedback: cùng ngôn ngữ truyện.
+Language: The platform is mostly Vietnamese. Write feedback and violations in Vietnamese when the story is in Vietnamese; otherwise use the story language.
+
+Output: Return ONLY a single valid JSON object, no markdown (no ```), no explanation before or after:
+{ "approved": true } when the draft has no critical violations (minor only or none).
+{ "approved": false, "feedback": "Mô tả ngắn vấn đề critical để AI/tác giả sửa (tiếng Việt nếu truyện tiếng Việt)", "violations": [ { "type": "timeline|character|world_rules|logic|story_flow|contradiction|other", "quote": "đoạn trích (tùy chọn)", "severity": "critical"|"minor" } ] } when at least one violation is critical.
 """ + "\n\n" + ConstitutionalRules;
 
     private async Task<(bool approved, string? feedback)> RunAgent3ReviewAsync(ChatClient client, string contextBlock, string outline, string draft, string languageInstruction, CancellationToken ct)
     {
-        var userPrompt = $"Ngữ cảnh:\n\n{contextBlock}\n\nDàn ý:\n{outline}\n\nBản nháp:\n{draft}\n\n{languageInstruction}\n\nTrả về JSON theo đúng cấu trúc.";
+        var userPrompt = $"{DbContextLabel}\n\n{contextBlock}\n\n---\nDàn ý:\n{outline}\n\nBản nháp:\n{draft}\n\n{languageInstruction}\n\nTrả lời bằng tiếng Việt nếu truyện tiếng Việt. Chỉ output một JSON duy nhất (approved, feedback, violations), không markdown hay giải thích.";
         var messages = new List<ChatMessage>
         {
             new SystemChatMessage(GetAgent3SystemPrompt()),
@@ -446,16 +500,24 @@ Ngôn ngữ feedback: cùng ngôn ngữ truyện.
             var root = JsonDocument.Parse(text).RootElement;
             var approved = root.TryGetProperty("approved", out var a) && a.GetBoolean();
             var feedback = root.TryGetProperty("feedback", out var f) ? f.GetString() : null;
-            if (!approved && string.IsNullOrWhiteSpace(feedback) && root.TryGetProperty("violations", out var v) && v.GetArrayLength() > 0)
+            if (root.TryGetProperty("violations", out var v) && v.ValueKind == JsonValueKind.Array && v.GetArrayLength() > 0)
             {
                 var parts = new List<string>();
+                var hasCritical = false;
                 foreach (var item in v.EnumerateArray())
                 {
                     var type = item.TryGetProperty("type", out var t) ? t.GetString() : null;
                     var quote = item.TryGetProperty("quote", out var q) ? q.GetString() : null;
+                    var severity = item.TryGetProperty("severity", out var sev) ? sev.GetString() : null;
+                    if (string.Equals(severity, "critical", StringComparison.OrdinalIgnoreCase))
+                        hasCritical = true;
                     parts.Add(string.IsNullOrEmpty(quote) ? $"[{type}]" : $"[{type}] {quote}");
                 }
-                feedback = string.Join(" ", parts);
+                if (string.IsNullOrWhiteSpace(feedback))
+                    feedback = string.Join(" ", parts);
+                // Chỉ fail khi có ít nhất một violation critical; nếu toàn minor thì coi là đạt
+                if (!hasCritical)
+                    approved = true;
             }
             return (approved, feedback);
         }

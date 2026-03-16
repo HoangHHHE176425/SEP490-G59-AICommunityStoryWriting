@@ -22,10 +22,6 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<ai_generated_content> ai_generated_content { get; set; }
 
-    public virtual DbSet<ai_model_registry> ai_model_registry { get; set; }
-
-    public virtual DbSet<ai_plagiarism_reports> ai_plagiarism_reports { get; set; }
-
     public virtual DbSet<ai_sensitive_words> ai_sensitive_words { get; set; }
 
     public virtual DbSet<ai_usage_logs> ai_usage_logs { get; set; }
@@ -161,34 +157,6 @@ public partial class StoryPlatformDbContext : DbContext
             entity.HasOne(d => d.chapter).WithMany(p => p.ai_generated_content)
                 .HasForeignKey(d => d.chapter_id)
                 .HasConstraintName("fk_aigen_chapter");
-        });
-
-        modelBuilder.Entity<ai_model_registry>(entity =>
-        {
-            entity.HasKey(e => e.id).HasName("PK__ai_model__3213E83F607CC772");
-
-            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
-            entity.Property(e => e.is_active).HasDefaultValue(true);
-            entity.Property(e => e.is_default_for_gen).HasDefaultValue(false);
-            entity.Property(e => e.is_default_for_mod).HasDefaultValue(false);
-            entity.Property(e => e.model_name).HasMaxLength(50);
-            entity.Property(e => e.provider).HasMaxLength(50);
-            entity.Property(e => e.temperature).HasColumnType("decimal(3, 2)");
-            entity.Property(e => e.updated_at).HasDefaultValueSql("(getdate())");
-        });
-
-        modelBuilder.Entity<ai_plagiarism_reports>(entity =>
-        {
-            entity.HasKey(e => e.id).HasName("PK__ai_plagi__3213E83F39187108");
-
-            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
-            entity.Property(e => e.checked_at).HasDefaultValueSql("(getdate())");
-            entity.Property(e => e.similarity_ratio).HasColumnType("decimal(5, 2)");
-            entity.Property(e => e.status).HasMaxLength(20);
-
-            entity.HasOne(d => d.chapter).WithMany(p => p.ai_plagiarism_reports)
-                .HasForeignKey(d => d.chapter_id)
-                .HasConstraintName("fk_plag_chapter");
         });
 
         modelBuilder.Entity<ai_sensitive_words>(entity =>

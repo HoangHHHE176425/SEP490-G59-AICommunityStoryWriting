@@ -112,7 +112,7 @@ Nếu không có lỗi chính tả: spellingErrors = [], summary = ""Không phá
     private static string GetSystemPrompt()
     {
         return """
-Bạn là trợ lý kiểm tra chính tả cho nội dung chương truyện. Nhiệm vụ: Phát hiện lỗi chính tả (tiếng Việt hoặc Anh) và gợi ý sửa. Trả về đúng JSON theo cấu trúc đã nêu (spellingErrors, summary), ngôn ngữ mô tả trùng với nội dung (Việt hoặc Anh).
+Bạn là trợ lý kiểm tra chính tả cho nội dung chương truyện. Nhiệm vụ: Phát hiện lỗi chính tả (tiếng Việt hoặc Anh) và gợi ý sửa. (Từ cấm/chính sách nội dung được hệ thống kiểm tra riêng từ DB; bạn chỉ tập trung vào chính tả.) Trả về đúng JSON theo cấu trúc đã nêu (spellingErrors, summary), ngôn ngữ mô tả trùng với nội dung (Việt hoặc Anh).
 """;
     }
 
