@@ -1,5 +1,5 @@
 import { ChevronRight, Star } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import StoryHeader from '../../components/story-detail/StoryHeader';
 import { ChapterList } from '../../components/story-detail/ChapterList';
@@ -205,6 +205,17 @@ export function StoryDetail() {
             .finally(() => setReviewsLoading(false));
     }, [storyId]);
 
+    // Mỗi user chỉ được đánh giá 1 lần; BE cũng chặn. Dùng để ẩn nút "Đánh giá" và chặn mở modal.
+    const { hasUserRated, userRatingStars } = useMemo(() => {
+        const uid = user?.id;
+        if (!uid) return { hasUserRated: false, userRatingStars: null };
+        const mine = reviews.find((r) => String(r.userId ?? r.UserId ?? '') === String(uid));
+        return {
+            hasUserRated: !!mine,
+            userRatingStars: mine != null ? Number(mine.starValue ?? mine.StarValue ?? 0) : null,
+        };
+    }, [user?.id, reviews]);
+
     // Load đánh giá ngay khi có storyId để tab hiển thị đúng số (0) trước khi user click tab
     useEffect(() => {
         if (storyId) loadReviews();
@@ -300,6 +311,11 @@ export function StoryDetail() {
                 setRatingError('Vui lòng đăng nhập để đánh giá.');
             } else {
                 setRatingError(msg);
+                // BE trả lỗi "đã đánh giá" khi user đánh giá lần 2 → đồng bộ lại danh sách để UI hiển thị "Bạn đã đánh giá"
+                if (msg && (msg.includes('đã đánh giá') || msg.includes('đánh giá lại'))) {
+                    setIsRatingModalOpen(false);
+                    loadReviews();
+                }
             }
         } finally {
             setRatingSubmitting(false);
@@ -307,6 +323,7 @@ export function StoryDetail() {
     };
 
     const handleOpenRating = () => {
+        if (hasUserRated) return; // Mỗi user chỉ được đánh giá 1 lần
         setRatingError(null);
         setIsRatingModalOpen(true);
     };
@@ -391,6 +408,8 @@ export function StoryDetail() {
                             isFollowing={isFollowing}
                             onToggleFollow={handleToggleFollow}
                             onOpenRating={handleOpenRating}
+                            hasUserRated={hasUserRated}
+                            userRatingStars={userRatingStars}
                             onOpenReport={() => setIsReportStoryModalOpen(true)}
                             onReadStory={() => {
                                 const first = chapters[0];

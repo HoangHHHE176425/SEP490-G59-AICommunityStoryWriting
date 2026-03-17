@@ -8,7 +8,7 @@ function formatStatNumber(n) {
     return num.toLocaleString();
 }
 
-export default function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, onOpenReport, onReadStory }) {
+export default function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, hasUserRated = false, userRatingStars = null, onOpenReport, onReadStory }) {
     return (
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="p-6">
@@ -124,13 +124,23 @@ export default function StoryHeader({ story, isFollowing, onToggleFollow, onOpen
                                 <Bookmark className="w-4 h-4" />
                                 {isFollowing ? 'Đang theo dõi' : 'Theo dõi'}
                             </button>
-                            <button
-                                onClick={onOpenRating}
-                                className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 text-sm font-bold rounded-full hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all"
-                            >
-                                <Star className="w-4 h-4" />
-                                Đánh giá
-                            </button>
+                            {hasUserRated ? (
+                                <span
+                                    className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-sm font-bold rounded-full cursor-default"
+                                    title="Mỗi tài khoản chỉ được đánh giá một lần"
+                                >
+                                    <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                                    Bạn đã đánh giá{userRatingStars != null && userRatingStars > 0 ? ` (${userRatingStars} sao)` : ''}
+                                </span>
+                            ) : (
+                                <button
+                                    onClick={onOpenRating}
+                                    className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 text-sm font-bold rounded-full hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all"
+                                >
+                                    <Star className="w-4 h-4" />
+                                    Đánh giá
+                                </button>
+                            )}
                             <button
                                 onClick={onOpenReport}
                                 className="flex items-center gap-2 px-4 py-2.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-sm font-bold rounded-full hover:bg-red-100 dark:hover:bg-red-900/40 transition-all"
