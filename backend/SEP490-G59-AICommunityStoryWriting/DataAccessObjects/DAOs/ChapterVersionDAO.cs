@@ -1,5 +1,6 @@
 using BusinessObjects;
 using BusinessObjects.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace DataAccessObjects.DAOs
 {
@@ -46,6 +47,24 @@ namespace DataAccessObjects.DAOs
             return context.chapter_versions
                 .Where(v => v.chapter_id == chapterId)
                 .OrderBy(v => v.version_number)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Lịch sử version đã từng bị từ chối: có rejection_reason (reviewed_at có thể null ở dữ liệu cũ).
+        /// Dùng cho màn quản lý xuất bản (tab Từ chối).
+        /// </summary>
+        public static List<chapter_versions> GetRejectedHistory(Guid? moderatorId = null)
+        {
+            using var context = new StoryPlatformDbContext();
+            var q = context.chapter_versions
+                .AsNoTracking()
+                .Include(v => v.chapter)
+                .ThenInclude(c => c!.story)
+                .Where(v => v.rejection_reason != null);
+            // Không lọc theo moderator để tab lịch sử không bị thiếu (reviewed_by có thể null tùy dữ liệu/migration).
+            return q
+                .OrderByDescending(v => v.reviewed_at ?? v.created_at)
                 .ToList();
         }
 
