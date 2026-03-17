@@ -99,6 +99,9 @@ export function StoryDetail() {
                     const totalChapters = rawItems.length;
                     const authorId = storyRes?.authorId ?? storyRes?.AuthorId;
                     setIsFollowing(!!(storyRes?.userIsFollowing ?? storyRes?.UserIsFollowing));
+                    const progressStatusRaw = (storyRes?.storyProgressStatus ?? storyRes?.StoryProgressStatus ?? 'ONGOING')?.toString?.() ?? 'ONGOING';
+                    const progressUpper = String(progressStatusRaw).toUpperCase();
+                    const progressLabel = progressUpper === 'COMPLETED' ? 'Hoàn thành' : progressUpper === 'HIATUS' ? 'Tạm dừng' : 'Đang ra';
                     const storyPayload = {
                         id: storyRes?.id ?? storyRes?.Id,
                         title: storyRes?.title ?? storyRes?.Title ?? 'Không có tiêu đề',
@@ -111,7 +114,11 @@ export function StoryDetail() {
                         },
                         cover: coverPath ? resolveBackendUrl(coverPath) : '',
                         genre: genreArr.length ? genreArr : ['Chưa phân loại'],
-                        status: 'Đang cập nhật',
+                        // Trạng thái tiến độ truyện: Đang ra / Tạm dừng / Hoàn thành
+                        storyProgressStatus: progressUpper,
+                        storyProgressLabel: progressLabel,
+                        // Nhãn cập nhật (UI): tách riêng khỏi trạng thái tiến độ
+                        updateLabel: 'Đang cập nhật',
                         rating: Number(storyRes?.avgRating ?? storyRes?.AvgRating ?? 0) || 0,
                         totalRatings: Number(storyRes?.totalRatings ?? storyRes?.TotalRatings ?? 0) || 0,
                         views: totalViews,
@@ -208,8 +215,16 @@ export function StoryDetail() {
         if (!storyId) return;
         setReviewsLoading(true);
         getStoryRatings(storyId)
-            .then((list) => setReviews(Array.isArray(list) ? list : []))
-            .catch(() => setReviews([]))
+            .then((list) => {
+                const arr = Array.isArray(list) ? list : [];
+                setReviews(arr);
+                // Đồng bộ số đánh giá ở header (API story đôi khi trả TotalRatings không khớp)
+                setStory((prev) => (prev ? { ...prev, totalRatings: arr.length } : prev));
+            })
+            .catch(() => {
+                setReviews([]);
+                setStory((prev) => (prev ? { ...prev, totalRatings: 0 } : prev));
+            })
             .finally(() => setReviewsLoading(false));
     }, [storyId]);
 
