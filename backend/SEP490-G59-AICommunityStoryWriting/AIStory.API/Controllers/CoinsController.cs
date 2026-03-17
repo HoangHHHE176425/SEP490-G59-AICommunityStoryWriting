@@ -155,6 +155,45 @@ namespace AIStory.API.Controllers
                 return BadRequest(new { message = ex.Message });
             }
         }
+
+        /// <summary>Lịch sử donate nhận + rút tiền của tác giả (user hiện tại). Dùng cho trang author.</summary>
+        [HttpGet("author/activity")]
+        [Authorize]
+        public async Task<IActionResult> GetAuthorActivity([FromQuery] int page = 1, [FromQuery] int pageSize = 50, CancellationToken cancellationToken = default)
+        {
+            var userId = GetUserIdFromToken();
+            var result = await _coinPaymentService.GetAuthorActivityAsync(userId, page, pageSize, cancellationToken);
+            return Ok(result);
+        }
+
+        /// <summary>Tạo yêu cầu rút tiền (tác giả). Trừ coin từ ví khi tạo; admin xử lý duyệt/chuyển tiền sau.</summary>
+        [HttpPost("author/withdraw-request")]
+        [Authorize]
+        public async Task<IActionResult> CreateWithdrawRequest([FromBody] CreateWithdrawRequestDto request, CancellationToken cancellationToken = default)
+        {
+            if (request == null || request.AmountCoins <= 0)
+                return BadRequest(new { message = "Số coin rút phải lớn hơn 0." });
+
+            try
+            {
+                var userId = GetUserIdFromToken();
+                var result = await _coinPaymentService.CreateWithdrawRequestAsync(userId, request.AmountCoins, request.BankInfo, cancellationToken);
+                return Ok(result);
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "CreateWithdrawRequest failed");
+                return BadRequest(new { message = ex.Message });
+            }
+        }
     }
 }
 

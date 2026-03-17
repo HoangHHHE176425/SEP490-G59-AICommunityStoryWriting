@@ -82,3 +82,38 @@ export async function donateToAuthor({ authorId, amount, message }) {
   }
 }
 
+/**
+ * Lịch sử donate nhận + rút tiền của tác giả (author hiện tại).
+ * @param {{ page?: number, pageSize?: number }} params
+ * @returns {Promise<{ success: boolean, data?: { items, totalCount, page, pageSize }, message?: string }>}
+ */
+export async function getAuthorActivity({ page = 1, pageSize = 50 } = {}) {
+  try {
+    const res = await axiosInstance.get('/coins/author/activity', {
+      params: { page, pageSize },
+    });
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, message: getErrorMessage(err) };
+  }
+}
+
+/**
+ * Tạo yêu cầu rút tiền (tác giả). Trừ coin từ ví khi tạo.
+ * @param {{ amountCoins: number, bankInfo?: string }} payload
+ */
+export async function createWithdrawRequest({ amountCoins, bankInfo } = {}) {
+  if (!amountCoins || amountCoins <= 0) {
+    return { success: false, message: 'Số coin rút phải lớn hơn 0.' };
+  }
+  try {
+    const res = await axiosInstance.post('/coins/author/withdraw-request', {
+      amountCoins,
+      bankInfo: bankInfo ?? null,
+    });
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, message: getErrorMessage(err) };
+  }
+}
+
