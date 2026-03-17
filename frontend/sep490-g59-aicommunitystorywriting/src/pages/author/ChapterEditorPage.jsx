@@ -244,7 +244,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         }
     }, [sourceChapterForVersion, editingVersion]);
 
-    // Load danh sách version của chương khi ở chế độ version (để validate số version không trùng)
+    // Load danh sách version của chương khi ở chế độ version (để validate số version không trùng + tự tăng số phiên bản)
     useEffect(() => {
         const chapterId = sourceChapterForVersion?.id ?? sourceChapterForVersion?.Id;
         if (!isVersionMode || !chapterId) {
@@ -256,15 +256,23 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         getChapterVersions(chapterId)
             .then((list) => {
                 const arr = Array.isArray(list) ? list : [];
-                setExistingVersionsForChapter(arr.map((v) => ({
+                const mapped = arr.map((v) => ({
                     id: v.id ?? v.Id,
                     versionNumber: Number(v.versionNumber ?? v.VersionNumber ?? v.version_number ?? 0) || 0,
                     status: (v.status ?? v.Status ?? '').toString(),
-                })));
+                }));
+                setExistingVersionsForChapter(mapped);
+                // Khi tạo version mới: tự gán số phiên bản = max(đã có) + 1 để khớp với list bên ngoài (BE cũng gán next number)
+                if (!editingVersion && mapped.length > 0) {
+                    const nextNum = Math.max(...mapped.map((x) => x.versionNumber), 0) + 1;
+                    setChapterData((prev) => ({ ...prev, versionNumber: nextNum }));
+                } else if (!editingVersion) {
+                    setChapterData((prev) => ({ ...prev, versionNumber: 1 }));
+                }
             })
             .catch(() => setExistingVersionsForChapter([]))
             .finally(() => setVersionsForChapterLoaded(true));
-    }, [isVersionMode, sourceChapterForVersion?.id, sourceChapterForVersion?.Id]);
+    }, [isVersionMode, sourceChapterForVersion?.id, sourceChapterForVersion?.Id, editingVersion]);
 
     // Load điều kiện gửi xuất bản version (thứ tự 1,2,3... và không trùng phiên bản chờ duyệt) — dùng đúng API có status như ChapterListManager
     useEffect(() => {
@@ -1092,23 +1100,24 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                                 type="number"
                                                 min="1"
                                                 value={chapterData.versionNumber ?? 1}
-                                                readOnly={readOnly}
-                                                disabled={readOnly}
+                                                readOnly={readOnly || (isVersionMode && !editingVersion)}
+                                                disabled={readOnly || (isVersionMode && !editingVersion)}
                                                 onChange={(e) => {
-                                                    if (readOnly) return;
+                                                    if (readOnly || (isVersionMode && !editingVersion)) return;
                                                     const v = e.target.value === '' ? 1 : Math.max(1, Number(e.target.value) || 1);
                                                     setChapterData((prev) => ({ ...prev, versionNumber: v }));
                                                     setVersionNumberError('');
                                                 }}
+                                                title={isVersionMode && !editingVersion ? 'Số phiên bản tự tăng theo danh sách phiên bản hiện có' : undefined}
                                                 style={{
                                                     width: '100%',
                                                     padding: '0.75rem',
-                                                    backgroundColor: readOnly ? '#f1f5f9' : '#f9fafb',
+                                                    backgroundColor: readOnly || (isVersionMode && !editingVersion) ? '#f1f5f9' : '#f9fafb',
                                                     border: versionNumberError ? '1px solid #ef4444' : '1px solid #e5e7eb',
                                                     borderRadius: '8px',
                                                     fontSize: '0.875rem',
                                                     outline: 'none',
-                                                    cursor: readOnly ? 'default' : undefined,
+                                                    cursor: readOnly || (isVersionMode && !editingVersion) ? 'default' : undefined,
                                                 }}
                                             />
                                             {versionNumberError && (
