@@ -70,6 +70,40 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         return string.Join("\n\n", parts.Where(s => !string.IsNullOrWhiteSpace(s)));
     }
 
+    /// <summary>Build context cho suggest-next-chapter: RAG (với ragQuery) + Character + Event + Story State. Không thêm ý tưởng tác giả.</summary>
+    public async Task<string> BuildContextForSuggestAsync(Guid storyId, string ragQuery, CancellationToken cancellationToken = default)
+    {
+        var story = _storyRepository.GetById(storyId);
+        if (story == null)
+            return string.Empty;
+
+        if (!_ragService.IsRagAvailableForStory(storyId))
+            throw new InvalidOperationException("Truyện chưa được index RAG. Vui lòng gọi index-rag trước khi sử dụng gợi ý chương.");
+
+        int ragMaxChars = _configuration.GetValue("AI:CoCreateRagMaxChars", DefaultRagMaxChars);
+        int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);
+        if (ragMaxChars < 1000) ragMaxChars = DefaultRagMaxChars;
+        if (ragTopK < 5) ragTopK = 5;
+        var query = ragQuery?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(query))
+            query = story.summary ?? story.title ?? "";
+        var ragBlock = await _ragService.RetrieveContextAsync(storyId, query, maxChars: ragMaxChars, topK: ragTopK, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(ragBlock))
+            throw new InvalidOperationException("Không lấy được ngữ cảnh từ RAG. Đảm bảo truyện đã có chương có nội dung và đã index RAG.");
+
+        var storyContextBlock = BuildRagStoryBlock(story, ragBlock);
+        var characterBlock = BuildCharacterMemoryBlock(storyId);
+        var eventBlock = BuildEventMemoryBlock(storyId);
+        var stateBlock = BuildStoryStateBlock(storyId);
+
+        var parts = new List<string> { storyContextBlock };
+        if (!string.IsNullOrWhiteSpace(characterBlock)) parts.Add(characterBlock);
+        if (!string.IsNullOrWhiteSpace(eventBlock)) parts.Add(eventBlock);
+        if (!string.IsNullOrWhiteSpace(stateBlock)) parts.Add(stateBlock);
+        return string.Join("\n\n", parts.Where(s => !string.IsNullOrWhiteSpace(s)));
+    }
+
     private static string BuildRagStoryBlock(stories story, string ragBlock)
     {
         var lines = new List<string>

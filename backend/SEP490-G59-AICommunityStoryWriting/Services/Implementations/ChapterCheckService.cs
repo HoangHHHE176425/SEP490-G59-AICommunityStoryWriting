@@ -45,7 +45,7 @@ public class ChapterCheckService : IChapterCheckService
             policyViolations.Add(new PolicyViolationItem { Type = v.Type, Description = v.Message, Quote = v.Quote });
 
         // 2) Kiểm tra chính tả bằng AI
-        var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfig(_configuration);
+        var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentConsistencyChecker);
         var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
 
         var titlePart = string.IsNullOrWhiteSpace(request.ChapterTitle) ? "" : $"Tiêu đề chương: {request.ChapterTitle}\n\n";
@@ -55,12 +55,18 @@ public class ChapterCheckService : IChapterCheckService
 {content}
 ---
 
-Nhiệm vụ: Tìm lỗi chính tả (tiếng Việt hoặc tiếng Anh) trong đoạn trên. Với mỗi lỗi, đưa ra từ/cụm sai và gợi ý sửa. Bỏ qua nếu không có lỗi.
+Nhiệm vụ: CHỈ tìm lỗi chính tả/đánh máy (typo) trong đoạn trên (tiếng Việt hoặc tiếng Anh).
+
+RÀNG BUỘC BẮT BUỘC:
+- Chỉ ghi nhận khi chắc chắn là typo. Nếu không chắc chắn: bỏ qua.
+- Tuyệt đối không gợi ý thay đổi văn phong, ngữ nghĩa, đại từ, hoặc “trau chuốt” câu chữ.
+- Không paraphrase, không biên tập, không thay từ đúng bằng từ khác.
+- Không bịa lỗi.
 
 Trả về DUY NHẤT một JSON hợp lệ, không markdown hay giải thích:
 {{ ""spellingErrors"": [ {{ ""wordOrPhrase"": ""từ/cụm sai"", ""suggestion"": ""gợi ý sửa"", ""context"": ""câu chứa lỗi (tùy chọn)"" }} ], ""summary"": ""Tóm tắt ngắn cho tác giả (1-2 câu)"" }}
 
-Nếu không có lỗi chính tả: spellingErrors = [], summary = ""Không phát hiện lỗi chính tả.""";
+Nếu không có lỗi chính tả (hoặc không chắc chắn): spellingErrors = [], summary = ""Không phát hiện lỗi chính tả.""";
 
         var messages = new List<ChatMessage>
         {
@@ -112,7 +118,14 @@ Nếu không có lỗi chính tả: spellingErrors = [], summary = ""Không phá
     private static string GetSystemPrompt()
     {
         return """
-Bạn là trợ lý kiểm tra chính tả cho nội dung chương truyện. Nhiệm vụ: Phát hiện lỗi chính tả (tiếng Việt hoặc Anh) và gợi ý sửa. (Từ cấm/chính sách nội dung được hệ thống kiểm tra riêng từ DB; bạn chỉ tập trung vào chính tả.) Trả về đúng JSON theo cấu trúc đã nêu (spellingErrors, summary), ngôn ngữ mô tả trùng với nội dung (Việt hoặc Anh).
+Bạn là hệ thống kiểm tra chính tả (typo) cho nội dung chương truyện.
+
+CHỈ được phép trả về các lỗi chính tả/đánh máy khi chắc chắn. Nếu không chắc chắn thì phải bỏ qua và trả danh sách rỗng.
+TUYỆT ĐỐI CẤM: đổi văn phong, đổi ngữ nghĩa, đổi đại từ, biên tập câu, diễn giải lại, hoặc thay từ đúng bằng từ khác.
+
+Đầu ra BẮT BUỘC: chỉ một JSON hợp lệ theo đúng schema:
+{ "spellingErrors": [ { "wordOrPhrase": "...", "suggestion": "...", "context": "..." } ], "summary": "..." }
+Không markdown. Không thêm text ngoài JSON.
 """;
     }
 
@@ -135,11 +148,18 @@ Bạn là trợ lý kiểm tra chính tả cho nội dung chương truyện. Nhi
             {
                 foreach (var item in se.EnumerateArray())
                 {
+                    var wordOrPhrase = item.TryGetProperty("wordOrPhrase", out var w) ? w.GetString() ?? "" : "";
+                    var suggestion = item.TryGetProperty("suggestion", out var s) ? s.GetString() ?? "" : "";
+                    var context = item.TryGetProperty("context", out var c) ? c.GetString() : null;
+
+                    if (!IsLikelyTypoCorrection(wordOrPhrase, suggestion))
+                        continue;
+
                     spelling.Add(new SpellingIssue
                     {
-                        WordOrPhrase = item.TryGetProperty("wordOrPhrase", out var w) ? w.GetString() ?? "" : "",
-                        Suggestion = item.TryGetProperty("suggestion", out var s) ? s.GetString() ?? "" : "",
-                        Context = item.TryGetProperty("context", out var c) ? c.GetString() : null
+                        WordOrPhrase = wordOrPhrase,
+                        Suggestion = suggestion,
+                        Context = context
                     });
                 }
             }
@@ -150,5 +170,64 @@ Bạn là trợ lý kiểm tra chính tả cho nội dung chương truyện. Nhi
         {
             return (new List<SpellingIssue>(), "Định dạng phản hồi không hợp lệ.");
         }
+    }
+
+    private static bool IsLikelyTypoCorrection(string wordOrPhrase, string suggestion)
+    {
+        wordOrPhrase = (wordOrPhrase ?? "").Trim();
+        suggestion = (suggestion ?? "").Trim();
+        if (wordOrPhrase.Length == 0 || suggestion.Length == 0) return false;
+        if (string.Equals(wordOrPhrase, suggestion, StringComparison.OrdinalIgnoreCase)) return false;
+
+        // Chỉ chấp nhận "sửa typo": không được thêm/bớt số từ (tránh kiểu biên tập/diễn đạt lại).
+        var wc1 = CountWords(wordOrPhrase);
+        var wc2 = CountWords(suggestion);
+        if (wc1 == 0 || wc2 == 0) return false;
+        if (wc1 != wc2) return false;
+
+        // Heuristic: độ khác biệt nhỏ (đánh máy/sai dấu). Từ quá dài khác hẳn thường là biên tập.
+        var len1 = wordOrPhrase.Length;
+        var len2 = suggestion.Length;
+        if (Math.Abs(len1 - len2) > 3) return false;
+
+        var dist = LevenshteinDistance(
+            wordOrPhrase.ToLowerInvariant(),
+            suggestion.ToLowerInvariant(),
+            maxDistance: 3);
+        return dist >= 1 && dist <= 3;
+    }
+
+    private static int CountWords(string s)
+        => s.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).Length;
+
+    private static int LevenshteinDistance(string a, string b, int maxDistance)
+    {
+        if (a == b) return 0;
+        if (a.Length == 0) return b.Length;
+        if (b.Length == 0) return a.Length;
+        if (Math.Abs(a.Length - b.Length) > maxDistance) return maxDistance + 1;
+
+        var prev = new int[b.Length + 1];
+        var curr = new int[b.Length + 1];
+        for (var j = 0; j <= b.Length; j++) prev[j] = j;
+
+        for (var i = 1; i <= a.Length; i++)
+        {
+            curr[0] = i;
+            var minInRow = curr[0];
+            for (var j = 1; j <= b.Length; j++)
+            {
+                var cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                curr[j] = Math.Min(
+                    Math.Min(curr[j - 1] + 1, prev[j] + 1),
+                    prev[j - 1] + cost);
+                if (curr[j] < minInRow) minInRow = curr[j];
+            }
+
+            if (minInRow > maxDistance) return maxDistance + 1;
+            (prev, curr) = (curr, prev);
+        }
+
+        return prev[b.Length];
     }
 }

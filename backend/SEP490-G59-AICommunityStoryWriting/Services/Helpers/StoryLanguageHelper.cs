@@ -37,11 +37,11 @@ public static class StoryLanguageHelper
         return ratio >= 0.08 ? "Vietnamese" : "English";
     }
 
-    /// <summary>Chỉ thị ngôn ngữ đưa vào prompt: bắt buộc AI viết (dàn ý, nội dung, feedback) đúng ngôn ngữ bộ truyện.</summary>
+    /// <summary>Chỉ thị ngôn ngữ đưa vào prompt: bắt buộc AI viết (dàn ý, nội dung, feedback) đúng ngôn ngữ bộ truyện, không xen ngôn ngữ khác.</summary>
     public static string GetLanguageInstruction(string language)
     {
         return language.Equals("Vietnamese", StringComparison.OrdinalIgnoreCase)
-            ? "Ngôn ngữ bộ truyện: Tiếng Việt. Bắt buộc viết toàn bộ (dàn ý, nội dung chương, feedback) bằng Tiếng Việt."
-            : "Story language: English. You must write all output (outline, chapter content, feedback) in English.";
+            ? "Ngôn ngữ bộ truyện: Tiếng Việt. Viết toàn bộ nội dung sinh ra (dàn ý, chương, feedback) bằng đúng ngôn ngữ đó. Không được xen bất kỳ từ hoặc cụm từ thuộc ngôn ngữ khác; mọi từ (từ nối, trạng từ, mô tả) phải thuần một ngôn ngữ của truyện."
+            : "Story language: English. Write all output (outline, chapter content, feedback) entirely in that language. Do not mix in words or phrases from any other language; every word must be in the story's language only.";
     }
 }
