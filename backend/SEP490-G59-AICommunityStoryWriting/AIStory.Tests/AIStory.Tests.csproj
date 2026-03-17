@@ -24,6 +24,7 @@
 		<ProjectReference Include="..\DataAccessObjects\DataAccessObjects.csproj" />
 		<ProjectReference Include="..\Repositories\Repositories.csproj" />
 		<ProjectReference Include="..\BusinessObjects\BusinessObjects.csproj" />
+		<ProjectReference Include="..\AIStory.API\AIStory.API.csproj" />
 	</ItemGroup>
 
 </Project>

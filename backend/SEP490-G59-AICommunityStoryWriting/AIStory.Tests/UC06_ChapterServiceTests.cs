@@ -1,4 +1,5 @@
 using BusinessObjects.Entities;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Repositories;
 using Services.DTOs.Chapters;
@@ -12,10 +13,12 @@ public class UC06_ChapterServiceTests
     private static ChapterService CreateSut(FakeChapterRepository chapterRepo, FakeChapterVersionRepository versionRepo)
     {
         var aiRepo = new FakeAiGeneratedContentRepository();
+        var scopeFactory = new FakeServiceScopeFactory();
         return new ChapterService(
             chapterRepo,
             versionRepo,
             aiRepo,
+            scopeFactory,
             NullLogger<ChapterService>.Instance,
             moderationHubNotifier: null,
             notificationHubNotifier: null);
@@ -257,6 +260,22 @@ public class UC06_ChapterServiceTests
         public ai_generated_content? GetById(Guid id) => null;
         public void Add(ai_generated_content entity) { }
         public void UpdateChapterId(Guid id, Guid chapterId) { }
+    }
+
+    private sealed class FakeServiceScopeFactory : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() => new FakeServiceScope();
+
+        private sealed class FakeServiceScope : IServiceScope
+        {
+            public IServiceProvider ServiceProvider { get; } = new FakeServiceProvider();
+            public void Dispose() { }
+        }
+
+        private sealed class FakeServiceProvider : IServiceProvider
+        {
+            public object? GetService(Type serviceType) => null;
+        }
     }
 }
 
