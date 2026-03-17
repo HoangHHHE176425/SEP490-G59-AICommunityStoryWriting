@@ -45,6 +45,13 @@ public static class AIClientHelper
         var apiKey = configuration["AI:ApiKey"];
         var baseUrl = configuration["AI:BaseUrl"];
 
+        (provider, apiKey, baseUrl) = NormalizeProviderConfig(provider, apiKey, baseUrl);
+
+        return (provider, model, apiKey!, baseUrl);
+    }
+
+    private static (string provider, string? apiKey, string? baseUrl) NormalizeProviderConfig(string provider, string? apiKey, string? baseUrl)
+    {
         if (provider.Equals("Ollama", StringComparison.OrdinalIgnoreCase))
         {
             if (string.IsNullOrWhiteSpace(baseUrl))
@@ -56,26 +63,54 @@ public static class AIClientHelper
             if (string.IsNullOrWhiteSpace(baseUrl))
                 baseUrl = "https://api.groq.com/openai/v1";
             if (string.IsNullOrWhiteSpace(apiKey))
-                throw new InvalidOperationException("Cấu hình AI:ApiKey chưa được thiết lập. Lấy API key miễn phí tại https://console.groq.com/keys và thêm vào appsettings.Local.json.");
+                throw new InvalidOperationException("Cấu hình AI:ApiKey chưa được thiết lập (AI:Provider=Groq). Vui lòng thêm key vào cấu hình local (appsettings.{ENV}.Local.json / appsettings.Local.json) hoặc env vars.");
         }
-        else if (string.IsNullOrWhiteSpace(apiKey))
-            throw new InvalidOperationException("Cấu hình AI:ApiKey chưa được thiết lập. Vui lòng thêm vào appsettings.Local.json (hoặc dùng AI:Provider = Groq/Ollama).");
+        else
+        {
+            // OpenAI/OpenRouter/Azure(OpenAI-compatible)/...: yêu cầu apiKey.
+            if (string.IsNullOrWhiteSpace(apiKey))
+                throw new InvalidOperationException("Cấu hình AI ApiKey chưa được thiết lập. Vui lòng thêm key vào cấu hình local (appsettings.{ENV}.Local.json / appsettings.Local.json) hoặc env vars.");
+        }
 
-        return (provider, model, apiKey!, baseUrl);
+        return (provider, apiKey, baseUrl);
     }
 
     /// <summary>Cấu hình cho một agent: dùng model riêng (Planner/Writer/ConsistencyChecker/PlotManager) nếu có.</summary>
     public static (string provider, string model, string apiKey, string? baseUrl) GetConfigForAgent(IConfiguration configuration, string agentName)
     {
-        var (provider, _, apiKey, baseUrl) = GetConfig(configuration);
+        // Hỗ trợ 2 provider khác nhau:
+        // - Analysis (Planner/ConsistencyChecker/PlotManager): AI:AnalysisProvider/BaseUrl/ApiKey
+        // - Writing (Writer): AI:WritingProvider/BaseUrl/ApiKey
+        // Fallback: AI:Provider/BaseUrl/ApiKey
+
+        string provider;
+        string? apiKey;
+        string? baseUrl;
+
+        if (agentName == AgentWriter)
+        {
+            provider = configuration["AI:WritingProvider"] ?? configuration["AI:Provider"] ?? "Ollama";
+            apiKey = configuration["AI:WritingApiKey"] ?? configuration["AI:ApiKey"];
+            baseUrl = configuration["AI:WritingBaseUrl"] ?? configuration["AI:BaseUrl"];
+        }
+        else
+        {
+            provider = configuration["AI:AnalysisProvider"] ?? configuration["AI:Provider"] ?? "Ollama";
+            apiKey = configuration["AI:AnalysisApiKey"] ?? configuration["AI:ApiKey"];
+            baseUrl = configuration["AI:AnalysisBaseUrl"] ?? configuration["AI:BaseUrl"];
+        }
+
+        (provider, apiKey, baseUrl) = NormalizeProviderConfig(provider, apiKey, baseUrl);
+
         var model = GetModelForAgent(configuration, agentName);
         return (provider, model, apiKey!, baseUrl);
     }
 
     public static ChatClient CreateChatClient(string provider, string model, string apiKey, string? baseUrl)
     {
-        if ((provider.Equals("Ollama", StringComparison.OrdinalIgnoreCase) || provider.Equals("Groq", StringComparison.OrdinalIgnoreCase))
-            && !string.IsNullOrWhiteSpace(baseUrl))
+        // If a BaseUrl is provided, treat it as an OpenAI-compatible endpoint (e.g. Groq, Ollama, OpenRouter, Azure OpenAI compatible gateways).
+        // This allows using a single SDK and switching providers purely via configuration.
+        if (!string.IsNullOrWhiteSpace(baseUrl))
         {
             var endpoint = baseUrl.TrimEnd('/');
             if (!endpoint.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))

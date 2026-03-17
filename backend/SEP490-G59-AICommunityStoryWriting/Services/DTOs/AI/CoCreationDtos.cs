@@ -39,4 +39,25 @@ public class CoCreationResponse
 
     /// <summary>ID bản ghi ai_generated_content vừa lưu (gắn với ChapterId).</summary>
     public Guid? AiGeneratedContentId { get; set; }
+
+    /// <summary>Thời gian chạy từng bước (ms): Outline, Write, Guardrail, Review; khi song song là thời gian wall-clock của mỗi phase. Null nếu không đo.</summary>
+    public List<AgentDuration>? AgentDurations { get; set; }
+}
+
+/// <summary>Một bước trong pipeline co-create và thời gian chạy (ms).</summary>
+public class AgentDuration
+{
+    /// <summary>Tên bước: Outline, Write, Guardrail, Review; hoặc Write_2, Review_2 khi chạy song song; Revision_Write khi trong vòng sửa.</summary>
+    public string Step { get; set; } = null!;
+    /// <summary>Thời gian chạy (millisecond).</summary>
+    public long DurationMs { get; set; }
+}
+
+/// <summary>Event tiến độ gửi qua SSE khi chạy co-create stream: mỗi bước xong (Outline, Write, Guardrail, Review) gửi một event.</summary>
+public class CoCreateProgressEvent
+{
+    public string Step { get; set; } = null!;
+    public long DurationMs { get; set; }
+    /// <summary>Message hiển thị cho user (vd. "Đã xong dàn ý").</summary>
+    public string? Message { get; set; }
 }

@@ -1,4 +1,5 @@
 using System.ClientModel;
+using System.Diagnostics;
 using System.Text.Json;
 using BusinessObjects.Entities;
 using Microsoft.Extensions.Configuration;
@@ -15,6 +16,8 @@ namespace Services.Implementations;
 public class AICoCreationService : IAICoCreationService
 {
     private const int DefaultMaxRevisions = 2;
+    /// <summary>Số bản nháp (và review) chạy song song trong một vòng; 1 = tuần tự như cũ.</summary>
+    // Co-create chạy tuần tự (không song song).
     private const string ActionOutline = "CO_CREATE_OUTLINE";
     private const string ActionWrite = "CO_CREATE_WRITE";
     private const string ActionReview = "CO_CREATE_REVIEW";
@@ -61,7 +64,8 @@ Quy tắc bắt buộc:
     public async Task<CoCreationResponse> CoCreateAsync(
         CoCreationRequest request,
         Guid authorUserId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IProgress<CoCreateProgressEvent>? progress = null)
     {
         var story = _storyRepository.GetById(request.StoryId);
         if (story == null)
@@ -75,10 +79,16 @@ Quy tắc bắt buộc:
         var storyLanguage = StoryLanguageHelper.DetectFromStoryContext(contextBlock);
         var languageInstruction = StoryLanguageHelper.GetLanguageInstruction(storyLanguage);
 
+        var durations = new List<AgentDuration>();
+
         // --- Agent 1 (Story Analyzer / Planner): Dàn ý theo kiến trúc Prompt + RAG + Memory + Agent Role ---
         var (p1, m1, k1, u1) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentPlanner);
         var clientPlanner = AIClientHelper.CreateChatClient(p1, m1, k1, u1);
+        var swOutline = Stopwatch.StartNew();
         var outlineJson = await RunAgent1OutlineAsync(clientPlanner, story, contextBlock, request.AuthorIdea, languageInstruction, cancellationToken);
+        swOutline.Stop();
+        durations.Add(new AgentDuration { Step = "Outline", DurationMs = swOutline.ElapsedMilliseconds });
+        progress?.Report(new CoCreateProgressEvent { Step = "Outline", DurationMs = swOutline.ElapsedMilliseconds, Message = "Đã xong dàn ý" });
         LogUsage(authorUserId, request.StoryId, null, ActionOutline, m1, 0, 0);
 
         var ideaFeedback = TryParseIdeaContradiction(outlineJson);
@@ -91,42 +101,72 @@ Quy tắc bắt buộc:
                 FinalContent = string.Empty,
                 Approved = false,
                 RevisionCount = 0,
-                ReviewFeedback = null
+                ReviewFeedback = null,
+                AgentDurations = durations.Count > 0 ? durations : null
             };
         }
 
         var outlineForPrompt = FormatOutlineForPrompt(outlineJson);
 
-        // --- Agent 2 (Writer): Viết nội dung — model Mistral ---
-        var (p2, m2, k2, u2) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentWriter);
-        var clientWriter = AIClientHelper.CreateChatClient(p2, m2, k2, u2);
-        string draft = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, feedback: null, languageInstruction, cancellationToken);
-        draft = StripTrailingFeedbackFromDraft(draft);
-        LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
-
-        // --- Guardrail: từ cấm ---
-        var guardrailResult = await _guardrail.CheckAsync(request.StoryId, draft, cancellationToken);
-        var guardrailFeedback = guardrailResult.Passed
-            ? null
-            : string.Join(" ", guardrailResult.Violations.Select(v => $"[{v.Type}] {v.Message}"));
-
         int maxRevisions = _configuration.GetValue("AI:CoCreateMaxRevisions", DefaultMaxRevisions);
         if (maxRevisions < 0) maxRevisions = 0;
 
-        // --- Agent 3 (Consistency Checker): Luôn chạy — model Llama 3 ---
+        var (p2, m2, k2, u2) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentWriter);
         var (p3, m3, k3, u3) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentConsistencyChecker);
-        var clientChecker = AIClientHelper.CreateChatClient(p3, m3, k3, u3);
-        var (approved, feedback) = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, languageInstruction, cancellationToken);
-        LogUsage(authorUserId, request.StoryId, null, ActionReview, m3, 0, 0);
 
-        if (!guardrailResult.Passed)
+        string draft;
+        bool approved;
+        string? lastFeedback;
+        ChatClient clientWriter;
+        ChatClient clientChecker;
+
+        const string LogicCheckAdvisoryNote =
+            "Lưu ý: Kiểm tra nhất quán (logic truyện) hiện chỉ mang tính CẢNH BÁO, không tự động sửa hoặc chặn kết quả.";
+
+        // Luồng tuần tự (ban đầu): một Writer → Guardrail → Review
+        clientWriter = AIClientHelper.CreateChatClient(p2, m2, k2, u2);
+        clientChecker = AIClientHelper.CreateChatClient(p3, m3, k3, u3);
+        var swWrite = Stopwatch.StartNew();
+        draft = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, feedback: null, languageInstruction, cancellationToken);
+        swWrite.Stop();
+        draft = StripTrailingFeedbackFromDraft(draft);
+        durations.Add(new AgentDuration { Step = "Write", DurationMs = swWrite.ElapsedMilliseconds });
+        progress?.Report(new CoCreateProgressEvent { Step = "Write", DurationMs = swWrite.ElapsedMilliseconds, Message = "Đã viết nội dung" });
+        LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
+
+        var swGuard = Stopwatch.StartNew();
+        var initialGuardrailResult = await _guardrail.CheckAsync(request.StoryId, draft, cancellationToken);
+        swGuard.Stop();
+        durations.Add(new AgentDuration { Step = "Guardrail", DurationMs = swGuard.ElapsedMilliseconds });
+        progress?.Report(new CoCreateProgressEvent { Step = "Guardrail", DurationMs = swGuard.ElapsedMilliseconds, Message = "Đã kiểm tra từ cấm" });
+        var guardrailFeedback = initialGuardrailResult.Passed ? null : string.Join(" ", initialGuardrailResult.Violations.Select(v => $"[{v.Type}] {v.Message}"));
+
+        // Check logic (Agent 3) chỉ để CẢNH BÁO: không chạy vòng sửa, không chặn kết quả nếu guardrail pass.
+        if (!initialGuardrailResult.Passed)
         {
             approved = false;
-            feedback = string.IsNullOrEmpty(feedback) ? guardrailFeedback : $"{guardrailFeedback}\n{feedback}";
+            lastFeedback = guardrailFeedback;
+        }
+        else
+        {
+            approved = true;
+            var swReview = Stopwatch.StartNew();
+            var (_, reviewFeedback) = await RunAgent3ReviewAsync(
+                clientChecker, contextBlock, outlineForPrompt, draft, languageInstruction, cancellationToken);
+            swReview.Stop();
+            durations.Add(new AgentDuration { Step = "Review", DurationMs = swReview.ElapsedMilliseconds });
+            progress?.Report(new CoCreateProgressEvent { Step = "Review", DurationMs = swReview.ElapsedMilliseconds, Message = "Đã kiểm tra nhất quán (cảnh báo)" });
+            LogUsage(authorUserId, request.StoryId, null, ActionReview, m3, 0, 0);
+
+            lastFeedback = string.IsNullOrWhiteSpace(reviewFeedback)
+                ? $"Không phát hiện mâu thuẫn rõ ràng.\n{LogicCheckAdvisoryNote}"
+                : $"{reviewFeedback}\n{LogicCheckAdvisoryNote}";
         }
 
+        // Không chạy vòng sửa (revision) trong chế độ cảnh báo.
+        maxRevisions = 0;
+
         int revisionCount = 0;
-        string? lastFeedback = feedback;
         var revisionFeedbacks = new List<string>();
 
         while (!approved && revisionCount < maxRevisions)
@@ -134,16 +174,28 @@ Quy tắc bắt buộc:
             revisionCount++;
             if (!string.IsNullOrWhiteSpace(lastFeedback))
                 revisionFeedbacks.Add(lastFeedback);
+            var swRevWrite = Stopwatch.StartNew();
             draft = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, lastFeedback, languageInstruction, cancellationToken);
+            swRevWrite.Stop();
             draft = StripTrailingFeedbackFromDraft(draft);
+            durations.Add(new AgentDuration { Step = $"Revision_Write_{revisionCount}", DurationMs = swRevWrite.ElapsedMilliseconds });
+            progress?.Report(new CoCreateProgressEvent { Step = $"Revision_Write_{revisionCount}", DurationMs = swRevWrite.ElapsedMilliseconds, Message = $"Đã viết lại lần {revisionCount}" });
             LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
 
-            guardrailResult = await _guardrail.CheckAsync(request.StoryId, draft, cancellationToken);
+            var swRevGuard = Stopwatch.StartNew();
+            var guardrailResult = await _guardrail.CheckAsync(request.StoryId, draft, cancellationToken);
+            swRevGuard.Stop();
+            durations.Add(new AgentDuration { Step = $"Revision_Guardrail_{revisionCount}", DurationMs = swRevGuard.ElapsedMilliseconds });
+            progress?.Report(new CoCreateProgressEvent { Step = $"Revision_Guardrail_{revisionCount}", DurationMs = swRevGuard.ElapsedMilliseconds, Message = "Đã kiểm tra từ cấm" });
             if (!guardrailResult.Passed)
                 lastFeedback = string.Join(" ", guardrailResult.Violations.Select(v => $"[{v.Type}] {v.Message}"));
             else
             {
+                var swRevReview = Stopwatch.StartNew();
                 var (approvedAgain, feedbackAgain) = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, languageInstruction, cancellationToken);
+                swRevReview.Stop();
+                durations.Add(new AgentDuration { Step = $"Revision_Review_{revisionCount}", DurationMs = swRevReview.ElapsedMilliseconds });
+                progress?.Report(new CoCreateProgressEvent { Step = $"Revision_Review_{revisionCount}", DurationMs = swRevReview.ElapsedMilliseconds, Message = "Đã kiểm duyệt nhất quán" });
                 LogUsage(authorUserId, request.StoryId, null, ActionReview, m3, 0, 0);
                 if (approvedAgain)
                 {
@@ -155,9 +207,10 @@ Quy tắc bắt buộc:
                         Approved = true,
                         RevisionCount = revisionCount,
                         RevisionFeedbacks = revisionFeedbacks.Count > 0 ? revisionFeedbacks : null,
-                        ReviewFeedback = null,
+                        ReviewFeedback = LogicCheckAdvisoryNote,
                         ChapterId = chapterId,
-                        AiGeneratedContentId = aiContentId
+                        AiGeneratedContentId = aiContentId,
+                        AgentDurations = durations.Count > 0 ? durations : null
                     };
                 }
                 lastFeedback = feedbackAgain;
@@ -172,9 +225,10 @@ Quy tắc bắt buộc:
             Approved = approved,
             RevisionCount = revisionCount,
             RevisionFeedbacks = revisionFeedbacks.Count > 0 ? revisionFeedbacks : null,
-            ReviewFeedback = approved ? null : lastFeedback,
+            ReviewFeedback = approved ? lastFeedback : lastFeedback,
             ChapterId = saved.ChapterId,
-            AiGeneratedContentId = saved.AiGeneratedContentId
+            AiGeneratedContentId = saved.AiGeneratedContentId,
+            AgentDurations = durations.Count > 0 ? durations : null
         };
     }
 
@@ -257,7 +311,7 @@ Constraints:
 
 Language: The platform is mostly Vietnamese. Write the outline and any feedback in Vietnamese when the story is in Vietnamese; if the story is clearly in another language (e.g. English), use that language. Do not mix languages.
 
-If the user idea CONTRADICTS the context (e.g. a character is dead or missing in Character Memory but the idea has them acting; or an event in Event Memory is reversed by the idea), do NOT generate an outline. Output ONLY this JSON (no other text, no markdown):
+Only if the user idea has an EXPLICIT, CLEAR contradiction with the context, do NOT generate an outline. Examples of explicit contradiction: (1) Character Memory or Story State clearly states a character is dead or missing, and the idea has that character acting or present; (2) Event Memory explicitly lists an event as already occurred (e.g. "funeral took place"), and the idea describes that same event as not yet happened or reverses it. Do NOT flag ideaContradiction for vague or interpretative mismatches, or when the idea is a reasonable continuation (e.g. the idea may come from a chapter-suggestion feature that used the same story). When in doubt, prefer generating an outline. If you must reject, output ONLY this JSON (no other text, no markdown):
 { "ideaContradiction": true, "feedback": "Giải thích ngắn cho tác giả (tiếng Việt nếu truyện tiếng Việt)." }
 
 Otherwise, output the structured outline in the following format. Use the same language as the story (prefer Vietnamese for Vietnamese stories). Scene Outline: at least 2–3 main points, at most 5–7. Output ONLY the outline in this exact format — no markdown (no ```), no extra explanation before or after:
@@ -280,7 +334,7 @@ Scene Outline:
     private async Task<string> RunAgent1OutlineAsync(ChatClient client, stories story, string contextBlock, string authorIdea, string languageInstruction, CancellationToken ct)
     {
         var storyInfo = $"Story Information:\nTitle: {story.title}\nSummary: {story.summary ?? ""}\n\nUser Idea:\n{authorIdea}";
-        var userPrompt = $"{storyInfo}\n\n---\n{DbContextLabel}\n\n{contextBlock}\n\n---\n{languageInstruction}\n\nNgữ cảnh trên là phần truyện ĐÃ XẢY RA. Chỉ sinh outline cho phần TIẾP THEO (sau điểm kết thúc hiện tại), không outline sự kiện đã xảy ra. Trả lời bằng tiếng Việt nếu truyện tiếng Việt. Sinh outline theo đúng format (Scene Objective, Scene Outline 2–7 ý, Characters Involved, Potential Conflict, Expected Outcome); chỉ output nội dung outline, không markdown hay giải thích thừa. Nếu ý tưởng mâu thuẫn với ngữ cảnh thì chỉ trả về JSON ideaContradiction.";
+        var userPrompt = $"{storyInfo}\n\n---\n{DbContextLabel}\n\n{contextBlock}\n\n---\n{languageInstruction}\n\nNgữ cảnh trên là phần truyện ĐÃ XẢY RA. Chỉ sinh outline cho phần TIẾP THEO (sau điểm kết thúc hiện tại), không outline sự kiện đã xảy ra. Trả lời bằng tiếng Việt nếu truyện tiếng Việt. Sinh outline theo đúng format (Scene Objective, Scene Outline 2–7 ý, Characters Involved, Potential Conflict, Expected Outcome); chỉ output nội dung outline, không markdown hay giải thích thừa. Chỉ trả về JSON ideaContradiction khi có mâu thuẫn RÕ RÀNG (vd. nhân vật đã ghi là chết/mất tích trong Character Memory nhưng ý tưởng cho họ xuất hiện; sự kiện đã có trong Event Memory nhưng ý tưởng đảo ngược). Ý tưởng có thể đến từ gợi ý chương tiếp theo — nếu là hướng tiếp nối hợp lý thì hãy sinh outline.";
         var messages = new List<ChatMessage>
         {
             new SystemChatMessage(GetAgent1SystemPrompt()),

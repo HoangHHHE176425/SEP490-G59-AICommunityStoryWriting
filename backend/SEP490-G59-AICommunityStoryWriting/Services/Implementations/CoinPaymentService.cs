@@ -460,6 +460,115 @@ namespace Services.Implementations
             });
         }
 
+        public async Task<AuthorActivityResponseDto> GetAuthorActivityAsync(Guid authorUserId, int page = 1, int pageSize = 50, CancellationToken cancellationToken = default)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 100);
+
+            var donations = await _db.donations
+                .AsNoTracking()
+                .Where(d => d.receiver_id == authorUserId)
+                .OrderByDescending(d => d.created_at)
+                .ToListAsync(cancellationToken);
+
+            var withdrawals = await _db.withdraw_requests
+                .AsNoTracking()
+                .Where(w => w.author_id == authorUserId)
+                .OrderByDescending(w => w.created_at)
+                .ToListAsync(cancellationToken);
+
+            var list = new List<AuthorActivityItemDto>();
+
+            foreach (var d in donations)
+            {
+                var senderName = d.sender_id.HasValue ? NotificationDAO.GetUserDisplayName(d.sender_id.Value) : "Người dùng";
+                list.Add(new AuthorActivityItemDto
+                {
+                    Type = "DONATE",
+                    Id = d.id,
+                    CreatedAt = d.created_at,
+                    Amount = d.amount,
+                    Note = d.message,
+                    SenderDisplayName = senderName,
+                    WithdrawStatus = null,
+                    ProcessedAt = null
+                });
+            }
+
+            foreach (var w in withdrawals)
+            {
+                list.Add(new AuthorActivityItemDto
+                {
+                    Type = "WITHDRAW",
+                    Id = w.id,
+                    CreatedAt = w.created_at,
+                    Amount = (int)Math.Round(w.amount_requested),
+                    Note = w.admin_note,
+                    SenderDisplayName = null,
+                    WithdrawStatus = w.status,
+                    ProcessedAt = w.processed_at
+                });
+            }
+
+            var ordered = list.OrderByDescending(x => x.CreatedAt ?? DateTime.MinValue).ToList();
+            var totalCount = ordered.Count;
+            var items = ordered.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+            return new AuthorActivityResponseDto
+            {
+                Items = items,
+                TotalCount = totalCount,
+                Page = page,
+                PageSize = pageSize
+            };
+        }
+
+        public async Task<WithdrawRequestItemDto> CreateWithdrawRequestAsync(Guid authorUserId, int amountCoins, string? bankInfo, CancellationToken cancellationToken = default)
+        {
+            if (amountCoins <= 0)
+                throw new ArgumentOutOfRangeException(nameof(amountCoins), "Số coin rút phải lớn hơn 0.");
+
+            var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == authorUserId, cancellationToken);
+            if (wallet == null)
+                throw new InvalidOperationException("Ví không tồn tại. Vui lòng thử lại sau.");
+
+            var balance = wallet.balance_coin ?? 0;
+            if (balance < amountCoins)
+                throw new InvalidOperationException($"Số dư không đủ. Hiện có {balance} coin, yêu cầu {amountCoins} coin.");
+
+            wallet.balance_coin = balance - amountCoins;
+            wallet.updated_at = DateTime.UtcNow;
+
+            var req = new withdraw_requests
+            {
+                id = Guid.NewGuid(),
+                author_id = authorUserId,
+                amount_requested = amountCoins,
+                fee_amount = null,
+                bank_info_snapshot = string.IsNullOrWhiteSpace(bankInfo) ? "{}" : bankInfo.Trim(),
+                status = "PENDING",
+                admin_note = null,
+                transaction_proof_url = null,
+                created_at = DateTime.UtcNow,
+                processed_at = null,
+                processed_by = null
+            };
+
+            _db.withdraw_requests.Add(req);
+            await _db.SaveChangesAsync(cancellationToken);
+
+            return new WithdrawRequestItemDto
+            {
+                Id = req.id,
+                AmountRequested = req.amount_requested,
+                FeeAmount = req.fee_amount,
+                Status = req.status,
+                CreatedAt = req.created_at,
+                ProcessedAt = req.processed_at,
+                AdminNote = req.admin_note
+            };
+        }
+
         /// <summary>Gửi real-time (SignalR) thông báo donate tới tác giả. Gọi fire-and-forget sau DonateAsync.</summary>
         private async Task PushDonationNotificationAsync(Guid userId, notifications n)
         {
