@@ -3,7 +3,7 @@ import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'luc
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
-import { indexRag, suggestNextChapter, coCreate } from '../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, checkChapter } from '../../api/ai/aiApi';
 import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 
 // Helper function to count words
@@ -128,6 +128,7 @@ function contentOnlyForChapter(raw) {
 export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, editingVersion, readOnly = false, onSave, onCancel }) {
     const { showToast, ToastContainer } = useToast();
     const storyId = story?.id ?? story?.Id;
+    const [chapterCheckModal, setChapterCheckModal] = useState({ open: false, loading: false, data: null, error: null });
     const [chapterData, setChapterData] = useState(() => {
         if (editingVersion) {
             return {
@@ -564,6 +565,45 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             return;
         }
 
+        // AI check: chính tả + từ cấm/chính sách (BE: POST /api/ai/check-chapter)
+        try {
+            setChapterCheckModal({ open: false, loading: true, data: null, error: null });
+            const res = await checkChapter({
+                content: chapterData.content,
+                storyId: storyId ?? null,
+                chapterTitle: chapterData.title ?? null,
+            });
+            const spellingIssues = res?.spellingIssues ?? res?.SpellingIssues ?? [];
+            const policyViolations = res?.policyViolations ?? res?.PolicyViolations ?? [];
+            const passed = Boolean(res?.passed ?? res?.Passed) &&
+                Array.isArray(spellingIssues) && spellingIssues.length === 0 &&
+                Array.isArray(policyViolations) && policyViolations.length === 0 &&
+                !(res?.hasInappropriateContent ?? res?.HasInappropriateContent);
+
+            if (!passed) {
+                setChapterCheckModal({
+                    open: true,
+                    loading: false,
+                    error: null,
+                    data: {
+                        passed: Boolean(res?.passed ?? res?.Passed),
+                        summary: res?.summary ?? res?.Summary ?? null,
+                        hasInappropriateContent: Boolean(res?.hasInappropriateContent ?? res?.HasInappropriateContent),
+                        spellingIssues,
+                        policyViolations,
+                    },
+                });
+                showToast('Nội dung có lỗi chính tả / từ cấm. Vui lòng sửa theo gợi ý trước khi lưu/xuất bản.', 'error');
+                return;
+            }
+            setChapterCheckModal({ open: false, loading: false, data: null, error: null });
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể kiểm tra nội dung chương.';
+            setChapterCheckModal({ open: true, loading: false, data: null, error: msg });
+            showToast(msg, 'error');
+            return;
+        }
+
         setIsSaving(true);
         try {
             const payload = {
@@ -585,10 +625,213 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         }
     };
 
+    // Tìm vị trí (đoạn + dòng) của từ/cụm trong nội dung hiện tại để hiển thị "vị trí phạm lỗi"
+    const findIssuePosition = (needleRaw) => {
+        const needle = (needleRaw ?? '').toString().trim();
+        const content = (chapterData?.content ?? '').toString();
+        if (!needle || !content) return null;
+
+        const lowerNeedle = needle.toLowerCase();
+        const lines = content.split(/\r?\n/);
+
+        // Line index (1-based)
+        const lineIndex = lines.findIndex((ln) => ln.toLowerCase().includes(lowerNeedle));
+        const lineNo = lineIndex >= 0 ? lineIndex + 1 : null;
+
+        // Paragraph index (1-based) - paragraph = block separated by blank lines
+        const paragraphs = content.split(/\r?\n\s*\r?\n/);
+        const paraIndex = paragraphs.findIndex((p) => p.toLowerCase().includes(lowerNeedle));
+        const paraNo = paraIndex >= 0 ? paraIndex + 1 : null;
+
+        // Character offset (1-based) - first occurrence in full content
+        const idx = content.toLowerCase().indexOf(lowerNeedle);
+        const charOffset = idx >= 0 ? idx + 1 : null;
+
+        if (lineNo == null && paraNo == null && charOffset == null) return null;
+        return { lineNo, paraNo, charOffset };
+    };
+
     return (
         <div>
             <Header />
             <ToastContainer />
+            {/* Popup AI check-chapter: lỗi chính tả / từ cấm */}
+            {chapterCheckModal.open && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        zIndex: 9999,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                    }}
+                    onClick={() => !chapterCheckModal.loading && setChapterCheckModal((p) => ({ ...p, open: false }))}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '12px',
+                            maxWidth: '820px',
+                            width: '92%',
+                            maxHeight: '85vh',
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '16px 18px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+                            <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>Kết quả kiểm tra nội dung</div>
+                                <div style={{ fontSize: '0.8125rem', color: '#64748b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    Vui lòng sửa các lỗi bên dưới trước khi lưu hoặc xuất bản.
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                disabled={chapterCheckModal.loading}
+                                onClick={() => setChapterCheckModal((p) => ({ ...p, open: false }))}
+                                style={{ border: 'none', background: 'transparent', cursor: chapterCheckModal.loading ? 'not-allowed' : 'pointer', padding: '6px', borderRadius: '8px' }}
+                                title="Đóng"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <div style={{ padding: '16px 18px', overflowY: 'auto' }}>
+                            {chapterCheckModal.loading ? (
+                                <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>Đang kiểm tra...</div>
+                            ) : chapterCheckModal.error ? (
+                                <div style={{ padding: '12px 14px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', color: '#b91c1c', fontSize: '0.875rem' }}>
+                                    {chapterCheckModal.error}
+                                </div>
+                            ) : (
+                                <>
+                                    {chapterCheckModal.data?.summary && (
+                                        <div style={{ padding: '12px 14px', backgroundColor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', color: '#0f172a', fontSize: '0.875rem', marginBottom: '12px' }}>
+                                            <div style={{ fontWeight: 800, marginBottom: '6px' }}>Tóm tắt</div>
+                                            <div style={{ color: '#334155', whiteSpace: 'pre-wrap' }}>{chapterCheckModal.data.summary}</div>
+                                        </div>
+                                    )}
+
+                                    {chapterCheckModal.data?.hasInappropriateContent && (
+                                        <div style={{ padding: '12px 14px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '10px', color: '#9a3412', fontSize: '0.875rem', marginBottom: '12px' }}>
+                                            Nội dung có dấu hiệu không phù hợp theo chính sách nền tảng. Vui lòng chỉnh sửa trước khi lưu/xuất bản.
+                                        </div>
+                                    )}
+
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
+                                        <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', overflow: 'hidden' }}>
+                                            <div style={{ padding: '10px 12px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: 800, color: '#0f172a' }}>
+                                                Lỗi chính tả ({(chapterCheckModal.data?.spellingIssues?.length ?? 0).toLocaleString()})
+                                            </div>
+                                            <div style={{ padding: '10px 12px' }}>
+                                                {(chapterCheckModal.data?.spellingIssues ?? []).length === 0 ? (
+                                                    <div style={{ color: '#64748b', fontSize: '0.875rem' }}>Không có lỗi chính tả.</div>
+                                                ) : (
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                                        {(chapterCheckModal.data?.spellingIssues ?? []).map((it, idx) => {
+                                                            const word = it.wordOrPhrase ?? it.WordOrPhrase ?? '';
+                                                            const sug = it.suggestion ?? it.Suggestion ?? '';
+                                                            const pos = findIssuePosition(word);
+                                                            return (
+                                                                <div key={idx} style={{ padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
+                                                                    <div style={{ fontSize: '0.875rem', color: '#0f172a' }}>
+                                                                        <span style={{ fontWeight: 800 }}>Từ/Cụm</span>: <span style={{ fontWeight: 800, color: '#b91c1c' }}>{word || '—'}</span>
+                                                                    </div>
+                                                                    <div style={{ fontSize: '0.875rem', color: '#0f172a', marginTop: '4px' }}>
+                                                                        <span style={{ fontWeight: 800 }}>Gợi ý</span>: <span style={{ color: '#15803d', fontWeight: 800 }}>{sug || '—'}</span>
+                                                                    </div>
+                                                                    {pos ? (
+                                                                        <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#475569' }}>
+                                                                            <span style={{ fontWeight: 800 }}>Vị trí</span>:
+                                                                            {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
+                                                                            {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
+                                                                            {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#94a3b8' }}>
+                                                                            Không xác định được vị trí trong nội dung hiện tại.
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', overflow: 'hidden' }}>
+                                            <div style={{ padding: '10px 12px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: 800, color: '#0f172a' }}>
+                                                Từ cấm / vi phạm chính sách ({(chapterCheckModal.data?.policyViolations?.length ?? 0).toLocaleString()})
+                                            </div>
+                                            <div style={{ padding: '10px 12px' }}>
+                                                {(chapterCheckModal.data?.policyViolations ?? []).length === 0 ? (
+                                                    <div style={{ color: '#64748b', fontSize: '0.875rem' }}>Không phát hiện vi phạm.</div>
+                                                ) : (
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                                        {(chapterCheckModal.data?.policyViolations ?? []).map((it, idx) => {
+                                                            const type = it.type ?? it.Type ?? '';
+                                                            const desc = it.description ?? it.Description ?? '';
+                                                            const quote = it.quote ?? it.Quote ?? '';
+                                                            const pos = findIssuePosition(quote);
+                                                            return (
+                                                                <div key={idx} style={{ padding: '10px 12px', border: '1px solid #fee2e2', borderRadius: '10px', backgroundColor: '#fff7ed' }}>
+                                                                    <div style={{ fontSize: '0.875rem', color: '#9a3412' }}>
+                                                                        <span style={{ fontWeight: 800 }}>Loại</span>: <span style={{ fontWeight: 800 }}>{type || '—'}</span>
+                                                                    </div>
+                                                                    <div style={{ fontSize: '0.875rem', color: '#9a3412', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
+                                                                        {desc || '—'}
+                                                                    </div>
+                                                                    {pos ? (
+                                                                        <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12' }}>
+                                                                            <span style={{ fontWeight: 800 }}>Vị trí</span>:
+                                                                            {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
+                                                                            {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
+                                                                            {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
+                                                                        </div>
+                                                                    ) : null}
+                                                                    {quote ? (
+                                                                        <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12', backgroundColor: '#fffbeb', border: '1px dashed #fdba74', borderRadius: '10px', padding: '8px 10px', whiteSpace: 'pre-wrap' }}>
+                                                                            {quote}
+                                                                        </div>
+                                                                    ) : null}
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <div style={{ padding: '12px 18px', borderTop: '1px solid #e5e7eb', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                            <button
+                                type="button"
+                                disabled={chapterCheckModal.loading}
+                                onClick={() => setChapterCheckModal((p) => ({ ...p, open: false }))}
+                                style={{
+                                    padding: '10px 14px',
+                                    borderRadius: '10px',
+                                    border: '1px solid #e2e8f0',
+                                    backgroundColor: '#fff',
+                                    fontWeight: 800,
+                                    cursor: chapterCheckModal.loading ? 'not-allowed' : 'pointer',
+                                }}
+                            >
+                                Đóng
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* Popup gợi ý chương tiếp theo (AI) */}
             {showSuggestPopup && (
                 <div
