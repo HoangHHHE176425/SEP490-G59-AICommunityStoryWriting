@@ -67,7 +67,7 @@ public class AIConsistencyCheckService : IAIConsistencyCheckService
 
         const string dbContextLabel = "=== DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU (ngữ cảnh truyện: các đoạn RAG từ truyện) — Đối chiếu bản nháp với dữ liệu này để phát hiện mâu thuẫn ===";
 
-        var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfig(_configuration);
+        var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentConsistencyChecker);
         var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
 
         var userPrompt = $@"{dbContextLabel}

@@ -19,6 +19,7 @@ namespace Services.Implementations
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
         private readonly IStoryRagService _ragService;
+        private readonly IStoryMemoryEngine _memoryEngine;
         private readonly IAIUsageLogRepository _aiUsageLogRepository;
         private readonly IConfiguration _configuration;
 
@@ -26,12 +27,14 @@ namespace Services.Implementations
             IStoryRepository storyRepository,
             IChapterRepository chapterRepository,
             IStoryRagService ragService,
+            IStoryMemoryEngine memoryEngine,
             IAIUsageLogRepository aiUsageLogRepository,
             IConfiguration configuration)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
             _ragService = ragService;
+            _memoryEngine = memoryEngine;
             _aiUsageLogRepository = aiUsageLogRepository;
             _configuration = configuration;
         }
@@ -60,16 +63,13 @@ namespace Services.Implementations
                 throw new InvalidOperationException("Truyện chưa được index RAG. Vui lòng cấu hình embedding (AI:EmbeddingBaseUrl, EmbeddingModel) và đảm bảo truyện có chương có nội dung.");
 
             var lastChapterContent = chapters.LastOrDefault()?.content ?? "";
-            var query = $"{story.summary ?? ""} {lastChapterContent}".Trim();
-            var ragBlock = await _ragService.RetrieveContextAsync(request.StoryId, query, maxChars: 8000, topK: 15, cancellationToken);
-            if (string.IsNullOrWhiteSpace(ragBlock))
-                throw new InvalidOperationException("Không lấy được ngữ cảnh từ RAG. Đảm bảo truyện đã có chương có nội dung và cấu hình embedding đúng.");
-            var contextBlock = BuildContextBlockFromRag(story, ragBlock);
+            var ragQuery = $"{story.summary ?? ""} {lastChapterContent}".Trim();
+            var contextBlock = await _memoryEngine.BuildContextForSuggestAsync(request.StoryId, ragQuery, cancellationToken);
 
             var storyLanguage = StoryLanguageHelper.DetectFromStoryContext(contextBlock);
             var languageInstruction = StoryLanguageHelper.GetLanguageInstruction(storyLanguage);
 
-            var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfig(_configuration);
+            var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentPlanner);
             var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
 
             var systemPrompt = GetSystemPrompt();
@@ -99,7 +99,11 @@ namespace Services.Implementations
 
             var suggestions = ParseSuggestions(text);
             if (suggestions.Count == 0)
-                throw new InvalidOperationException("Không thể đọc được gợi ý từ phản hồi AI.");
+            {
+                var snippet = text.Length > 600 ? text[..600] + "..." : text;
+                throw new InvalidOperationException(
+                    "Không thể đọc được gợi ý từ phản hồi AI. Kiểm tra model trả về đúng JSON với mảng \"suggestions\" (title, summary, direction, key_events, characters_involved). Phản hồi AI (rút gọn): " + snippet);
+            }
 
             var promptTokens = completion.Usage?.InputTokenCount ?? 0;
             var completionTokens = completion.Usage?.OutputTokenCount ?? 0;
@@ -136,24 +140,12 @@ namespace Services.Implementations
             };
         }
 
-        private static string BuildContextBlockFromRag(stories story, string ragBlock)
-        {
-            var lines = new List<string>
-            {
-                $"## Truyện: {story.title}",
-                string.IsNullOrWhiteSpace(story.summary) ? "" : $"Tóm tắt: {story.summary}",
-                "## Các đoạn liên quan từ truyện (RAG):",
-                ragBlock
-            };
-            return string.Join("\n\n", lines.Where(s => !string.IsNullOrWhiteSpace(s)));
-        }
-
-        private const string DbContextLabel = "=== DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU (ngữ cảnh truyện: thông tin truyện, nội dung các chương / RAG) — Dùng làm tham chiếu bắt buộc ===";
+        private const string DbContextLabel = "=== DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU (ngữ cảnh truyện: RAG, Character Memory, Event Memory, Story State) — Dùng làm tham chiếu bắt buộc ===";
 
         private static string GetSystemPrompt()
         {
             return """
-Bạn là trợ lý sáng tác cho tác giả truyện. Bạn sẽ nhận DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU (ngữ cảnh truyện: thông tin truyện, nội dung các chương đã có hoặc các đoạn RAG).
+Bạn là trợ lý sáng tác cho tác giả truyện. Bạn sẽ nhận DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU gồm: thông tin truyện, các đoạn RAG (nội dung chương đã có), Character Memory (trạng thái nhân vật: còn sống, chết, mất tích...), Event Memory (timeline sự kiện đã xảy ra), Story State. Phải tôn trọng tất cả: không gợi ý nhân vật đã chết/mất tích trong Character Memory xuất hiện hay hành động; không đảo ngược hoặc lặp lại sự kiện đã có trong Event Memory; chỉ gợi ý nội dung tiếp theo trên dòng thời gian.
 
 Quan trọng — Dòng thời gian: Dữ liệu đó mô tả phần truyện ĐÃ XẢY RA (các chương đã được viết). Bạn chỉ được gợi ý nội dung cho CHƯƠNG TIẾP THEO — tức là sự kiện xảy ra SAU điểm kết thúc hiện tại của truyện. Tuyệt đối không gợi ý tình tiết đã xảy ra ở các chương trước (ví dụ: nếu trong dữ liệu đã nêu một sự kiện như đám tang đã diễn ra, thì không được gợi ý chương này "làm rõ việc hấp hối" hay quay lại thời điểm trước đó). Ưu tiên bám sát các chương/các đoạn gần nhất trong dữ liệu để xác định "điểm hiện tại" của truyện rồi gợi ý phần tiếp nối.
 
@@ -181,7 +173,7 @@ Trả về DUY NHẤT một JSON hợp lệ, không markdown:
   ]
 }
 
-Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau (khác tình tiết, xung đột hoặc kết cục); mỗi gợi ý phải đủ dài và cụ thể, không sơ sài; bám sát mạch truyện và đặc biệt nội dung các chương/đoạn gần nhất trong dữ liệu — chỉ gợi ý nội dung tiếp theo trên dòng thời gian, không đảo ngược hay lặp lại sự kiện đã xảy ra; ngôn ngữ trùng với ngôn ngữ của truyện (ưu tiên tiếng Việt nếu truyện tiếng Việt).
+Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau (khác tình tiết, xung đột hoặc kết cục); mỗi gợi ý phải đủ dài và cụ thể, không sơ sài; bám sát mạch truyện và đặc biệt nội dung các chương/đoạn gần nhất trong dữ liệu — chỉ gợi ý nội dung tiếp theo trên dòng thời gian, không đảo ngược hay lặp lại sự kiện đã xảy ra. Ngôn ngữ: Nội dung sinh ra (title, summary, direction, key_events, characters_involved) phải thuần theo đúng ngôn ngữ của bộ truyện; không xen từ hoặc cụm từ thuộc ngôn ngữ khác — mọi từ phải cùng một ngôn ngữ với truyện.
 """;
         }
 
@@ -207,21 +199,39 @@ Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau (khác tình tiết, 
                     text = text[start..].Trim();
             }
 
-            // Lấy đoạn JSON: từ ký tự '{' đầu tiên đến '}' cuối cùng (tránh chữ thừa trước/sau)
+            // Lấy đoạn JSON: từ ký tự '{' hoặc '[' đầu tiên đến '}' hoặc ']' tương ứng (tránh chữ thừa trước/sau)
             var firstBrace = text.IndexOf('{');
-            var lastBrace = text.LastIndexOf('}');
-            if (firstBrace >= 0 && lastBrace > firstBrace)
-                text = text.Substring(firstBrace, lastBrace - firstBrace + 1);
+            var firstBracket = text.IndexOf('[');
+            int startIdx;
+            int endIdx;
+            if (firstBracket >= 0 && (firstBrace < 0 || firstBracket < firstBrace))
+            {
+                startIdx = firstBracket;
+                endIdx = text.LastIndexOf(']');
+            }
+            else
+            {
+                startIdx = firstBrace;
+                endIdx = text.LastIndexOf('}');
+            }
+            if (startIdx >= 0 && endIdx > startIdx)
+                text = text.Substring(startIdx, endIdx - startIdx + 1);
 
-            // Chuẩn hóa newline trong string value: một số model trả xuống dòng thật trong chuỗi → JSON lỗi. Thay \r\n và \n thành khoảng trắng trong chuỗi nằm trong "..."
+            // Chuẩn hóa newline trong string value (chỉ trong "...") để JSON parse được
             text = NormalizeNewlinesInJsonStrings(text);
 
             try
             {
-                var root = JsonDocument.Parse(text).RootElement;
-                // Chấp nhận "suggestions" hoặc "Suggestions"
-                if (!root.TryGetProperty("suggestions", out var arrProp))
-                    root.TryGetProperty("Suggestions", out arrProp);
+                var options = new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip };
+                var root = JsonDocument.Parse(text, options).RootElement;
+                JsonElement arrProp;
+                if (root.ValueKind == JsonValueKind.Array)
+                    arrProp = root;
+                else if (root.TryGetProperty("suggestions", out arrProp) || root.TryGetProperty("Suggestions", out arrProp)
+                         || root.TryGetProperty("data", out arrProp) || root.TryGetProperty("items", out arrProp))
+                { /* arrProp đã được gán */ }
+                else
+                    return new List<JsonSuggestion>();
                 if (arrProp.ValueKind != JsonValueKind.Array)
                     return new List<JsonSuggestion>();
 
@@ -236,9 +246,11 @@ Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau (khác tình tiết, 
                     if (item.TryGetProperty("direction", out var d)) s.Direction = GetStringFromElement(d);
                     if (item.TryGetProperty("Direction", out d)) s.Direction ??= GetStringFromElement(d);
                     if (item.TryGetProperty("key_events", out var k)) s.KeyEvents = GetStringFromElement(k);
+                    if (item.TryGetProperty("KeyEvents", out k)) s.KeyEvents ??= GetStringFromElement(k);
                     if (item.TryGetProperty("keyEvents", out k)) s.KeyEvents ??= GetStringFromElement(k);
                     if (item.TryGetProperty("characters_involved", out var c)) s.CharactersInvolved = GetStringFromElement(c);
                     if (item.TryGetProperty("charactersInvolved", out c)) s.CharactersInvolved ??= GetStringFromElement(c);
+                    if (item.TryGetProperty("CharactersInvolved", out c)) s.CharactersInvolved ??= GetStringFromElement(c);
 
                     if (!string.IsNullOrWhiteSpace(s.Title) || !string.IsNullOrWhiteSpace(s.Summary) || !string.IsNullOrWhiteSpace(s.Direction))
                         list.Add(s);
@@ -299,7 +311,8 @@ Yêu cầu: Đảm bảo 3 gợi ý thực sự khác nhau (khác tình tiết, 
                     i++;
                     continue;
                 }
-                if ((c == '"' || c == '\'') && !inString)
+                // Chỉ coi dấu ngoặc kép " là ranh giới chuỗi JSON (tránh nhầm dấu nháy đơn trong nội dung)
+                if (c == '"' && !inString)
                 {
                     inString = true;
                     quote = c;
