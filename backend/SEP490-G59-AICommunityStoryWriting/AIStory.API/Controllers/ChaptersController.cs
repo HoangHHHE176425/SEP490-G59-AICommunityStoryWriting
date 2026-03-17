@@ -455,14 +455,12 @@ namespace AIStory.API.Controllers
         }
 
         // ---------- Chapter Versions (AUTHOR) ----------
-        /// <summary>Lấy danh sách version của chapter. Chỉ AUTHOR. Version đã được duyệt (PUBLISHED) không hiển thị nữa.</summary>
+        /// <summary>Lấy danh sách version của chapter. Chỉ AUTHOR. Bao gồm cả version đã xuất bản (PUBLISHED) — vẫn hiển thị trong danh sách, không ẩn/xóa.</summary>
         [HttpGet("{chapterId:guid}/versions")]
         [Authorize(Roles = "AUTHOR")]
         public IActionResult GetChapterVersions(Guid chapterId)
         {
-            var list = _chapterVersionService.GetByChapterId(chapterId)
-                .Where(v => !string.Equals(v.Status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            var list = _chapterVersionService.GetByChapterId(chapterId).ToList();
             return Ok(list);
         }
 
