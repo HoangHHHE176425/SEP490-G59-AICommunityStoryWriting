@@ -22,6 +22,15 @@ const MOCK_TRANSACTIONS = [
         status: 'PENDING',
         note: 'Rút về ngân hàng',
         gatewayRef: 'BANK_WD_889911',
+        bankAccount: {
+            user_id: 'U-0002',
+            bank_name: 'Vietcombank',
+            account_number: '0123456789',
+            account_holder_name: 'TRẦN THỊ B',
+            branch_name: 'CN TP.HCM',
+            is_verified: true,
+            updated_at: '2026-03-10T04:00:00Z',
+        },
     },
     {
         id: 'TX-20260316-0003',
@@ -44,8 +53,25 @@ const MOCK_TRANSACTIONS = [
         status: 'SUCCESS',
         note: 'Rút về ngân hàng',
         gatewayRef: 'BANK_WD_771122',
+        bankAccount: {
+            user_id: 'U-0004',
+            bank_name: 'Techcombank',
+            account_number: '2345678901',
+            account_holder_name: 'PHẠM THỊ D',
+            branch_name: 'CN Hà Nội',
+            is_verified: true,
+            updated_at: '2026-03-12T09:30:00Z',
+        },
     },
 ];
+
+function maskAccountNumber(value) {
+    const s = String(value || '');
+    const digits = s.replace(/\s+/g, '');
+    if (!digits) return '-';
+    if (digits.length <= 4) return digits;
+    return `${'•'.repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
+}
 
 function formatVnd(amount) {
     try {
@@ -272,6 +298,8 @@ export function AdminTransactions() {
                                 <th className="px-3 py-2 font-medium">Người dùng</th>
                                 <th className="px-3 py-2 font-medium">Loại</th>
                                 <th className="px-3 py-2 font-medium text-right">Số tiền</th>
+                                <th className="px-3 py-2 font-medium">Ngân hàng</th>
+                                <th className="px-3 py-2 font-medium">Số tài khoản</th>
                                 <th className="px-3 py-2 font-medium">Phương thức</th>
                                 <th className="px-3 py-2 font-medium">Trạng thái</th>
                                 <th className="px-3 py-2 font-medium">Mã tham chiếu</th>
@@ -280,7 +308,7 @@ export function AdminTransactions() {
                         <tbody className="bg-white">
                             {filtered.length === 0 ? (
                                 <tr>
-                                    <td className="px-3 py-10 text-center text-slate-500" colSpan={7}>
+                                    <td className="px-3 py-10 text-center text-slate-500" colSpan={9}>
                                         Không có giao dịch phù hợp bộ lọc.
                                     </td>
                                 </tr>
@@ -311,6 +339,12 @@ export function AdminTransactions() {
                                         </td>
                                         <td className="px-3 py-2 text-right font-semibold text-slate-900">
                                             {formatVnd(tx.amountVnd)}
+                                        </td>
+                                        <td className="px-3 py-2 text-slate-700">
+                                            {tx.type === 'WITHDRAW' ? (tx.bankAccount?.bank_name || '-') : '-'}
+                                        </td>
+                                        <td className="px-3 py-2 text-slate-700">
+                                            {tx.type === 'WITHDRAW' ? maskAccountNumber(tx.bankAccount?.account_number) : '-'}
                                         </td>
                                         <td className="px-3 py-2 text-slate-700">{tx.method}</td>
                                         <td className="px-3 py-2">
@@ -403,6 +437,29 @@ export function AdminTransactions() {
                                 <p className="mt-1 font-semibold text-slate-900">{formatVnd(selectedFresh.amountVnd)}</p>
                                 <p className="text-slate-600">Mã tham chiếu: {selectedFresh.gatewayRef || '-'}</p>
                             </div>
+                            {selectedFresh.type === 'WITHDRAW' && (
+                                <div className="md:col-span-2 rounded-xl bg-slate-50 p-3">
+                                    <p className="text-slate-500">Tài khoản nhận</p>
+                                    <p className="mt-1 font-semibold text-slate-900">
+                                        {selectedFresh.bankAccount?.bank_name || '-'} — {selectedFresh.bankAccount?.branch_name || '-'}
+                                    </p>
+                                    <p className="text-slate-700">
+                                        {selectedFresh.bankAccount?.account_holder_name || '-'} • {selectedFresh.bankAccount?.account_number || '-'}
+                                        {selectedFresh.bankAccount?.is_verified ? (
+                                            <span className="ml-2 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                                                Verified
+                                            </span>
+                                        ) : (
+                                            <span className="ml-2 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200">
+                                                Unverified
+                                            </span>
+                                        )}
+                                    </p>
+                                    <p className="text-slate-500">
+                                        Cập nhật: {selectedFresh.bankAccount?.updated_at ? formatTime(selectedFresh.bankAccount.updated_at) : '-'}
+                                    </p>
+                                </div>
+                            )}
                             <div className="md:col-span-2 rounded-xl bg-slate-50 p-3">
                                 <p className="text-slate-500">Ghi chú</p>
                                 <p className="mt-1 text-slate-800">{selectedFresh.note || '-'}</p>
