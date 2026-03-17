@@ -1,8 +1,12 @@
+using System.Linq;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using BusinessObjects.Entities;
+using DataAccessObjects.DAOs;
 using Services.DTOs.Chapters;
+using Services.DTOs.Comments;
 using Services.Interfaces;
 
 namespace AIStory.API.Controllers
@@ -133,6 +137,178 @@ namespace AIStory.API.Controllers
             }
         }
 
+        /// <summary>Lấy comment của chapter (cho phép xem không cần đăng nhập).</summary>
+        [HttpGet("{id:guid}/comments")]
+        [AllowAnonymous]
+        public IActionResult GetChapterComments(Guid id)
+        {
+            try
+            {
+                var chapter = _chapterService.GetById(id);
+                if (chapter == null)
+                    return NotFound(new { message = "Chapter not found." });
+                var entities = CommentDAO.GetChapterComments(id);
+                var currentUserId = GetCurrentUserId();
+                var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId)).ToList();
+                return Ok(dtos);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "An error occurred while fetching chapter comments", error = ex.Message });
+            }
+        }
+
+        /// <summary>Comment chapter. Bắt buộc đăng nhập và đã đọc ít nhất 1 chapter của truyện.</summary>
+        [HttpPost("{id:guid}/comments")]
+        [Authorize]
+        public IActionResult AddChapterComment(Guid id, [FromBody] CreateStoryCommentRequestDto request)
+        {
+            try
+            {
+                var userId = GetCurrentUserId();
+                if (!userId.HasValue)
+                    return Unauthorized(new { message = "User ID not found in token." });
+                if (request == null || string.IsNullOrWhiteSpace(request.Content))
+                    return BadRequest(new { message = "Nội dung comment không được để trống." });
+                var content = request.Content.Trim();
+                if (content.Length > 2000)
+                    return BadRequest(new { message = "Nội dung comment tối đa 2000 ký tự." });
+
+                var chapter = _chapterService.GetById(id);
+                if (chapter == null || !chapter.StoryId.HasValue)
+                    return NotFound(new { message = "Chapter not found." });
+                var storyId = chapter.StoryId.Value;
+                var story = StoryDAO.GetById(storyId);
+                if (story == null || !string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
+                    return BadRequest(new { message = "Chỉ có thể comment chapter của truyện đã PUBLISHED." });
+                if (!UserActivityLogDAO.HasReadAnyChapterOfStory(userId.Value, storyId))
+                    return BadRequest(new { message = "Bạn cần đọc ít nhất một chapter của truyện trước khi comment." });
+
+                comments? parent = null;
+                if (request.ParentId.HasValue)
+                {
+                    parent = CommentDAO.GetById(request.ParentId.Value);
+                    if (parent == null || parent.chapter_id != id)
+                        return BadRequest(new { message = "ParentId không hợp lệ (phải là comment của chapter này)." });
+                }
+
+                var entity = CommentDAO.AddChapterComment(storyId, id, userId.Value, content, request.ParentId);
+                if (parent != null && parent.user_id.HasValue && parent.user_id != userId.Value)
+                {
+                    var replierName = entity.userNavigation?.user_profiles?.nickname?.Trim()
+                        ?? entity.userNavigation?.email?.Trim() ?? "Ai đó";
+                    try
+                    {
+                        NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, storyId, story.title, entity.id);
+                    }
+                    catch { /* best effort */ }
+                }
+                var dto = MapToStoryCommentDto(entity, userId);
+                return Created($"/api/chapters/{id}/comments/{dto.Id}", dto);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "An error occurred while adding chapter comment", error = ex.Message });
+            }
+        }
+
+        /// <summary>Lấy danh sách người đã reaction comment của chapter.</summary>
+        [HttpGet("{chapterId:guid}/comments/{commentId:guid}/reactions")]
+        [AllowAnonymous]
+        public IActionResult GetChapterCommentReactions(Guid chapterId, Guid commentId)
+        {
+            try
+            {
+                var comment = CommentDAO.GetById(commentId);
+                if (comment == null || comment.chapter_id != chapterId)
+                    return NotFound(new { message = "Comment not found or not belong to this chapter." });
+                var list = CommentDAO.GetCommentReactions(commentId);
+                var dtos = list.Select(x => new CommentReactionUserDto
+                {
+                    UserId = x.UserId,
+                    UserDisplayName = x.DisplayName,
+                    ReactionType = x.ReactionType
+                }).ToList();
+                return Ok(dtos);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "An error occurred while fetching comment reactions", error = ex.Message });
+            }
+        }
+
+        /// <summary>Đặt reaction cho comment của chapter: LIKE, DISLIKE, FUNNY, SAD, ANGRY, LOVE, WOW.</summary>
+        [HttpPost("{chapterId:guid}/comments/{commentId:guid}/reaction")]
+        [Authorize]
+        public IActionResult SetChapterCommentReaction(Guid chapterId, Guid commentId, [FromBody] SetCommentReactionRequestDto? request)
+        {
+            try
+            {
+                var userId = GetCurrentUserId();
+                if (!userId.HasValue)
+                    return Unauthorized(new { message = "User ID not found in token." });
+                var comment = CommentDAO.GetById(commentId);
+                if (comment == null || comment.chapter_id != chapterId)
+                    return NotFound(new { message = "Comment not found or not belong to this chapter." });
+                var storyId = comment.story_id;
+                var story = storyId.HasValue ? StoryDAO.GetById(storyId.Value) : null;
+                var reactionType = request?.ReactionType;
+                var newType = CommentDAO.SetReaction(userId.Value, commentId, reactionType);
+                if (!string.IsNullOrWhiteSpace(newType) && comment.user_id.HasValue && comment.user_id != userId.Value)
+                {
+                    try
+                    {
+                        var actorName = NotificationDAO.GetUserDisplayName(userId.Value);
+                        NotificationDAO.NotifyCommentReaction(comment.user_id.Value, actorName, storyId ?? Guid.Empty, story?.title, newType);
+                    }
+                    catch { /* best effort */ }
+                }
+                var counts = CommentDAO.GetReactionCounts(commentId);
+                return Ok(new { userReactionType = newType, reactionCounts = counts });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "An error occurred while setting reaction", error = ex.Message });
+            }
+        }
+
+        private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null)
+        {
+            var nickname = c.userNavigation?.user_profiles?.nickname;
+            var email = c.userNavigation?.email;
+            var display = !string.IsNullOrWhiteSpace(nickname) ? nickname : email;
+            var userHasLiked = false;
+            IReadOnlyDictionary<string, int>? reactionCounts = null;
+            string? userReactionType = null;
+            try
+            {
+                if (currentUserId.HasValue)
+                {
+                    userHasLiked = CommentDAO.HasLiked(currentUserId.Value, c.id);
+                    userReactionType = CommentDAO.GetUserReaction(currentUserId.Value, c.id);
+                }
+                reactionCounts = CommentDAO.GetReactionCounts(c.id);
+            }
+            catch
+            {
+                reactionCounts = new Dictionary<string, int>();
+            }
+            return new StoryCommentDto
+            {
+                Id = c.id,
+                StoryId = c.story_id ?? Guid.Empty,
+                ParentId = c.parent_id,
+                UserId = c.user_id ?? Guid.Empty,
+                UserDisplayName = display,
+                Content = c.content ?? "",
+                LikesCount = c.likes_count ?? 0,
+                UserHasLiked = userHasLiked,
+                ReactionCounts = reactionCounts ?? new Dictionary<string, int>(),
+                UserReactionType = userReactionType,
+                CreatedAt = c.created_at
+            };
+        }
+
         /// <summary>Cập nhật chapter - Chỉ AUTHOR (chỉ được sửa chapter của chính mình)</summary>
         [HttpPut("{id:guid}")]
         [Authorize(Roles = "AUTHOR")]
@@ -219,6 +395,10 @@ namespace AIStory.API.Controllers
                 var unpublished = _chapterService.Unpublish(id);
                 return unpublished ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while unpublishing the chapter", error = ex.Message });
@@ -275,12 +455,14 @@ namespace AIStory.API.Controllers
         }
 
         // ---------- Chapter Versions (AUTHOR) ----------
-        /// <summary>Lấy danh sách version của chapter. Chỉ AUTHOR (tác giả truyện chứa chapter).</summary>
+        /// <summary>Lấy danh sách version của chapter. Chỉ AUTHOR. Version đã được duyệt (PUBLISHED) không hiển thị nữa.</summary>
         [HttpGet("{chapterId:guid}/versions")]
         [Authorize(Roles = "AUTHOR")]
         public IActionResult GetChapterVersions(Guid chapterId)
         {
-            var list = _chapterVersionService.GetByChapterId(chapterId);
+            var list = _chapterVersionService.GetByChapterId(chapterId)
+                .Where(v => !string.Equals(v.Status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
+                .ToList();
             return Ok(list);
         }
 
@@ -362,6 +544,23 @@ namespace AIStory.API.Controllers
             {
                 var ok = _chapterVersionService.SubmitForReview(versionId, authorId.Value);
                 return ok ? NoContent() : NotFound(new { message = "Version không tồn tại hoặc không thể gửi duyệt." });
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        }
+
+        /// <summary>Hủy gửi duyệt version: đưa version và chapter về DRAFT. Chỉ AUTHOR, chỉ version PENDING_REVIEW.</summary>
+        [HttpPost("{chapterId:guid}/versions/{versionId:guid}/unsubmit")]
+        [Authorize(Roles = "AUTHOR")]
+        public IActionResult UnsubmitChapterVersion(Guid chapterId, Guid versionId)
+        {
+            var authorId = GetCurrentUserId();
+            if (!authorId.HasValue)
+                return Unauthorized(new { message = "Không xác định user. Vui lòng đăng nhập." });
+            try
+            {
+                var ok = _chapterVersionService.CancelSubmit(versionId, authorId.Value);
+                return ok ? NoContent() : NotFound(new { message = "Version không tồn tại hoặc không thể hủy gửi duyệt." });
             }
             catch (UnauthorizedAccessException) { return Forbid(); }
             catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }

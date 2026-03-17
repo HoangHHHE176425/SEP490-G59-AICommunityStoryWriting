@@ -26,6 +26,11 @@ namespace AIStory.Client.Controllers
             return View();
         }
 
+        public IActionResult Library()
+        {
+            return View();
+        }
+
         public IActionResult Privacy()
         {
             return View();

@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.Stories
+namespace Services.DTOs.Stories
 {
     public class StoryListItemDto
     {
@@ -15,6 +15,8 @@
         public string? CategoryNames { get; set; }
         public Guid? AuthorId { get; set; }
         public string? AuthorName { get; set; }
+        /// <summary>Độ tuổi phù hợp: ALL, 13+, 16+, 18+</summary>
+        public string? AgeRating { get; set; }
 
         public int? TotalChapters { get; set; }
         /// <summary>Số chapter đã PUBLISHED.</summary>
@@ -35,5 +37,16 @@
         public string? ClaimedByDisplayName { get; set; }
         /// <summary>Trong queue moderator: thời điểm nhận duyệt.</summary>
         public DateTime? ClaimedAt { get; set; }
+
+        /// <summary>Admin: thời điểm gửi duyệt (dùng updated_at khi PENDING_REVIEW).</summary>
+        public DateTime? PendingSince { get; set; }
+        /// <summary>Admin: hạn duyệt (PendingSince + 7 ngày, có thể gia hạn).</summary>
+        public DateTime? DeadlineAt { get; set; }
+        /// <summary>Admin: trạng thái thời hạn duyệt — OnTime, Warning, Overdue.</summary>
+        public string? TimeStatus { get; set; }
+        /// <summary>Admin: thời điểm moderator duyệt/từ chối.</summary>
+        public DateTime? ReviewedAt { get; set; }
+        /// <summary>Admin: tên moderator đã duyệt/từ chối.</summary>
+        public string? ReviewedByModeratorName { get; set; }
     }
 }

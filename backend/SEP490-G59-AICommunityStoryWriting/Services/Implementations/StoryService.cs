@@ -179,7 +179,7 @@ namespace Services.Implementations
             };
         }
 
-        public StoryResponseDto? GetById(Guid id)
+        public StoryResponseDto? GetById(Guid id, Guid? userId = null)
         {
             var story = _storyRepository.GetById(id);
             if (story == null) return null;
@@ -190,10 +190,21 @@ namespace Services.Implementations
                 dto.RejectionReason = reason;
                 dto.RejectedAt = rejectedAt;
             }
+            if (userId.HasValue && userId.Value != Guid.Empty)
+            {
+                var (chapterId, lastReadAt) = UserLibraryDAO.GetLastRead(userId.Value, id);
+                if (chapterId.HasValue)
+                {
+                    dto.LastReadChapterId = chapterId;
+                    dto.LastReadAt = lastReadAt;
+                    var ch = ChapterDAO.GetById(chapterId.Value);
+                    if (ch != null) dto.LastReadChapterTitle = ch.title;
+                }
+            }
             return dto;
         }
 
-        public StoryResponseDto? GetBySlug(string slug)
+        public StoryResponseDto? GetBySlug(string slug, Guid? userId = null)
         {
             var story = _storyRepository.GetBySlug(slug);
             if (story == null) return null;
@@ -204,7 +215,26 @@ namespace Services.Implementations
                 dto.RejectionReason = reason;
                 dto.RejectedAt = rejectedAt;
             }
+            if (userId.HasValue && userId.Value != Guid.Empty && story != null)
+            {
+                var (chapterId, lastReadAt) = UserLibraryDAO.GetLastRead(userId.Value, story.id);
+                if (chapterId.HasValue)
+                {
+                    dto.LastReadChapterId = chapterId;
+                    dto.LastReadAt = lastReadAt;
+                    var ch = ChapterDAO.GetById(chapterId.Value);
+                    if (ch != null) dto.LastReadChapterTitle = ch.title;
+                }
+            }
             return dto;
+        }
+
+        public void SaveReadingProgress(Guid storyId, Guid userId, Guid chapterId)
+        {
+            if (storyId == Guid.Empty || userId == Guid.Empty || chapterId == Guid.Empty) return;
+            var story = _storyRepository.GetById(storyId);
+            if (story == null || !string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase)) return;
+            UserLibraryDAO.SaveReadingProgress(userId, storyId, chapterId);
         }
 
         public PagedResultDto<StoryListItemDto> GetByAuthor(Guid authorId, StoryQueryDto query)
@@ -556,6 +586,7 @@ namespace Services.Implementations
             if (latestChapterUpdatedAt.HasValue && (!latestUpdatedAt.HasValue || latestChapterUpdatedAt > latestUpdatedAt))
                 latestUpdatedAt = latestChapterUpdatedAt;
 
+            var authorName = story.author_id.HasValue ? NotificationDAO.GetUserDisplayName(story.author_id.Value) : null;
             return new StoryResponseDto
             {
                 Id = story.id,
@@ -565,6 +596,7 @@ namespace Services.Implementations
                 CategoryIds = categoryIds,
                 CategoryNames = categoryNames,
                 AuthorId = story.author_id,
+                AuthorName = authorName,
                 CoverImage = story.cover_image,
                 Status = story.status,
                 StoryProgressStatus = story.story_progress_status,
@@ -610,6 +642,7 @@ namespace Services.Implementations
                 CategoryIds = categoryIds,
                 CategoryNames = categoryNames,
                 AuthorId = story.author_id,
+                AgeRating = story.age_rating,
                 TotalChapters = totalChapters,
                 PublishedChaptersCount = publishedChaptersCount,
                 TotalViews = story.total_views,

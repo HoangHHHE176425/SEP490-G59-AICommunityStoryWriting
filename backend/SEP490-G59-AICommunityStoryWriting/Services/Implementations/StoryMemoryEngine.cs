@@ -6,7 +6,7 @@ using Services.Interfaces;
 
 namespace Services.Implementations;
 
-/// <summary>Story Memory Engine: ghép Story Context (chỉ RAG) + Character Memory + Event Memory + Story State.</summary>
+/// <summary>Story Memory Engine: ghép Story Context (chỉ RAG) + Character Memory + Event Memory + Story State. Không dùng Story Memory (N chương) — chỉ RAG để chất lượng tối đa.</summary>
 public class StoryMemoryEngine : IStoryMemoryEngine
 {
     private const int DefaultRagMaxChars = 12000;
@@ -16,7 +16,6 @@ public class StoryMemoryEngine : IStoryMemoryEngine
     private readonly IStoryEventMemoryRepository _eventRepo;
     private readonly IStoryStoryStateRepository _stateRepo;
     private readonly IStoryRagService _ragService;
-    private readonly IStoryContextBuilder _contextBuilder;
     private readonly IStoryRepository _storyRepository;
     private readonly IConfiguration _configuration;
 
@@ -25,7 +24,6 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         IStoryEventMemoryRepository eventRepo,
         IStoryStoryStateRepository stateRepo,
         IStoryRagService ragService,
-        IStoryContextBuilder contextBuilder,
         IStoryRepository storyRepository,
         IConfiguration configuration)
     {
@@ -33,7 +31,6 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         _eventRepo = eventRepo;
         _stateRepo = stateRepo;
         _ragService = ragService;
-        _contextBuilder = contextBuilder;
         _storyRepository = storyRepository;
         _configuration = configuration;
     }
@@ -44,27 +41,20 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         if (story == null)
             return string.Empty;
 
-        string storyContextBlock;
-        if (_ragService.IsRagAvailableForStory(storyId))
-        {
-            int ragMaxChars = _configuration.GetValue("AI:CoCreateRagMaxChars", DefaultRagMaxChars);
-            int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);
-            if (ragMaxChars < 1000) ragMaxChars = DefaultRagMaxChars;
-            if (ragTopK < 5) ragTopK = 5;
-            var query = authorIdea.Trim();
-            var ragBlock = await _ragService.RetrieveContextAsync(storyId, query, maxChars: ragMaxChars, topK: ragTopK, cancellationToken);
+        if (!_ragService.IsRagAvailableForStory(storyId))
+            throw new InvalidOperationException("Truyện chưa được index RAG. Vui lòng gọi POST /api/ai/index-rag trước khi sử dụng đồng sáng tác.");
 
-            if (string.IsNullOrWhiteSpace(ragBlock))
-                throw new InvalidOperationException("Không lấy được ngữ cảnh từ RAG. Đảm bảo truyện đã có chương có nội dung và đã gọi POST /api/ai/index-rag.");
+        int ragMaxChars = _configuration.GetValue("AI:CoCreateRagMaxChars", DefaultRagMaxChars);
+        int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);
+        if (ragMaxChars < 1000) ragMaxChars = DefaultRagMaxChars;
+        if (ragTopK < 5) ragTopK = 5;
+        var query = authorIdea.Trim();
+        var ragBlock = await _ragService.RetrieveContextAsync(storyId, query, maxChars: ragMaxChars, topK: ragTopK, cancellationToken);
 
-            storyContextBlock = BuildRagStoryBlock(story, ragBlock);
-        }
-        else
-        {
-            storyContextBlock = _contextBuilder.GetStoryAndMemoryBlock(storyId, afterChapterId: null);
-            if (string.IsNullOrWhiteSpace(storyContextBlock))
-                throw new InvalidOperationException("Không lấy được ngữ cảnh truyện. Đảm bảo truyện đã có chương có nội dung.");
-        }
+        if (string.IsNullOrWhiteSpace(ragBlock))
+            throw new InvalidOperationException("Không lấy được ngữ cảnh từ RAG. Đảm bảo truyện đã có chương có nội dung và đã gọi POST /api/ai/index-rag.");
+
+        var storyContextBlock = BuildRagStoryBlock(story, ragBlock);
 
         var characterBlock = BuildCharacterMemoryBlock(storyId);
         var eventBlock = BuildEventMemoryBlock(storyId);
@@ -77,6 +67,40 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         parts.Add("## Ý tưởng tác giả");
         parts.Add(authorIdea.Trim());
 
+        return string.Join("\n\n", parts.Where(s => !string.IsNullOrWhiteSpace(s)));
+    }
+
+    /// <summary>Build context cho suggest-next-chapter: RAG (với ragQuery) + Character + Event + Story State. Không thêm ý tưởng tác giả.</summary>
+    public async Task<string> BuildContextForSuggestAsync(Guid storyId, string ragQuery, CancellationToken cancellationToken = default)
+    {
+        var story = _storyRepository.GetById(storyId);
+        if (story == null)
+            return string.Empty;
+
+        if (!_ragService.IsRagAvailableForStory(storyId))
+            throw new InvalidOperationException("Truyện chưa được index RAG. Vui lòng gọi index-rag trước khi sử dụng gợi ý chương.");
+
+        int ragMaxChars = _configuration.GetValue("AI:CoCreateRagMaxChars", DefaultRagMaxChars);
+        int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);
+        if (ragMaxChars < 1000) ragMaxChars = DefaultRagMaxChars;
+        if (ragTopK < 5) ragTopK = 5;
+        var query = ragQuery?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(query))
+            query = story.summary ?? story.title ?? "";
+        var ragBlock = await _ragService.RetrieveContextAsync(storyId, query, maxChars: ragMaxChars, topK: ragTopK, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(ragBlock))
+            throw new InvalidOperationException("Không lấy được ngữ cảnh từ RAG. Đảm bảo truyện đã có chương có nội dung và đã index RAG.");
+
+        var storyContextBlock = BuildRagStoryBlock(story, ragBlock);
+        var characterBlock = BuildCharacterMemoryBlock(storyId);
+        var eventBlock = BuildEventMemoryBlock(storyId);
+        var stateBlock = BuildStoryStateBlock(storyId);
+
+        var parts = new List<string> { storyContextBlock };
+        if (!string.IsNullOrWhiteSpace(characterBlock)) parts.Add(characterBlock);
+        if (!string.IsNullOrWhiteSpace(eventBlock)) parts.Add(eventBlock);
+        if (!string.IsNullOrWhiteSpace(stateBlock)) parts.Add(stateBlock);
         return string.Join("\n\n", parts.Where(s => !string.IsNullOrWhiteSpace(s)));
     }
 

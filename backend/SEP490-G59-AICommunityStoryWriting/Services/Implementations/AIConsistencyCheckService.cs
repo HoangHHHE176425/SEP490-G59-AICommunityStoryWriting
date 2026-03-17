@@ -10,24 +10,26 @@ using Services.Interfaces;
 
 namespace Services.Implementations;
 
-/// <summary>Kiểm tra bản nháp chương có nhất quán với cốt truyện; dùng Story memory (N chương gần nhất) làm ngữ cảnh.</summary>
+/// <summary>Kiểm tra bản nháp chương có nhất quán với cốt truyện; dùng RAG làm ngữ cảnh (chỉ RAG, không dùng Story Memory N chương).</summary>
 public class AIConsistencyCheckService : IAIConsistencyCheckService
 {
     private const string ActionConsistencyCheck = "CONSISTENCY_CHECK";
+    private const int ConsistencyRagMaxChars = 8000;
+    private const int ConsistencyRagTopK = 15;
 
     private readonly IStoryRepository _storyRepository;
-    private readonly IStoryContextBuilder _contextBuilder;
+    private readonly IStoryRagService _ragService;
     private readonly IAIUsageLogRepository _aiUsageLogRepository;
     private readonly IConfiguration _configuration;
 
     public AIConsistencyCheckService(
         IStoryRepository storyRepository,
-        IStoryContextBuilder contextBuilder,
+        IStoryRagService ragService,
         IAIUsageLogRepository aiUsageLogRepository,
         IConfiguration configuration)
     {
         _storyRepository = storyRepository;
-        _contextBuilder = contextBuilder;
+        _ragService = ragService;
         _aiUsageLogRepository = aiUsageLogRepository;
         _configuration = configuration;
     }
@@ -47,22 +49,35 @@ public class AIConsistencyCheckService : IAIConsistencyCheckService
         if (string.IsNullOrWhiteSpace(request.DraftContent))
             throw new InvalidOperationException("DraftContent (nội dung bản nháp) là bắt buộc.");
 
-        var contextBlock = _contextBuilder.BuildForCheckConsistency(request.StoryId, request.DraftContent, request.AfterChapterId, request.ChapterTitle);
-        if (string.IsNullOrWhiteSpace(contextBlock))
-            throw new InvalidOperationException("Truyện cần có ít nhất một chương đã có nội dung để kiểm tra nhất quán.");
+        await _ragService.TryEnsureIndexedAsync(request.StoryId, request.AfterChapterId, cancellationToken);
+        if (!_ragService.IsRagAvailableForStory(request.StoryId))
+            throw new InvalidOperationException("Truyện chưa được index RAG. Vui lòng cấu hình embedding (AI:EmbeddingBaseUrl, EmbeddingModel) và đảm bảo truyện có chương có nội dung.");
+
+        var query = (request.ChapterTitle ?? "").Trim().Length > 0
+            ? request.ChapterTitle!.Trim()
+            : request.DraftContent.Trim().Length > 500 ? request.DraftContent.Trim()[..500] : request.DraftContent.Trim();
+        var ragBlock = await _ragService.RetrieveContextAsync(request.StoryId, query, maxChars: ConsistencyRagMaxChars, topK: ConsistencyRagTopK, cancellationToken);
+        if (string.IsNullOrWhiteSpace(ragBlock))
+            throw new InvalidOperationException("Không lấy được ngữ cảnh từ RAG. Đảm bảo truyện đã có chương có nội dung và cấu hình embedding đúng.");
+
+        var contextBlock = BuildContextBlockForConsistency(story, ragBlock, request.ChapterTitle, request.DraftContent);
 
         var storyLanguage = StoryLanguageHelper.DetectFromStoryContext(contextBlock);
         var languageInstruction = StoryLanguageHelper.GetLanguageInstruction(storyLanguage);
 
-        var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfig(_configuration);
+        const string dbContextLabel = "=== DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU (ngữ cảnh truyện: các đoạn RAG từ truyện) — Đối chiếu bản nháp với dữ liệu này để phát hiện mâu thuẫn ===";
+
+        var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentConsistencyChecker);
         var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
 
-        var userPrompt = $@"{contextBlock}
+        var userPrompt = $@"{dbContextLabel}
+
+{contextBlock}
 
 ---
 {languageInstruction}
 
-Nhiệm vụ: Kiểm tra xem bản nháp (phần cuối ngữ cảnh trên) có MÂU THUẪN với cốt truyện trong ngữ cảnh không. Ví dụ: nhân vật đã chết hoặc đã rời đi nhưng lại xuất hiện; sự kiện đã xảy ra nhưng bản nháp mô tả ngược lại; địa điểm/ thời gian không khớp. Chỉ báo lỗi khi có bằng chứng rõ ràng từ ngữ cảnh.
+Nhiệm vụ: Kiểm tra xem bản nháp (phần cuối phía trên) có MÂU THUẪN với dữ liệu từ DB (các chương trước) không. Ví dụ: nhân vật đã chết hoặc đã rời đi nhưng lại xuất hiện; sự kiện đã xảy ra nhưng bản nháp mô tả ngược lại; địa điểm/ thời gian không khớp. Chỉ báo lỗi khi có bằng chứng rõ ràng từ ngữ cảnh.
 
 Trả về DUY NHẤT một JSON hợp lệ, không kèm markdown hay giải thích:
 {{ ""hasIssues"": true/false, ""issues"": [ {{ ""type"": ""character""|""event""|""timeline""|""location""|""other"", ""description"": ""Mô tả ngắn gọn cho tác giả"", ""referenceChapter"": số chương tham chiếu (nếu có) }} ] }}
@@ -89,10 +104,26 @@ Nếu không có mâu thuẫn, trả về: {{ ""hasIssues"": false, ""issues"": 
         return ParseConsistencyResult(text);
     }
 
+    private static string BuildContextBlockForConsistency(stories story, string ragBlock, string? chapterTitle, string draftContent)
+    {
+        var lines = new List<string>
+        {
+            $"## Truyện: {story.title}",
+            string.IsNullOrWhiteSpace(story.summary) ? "" : $"Tóm tắt: {story.summary}",
+            "## Các đoạn liên quan từ truyện (RAG)",
+            ragBlock
+        };
+        if (!string.IsNullOrWhiteSpace(chapterTitle))
+            lines.Add($"## Chương cần kiểm tra: {chapterTitle}");
+        lines.Add("## Bản nháp cần kiểm tra");
+        lines.Add(draftContent);
+        return string.Join("\n\n", lines.Where(s => !string.IsNullOrWhiteSpace(s)));
+    }
+
     private static string GetSystemPrompt()
     {
         return """
-Bạn là trợ lý kiểm tra tính nhất quán của truyện. Nhiệm vụ: đọc ngữ cảnh (nội dung 5 chương gần nhất) và bản nháp chương mới; phát hiện MÂU THUẪN rõ ràng — ví dụ nhân vật đã chết/ mất tích nhưng lại xuất hiện, sự kiện đã xảy ra nhưng bản nháp mô tả ngược lại, timeline/ địa điểm sai. Chỉ báo lỗi khi chắc chắn có mâu thuẫn với ngữ cảnh; không suy diễn quá xa. Trả về đúng JSON theo cấu trúc đã nêu, ngôn ngữ mô tả trùng với truyện (Việt hoặc Anh).
+Bạn là trợ lý kiểm tra tính nhất quán của truyện. Bạn sẽ nhận DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU (ngữ cảnh: nội dung các chương trước đã lưu) và bản nháp chương mới. Nhiệm vụ: đối chiếu bản nháp với dữ liệu từ DB, phát hiện MÂU THUẪN rõ ràng — ví dụ nhân vật đã chết/mất tích trong ngữ cảnh nhưng bản nháp lại cho xuất hiện, sự kiện đã xảy ra nhưng bản nháp mô tả ngược lại, timeline/địa điểm sai. Chỉ báo lỗi khi chắc chắn có mâu thuẫn với dữ liệu từ DB; không suy diễn quá xa. Trả về đúng JSON theo cấu trúc đã nêu, ngôn ngữ mô tả trùng với truyện (Việt hoặc Anh).
 """;
     }
 

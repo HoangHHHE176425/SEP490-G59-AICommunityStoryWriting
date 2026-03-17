@@ -37,8 +37,6 @@ public partial class chapters
 
     public virtual ICollection<ai_generated_content> ai_generated_content { get; set; } = new List<ai_generated_content>();
 
-    public virtual ICollection<ai_plagiarism_reports> ai_plagiarism_reports { get; set; } = new List<ai_plagiarism_reports>();
-
     public virtual ICollection<chapter_versions> chapter_versions { get; set; } = new List<chapter_versions>();
 
     public virtual stories? story { get; set; }

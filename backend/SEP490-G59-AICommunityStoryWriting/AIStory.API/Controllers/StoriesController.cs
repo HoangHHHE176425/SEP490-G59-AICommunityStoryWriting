@@ -145,21 +145,21 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy story theo ID (Guid) (cho phép xem không cần đăng nhập). Ghi nhận lượt xem khi recordView=true (chống spam: 1 lượt/viewer/24h).</summary>
+        /// <summary>Lấy story theo ID (Guid) (cho phép xem không cần đăng nhập). Ghi nhận lượt xem khi recordView=true (chống spam: 1 lượt/viewer/24h). Nếu đăng nhập thì trả thêm lastReadChapterId/lastReadAt (lịch sử đọc dở).</summary>
         [HttpGet("{id:guid}")]
         [AllowAnonymous]
         public IActionResult GetById(Guid id, [FromQuery] bool recordView = true)
         {
             try
             {
-                var story = _storyService.GetById(id);
+                var userId = GetCurrentUserId();
+                var story = _storyService.GetById(id, userId);
                 if (story == null)
                     return NotFound(new { message = $"Story with ID {id} not found" });
                 if (recordView)
                 {
                     var viewerKey = GetViewerKey();
                     _storyService.RecordViewIfAllowed(id, viewerKey);
-                    var userId = GetCurrentUserId();
                     if (userId.HasValue)
                     {
                         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
@@ -167,12 +167,33 @@ namespace AIStory.API.Controllers
                         _storyService.RecordReadStory(id, userId.Value, ip, ua);
                     }
                 }
-                story.UserIsFollowing = GetCurrentUserId() is Guid uid ? UserLibraryDAO.IsFollowing(uid, id) : null;
+                story.UserIsFollowing = userId is Guid uid ? UserLibraryDAO.IsFollowing(uid, id) : null;
                 return Ok(story);
             }
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while fetching the story", error = ex.Message });
+            }
+        }
+
+        /// <summary>Lưu tiến độ đọc: đang đọc đến chapter nào của truyện. Cần đăng nhập.</summary>
+        [HttpPost("{id:guid}/reading-progress")]
+        [Authorize]
+        public IActionResult SaveReadingProgress(Guid id, [FromBody] SaveReadingProgressRequest request)
+        {
+            var userId = GetCurrentUserId();
+            if (!userId.HasValue)
+                return Unauthorized(new { message = "User ID not found in token." });
+            if (request?.ChapterId == null || request.ChapterId == Guid.Empty)
+                return BadRequest(new { message = "ChapterId is required." });
+            try
+            {
+                _storyService.SaveReadingProgress(id, userId.Value, request.ChapterId.Value);
+                return Ok(new { message = "Đã lưu tiến độ đọc.", lastReadChapterId = request.ChapterId });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Failed to save reading progress", error = ex.Message });
             }
         }
 
@@ -183,14 +204,14 @@ namespace AIStory.API.Controllers
         {
             try
             {
-                var story = _storyService.GetBySlug(slug);
+                var userId = GetCurrentUserId();
+                var story = _storyService.GetBySlug(slug, userId);
                 if (story == null)
                     return NotFound(new { message = $"Story with slug '{slug}' not found" });
                 if (recordView)
                 {
                     var viewerKey = GetViewerKey();
                     _storyService.RecordViewIfAllowed(story.Id, viewerKey);
-                    var userId = GetCurrentUserId();
                     if (userId.HasValue)
                     {
                         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
@@ -198,7 +219,7 @@ namespace AIStory.API.Controllers
                         _storyService.RecordReadStory(story.Id, userId.Value, ip, ua);
                     }
                 }
-                story.UserIsFollowing = GetCurrentUserId() is Guid uid ? UserLibraryDAO.IsFollowing(uid, story.Id) : null;
+                story.UserIsFollowing = userId is Guid uid ? UserLibraryDAO.IsFollowing(uid, story.Id) : null;
                 return Ok(story);
             }
             catch (Exception ex)
@@ -409,8 +430,8 @@ namespace AIStory.API.Controllers
                 if (request.ParentId.HasValue)
                 {
                     parent = CommentDAO.GetById(request.ParentId.Value);
-                    if (parent == null || parent.story_id != id)
-                        return BadRequest(new { message = "ParentId không hợp lệ." });
+                    if (parent == null || parent.story_id != id || parent.chapter_id != null)
+                        return BadRequest(new { message = "ParentId không hợp lệ (phải là comment cấp truyện)." });
                 }
 
                 var entity = CommentDAO.AddStoryComment(id, userId.Value, content, request.ParentId);

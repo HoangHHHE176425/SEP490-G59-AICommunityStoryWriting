@@ -107,6 +107,14 @@ namespace DataAccessObjects.DAOs
                 context.SaveChanges();
         }
 
+        /// <summary>Lấy version đang chờ duyệt (PENDING_REVIEW) của chapter, nếu có.</summary>
+        public static chapter_versions? GetPendingByChapterId(Guid chapterId)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.chapter_versions
+                .FirstOrDefault(v => v.chapter_id == chapterId && v.status == "PENDING_REVIEW");
+        }
+
         /// <summary>Khi moderator duyệt chapter: đánh dấu version đang PENDING_REVIEW của chapter đó thành PUBLISHED.</summary>
         public static void MarkPendingVersionsAsPublished(Guid chapterId)
         {
@@ -118,6 +126,17 @@ namespace DataAccessObjects.DAOs
                 v.status = "PUBLISHED";
             if (list.Any())
                 context.SaveChanges();
+        }
+
+        /// <summary>Lấy danh sách chapter_id có ít nhất một version đang PENDING_REVIEW (để moderator nhận duyệt version của chapter đã xuất bản).</summary>
+        public static List<Guid> GetChapterIdsWithPendingReviewVersion()
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.chapter_versions
+                .Where(v => v.chapter_id != null && v.status == "PENDING_REVIEW")
+                .Select(v => v.chapter_id!.Value)
+                .Distinct()
+                .ToList();
         }
     }
 }

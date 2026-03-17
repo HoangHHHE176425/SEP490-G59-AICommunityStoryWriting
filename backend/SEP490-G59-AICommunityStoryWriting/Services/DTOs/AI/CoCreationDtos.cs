@@ -28,7 +28,10 @@ public class CoCreationResponse
     /// <summary>Số lần Agent 2 viết lại theo feedback (0 = không sửa).</summary>
     public int RevisionCount { get; set; }
 
-    /// <summary>Feedback cuối từ Agent 3 nếu vẫn chưa đạt (để tác giả tham khảo).</summary>
+    /// <summary>Feedback từ Agent 3 ở mỗi lần chưa đạt (khiến hệ thống chạy vòng sửa). revisionCount=1 → 1 phần tử (feedback lần 1); revisionCount=2 → 2 phần tử. Null hoặc rỗng khi revisionCount=0.</summary>
+    public List<string>? RevisionFeedbacks { get; set; }
+
+    /// <summary>Feedback cuối từ Agent 3 nếu vẫn chưa đạt sau tất cả vòng sửa (để tác giả tham khảo). Khi Approved=true thì thường null.</summary>
     public string? ReviewFeedback { get; set; }
 
     /// <summary>ID chương nháp (DRAFT) vừa tạo — mỗi lần co-create thành công tạo một chương + một bản ai_generated_content.</summary>
@@ -36,4 +39,25 @@ public class CoCreationResponse
 
     /// <summary>ID bản ghi ai_generated_content vừa lưu (gắn với ChapterId).</summary>
     public Guid? AiGeneratedContentId { get; set; }
+
+    /// <summary>Thời gian chạy từng bước (ms): Outline, Write, Guardrail, Review; khi song song là thời gian wall-clock của mỗi phase. Null nếu không đo.</summary>
+    public List<AgentDuration>? AgentDurations { get; set; }
+}
+
+/// <summary>Một bước trong pipeline co-create và thời gian chạy (ms).</summary>
+public class AgentDuration
+{
+    /// <summary>Tên bước: Outline, Write, Guardrail, Review; hoặc Write_2, Review_2 khi chạy song song; Revision_Write khi trong vòng sửa.</summary>
+    public string Step { get; set; } = null!;
+    /// <summary>Thời gian chạy (millisecond).</summary>
+    public long DurationMs { get; set; }
+}
+
+/// <summary>Event tiến độ gửi qua SSE khi chạy co-create stream: mỗi bước xong (Outline, Write, Guardrail, Review) gửi một event.</summary>
+public class CoCreateProgressEvent
+{
+    public string Step { get; set; } = null!;
+    public long DurationMs { get; set; }
+    /// <summary>Message hiển thị cho user (vd. "Đã xong dàn ý").</summary>
+    public string? Message { get; set; }
 }

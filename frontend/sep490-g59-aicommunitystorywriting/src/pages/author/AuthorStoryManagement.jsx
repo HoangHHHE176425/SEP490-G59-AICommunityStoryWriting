@@ -8,7 +8,8 @@ import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
 import { createStory, updateStory, getStories, getStoryById, deleteStory } from '../../api/story/storyApi';
-import { createChapter, updateChapter, getChapterById, getChapters } from '../../api/chapter/chapterApi';
+import { createChapter, updateChapter, getChapterById, getChapters, createChapterVersion, updateChapterVersion, getChapterVersionById, submitChapterVersion } from '../../api/chapter/chapterApi';
+import * as coinApi from '../../api/coins/coinApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -84,6 +85,11 @@ export function AuthorStoryManagement({ onBack }) {
     const [activeMenu, setActiveMenu] = useState('stories');
     const [currentStory, setCurrentStory] = useState(null);
     const [currentChapter, setCurrentChapter] = useState(null);
+    /** Chương gốc khi đang tạo version (mở editor giống tạo chương mới nhưng pre-fill từ chương này). */
+    const [sourceChapterForVersion, setSourceChapterForVersion] = useState(null);
+    const [editingVersion, setEditingVersion] = useState(null);
+    /** True khi mở màn editor chỉ để xem chi tiết chương (read-only), không lưu/xuất bản. */
+    const [viewChapterOnly, setViewChapterOnly] = useState(false);
     const [stories, setStories] = useState([]);
     const [storiesLoading, setStoriesLoading] = useState(true);
     const [storiesError, setStoriesError] = useState(null);
@@ -93,6 +99,16 @@ export function AuthorStoryManagement({ onBack }) {
 
     const STORIES_PAGE_SIZE = 10;
     const authorId = user?.id ?? user?.Id;
+
+    // Lịch sử donate + rút tiền (author)
+    const [authorActivityItems, setAuthorActivityItems] = useState([]);
+    const [authorActivityLoading, setAuthorActivityLoading] = useState(false);
+    const [authorActivityError, setAuthorActivityError] = useState(null);
+    // Rút tiền: số dư ví, số coin nhập, trạng thái gửi
+    const [withdrawBalance, setWithdrawBalance] = useState(null);
+    const [withdrawAmount, setWithdrawAmount] = useState('');
+    const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+    const [withdrawError, setWithdrawError] = useState(null);
 
     const loadStories = useCallback((page = 1, options = {}) => {
         if (!authorId) {
@@ -196,6 +212,40 @@ export function AuthorStoryManagement({ onBack }) {
         queueMicrotask(() => loadStories(1));
     }, [loadStories]);
 
+    useEffect(() => {
+        if (activeView !== 'history' || !authorId) return;
+        setAuthorActivityLoading(true);
+        setAuthorActivityError(null);
+        coinApi.getAuthorActivity({ page: 1, pageSize: 100 })
+            .then((res) => {
+                if (res?.success && res?.data?.items) {
+                    setAuthorActivityItems(res.data.items);
+                } else {
+                    setAuthorActivityItems([]);
+                    if (!res?.success) setAuthorActivityError(res?.message ?? 'Không tải được lịch sử.');
+                }
+            })
+            .catch(() => {
+                setAuthorActivityItems([]);
+                setAuthorActivityError('Không tải được lịch sử donate và rút tiền.');
+            })
+            .finally(() => setAuthorActivityLoading(false));
+    }, [activeView, authorId]);
+
+    useEffect(() => {
+        if (activeView !== 'withdraw' || !authorId) return;
+        setWithdrawError(null);
+        coinApi.getMyWallet()
+            .then((res) => {
+                if (res?.success && res?.data != null) {
+                    setWithdrawBalance(res.data.balanceCoin ?? res.data.balance_coin ?? 0);
+                } else {
+                    setWithdrawBalance(0);
+                }
+            })
+            .catch(() => setWithdrawBalance(0));
+    }, [activeView, authorId]);
+
     /** Real-time: refetch danh sách truyện khi tab đang hiển thị (moderator duyệt/từ chối → trạng thái truyện thay đổi). */
     const STORIES_POLL_INTERVAL_MS = 1000;
     const storiesCurrentPageRef = useRef(storiesCurrentPage);
@@ -276,6 +326,7 @@ export function AuthorStoryManagement({ onBack }) {
     };
 
     const handleEditChapter = async (chapter) => {
+        setViewChapterOnly(false);
         const chapterId = chapter?.id ?? chapter?.Id;
         if (!chapterId) {
             showToast('Không tìm thấy ID chương', 'error');
@@ -283,13 +334,9 @@ export function AuthorStoryManagement({ onBack }) {
         }
 
         try {
-            // Gọi API để lấy đầy đủ thông tin chương
             const fullChapter = await getChapterById(chapterId);
-
-            // Map dữ liệu từ API về format UI
             const status = (fullChapter.status ?? fullChapter.Status ?? 'DRAFT').toUpperCase();
             const accessTypeApi = (fullChapter.accessType ?? fullChapter.AccessType ?? 'FREE').toUpperCase();
-
             const mappedChapter = {
                 id: fullChapter.id ?? fullChapter.Id,
                 number: (fullChapter.orderIndex ?? fullChapter.OrderIndex ?? 0) + 1,
@@ -299,13 +346,102 @@ export function AuthorStoryManagement({ onBack }) {
                 accessType: accessTypeApi === 'PAID' ? 'paid' : 'public',
                 price: fullChapter.coinPrice ?? fullChapter.CoinPrice ?? 0,
             };
-
             setCurrentChapter(mappedChapter);
             setActiveView('editChapter');
         } catch (error) {
             const errorMessage = error?.response?.data?.message || error?.message || 'Không thể tải thông tin chương';
             showToast(errorMessage, 'error');
             console.error('Error loading chapter:', error);
+        }
+    };
+
+    /** Mở màn xem chi tiết chương (read-only, cùng giao diện editor nhưng không chỉnh sửa/lưu). */
+    const handleViewChapter = async (chapter) => {
+        setViewChapterOnly(true);
+        const chapterId = chapter?.id ?? chapter?.Id;
+        if (!chapterId) {
+            showToast('Không tìm thấy ID chương', 'error');
+            return;
+        }
+        try {
+            const fullChapter = await getChapterById(chapterId);
+            const status = (fullChapter.status ?? fullChapter.Status ?? 'DRAFT').toUpperCase();
+            const accessTypeApi = (fullChapter.accessType ?? fullChapter.AccessType ?? 'FREE').toUpperCase();
+            const mappedChapter = {
+                id: fullChapter.id ?? fullChapter.Id,
+                number: (fullChapter.orderIndex ?? fullChapter.OrderIndex ?? 0) + 1,
+                title: fullChapter.title ?? fullChapter.Title ?? '',
+                content: fullChapter.content ?? fullChapter.Content ?? '',
+                status: status.toLowerCase(),
+                accessType: accessTypeApi === 'PAID' ? 'paid' : 'public',
+                price: fullChapter.coinPrice ?? fullChapter.CoinPrice ?? 0,
+            };
+            setCurrentChapter(mappedChapter);
+            setActiveView('editChapter');
+        } catch (error) {
+            const errorMessage = error?.response?.data?.message || error?.message || 'Không thể tải thông tin chương';
+            showToast(errorMessage, 'error');
+            setViewChapterOnly(false);
+        }
+    };
+
+    /** Mở màn tạo version mới: form để trống, chỉ cần chapter id + số chương để hiển thị. */
+    const handleAddVersion = (story, chapterFromList) => {
+        const chapterId = chapterFromList?.id ?? chapterFromList?.Id;
+        if (!chapterId) {
+            showToast('Không tìm thấy ID chương', 'error');
+            return;
+        }
+        const number = chapterFromList?.number ?? (chapterFromList?.orderIndex ?? chapterFromList?.OrderIndex ?? chapterFromList?.order_index ?? 0) + 1;
+        const title = chapterFromList?.title ?? chapterFromList?.name ?? `Chương ${number}`;
+        setCurrentStory(story);
+        setCurrentChapter(null);
+        setSourceChapterForVersion({
+            id: chapterId,
+            number: Number(number) || 1,
+            title,
+            content: '',
+            status: 'draft',
+            accessType: 'public',
+            price: 0,
+        });
+        setEditingVersion(null);
+        setActiveView('addChapterVersion');
+    };
+
+    /** Mở editor chỉnh sửa version đã có: load chi tiết version rồi mở ChapterEditorPage ở chế độ edit version. */
+    const handleEditVersion = async (chapter, versionFromList) => {
+        const chapterId = chapter?.id ?? chapter?.Id;
+        const versionId = versionFromList?.id ?? versionFromList?.Id;
+        if (!chapterId || !versionId) {
+            showToast('Không tìm thấy chương hoặc phiên bản', 'error');
+            return;
+        }
+        try {
+            const detail = await getChapterVersionById(chapterId, versionId);
+            const id = detail.id ?? detail.Id;
+            const titleSnapshot = detail.titleSnapshot ?? detail.TitleSnapshot ?? detail.title_snapshot ?? '';
+            const contentSnapshot = detail.contentSnapshot ?? detail.ContentSnapshot ?? detail.content_snapshot ?? '';
+            const versionNumber = detail.versionNumber ?? detail.VersionNumber ?? detail.version_number ?? 1;
+            const chapterNumber = chapter.number ?? (chapter.orderIndex ?? chapter.order_index ?? 0) + 1;
+            const sourceMapped = {
+                id: chapterId,
+                number: Number(chapterNumber) || 1,
+                title: chapter.title ?? chapter.name ?? `Chương ${chapterNumber}`,
+            };
+            setSourceChapterForVersion(sourceMapped);
+            setEditingVersion({
+                id,
+                chapterId,
+                titleSnapshot,
+                contentSnapshot,
+                versionNumber: Number(versionNumber) || 1,
+                status: detail.status ?? detail.Status,
+            });
+            setActiveView('addChapterVersion');
+        } catch (error) {
+            const msg = error?.response?.data?.message || error?.message || 'Không thể tải phiên bản';
+            showToast(msg, 'error');
         }
     };
 
@@ -317,6 +453,34 @@ export function AuthorStoryManagement({ onBack }) {
         }
 
         try {
+            // Chế độ version: tạo mới hoặc cập nhật version; nếu status === 'published' thì gửi duyệt (giống nút Xuất bản ở danh sách phiên bản)
+            if (chapterData.sourceChapterId) {
+                const chapterId = chapterData.sourceChapterId;
+                const titleSnapshot = chapterData.title ?? '';
+                const contentSnapshot = chapterData.content ?? '';
+                const shouldSubmitForReview = chapterData.status === 'published';
+                let versionId = chapterData.editingVersionId;
+
+                if (chapterData.editingVersionId) {
+                    await updateChapterVersion(chapterId, chapterData.editingVersionId, { titleSnapshot, contentSnapshot });
+                    showToast(shouldSubmitForReview ? 'Đã cập nhật và gửi phiên bản đi duyệt' : 'Đã cập nhật phiên bản', 'success');
+                } else {
+                    const created = await createChapterVersion(chapterId, { titleSnapshot, contentSnapshot });
+                    versionId = created?.id ?? created?.Id ?? created?.id;
+                    showToast(shouldSubmitForReview && versionId ? 'Đã tạo và gửi phiên bản đi duyệt' : 'Đã tạo phiên bản', 'success');
+                }
+
+                if (shouldSubmitForReview && versionId) {
+                    await submitChapterVersion(chapterId, versionId);
+                }
+
+                setActiveView('chapterList');
+                setCurrentChapter(null);
+                setSourceChapterForVersion(null);
+                setEditingVersion(null);
+                return;
+            }
+
             // Map status: 'draft' -> 'DRAFT', 'published' -> 'PENDING_REVIEW'
             const apiStatus = chapterData.status === 'published' ? 'PENDING_REVIEW' : 'DRAFT';
 
@@ -371,6 +535,8 @@ export function AuthorStoryManagement({ onBack }) {
             // Quay về danh sách chương
             setActiveView('chapterList');
             setCurrentChapter(null);
+            setSourceChapterForVersion(null);
+            setEditingVersion(null);
         } catch (error) {
             const errorMessage = error?.response?.data?.message || error?.message || 'Không thể lưu chương';
             showToast(errorMessage, 'error');
@@ -449,7 +615,15 @@ export function AuthorStoryManagement({ onBack }) {
         }
     };
 
-    const { showToast, ToastContainer } = useToast();
+    const { showToast, ToastContainer, clearToasts } = useToast();
+
+    /** Chỉ xóa toasts khi vừa chuyển SANG màn danh sách chương (từ màn khác), tránh xóa mỗi lần re-render gây nhấp nháy. */
+    const prevActiveViewRef = useRef(activeView);
+    useEffect(() => {
+        const prev = prevActiveViewRef.current;
+        prevActiveViewRef.current = activeView;
+        if (prev !== 'chapterList' && activeView === 'chapterList') clearToasts();
+    }, [activeView, clearToasts]);
 
     const getCategoryId = (c) => (typeof c === 'object' && c?.id ? c.id : c);
 
@@ -516,30 +690,44 @@ export function AuthorStoryManagement({ onBack }) {
 
     if (activeView === 'chapterList') {
         return (
-            <ChapterListManager
-                story={currentStory}
-                onBack={() => {
-                    setActiveView('stories');
-                    setCurrentStory(null);
-                    loadStories(storiesCurrentPage);
-                }}
-                onAddChapter={() => handleAddChapter(currentStory)}
-                onEditChapter={(chapter) => handleEditChapter(chapter)}
-            />
+            <>
+                <ChapterListManager
+                    story={currentStory}
+                    onBack={() => {
+                        setActiveView('stories');
+                        setCurrentStory(null);
+                        loadStories(storiesCurrentPage);
+                    }}
+                    onAddChapter={() => handleAddChapter(currentStory)}
+                    onEditChapter={(chapter) => handleEditChapter(chapter)}
+                    onViewChapter={(chapter) => handleViewChapter(chapter)}
+                    onAddVersion={(chapter) => handleAddVersion(currentStory, chapter)}
+                    onEditVersion={(chapter, version) => handleEditVersion(chapter, version)}
+                />
+                <ToastContainer />
+            </>
         );
     }
 
-    if (activeView === 'addChapter' || activeView === 'editChapter') {
+    if (activeView === 'addChapter' || activeView === 'editChapter' || activeView === 'addChapterVersion') {
         return (
-            <ChapterEditorPage
-                story={currentStory}
-                chapter={activeView === 'editChapter' ? currentChapter : null}
-                onSave={handleSaveChapter}
-                onCancel={() => {
-                    setActiveView('chapterList');
-                    setCurrentChapter(null);
-                }}
-            />
+            <>
+                <ChapterEditorPage
+                    story={currentStory}
+                    chapter={activeView === 'editChapter' ? currentChapter : null}
+                    sourceChapterForVersion={activeView === 'addChapterVersion' ? sourceChapterForVersion : null}
+                    editingVersion={activeView === 'addChapterVersion' ? editingVersion : null}
+                    readOnly={viewChapterOnly}
+                    onSave={handleSaveChapter}
+                    onCancel={() => {
+                        setActiveView('chapterList');
+                        setCurrentChapter(null);
+                        setSourceChapterForVersion(null);
+                        setEditingVersion(null);
+                        setViewChapterOnly(false);
+                    }}
+                />
+            </>
         );
     }
 
@@ -879,7 +1067,7 @@ export function AuthorStoryManagement({ onBack }) {
                                     borderRadius: '12px',
                                     border: '1px solid #bbf7d0'
                                 }}>
-                                    <span style={{ fontSize: '1.75rem', fontWeight: 700, color: '#15803d', letterSpacing: '-0.02em' }}>0</span>
+                                    <span style={{ fontSize: '1.75rem', fontWeight: 700, color: '#15803d', letterSpacing: '-0.02em' }}>{withdrawBalance != null ? Number(withdrawBalance).toLocaleString() : '—'}</span>
                                     <span style={{ fontSize: '0.875rem', color: '#166534', fontWeight: 500 }}>coin</span>
                                 </div>
                             </div>
@@ -895,12 +1083,18 @@ export function AuthorStoryManagement({ onBack }) {
                                     <ArrowDownToLine style={{ width: '20px', height: '20px', color: '#6b7280' }} />
                                     <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>Yêu cầu rút tiền</span>
                                 </div>
+                                {withdrawError && (
+                                    <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '0.75rem' }}>{withdrawError}</p>
+                                )}
                                 <div style={{ marginBottom: '1.25rem' }}>
                                     <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Số coin muốn rút</label>
                                     <input
                                         type="number"
                                         placeholder="0"
                                         min={1}
+                                        max={withdrawBalance != null ? withdrawBalance : undefined}
+                                        value={withdrawAmount}
+                                        onChange={(e) => setWithdrawAmount(e.target.value.replace(/[^0-9]/g, '') || '')}
                                         style={{
                                             width: '100%',
                                             maxWidth: '320px',
@@ -915,6 +1109,8 @@ export function AuthorStoryManagement({ onBack }) {
                                     />
                                 </div>
                                 <button
+                                    type="button"
+                                    disabled={withdrawSubmitting || !withdrawAmount || (withdrawBalance != null && Number(withdrawAmount) > withdrawBalance) || Number(withdrawAmount) < 1}
                                     style={{
                                         padding: '0.625rem 1.5rem',
                                         backgroundColor: '#13ec5b',
@@ -923,14 +1119,31 @@ export function AuthorStoryManagement({ onBack }) {
                                         fontSize: '0.875rem',
                                         fontWeight: 600,
                                         color: '#ffffff',
-                                        cursor: 'pointer',
+                                        cursor: withdrawSubmitting ? 'not-allowed' : 'pointer',
+                                        opacity: (withdrawSubmitting || !withdrawAmount || (withdrawBalance != null && Number(withdrawAmount) > withdrawBalance)) ? 0.6 : 1,
                                         boxShadow: '0 2px 8px rgba(19, 236, 91, 0.35)',
                                         transition: 'all 0.2s ease'
                                     }}
-                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#10d452'; e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.4)'; }}
+                                    onMouseEnter={(e) => { if (!e.currentTarget.disabled) { e.currentTarget.style.backgroundColor = '#10d452'; e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.4)'; } }}
                                     onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#13ec5b'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(19, 236, 91, 0.35)'; }}
+                                    onClick={async () => {
+                                        const amount = Number(withdrawAmount);
+                                        if (!amount || amount < 1) return;
+                                        setWithdrawSubmitting(true);
+                                        setWithdrawError(null);
+                                        const res = await coinApi.createWithdrawRequest({ amountCoins: amount });
+                                        setWithdrawSubmitting(false);
+                                        if (res?.success) {
+                                            setWithdrawAmount('');
+                                            showToast('Đã gửi yêu cầu rút tiền. Quản trị viên sẽ xử lý.', 'success');
+                                            coinApi.getMyWallet().then((r) => { if (r?.success && r?.data) setWithdrawBalance(r.data.balanceCoin ?? r.data.balance_coin ?? 0); });
+                                            coinApi.getAuthorActivity({ page: 1, pageSize: 100 }).then((ar) => { if (ar?.success && ar?.data?.items) setAuthorActivityItems(ar.data.items); });
+                                        } else {
+                                            setWithdrawError(res?.message ?? 'Không gửi được yêu cầu rút tiền.');
+                                        }
+                                    }}
                                 >
-                                    Gửi yêu cầu rút tiền
+                                    {withdrawSubmitting ? 'Đang gửi...' : 'Gửi yêu cầu rút tiền'}
                                 </button>
                             </div>
                         </div>
@@ -977,21 +1190,51 @@ export function AuthorStoryManagement({ onBack }) {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <tr>
-                                            <td colSpan={4} style={{ padding: '3rem 1.5rem', textAlign: 'center' }}>
-                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
-                                                    <div style={{
-                                                        width: '56px', height: '56px', borderRadius: '50%',
-                                                        backgroundColor: '#f1f5f9',
-                                                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                                    }}>
-                                                        <History style={{ width: '28px', height: '28px', color: '#94a3b8' }} />
+                                        {authorActivityLoading ? (
+                                            <tr>
+                                                <td colSpan={4} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
+                                            </tr>
+                                        ) : authorActivityError ? (
+                                            <tr>
+                                                <td colSpan={4} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorActivityError}</td>
+                                            </tr>
+                                        ) : authorActivityItems.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={4} style={{ padding: '3rem 1.5rem', textAlign: 'center' }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+                                                        <div style={{
+                                                            width: '56px', height: '56px', borderRadius: '50%',
+                                                            backgroundColor: '#f1f5f9',
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                                        }}>
+                                                            <History style={{ width: '28px', height: '28px', color: '#94a3b8' }} />
+                                                        </div>
+                                                        <p style={{ fontSize: '0.9375rem', fontWeight: 500, color: '#64748b', margin: 0 }}>Chưa có giao dịch nào</p>
+                                                        <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>Donate và rút tiền sẽ hiển thị tại đây</p>
                                                     </div>
-                                                    <p style={{ fontSize: '0.9375rem', fontWeight: 500, color: '#64748b', margin: 0 }}>Chưa có giao dịch nào</p>
-                                                    <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>Donate và rút tiền sẽ hiển thị tại đây</p>
-                                                </div>
-                                            </td>
-                                        </tr>
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            authorActivityItems.map((item) => {
+                                                const createdAt = item.createdAt ?? item.CreatedAt;
+                                                const timeStr = createdAt ? new Date(createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+                                                const typeLabel = (item.type || item.Type) === 'WITHDRAW' ? 'Rút tiền' : 'Donate';
+                                                const amount = item.amount ?? item.Amount ?? 0;
+                                                const note = (item.type || item.Type) === 'DONATE'
+                                                    ? (item.senderDisplayName ?? item.SenderDisplayName ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}` : (item.note ?? item.Note) || '—')
+                                                    : (item.withdrawStatus ?? item.WithdrawStatus) === 'PENDING' ? 'Chờ xử lý' : (item.note ?? item.Note) || (item.withdrawStatus ?? item.WithdrawStatus) || '—';
+                                                return (
+                                                    <tr key={item.id ?? item.Id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                        <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{timeStr}</td>
+                                                        <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{typeLabel}</td>
+                                                        <td style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: (item.type || item.Type) === 'WITHDRAW' ? '#dc2626' : '#15803d' }}>
+                                                            {(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin
+                                                        </td>
+                                                        <td style={{ padding: '1rem 1.25rem', color: '#64748b', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
@@ -1606,3 +1849,5 @@ export function AuthorStoryManagement({ onBack }) {
         </div>
     );
 }
+
+export default AuthorStoryManagement;
