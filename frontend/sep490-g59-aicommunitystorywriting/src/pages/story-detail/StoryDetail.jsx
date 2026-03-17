@@ -182,19 +182,27 @@ export function StoryDetail() {
         };
     }, [storyId, viewerKey]);
 
-    const loadComments = useCallback(() => {
+    const loadComments = useCallback((options = {}) => {
         if (!storyId) return;
-        setCommentsLoading(true);
-        setCommentError(null);
+        const silent = options.silent === true;
+        if (!silent) {
+            setCommentsLoading(true);
+            setCommentError(null);
+        }
         getStoryComments(storyId)
             .then((list) => setComments(Array.isArray(list) ? list : []))
-            .catch((err) => setCommentError(err?.response?.data?.message ?? 'Không tải được bình luận.'))
-            .finally(() => setCommentsLoading(false));
+            .catch((err) => { if (!silent) setCommentError(err?.response?.data?.message ?? 'Không tải được bình luận.'); })
+            .finally(() => { if (!silent) setCommentsLoading(false); });
     }, [storyId]);
 
     useEffect(() => {
         if (storyId && activeTab === 'comments') loadComments();
     }, [storyId, activeTab, loadComments]);
+
+    // Load comment count sớm (silent) để tab hiển thị đúng số trước khi user click vào.
+    useEffect(() => {
+        if (storyId) loadComments({ silent: true });
+    }, [storyId, loadComments]);
 
     const loadReviews = useCallback(() => {
         if (!storyId) return;
@@ -231,7 +239,6 @@ export function StoryDetail() {
         try {
             await addStoryComment(storyId, { content: content.trim(), parentId: parentId || undefined });
             loadComments();
-            setStory((prev) => (prev ? { ...prev, comments: (prev.comments ?? 0) + 1 } : prev));
             showToast('Đã gửi bình luận.', 'success');
         } catch (err) {
             const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể gửi bình luận.';
@@ -441,7 +448,7 @@ export function StoryDetail() {
                                             : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                                             }`}
                                     >
-                                        Bình luận ({story.comments.toLocaleString()})
+                                        Bình luận ({comments.length.toLocaleString()})
                                     </button>
                                     <button
                                         onClick={() => setActiveTab('reviews')}
