@@ -18,6 +18,7 @@ import {
     Shield,
     Brain,
     AlertTriangle,
+    Wallet,
 } from 'lucide-react';
 
 const ROLE_LABELS = {
@@ -37,7 +38,8 @@ const ALL_MENU_ITEMS = [
     { id: 'users', label: 'Quản lý người dùng', icon: Users },
     { id: 'comments', label: 'Quản lý bình luận', icon: MessageSquare },
     { id: 'policies', label: 'Quản lý Policy', icon: Shield },
-    { id: 'ai-config', label: 'AI Config', icon: Brain },
+    { id: 'transactions', label: 'Quản lý giao dịch', icon: Wallet },
+    { id: 'ai-config', label: 'Cấu hình AI', icon: Brain },
     { id: 'settings', label: 'Cài đặt', icon: Settings },
 ];
 
