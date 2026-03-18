@@ -3,6 +3,8 @@ using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 
 namespace AIStory.API.Controllers
 {
@@ -12,10 +14,19 @@ namespace AIStory.API.Controllers
     public sealed class AdminWalletController : ControllerBase
     {
         private readonly StoryPlatformDbContext _db;
+        private const string PlatformWalletAdjustPurchaseType = "PLATFORM_WALLET_ADJ";
+        private const string UserWalletAdjustPurchaseType = "USR_WALLET_ADJ";
 
         public AdminWalletController(StoryPlatformDbContext db)
         {
             _db = db;
+        }
+
+        private Guid? GetCurrentAdminId()
+        {
+            var sub = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                      ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return Guid.TryParse(sub, out var id) ? id : null;
         }
 
         /// <summary>Số dư coin hiện tại của ví hệ thống (platform_wallet id=1).</summary>
@@ -107,6 +118,616 @@ namespace AIStory.API.Controllers
                 activeAuthors,
                 activeReaders
             });
+        }
+
+        public sealed class AdminPlatformWalletAdjustRequest
+        {
+            /// <summary>
+            /// Số coin cộng (delta &gt; 0) hoặc trừ (delta &lt; 0) cho ví hệ thống.
+            /// </summary>
+            public int DeltaCoins { get; set; }
+
+            /// <summary>
+            /// Lý do điều chỉnh (lưu trong escrow_status dạng ADD:note hoặc SUB:note).
+            /// Do escrow_status chỉ có max length 20 nên note sẽ bị cắt ngắn.
+            /// </summary>
+            public string? Note { get; set; }
+        }
+
+        public sealed class AdminUserWalletAdjustRequest
+        {
+            /// <summary>
+            /// Định danh user cần điều chỉnh: có thể là Guid userId, hoặc email, hoặc nickname.
+            /// </summary>
+            public string TargetUser { get; set; } = null!;
+
+            /// <summary>
+            /// Số coin cộng (delta &gt; 0) hoặc trừ (delta &lt; 0).
+            /// </summary>
+            public int DeltaCoins { get; set; }
+
+            /// <summary>
+            /// Lý do điều chỉnh (lưu trong escrow_status dưới dạng ADD:note hoặc SUB:note).
+            /// </summary>
+            public string? Note { get; set; }
+        }
+
+        private async Task<Guid?> ResolveTargetUserIdAsync(string target, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(target)) return null;
+            var trimmed = target.Trim();
+
+            if (Guid.TryParse(trimmed, out var guid))
+                return guid;
+
+            // Try by email first.
+            var byEmail = await _db.users.AsNoTracking()
+                .Where(u => u.email == trimmed)
+                .Select(u => (Guid?)u.id)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (byEmail.HasValue) return byEmail.Value;
+
+            // Try by nickname.
+            var byNickname = await _db.user_profiles.AsNoTracking()
+                .Where(p => p.nickname == trimmed)
+                .Select(p => (Guid?)p.user_id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            return byNickname;
+        }
+
+        /// <summary>Admin điều chỉnh trực tiếp số dư ví hệ thống (platform_wallet id=1).</summary>
+        [HttpPost("adjust")]
+        public async Task<IActionResult> AdjustPlatformWallet([FromBody] AdminPlatformWalletAdjustRequest request, CancellationToken cancellationToken)
+        {
+            if (request == null) return BadRequest(new { message = "Payload không hợp lệ." });
+            if (request.DeltaCoins == 0) return BadRequest(new { message = "DeltaCoins không được bằng 0." });
+
+            var adminId = GetCurrentAdminId();
+
+            // Important: SqlServerRetryingExecutionStrategy does NOT support user-initiated transactions
+            // unless the whole block is executed inside CreateExecutionStrategy().ExecuteAsync(...)
+            var executionStrategy = _db.Database.CreateExecutionStrategy();
+            return await executionStrategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    var platform = await _db.platform_wallet.FirstOrDefaultAsync(x => x.id == 1, cancellationToken);
+                    if (platform == null)
+                    {
+                        platform = new platform_wallet
+                        {
+                            id = 1,
+                            balance_coin = 0,
+                            updated_at = DateTime.UtcNow
+                        };
+                        _db.platform_wallet.Add(platform);
+                        await _db.SaveChangesAsync(cancellationToken);
+                    }
+
+                    var newBalance = platform.balance_coin + request.DeltaCoins;
+                    if (newBalance < 0)
+                    {
+                        return (IActionResult)BadRequest(new { message = "Số dư ví hệ thống không đủ để trừ.", currentBalance = platform.balance_coin });
+                    }
+
+                    platform.balance_coin = newBalance;
+                    platform.updated_at = DateTime.UtcNow;
+                    _db.platform_wallet.Update(platform);
+
+                    // Audit bằng cách ghi vào purchases với purchase_type riêng.
+                    var sign = request.DeltaCoins >= 0 ? "ADD" : "SUB";
+                    var notePart = string.Empty;
+                    if (!string.IsNullOrWhiteSpace(request.Note))
+                    {
+                        // escrow_status max length = 20; prefix "ADD:"/ "SUB:" length = 4 => notePart max = 16
+                        notePart = request.Note.Trim();
+                        if (notePart.Length > 16) notePart = notePart.Substring(0, 16);
+                    }
+
+                    _db.purchases.Add(new purchases
+                    {
+                        id = Guid.NewGuid(),
+                        user_id = adminId,
+                        story_id = null,
+                        chapter_id = null,
+                        price_paid = Math.Abs(request.DeltaCoins),
+                        // Note: purchases.purchase_type column in DB appears to be length-constrained.
+                        // Using a shorter value to avoid SqlException "String or binary data would be truncated".
+                        purchase_type = PlatformWalletAdjustPurchaseType,
+                        escrow_status = sign + (string.IsNullOrWhiteSpace(notePart) ? string.Empty : (":" + notePart)),
+                        released_at = DateTime.UtcNow,
+                        platform_fee_ratio = null,
+                        created_at = DateTime.UtcNow
+                    });
+
+                    await _db.SaveChangesAsync(cancellationToken);
+                    await tx.CommitAsync(cancellationToken);
+
+                    return (IActionResult)Ok(new
+                    {
+                        balanceCoin = newBalance,
+                        updatedAt = platform.updated_at
+                    });
+                }
+                catch
+                {
+                    try { await tx.RollbackAsync(cancellationToken); } catch { /* ignore */ }
+                    throw;
+                }
+            });
+        }
+
+        /// <summary>
+        /// Lịch sử điều chỉnh ví hệ thống (dùng cho FE admin hiển thị).
+        /// </summary>
+        [HttpGet("adjustments")]
+        public async Task<IActionResult> GetPlatformWalletAdjustments(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] DateTime? dateFrom = null,
+            [FromQuery] DateTime? dateTo = null,
+            [FromQuery] string? type = null, // ALL | ADD | SUB
+            [FromQuery] string? q = null,    // search in note
+            CancellationToken cancellationToken = default)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 50);
+
+            type = string.IsNullOrWhiteSpace(type) ? null : type.Trim();
+            q = string.IsNullOrWhiteSpace(q) ? null : q.Trim();
+
+            var fromDate = dateFrom?.Date;
+            var toExclusive = dateTo?.Date.AddDays(1);
+
+            var query = _db.purchases.AsNoTracking()
+                .Where(p => p.purchase_type == PlatformWalletAdjustPurchaseType);
+
+            if (fromDate.HasValue)
+                query = query.Where(p => (p.released_at ?? p.created_at) >= fromDate.Value);
+            if (toExclusive.HasValue)
+                query = query.Where(p => (p.released_at ?? p.created_at) < toExclusive.Value);
+
+            if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "ALL", StringComparison.OrdinalIgnoreCase))
+            {
+                var t = type.ToUpperInvariant();
+                if (t == "ADD")
+                    query = query.Where(p => ((p.escrow_status ?? string.Empty).ToUpper()).StartsWith("ADD"));
+                else if (t == "SUB")
+                    query = query.Where(p => ((p.escrow_status ?? string.Empty).ToUpper()).StartsWith("SUB"));
+            }
+
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                var qUpper = q.ToUpperInvariant();
+                query = query.Where(p => ((p.escrow_status ?? string.Empty).ToUpper()).Contains(qUpper));
+            }
+
+            var total = await query.CountAsync(cancellationToken);
+
+            var rawItems = await query
+                .OrderByDescending(p => p.released_at ?? p.created_at)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(p => new
+                {
+                    PurchaseId = p.id,
+                    AdjustedAt = p.released_at ?? p.created_at,
+                    PricePaid = p.price_paid,
+                    EscrowStatus = p.escrow_status,
+                    AdminId = p.user_id
+                })
+                .ToListAsync(cancellationToken);
+
+            var items = rawItems.Select(x =>
+            {
+                var escrow = x.EscrowStatus ?? string.Empty;
+                var escrowUpper = escrow.ToUpperInvariant();
+                var isSub = escrowUpper.StartsWith("SUB");
+                var delta = isSub ? -x.PricePaid : x.PricePaid;
+
+                string? note = null;
+                var idx = escrow.IndexOf(':');
+                if (idx >= 0 && idx < escrow.Length - 1)
+                    note = escrow.Substring(idx + 1);
+
+                return new
+                {
+                    PurchaseId = x.PurchaseId,
+                    AdjustedAt = x.AdjustedAt,
+                    DeltaCoins = delta,
+                    AdminId = x.AdminId,
+                    Note = note ?? string.Empty
+                };
+            }).ToList();
+
+            return Ok(new
+            {
+                totalCount = total,
+                page = page,
+                pageSize = pageSize,
+                items = items
+            });
+        }
+
+        /// <summary>
+        /// Admin điều chỉnh ví người dùng (wallets.balance_coin).
+        /// Chỉ thay đổi một user wallet để tránh gây sai lệch “trừ của ai”.
+        /// purchase_type: USR_WALLET_ADJ
+        /// </summary>
+        [HttpPost("adjust-user-wallet")]
+        public async Task<IActionResult> AdjustUserWallet(
+            [FromBody] AdminUserWalletAdjustRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (request == null) return BadRequest(new { message = "Payload không hợp lệ." });
+            if (request.DeltaCoins == 0) return BadRequest(new { message = "DeltaCoins không được bằng 0." });
+            if (string.IsNullOrWhiteSpace(request.TargetUser))
+                return BadRequest(new { message = "TargetUser là bắt buộc." });
+
+            var targetUserId = await ResolveTargetUserIdAsync(request.TargetUser, cancellationToken);
+            if (!targetUserId.HasValue)
+                return BadRequest(new { message = "Không tìm thấy user để điều chỉnh." });
+
+            var executionStrategy = _db.Database.CreateExecutionStrategy();
+            return await executionStrategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == targetUserId.Value, cancellationToken);
+                    if (wallet == null)
+                    {
+                        wallet = new wallets
+                        {
+                            user_id = targetUserId.Value,
+                            balance_coin = 0,
+                            currency = "VND",
+                            income_balance = 0m,
+                            frozen_balance = 0m,
+                            pending_escrow_balance = 0m,
+                            updated_at = DateTime.UtcNow
+                        };
+                        _db.wallets.Add(wallet);
+                        await _db.SaveChangesAsync(cancellationToken);
+                    }
+
+                    var current = wallet.balance_coin ?? 0;
+                    var newBalance = current + request.DeltaCoins;
+                    if (newBalance < 0)
+                        return (IActionResult)BadRequest(new { message = "Số dư không đủ để trừ.", currentBalance = current });
+
+                    wallet.balance_coin = newBalance;
+                    wallet.updated_at = DateTime.UtcNow;
+                    _db.wallets.Update(wallet);
+
+                    var sign = request.DeltaCoins >= 0 ? "ADD" : "SUB";
+                    var notePart = string.Empty;
+                    if (!string.IsNullOrWhiteSpace(request.Note))
+                    {
+                        notePart = request.Note.Trim();
+                        if (notePart.Length > 16) notePart = notePart.Substring(0, 16);
+                    }
+
+                    _db.purchases.Add(new purchases
+                    {
+                        id = Guid.NewGuid(),
+                        user_id = targetUserId.Value,
+                        story_id = null,
+                        chapter_id = null,
+                        price_paid = Math.Abs(request.DeltaCoins),
+                        purchase_type = UserWalletAdjustPurchaseType,
+                        escrow_status = sign + (string.IsNullOrWhiteSpace(notePart) ? string.Empty : (":" + notePart)),
+                        released_at = DateTime.UtcNow,
+                        platform_fee_ratio = null,
+                        created_at = DateTime.UtcNow
+                    });
+
+                    await _db.SaveChangesAsync(cancellationToken);
+                    await tx.CommitAsync(cancellationToken);
+
+                    return (IActionResult)Ok(new
+                    {
+                        userId = targetUserId.Value,
+                        balanceCoin = newBalance,
+                        updatedAt = wallet.updated_at
+                    });
+                }
+                catch
+                {
+                    try { await tx.RollbackAsync(cancellationToken); } catch { /* ignore */ }
+                    throw;
+                }
+            });
+        }
+
+        /// <summary>History điều chỉnh ví người dùng.</summary>
+        [HttpGet("user-adjustments")]
+        public async Task<IActionResult> GetUserWalletAdjustments(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] DateTime? dateFrom = null,
+            [FromQuery] DateTime? dateTo = null,
+            [FromQuery] string? type = null, // ALL | ADD | SUB
+            [FromQuery] string? q = null,    // search in note (escrow_status)
+            CancellationToken cancellationToken = default)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 50);
+
+            type = string.IsNullOrWhiteSpace(type) ? null : type.Trim();
+            q = string.IsNullOrWhiteSpace(q) ? null : q.Trim();
+
+            var fromDate = dateFrom?.Date;
+            var toExclusive = dateTo?.Date.AddDays(1);
+
+            var query = _db.purchases.AsNoTracking()
+                .Where(p => p.purchase_type == UserWalletAdjustPurchaseType);
+
+            if (fromDate.HasValue)
+                query = query.Where(p => (p.released_at ?? p.created_at) >= fromDate.Value);
+            if (toExclusive.HasValue)
+                query = query.Where(p => (p.released_at ?? p.created_at) < toExclusive.Value);
+
+            if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "ALL", StringComparison.OrdinalIgnoreCase))
+            {
+                var t = type.ToUpperInvariant();
+                if (t == "ADD")
+                    query = query.Where(p => ((p.escrow_status ?? string.Empty).ToUpper()).StartsWith("ADD"));
+                else if (t == "SUB")
+                    query = query.Where(p => ((p.escrow_status ?? string.Empty).ToUpper()).StartsWith("SUB"));
+            }
+
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                var qUpper = q.ToUpperInvariant();
+                query = query.Where(p => ((p.escrow_status ?? string.Empty).ToUpper()).Contains(qUpper));
+            }
+
+            var total = await query.CountAsync(cancellationToken);
+
+            var rawItems = await query
+                .OrderByDescending(p => p.released_at ?? p.created_at)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(p => new
+                {
+                    PurchaseId = p.id,
+                    AdjustedAt = p.released_at ?? p.created_at,
+                    PricePaid = p.price_paid,
+                    EscrowStatus = p.escrow_status,
+                    UserId = p.user_id
+                })
+                .ToListAsync(cancellationToken);
+
+            var items = rawItems.Select(x =>
+            {
+                var escrow = x.EscrowStatus ?? string.Empty;
+                var escrowUpper = escrow.ToUpperInvariant();
+                var isSub = escrowUpper.StartsWith("SUB");
+                var delta = isSub ? -x.PricePaid : x.PricePaid;
+
+                string? note = null;
+                var idx = escrow.IndexOf(':');
+                if (idx >= 0 && idx < escrow.Length - 1)
+                    note = escrow.Substring(idx + 1);
+
+                return new
+                {
+                    PurchaseId = x.PurchaseId,
+                    AdjustedAt = x.AdjustedAt,
+                    DeltaCoins = delta,
+                    UserId = x.UserId,
+                    Note = note ?? string.Empty
+                };
+            }).ToList();
+
+            return Ok(new
+            {
+                totalCount = total,
+                page = page,
+                pageSize = pageSize,
+                items = items
+            });
+        }
+
+        /// <summary>
+        /// Ledger hoạt động tiền (admin):
+        /// - CHAPTER_UNLOCK: platform nhận 30%, buyer trả tiền, author nhận net vào income_balance
+        /// - PLATFORM_WALLET_ADJ: điều chỉnh ví hệ thống
+        /// - withdraw_requests: create/approve/reject (income_balance & frozen_balance)
+        /// </summary>
+        [HttpGet("system-coin-ledger")]
+        public async Task<IActionResult> GetSystemCoinLedger(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] DateTime? dateFrom = null,
+            [FromQuery] DateTime? dateTo = null, // inclusive date
+            [FromQuery] string? type = null, // ALL | UNLOCK | PLATFORM_ADJ | WITHDRAW_REQUESTED | WITHDRAW_APPROVED | WITHDRAW_REJECTED
+            CancellationToken cancellationToken = default)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 50);
+
+            var fromDate = dateFrom?.Date;
+            var toExclusive = dateTo?.Date.AddDays(1);
+
+            type = string.IsNullOrWhiteSpace(type) ? "ALL" : type.Trim();
+            var t = type.ToUpperInvariant();
+            bool acceptAll = t == "ALL";
+
+            var parts = new List<IQueryable<SystemCoinLedgerItemDto>>();
+
+            if (acceptAll || t == "UNLOCK")
+            {
+                var unlockQ =
+                    from p in _db.purchases.AsNoTracking()
+                    where p.purchase_type == "CHAPTER_UNLOCK"
+                        && p.chapter_id != null
+                        && p.story_id != null
+                    join c in _db.chapters.AsNoTracking() on p.chapter_id equals c.id
+                    join s in _db.stories.AsNoTracking() on p.story_id equals s.id
+                    where (fromDate == null || (p.released_at ?? p.created_at) >= fromDate.Value)
+                        && (toExclusive == null || (p.released_at ?? p.created_at) < toExclusive.Value)
+                    select new SystemCoinLedgerItemDto
+                    {
+                        EventType = "UNLOCK",
+                        EventTime = p.released_at ?? p.created_at ?? DateTime.MinValue,
+                        // Must match ChaptersController.UnlockPaidChapter:
+                        // platformFee = (int)Math.Floor(coinPrice * 0.30m) => platform gets whole coins.
+                        PlatformDeltaCoins = (decimal)Math.Floor(p.price_paid * 0.30m),
+                        BuyerDeltaCoins = -(decimal)p.price_paid,
+                        AuthorIncomeDeltaCoins = (decimal)(p.price_paid - Math.Floor(p.price_paid * 0.30m)),
+                        AuthorFrozenDeltaCoins = 0m,
+                        StoryId = s.id,
+                        ChapterId = c.id,
+                        StoryTitle = s.title ?? string.Empty,
+                        ChapterTitle = c.title ?? string.Empty,
+                        AdminId = null,
+                        BuyerUserId = p.user_id,
+                        AuthorUserId = s.author_id,
+                        Note = null
+                    };
+                parts.Add(unlockQ);
+            }
+
+            if (acceptAll || t == "PLATFORM_ADJ")
+            {
+                var platformAdjQ =
+                    from p in _db.purchases.AsNoTracking()
+                    where p.purchase_type == PlatformWalletAdjustPurchaseType
+                    where (fromDate == null || (p.released_at ?? p.created_at) >= fromDate.Value)
+                        && (toExclusive == null || (p.released_at ?? p.created_at) < toExclusive.Value)
+                    select new SystemCoinLedgerItemDto
+                    {
+                        EventType = "PLATFORM_ADJ",
+                        EventTime = p.released_at ?? p.created_at ?? DateTime.MinValue,
+                        PlatformDeltaCoins = ((p.escrow_status ?? string.Empty).ToUpper().StartsWith("SUB"))
+                            ? -(decimal)p.price_paid
+                            : (decimal)p.price_paid,
+                        BuyerDeltaCoins = 0m,
+                        AuthorIncomeDeltaCoins = 0m,
+                        AuthorFrozenDeltaCoins = 0m,
+                        StoryId = null,
+                        ChapterId = null,
+                        StoryTitle = string.Empty,
+                        ChapterTitle = string.Empty,
+                        AdminId = p.user_id,
+                        BuyerUserId = null,
+                        AuthorUserId = null,
+                        Note = p.escrow_status
+                    };
+                parts.Add(platformAdjQ);
+            }
+
+            if (acceptAll || t == "WITHDRAW_REQUESTED")
+            {
+                var withdrawReqQ =
+                    from w in _db.withdraw_requests.AsNoTracking()
+                    where (fromDate == null || (w.created_at ?? w.processed_at) >= fromDate.Value)
+                        && (toExclusive == null || (w.created_at ?? w.processed_at) < toExclusive.Value)
+                    select new SystemCoinLedgerItemDto
+                    {
+                        EventType = "WITHDRAW_REQUESTED",
+                        EventTime = w.created_at ?? w.processed_at ?? DateTime.MinValue,
+                        PlatformDeltaCoins = 0m,
+                        BuyerDeltaCoins = 0m,
+                        AuthorIncomeDeltaCoins = -w.amount_requested,
+                        AuthorFrozenDeltaCoins = w.amount_requested,
+                        StoryId = null,
+                        ChapterId = null,
+                        StoryTitle = string.Empty,
+                        ChapterTitle = string.Empty,
+                        AdminId = null,
+                        BuyerUserId = null,
+                        AuthorUserId = w.author_id,
+                        // admin_note chỉ được set khi admin approve/reject, nên giữ "requested" event không bị dính note sau này
+                        Note = null
+                    };
+                parts.Add(withdrawReqQ);
+            }
+
+            if (acceptAll || t == "WITHDRAW_APPROVED" || t == "WITHDRAW_REJECTED")
+            {
+                var withdrawProcessedQ =
+                    from w in _db.withdraw_requests.AsNoTracking()
+                    where w.processed_at != null
+                        && (fromDate == null || w.processed_at >= fromDate.Value)
+                        && (toExclusive == null || w.processed_at < toExclusive.Value)
+                    select new SystemCoinLedgerItemDto
+                    {
+                        EventType = w.status == "SUCCESS" ? "WITHDRAW_APPROVED" : "WITHDRAW_REJECTED",
+                        EventTime = w.processed_at!.Value,
+                        PlatformDeltaCoins = 0m,
+                        BuyerDeltaCoins = 0m,
+                        AuthorIncomeDeltaCoins = w.status == "SUCCESS" ? 0m : w.amount_requested,
+                        AuthorFrozenDeltaCoins = -w.amount_requested,
+                        StoryId = null,
+                        ChapterId = null,
+                        StoryTitle = string.Empty,
+                        ChapterTitle = string.Empty,
+                        AdminId = w.processed_by,
+                        BuyerUserId = null,
+                        AuthorUserId = w.author_id,
+                        Note = w.admin_note
+                    };
+                // Optional narrowing if user picked only one of APPROVED/REJECTED.
+                if (!acceptAll)
+                {
+                    if (t == "WITHDRAW_APPROVED") parts.Add(withdrawProcessedQ.Where(x => x.EventType == "WITHDRAW_APPROVED"));
+                    else if (t == "WITHDRAW_REJECTED") parts.Add(withdrawProcessedQ.Where(x => x.EventType == "WITHDRAW_REJECTED"));
+                    else parts.Add(withdrawProcessedQ);
+                }
+                else parts.Add(withdrawProcessedQ);
+            }
+
+            IQueryable<SystemCoinLedgerItemDto> events;
+            if (parts.Count == 0)
+            {
+                events = _db.purchases.AsNoTracking().Where(p => false).Select(p => new SystemCoinLedgerItemDto());
+            }
+            else
+            {
+                events = parts[0];
+                for (int i = 1; i < parts.Count; i++)
+                {
+                    events = events.Concat(parts[i]);
+                }
+            }
+
+            var total = await events.CountAsync(cancellationToken);
+            var items = await events
+                .OrderByDescending(e => e.EventTime)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync(cancellationToken);
+
+            return Ok(new
+            {
+                totalCount = total,
+                page = page,
+                pageSize = pageSize,
+                items
+            });
+        }
+
+        private sealed class SystemCoinLedgerItemDto
+        {
+            public string EventType { get; set; } = null!;
+            public DateTime EventTime { get; set; }
+            public decimal PlatformDeltaCoins { get; set; }
+            public decimal BuyerDeltaCoins { get; set; }
+            public decimal AuthorIncomeDeltaCoins { get; set; }
+            public decimal AuthorFrozenDeltaCoins { get; set; }
+            public Guid? StoryId { get; set; }
+            public Guid? ChapterId { get; set; }
+            public string StoryTitle { get; set; } = string.Empty;
+            public string ChapterTitle { get; set; } = string.Empty;
+            public Guid? AdminId { get; set; }
+            public Guid? BuyerUserId { get; set; }
+            public Guid? AuthorUserId { get; set; }
+            public string? Note { get; set; }
         }
 
         /// <summary>Top tác giả theo thu nhập (coin) dựa trên author_income_logs.</summary>
