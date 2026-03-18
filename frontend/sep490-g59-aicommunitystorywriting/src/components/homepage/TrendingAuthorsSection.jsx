@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { TrendingUp, Flame, CheckCircle, UserPlus, UserMinus } from 'lucide-react';
 import { getStories } from '../../api/story/storyApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
-import { getAuthorFollowing, followAuthor, unfollowAuthor, getAuthorFollowersCount } from '../../api/author/authorApi';
+import { getAuthorFollowing, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -134,23 +134,17 @@ export function TrendingAuthorsSection() {
         const topAuthors = authorList.slice(0, 3);
 
         const profiles = await Promise.all(topAuthors.map((a) => getProfileByUserId(a.authorId).catch(() => null)));
-        const followersCounts = await Promise.all(
-          topAuthors.map((a) => getAuthorFollowersCount(a.authorId).catch(() => ({ followersCount: 0 })))
-        );
         const profileMap = {};
         topAuthors.forEach((a, idx) => {
           profileMap[a.authorId] = profiles[idx];
-        });
-        const followersCountMap = {};
-        topAuthors.forEach((a, idx) => {
-          followersCountMap[a.authorId] = followersCounts[idx]?.followersCount ?? 0;
         });
 
         const overallMaxViews = Math.max(...authorList.map((x) => x.views ?? 0), 1);
 
         const mapped = topAuthors.map((a, idx) => {
           const profile = profileMap[a.authorId];
-          const followersNum = Number(followersCountMap[a.authorId] ?? 0) || 0;
+          const followersRaw = profile?.stats?.totalReads ?? 0;
+          const followersNum = profile ? Number(followersRaw) || 0 : 0;
           const followers = profile ? formatCompactNumber(followersNum) : '-';
           const verified = Boolean(profile?.isVerified);
 

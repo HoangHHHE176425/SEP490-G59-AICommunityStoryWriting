@@ -12,14 +12,24 @@ import { Link, useLocation } from 'react-router-dom';
 import * as coinApi from '../../api/coins/coinApi';
 
 export default function Profile() {
-    const { user } = useAuth();
+    const { user, role } = useAuth();
     const location = useLocation();
     const [activeTab, setActiveTab] = useState('info');
-    const [walletCoins, setWalletCoins] = useState(null);
+    const [walletBalanceCoin, setWalletBalanceCoin] = useState(null);
+    const [walletIncomeBalance, setWalletIncomeBalance] = useState(null);
 
     const profileData = user;
     const coinsFallback = profileData?.stats?.currentCoins ?? 0;
-    const displayedCoins = walletCoins ?? coinsFallback;
+
+    const roleUpper = (role ?? '').toString().toUpperCase();
+    const isAuthor = roleUpper === 'AUTHOR' || user?.isAuthor === true;
+
+    const displayedCoins =
+        walletBalanceCoin !== null
+            ? isAuthor
+                ? (walletBalanceCoin ?? 0) + (walletIncomeBalance ?? 0)
+                : walletBalanceCoin
+            : coinsFallback;
 
     const tabs = [
         { id: 'info', label: 'Thông tin', icon: User },
@@ -43,12 +53,16 @@ export default function Profile() {
 
         const loadWallet = async () => {
             if (!profileData?.id) {
-                setWalletCoins(null);
+                    setWalletBalanceCoin(null);
+                    setWalletIncomeBalance(null);
                 return;
             }
             const res = await coinApi.getMyWallet();
             if (cancelled) return;
-            if (res?.success) setWalletCoins(res?.data?.balanceCoin ?? 0);
+                if (res?.success) {
+                    setWalletBalanceCoin(res?.data?.balanceCoin ?? 0);
+                    setWalletIncomeBalance(Number(res?.data?.incomeBalance ?? 0) || 0);
+                }
         };
 
         loadWallet().catch(() => {

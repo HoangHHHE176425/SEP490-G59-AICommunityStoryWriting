@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { UserPlus, UserMinus, Gift, BookOpen, Quote, Eye, Star, Compass } from 'lucide-react';
+import { UserPlus, UserMinus, Gift, BookOpen, Quote, Eye, Star, Compass, CheckCircle } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getProfileByUserId } from '../../api/account/accountApi';
@@ -30,6 +30,8 @@ export function AuthorDetail() {
     const [isFollowing, setIsFollowing] = useState(false);
     const [followLoading, setFollowLoading] = useState(false);
     const [followError, setFollowError] = useState(null);
+    const [followerCount, setFollowerCount] = useState(0);
+    const [recommendationCount, setRecommendationCount] = useState(0);
 
     const loadData = useCallback(async () => {
         if (!authorId) {
@@ -79,9 +81,14 @@ export function AuthorDetail() {
             if (isFollowing) {
                 await unfollowAuthor(authorId);
                 setIsFollowing(false);
+                // FE update số liệu hiển thị ngay để user thấy phản hồi tức thì.
+                setFollowerCount((c) => Math.max(0, Number(c) - 1));
+                setRecommendationCount((c) => Math.max(0, Number(c) - 1));
             } else {
                 await followAuthor(authorId);
                 setIsFollowing(true);
+                setFollowerCount((c) => Math.max(0, Number(c) + 1));
+                setRecommendationCount((c) => Math.max(0, Number(c) + 1));
             }
             const p = await getProfileByUserId(authorId);
             setProfile(p);
@@ -93,14 +100,27 @@ export function AuthorDetail() {
         }
     }, [authorId, isFollowing, followLoading]);
 
+    useEffect(() => {
+        if (!profile?.stats) return;
+        // Nếu backend có trả đúng `followers`/`recommendations` thì ưu tiên set theo BE.
+        if (typeof profile.stats.followers === 'number') setFollowerCount(profile.stats.followers);
+        if (typeof profile.stats.recommendations === 'number') setRecommendationCount(profile.stats.recommendations);
+    }, [profile]);
+
+    useEffect(() => {
+        if (!profile?.stats) return;
+        // Nếu BE chưa cung cấp `followers/recommendations`, FE chỉ có thể hiển thị "tình trạng follow của current user".
+        if (typeof profile.stats.followers !== 'number') setFollowerCount(isFollowing ? 1 : 0);
+        if (typeof profile.stats.recommendations !== 'number') setRecommendationCount(isFollowing ? 1 : 0);
+    }, [isFollowing, profile]);
+
     const displayName = profile?.displayName ?? 'Tác giả';
     const avatarUrl = profile?.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '';
     const joinDate = formatJoinDate(profile?.joinDate);
     const totalReads = profile?.stats?.totalReads ?? 0;
     const storiesWritten = profile?.stats?.storiesWritten ?? stories.length ?? 0;
     const likes = profile?.stats?.likes ?? 0;
-    const followers = profile?.stats?.followers ?? 0;
-    const recommendations = profile?.stats?.recommendations ?? 0;
+    // `followers/recommendations` có thể chưa có trong BE hiện tại => hiển thị từ state FE (được cập nhật khi follow/unfollow).
 
     return (
         <div className="min-h-screen bg-slate-50">
@@ -122,122 +142,151 @@ export function AuthorDetail() {
                         {/* Hồ sơ tác giả (giống trang /author) */}
                         <section className="lg:col-span-4 space-y-6">
                             {/* Header thông tin + Thành tích */}
-                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-2">
-                                <div className="flex items-center gap-4 mb-6">
-                                    <div className="w-16 h-16 rounded-full bg-primary text-white flex items-center justify-center text-2xl font-bold overflow-hidden">
-                                        {avatarUrl ? (
-                                            <img
-                                                src={avatarUrl}
-                                                alt={displayName}
-                                                className="w-full h-full object-cover"
-                                            />
-                                        ) : (
-                                            displayName.charAt(0).toUpperCase()
-                                        )}
-                                    </div>
-                                    <div>
-                                        <h1 className="text-xl font-extrabold text-slate-900">
-                                            {displayName}
-                                        </h1>
-                                        {joinDate && (
-                                            <p className="text-xs text-slate-500 mt-1">
-                                                Tham gia từ {joinDate}
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
+                            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-2 overflow-hidden">
+                                <div className="h-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-primary" />
 
-                                {/* Nút Follow / Unfollow & Donate */}
-                                <div className="flex flex-wrap gap-3 mt-4">
-                                    <button
-                                        type="button"
-                                        onClick={handleFollowToggle}
-                                        disabled={followLoading}
-                                        className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold transition-all disabled:opacity-70 ${
-                                            isFollowing
-                                                ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
-                                                : 'bg-primary text-white hover:bg-primary/90 shadow-md'
-                                        }`}
-                                    >
-                                        {followLoading ? (
-                                            'Đang xử lý...'
-                                        ) : isFollowing ? (
-                                            <>
-                                                <UserMinus className="w-4 h-4" />
-                                                Bỏ theo dõi
-                                            </>
-                                        ) : (
-                                            <>
-                                                <UserPlus className="w-4 h-4" />
-                                                Theo dõi
-                                            </>
-                                        )}
-                                    </button>
-                                    <Link
-                                        to={authorId ? `/donate/${authorId}?name=${encodeURIComponent(displayName)}` : '#'}
-                                        className="flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 shadow-md transition-all"
-                                    >
-                                        <Gift className="w-4 h-4" />
-                                        Ủng hộ
-                                    </Link>
-                                </div>
-                                {followError && (
-                                    <p className="mt-2 text-sm text-red-600">{followError}</p>
-                                )}
+                                <div className="p-6">
+                                    <div className="flex items-start gap-4 mb-6">
+                                        <div className="relative w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden">
+                                            <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-emerald-400 to-primary opacity-20 blur-sm" />
+                                            <div className="relative w-full h-full rounded-full flex items-center justify-center text-2xl font-bold text-primary bg-white/40">
+                                                {avatarUrl ? (
+                                                    <img
+                                                        src={avatarUrl}
+                                                        alt={displayName}
+                                                        className="w-full h-full object-cover"
+                                                    />
+                                                ) : (
+                                                    displayName.charAt(0).toUpperCase()
+                                                )}
+                                            </div>
+                                        </div>
 
-                                {/* Thành tích */}
-                                <div className="mt-4">
-                                <div className="flex items-center gap-2 mb-6">
-                                    <span className="text-lg">🌱</span>
-                                    <h2 className="text-lg font-bold text-slate-900">Thành tích</h2>
+                                        <div className="flex-1">
+                                            <h1 className="text-xl font-extrabold text-slate-900 leading-tight">
+                                                {displayName}
+                                            </h1>
+                                            {joinDate && (
+                                                <p className="text-xs text-slate-500 mt-1">
+                                                    Tham gia từ {joinDate}
+                                                </p>
+                                            )}
+
+                                            <div className="flex flex-wrap gap-2 mt-3">
+                                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
+                                                    <span aria-hidden>🤝</span>
+                                                    <span>
+                                                        {followerCount.toLocaleString()} người theo dõi
+                                                    </span>
+                                                </span>
+                                                {profile?.isVerified && (
+                                                    <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-sky-500/10 text-sky-700 border border-sky-500/20">
+                                                        <CheckCircle className="w-4 h-4" />
+                                                        Đã xác thực
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Nút Follow / Unfollow & Donate */}
+                                    <div className="flex flex-wrap gap-3 items-center">
+                                        <button
+                                            type="button"
+                                            onClick={handleFollowToggle}
+                                            disabled={followLoading}
+                                            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-70 border ${
+                                                isFollowing
+                                                    ? 'bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                                                    : 'bg-primary/95 text-white border-primary hover:bg-primary shadow-md'
+                                            }`}
+                                        >
+                                            {followLoading ? (
+                                                'Đang xử lý...'
+                                            ) : isFollowing ? (
+                                                <>
+                                                    <UserMinus className="w-4 h-4" />
+                                                    Bỏ theo dõi
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <UserPlus className="w-4 h-4" />
+                                                    Theo dõi
+                                                </>
+                                            )}
+                                        </button>
+
+                                        <Link
+                                            to={authorId ? `/donate/${authorId}?name=${encodeURIComponent(displayName)}` : '#'}
+                                            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 shadow-md transition-all border border-amber-500/10"
+                                        >
+                                            <Gift className="w-4 h-4" />
+                                            Ủng hộ
+                                        </Link>
+                                    </div>
+
+                                    {followError && (
+                                        <p className="mt-3 text-sm text-red-600">{followError}</p>
+                                    )}
+
+                                    {/* Thành tích */}
+                                    <div className="mt-6">
+                                        <div className="flex items-center gap-2 mb-4">
+                                            <span className="text-lg">🌱</span>
+                                            <h2 className="text-lg font-bold text-slate-900">Thành tích</h2>
+                                        </div>
+
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="p-3 rounded-xl border border-slate-200 bg-gradient-to-b from-emerald-50/60 to-white hover:border-emerald-200 transition-colors">
+                                                <div className="w-11 h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-2">
+                                                    <span className="text-2xl">📚</span>
+                                                </div>
+                                                <div className="text-xl font-extrabold text-slate-900 text-center">
+                                                    {storiesWritten.toLocaleString()}
+                                                </div>
+                                                <div className="text-xs text-slate-500 mt-1 text-center">
+                                                    Truyện đã đăng
+                                                </div>
+                                            </div>
+
+                                            <div className="p-3 rounded-xl border border-slate-200 bg-gradient-to-b from-emerald-50/60 to-white hover:border-emerald-200 transition-colors">
+                                                <div className="w-11 h-11 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-2">
+                                                    <span className="text-2xl">👀</span>
+                                                </div>
+                                                <div className="text-xl font-extrabold text-slate-900 text-center">
+                                                    {totalReads.toLocaleString()}
+                                                </div>
+                                                <div className="text-xs text-slate-500 mt-1 text-center">
+                                                    Lượt đọc
+                                                </div>
+                                            </div>
+
+                                            <div className="p-3 rounded-xl border border-slate-200 bg-gradient-to-b from-teal-50/60 to-white hover:border-teal-200 transition-colors">
+                                                <div className="w-11 h-11 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center mx-auto mb-2">
+                                                    <span className="text-2xl">🤝</span>
+                                                </div>
+                                                <div className="text-xl font-extrabold text-slate-900 text-center">
+                                                    {followerCount.toLocaleString()}
+                                                </div>
+                                                <div className="text-xs text-slate-500 mt-1 text-center">
+                                                    Người theo dõi
+                                                </div>
+                                            </div>
+
+                                            <div className="p-3 rounded-xl border border-slate-200 bg-gradient-to-b from-amber-50/70 to-white hover:border-amber-200 transition-colors">
+                                                <div className="w-11 h-11 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-2">
+                                                    <span className="text-2xl">⭐</span>
+                                                </div>
+                                                <div className="text-xl font-extrabold text-slate-900 text-center">
+                                                    {recommendationCount.toLocaleString()}
+                                                </div>
+                                                <div className="text-xs text-slate-500 mt-1 text-center">
+                                                    Đề cử
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="text-center">
-                                        <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-emerald-100 flex items-center justify-center">
-                                            <span className="text-emerald-500 text-xl">📚</span>
-                                        </div>
-                                        <div className="text-xl font-bold text-slate-900">
-                                            {storiesWritten.toLocaleString()}
-                                        </div>
-                                        <div className="text-xs text-slate-500 mt-1">
-                                            Truyện đã đăng
-                                        </div>
-                                    </div>
-                                    <div className="text-center">
-                                        <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-emerald-100 flex items-center justify-center">
-                                            <span className="text-emerald-500 text-xl">👀</span>
-                                        </div>
-                                        <div className="text-xl font-bold text-slate-900">
-                                            {totalReads.toLocaleString()}
-                                        </div>
-                                        <div className="text-xs text-slate-500 mt-1">
-                                            Lượt đọc
-                                        </div>
-                                    </div>
-                                    <div className="text-center">
-                                        <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-emerald-100 flex items-center justify-center">
-                                            <span className="text-emerald-500 text-xl">🤝</span>
-                                        </div>
-                                        <div className="text-xl font-bold text-slate-900">
-                                            {followers.toLocaleString()}
-                                        </div>
-                                        <div className="text-xs text-slate-500 mt-1">
-                                            Người theo dõi
-                                        </div>
-                                    </div>
-                                    <div className="text-center">
-                                        <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-emerald-100 flex items-center justify-center">
-                                            <span className="text-emerald-500 text-xl">⭐</span>
-                                        </div>
-                                        <div className="text-xl font-bold text-slate-900">
-                                            {recommendations.toLocaleString()}
-                                        </div>
-                                        <div className="text-xs text-slate-500 mt-1">
-                                            Đề cử
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
                             </div>
 
                             {/* Thông tin cá nhân */}
@@ -300,7 +349,7 @@ export function AuthorDetail() {
                                         </div>
                                         <div className="px-3 py-1.5 rounded-full bg-white/10 border border-white/15 flex items-center gap-2">
                                             <span className="text-emerald-200 font-semibold">
-                                                {followers.toLocaleString()}
+                                                {followerCount.toLocaleString()}
                                             </span>
                                             <span className="text-emerald-50/80">người theo dõi</span>
                                         </div>

@@ -22,9 +22,12 @@ export default function Wallet() {
 
     const normalizedRole = (role ?? '').toString().trim().toUpperCase();
     const isAuthor = normalizedRole === 'AUTHOR' || user?.isAuthor === true;
-    const displayBalance = isAuthor
-        ? incomeBalance
-        : walletBalance ?? (user?.stats?.currentCoins ?? 0);
+
+    // Với AUTHOR: "tổng coin" = spendable (balanceCoin) + withdrawable (incomeBalance).
+    // Khi tác giả tạo yêu cầu rút tiền, BE sẽ chuyển income_balance -> frozen_balance,
+    // nên incomeBalance giảm tương ứng và tổng sẽ tự trừ phần bị khóa.
+    const totalAuthorCoins = Number(walletBalance ?? 0) + Number(incomeBalance ?? 0);
+    const displayBalance = isAuthor ? totalAuthorCoins : (walletBalance ?? (user?.stats?.currentCoins ?? 0));
 
     const spentPercent = useMemo(() => {
         if (totalRechargeCoins <= 0) return 0;
@@ -117,7 +120,7 @@ export default function Wallet() {
                             </div>
                             <div className="text-right">
                                 <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                                    Số dư hiện tại
+                                    {isAuthor ? 'Tổng coin' : 'Số dư hiện tại'}
                                 </p>
                                 <p className="text-2xl font-bold text-primary">
                                     {Number(displayBalance || 0).toLocaleString()} Coins

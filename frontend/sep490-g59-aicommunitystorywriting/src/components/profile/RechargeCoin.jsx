@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Coins, AlertCircle } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
 import * as coinApi from '../../api/coins/coinApi';
 
 export default function RechargeCoin() {
+    const { user, role } = useAuth();
+    const normalizedRole = (role ?? '').toString().trim().toUpperCase();
+    const isAuthor = normalizedRole === 'AUTHOR' || user?.isAuthor === true;
+
     const [packages, setPackages] = useState([]);
     const [packagesLoading, setPackagesLoading] = useState(true);
     const [selectedPackageId, setSelectedPackageId] = useState(null);
@@ -66,6 +71,18 @@ export default function RechargeCoin() {
     useEffect(() => {
         loadWallet();
     }, [loadWallet]);
+
+    // Khi donate/withdraw hoàn tất, các component khác có thể dispatch `wallet:changed`.
+    // RechargeCoin cũng cần refresh lại để hiển thị đúng số dư/tổng coin.
+    useEffect(() => {
+        const handler = () => loadWallet().catch(() => { });
+        window.addEventListener('wallet:changed', handler);
+        return () => window.removeEventListener('wallet:changed', handler);
+    }, [loadWallet]);
+
+    const displayedCoins = isAuthor
+        ? Number(wallet?.balanceCoin ?? wallet?.balance_coin ?? 0) + Number(wallet?.incomeBalance ?? wallet?.income_balance ?? 0)
+        : Number(wallet?.balanceCoin ?? wallet?.balance_coin ?? 0);
 
     useEffect(() => {
         if (!status) return;
@@ -255,9 +272,11 @@ export default function RechargeCoin() {
                 )}
 
                 <div className="p-4 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg flex items-center justify-between">
-                    <div className="text-sm font-semibold text-amber-800 dark:text-amber-200">Số dư coin</div>
+                    <div className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                        {isAuthor ? 'Tổng coin' : 'Số dư coin'}
+                    </div>
                     <div className="text-lg font-bold text-amber-800 dark:text-amber-200">
-                        {(wallet?.balanceCoin ?? 0).toLocaleString()}
+                        {Number(displayedCoins || 0).toLocaleString()}
                     </div>
                 </div>
 

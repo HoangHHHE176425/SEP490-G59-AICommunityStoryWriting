@@ -10,7 +10,7 @@ import linhVuThienHa from '../../assets/image/linh-vu-thien-ha.jpg';
 import { useNavigate } from 'react-router-dom';
 import { getStories } from '../../api/story/storyApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
-import { getAuthorFollowing, followAuthor, unfollowAuthor, getAuthorFollowersCount } from '../../api/author/authorApi';
+import { getAuthorFollowing, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
@@ -137,16 +137,9 @@ export function HeroAuthorStoriesBanner() {
         ];
 
         const profiles = await Promise.all(authorIds.map((id) => getProfileByUserId(id).catch(() => null)));
-        const followersCounts = await Promise.all(
-          authorIds.map((id) => getAuthorFollowersCount(id).catch(() => ({ followersCount: 0 })))
-        );
         const profileMap = {};
         authorIds.forEach((id, idx) => {
           profileMap[id] = profiles[idx];
-        });
-        const followersCountMap = {};
-        authorIds.forEach((id, idx) => {
-          followersCountMap[id] = followersCounts[idx]?.followersCount ?? 0;
         });
 
         const mapped = pickedStories.map((item) => {
@@ -176,7 +169,8 @@ export function HeroAuthorStoriesBanner() {
             item.TotalChapters ??
             0;
 
-          const followersNum = Number(followersCountMap[authorId] ?? 0) || 0;
+          const followersRaw = profile?.stats?.totalReads ?? 0;
+          const followersNum = profile ? Number(followersRaw) || 0 : 0;
 
           const badge = rating >= 4.8 ? 'ĐỈNH CAO' : rating >= 4.5 ? 'NỔI BẬT' : 'AWARD WINNING';
 
