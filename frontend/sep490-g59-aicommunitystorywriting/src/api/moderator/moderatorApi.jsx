@@ -74,6 +74,25 @@ export async function getModeratorReviewedStories(params = {}) {
 }
 
 /**
+ * Lịch sử phiên bản chương bị từ chối (version). Moderator chỉ thấy bản do mình từ chối; ADMIN thấy tất cả.
+ * @returns {Promise<Array<{ id, chapterId?, storyId?, storyTitle?, chapterTitle?, versionNumber, titleSnapshot?, status?, rejectionReason?, rejectedAt? }>>}
+ */
+export async function getRejectedChapterVersionsHistory() {
+    const res = await axiosInstance.get('/moderator/chapter-versions/rejected-history');
+    return Array.isArray(res.data) ? res.data : [];
+}
+
+/**
+ * Moderator xem chi tiết một version (nội dung snapshot).
+ * @param {string} chapterId - Guid chapter
+ * @param {string} versionId - Guid version
+ */
+export async function getModeratorChapterVersion(chapterId, versionId) {
+    const res = await axiosInstance.get(`/moderator/chapters/${chapterId}/versions/${versionId}`);
+    return res.data;
+}
+
+/**
  * Moderator nhận duyệt truyện (claim). 1 item chỉ 1 moderator; đã nhận thì người khác không thấy trong queue unclaimed.
  */
 export async function claimStory(storyId) {

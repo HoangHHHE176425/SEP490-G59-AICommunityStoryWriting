@@ -75,6 +75,9 @@ namespace Services.Implementations
             {
                 UserId = wallet.user_id,
                 BalanceCoin = wallet.balance_coin ?? 0,
+                IncomeBalance = wallet.income_balance ?? 0m,
+                FrozenBalance = wallet.frozen_balance ?? 0m,
+                PendingEscrowBalance = wallet.pending_escrow_balance ?? 0m,
                 Currency = wallet.currency ?? "VND",
                 UpdatedAt = AsUtc(wallet.updated_at)
             };
@@ -409,12 +412,36 @@ namespace Services.Implementations
                     throw new InvalidOperationException("Số dư coin không đủ để thực hiện ủng hộ.");
                 }
 
+                // Platform fee: 30% goes to system wallet, 70% goes to author.
+                // Use floor to avoid charging more than intended; net + fee == amount.
+                var platformFee = (int)Math.Floor(amount * 0.30m);
+                platformFee = Math.Clamp(platformFee, 0, amount);
+                var authorNet = amount - platformFee;
+
                 senderWallet.balance_coin = senderBalance - amount;
                 senderWallet.updated_at = DateTime.UtcNow;
 
-                var receiverBalance = receiverWallet.balance_coin ?? 0;
-                receiverWallet.balance_coin = receiverBalance + amount;
+                // Author receives income into income_balance (withdrawable), not spendable balance_coin.
+                var receiverIncome = receiverWallet.income_balance ?? 0m;
+                receiverWallet.income_balance = receiverIncome + authorNet;
                 receiverWallet.updated_at = DateTime.UtcNow;
+
+                // Ensure platform wallet row exists (id=1)
+                var platformWallet = await _db.platform_wallet.FirstOrDefaultAsync(w => w.id == 1, cancellationToken);
+                if (platformWallet == null)
+                {
+                    platformWallet = new platform_wallet
+                    {
+                        id = 1,
+                        balance_coin = 0,
+                        updated_at = DateTime.UtcNow
+                    };
+                    _db.platform_wallet.Add(platformWallet);
+                    await _db.SaveChangesAsync(cancellationToken);
+                }
+
+                platformWallet.balance_coin += platformFee;
+                platformWallet.updated_at = DateTime.UtcNow;
 
                 var donation = new donations
                 {
@@ -428,6 +455,21 @@ namespace Services.Implementations
                 };
 
                 _db.donations.Add(donation);
+
+                // Log author's income for analytics/withdraw flows.
+                // Top authors dashboard uses author_income_logs as the source of truth.
+                _db.author_income_logs.Add(new author_income_logs
+                {
+                    author_id = receiverUserId,
+                    source_type = "DONATE",
+                    source_id = donation.id,
+                    gross_amount = amount,
+                    platform_fee = platformFee,
+                    net_amount = authorNet,
+                    status = "AVAILABLE",
+                    created_at = DateTime.UtcNow
+                });
+
                 await _db.SaveChangesAsync(cancellationToken);
                 await tx.CommitAsync(cancellationToken);
 
@@ -455,6 +497,8 @@ namespace Services.Implementations
                     Message = message,
                     CreatedAt = donation.created_at,
                     SenderBalanceAfter = senderWallet.balance_coin ?? 0,
+                    // Keep this field as receiver's spendable coins (balance_coin) for backward compatibility.
+                    // Author's withdrawable income is in income_balance.
                     ReceiverBalanceAfter = receiverWallet.balance_coin ?? 0
                 };
             });
@@ -532,11 +576,13 @@ namespace Services.Implementations
             if (wallet == null)
                 throw new InvalidOperationException("Ví không tồn tại. Vui lòng thử lại sau.");
 
-            var balance = wallet.balance_coin ?? 0;
-            if (balance < amountCoins)
-                throw new InvalidOperationException($"Số dư không đủ. Hiện có {balance} coin, yêu cầu {amountCoins} coin.");
+            var income = wallet.income_balance ?? 0m;
+            if (income < amountCoins)
+                throw new InvalidOperationException($"Thu nhập khả dụng không đủ. Hiện có {income} coin, yêu cầu {amountCoins} coin.");
 
-            wallet.balance_coin = balance - amountCoins;
+            // Move from withdrawable income -> frozen while admin processes.
+            wallet.income_balance = income - amountCoins;
+            wallet.frozen_balance = (wallet.frozen_balance ?? 0m) + amountCoins;
             wallet.updated_at = DateTime.UtcNow;
 
             var req = new withdraw_requests

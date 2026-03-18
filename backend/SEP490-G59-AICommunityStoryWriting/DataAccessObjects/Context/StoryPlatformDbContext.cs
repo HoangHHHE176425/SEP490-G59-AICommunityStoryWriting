@@ -70,6 +70,8 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<otp_verifications> otp_verifications { get; set; }
 
+    public virtual DbSet<platform_wallet> platform_wallet { get; set; }
+
     public virtual DbSet<purchases> purchases { get; set; }
 
     public virtual DbSet<ratings> ratings { get; set; }
@@ -119,7 +121,7 @@ public partial class StoryPlatformDbContext : DbContext
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer(
-                "Server= QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                "Server= localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                     maxRetryCount: 5,
                     maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -589,6 +591,15 @@ public partial class StoryPlatformDbContext : DbContext
             entity.HasOne(d => d.user).WithMany(p => p.otp_verifications)
                 .HasForeignKey(d => d.user_id)
                 .HasConstraintName("fk_otp_user");
+        });
+
+        modelBuilder.Entity<platform_wallet>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("PK_platform_wallet");
+
+            entity.Property(e => e.id).ValueGeneratedNever();
+            entity.Property(e => e.balance_coin).HasDefaultValue(0);
+            entity.Property(e => e.updated_at).HasDefaultValueSql("(sysutcdatetime())");
         });
 
         modelBuilder.Entity<purchases>(entity =>

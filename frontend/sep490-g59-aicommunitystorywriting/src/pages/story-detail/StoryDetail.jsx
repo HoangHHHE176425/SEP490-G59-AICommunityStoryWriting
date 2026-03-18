@@ -1,5 +1,5 @@
 import { ChevronRight, Star } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import StoryHeader from '../../components/story-detail/StoryHeader';
 import { ChapterList } from '../../components/story-detail/ChapterList';
@@ -99,6 +99,9 @@ export function StoryDetail() {
                     const totalChapters = rawItems.length;
                     const authorId = storyRes?.authorId ?? storyRes?.AuthorId;
                     setIsFollowing(!!(storyRes?.userIsFollowing ?? storyRes?.UserIsFollowing));
+                    const progressStatusRaw = (storyRes?.storyProgressStatus ?? storyRes?.StoryProgressStatus ?? 'ONGOING')?.toString?.() ?? 'ONGOING';
+                    const progressUpper = String(progressStatusRaw).toUpperCase();
+                    const progressLabel = progressUpper === 'COMPLETED' ? 'Hoàn thành' : progressUpper === 'HIATUS' ? 'Tạm dừng' : 'Đang ra';
                     const storyPayload = {
                         id: storyRes?.id ?? storyRes?.Id,
                         title: storyRes?.title ?? storyRes?.Title ?? 'Không có tiêu đề',
@@ -111,7 +114,11 @@ export function StoryDetail() {
                         },
                         cover: coverPath ? resolveBackendUrl(coverPath) : '',
                         genre: genreArr.length ? genreArr : ['Chưa phân loại'],
-                        status: 'Đang cập nhật',
+                        // Trạng thái tiến độ truyện: Đang ra / Tạm dừng / Hoàn thành
+                        storyProgressStatus: progressUpper,
+                        storyProgressLabel: progressLabel,
+                        // Nhãn cập nhật (UI): tách riêng khỏi trạng thái tiến độ
+                        updateLabel: 'Đang cập nhật',
                         rating: Number(storyRes?.avgRating ?? storyRes?.AvgRating ?? 0) || 0,
                         totalRatings: Number(storyRes?.totalRatings ?? storyRes?.TotalRatings ?? 0) || 0,
                         views: totalViews,
@@ -182,28 +189,55 @@ export function StoryDetail() {
         };
     }, [storyId, viewerKey]);
 
-    const loadComments = useCallback(() => {
+    const loadComments = useCallback((options = {}) => {
         if (!storyId) return;
-        setCommentsLoading(true);
-        setCommentError(null);
+        const silent = options.silent === true;
+        if (!silent) {
+            setCommentsLoading(true);
+            setCommentError(null);
+        }
         getStoryComments(storyId)
             .then((list) => setComments(Array.isArray(list) ? list : []))
-            .catch((err) => setCommentError(err?.response?.data?.message ?? 'Không tải được bình luận.'))
-            .finally(() => setCommentsLoading(false));
+            .catch((err) => { if (!silent) setCommentError(err?.response?.data?.message ?? 'Không tải được bình luận.'); })
+            .finally(() => { if (!silent) setCommentsLoading(false); });
     }, [storyId]);
 
     useEffect(() => {
         if (storyId && activeTab === 'comments') loadComments();
     }, [storyId, activeTab, loadComments]);
 
+    // Load comment count sớm (silent) để tab hiển thị đúng số trước khi user click vào.
+    useEffect(() => {
+        if (storyId) loadComments({ silent: true });
+    }, [storyId, loadComments]);
+
     const loadReviews = useCallback(() => {
         if (!storyId) return;
         setReviewsLoading(true);
         getStoryRatings(storyId)
-            .then((list) => setReviews(Array.isArray(list) ? list : []))
-            .catch(() => setReviews([]))
+            .then((list) => {
+                const arr = Array.isArray(list) ? list : [];
+                setReviews(arr);
+                // Đồng bộ số đánh giá ở header (API story đôi khi trả TotalRatings không khớp)
+                setStory((prev) => (prev ? { ...prev, totalRatings: arr.length } : prev));
+            })
+            .catch(() => {
+                setReviews([]);
+                setStory((prev) => (prev ? { ...prev, totalRatings: 0 } : prev));
+            })
             .finally(() => setReviewsLoading(false));
     }, [storyId]);
+
+    // Mỗi user chỉ được đánh giá 1 lần; BE cũng chặn. Dùng để ẩn nút "Đánh giá" và chặn mở modal.
+    const { hasUserRated, userRatingStars } = useMemo(() => {
+        const uid = user?.id;
+        if (!uid) return { hasUserRated: false, userRatingStars: null };
+        const mine = reviews.find((r) => String(r.userId ?? r.UserId ?? '') === String(uid));
+        return {
+            hasUserRated: !!mine,
+            userRatingStars: mine != null ? Number(mine.starValue ?? mine.StarValue ?? 0) : null,
+        };
+    }, [user?.id, reviews]);
 
     // Load đánh giá ngay khi có storyId để tab hiển thị đúng số (0) trước khi user click tab
     useEffect(() => {
@@ -220,7 +254,6 @@ export function StoryDetail() {
         try {
             await addStoryComment(storyId, { content: content.trim(), parentId: parentId || undefined });
             loadComments();
-            setStory((prev) => (prev ? { ...prev, comments: (prev.comments ?? 0) + 1 } : prev));
             showToast('Đã gửi bình luận.', 'success');
         } catch (err) {
             const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể gửi bình luận.';
@@ -300,6 +333,11 @@ export function StoryDetail() {
                 setRatingError('Vui lòng đăng nhập để đánh giá.');
             } else {
                 setRatingError(msg);
+                // BE trả lỗi "đã đánh giá" khi user đánh giá lần 2 → đồng bộ lại danh sách để UI hiển thị "Bạn đã đánh giá"
+                if (msg && (msg.includes('đã đánh giá') || msg.includes('đánh giá lại'))) {
+                    setIsRatingModalOpen(false);
+                    loadReviews();
+                }
             }
         } finally {
             setRatingSubmitting(false);
@@ -307,6 +345,7 @@ export function StoryDetail() {
     };
 
     const handleOpenRating = () => {
+        if (hasUserRated) return; // Mỗi user chỉ được đánh giá 1 lần
         setRatingError(null);
         setIsRatingModalOpen(true);
     };
@@ -391,6 +430,8 @@ export function StoryDetail() {
                             isFollowing={isFollowing}
                             onToggleFollow={handleToggleFollow}
                             onOpenRating={handleOpenRating}
+                            hasUserRated={hasUserRated}
+                            userRatingStars={userRatingStars}
                             onOpenReport={() => setIsReportStoryModalOpen(true)}
                             onReadStory={() => {
                                 const first = chapters[0];
@@ -422,7 +463,7 @@ export function StoryDetail() {
                                             : 'border-transparent text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                                             }`}
                                     >
-                                        Bình luận ({story.comments.toLocaleString()})
+                                        Bình luận ({comments.length.toLocaleString()})
                                     </button>
                                     <button
                                         onClick={() => setActiveTab('reviews')}
