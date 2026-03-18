@@ -3,7 +3,7 @@ import { PublicationList } from '../../../components/admin/publication/Publicati
 import { PublicationDetailModal } from '../../../components/admin/publication/PublicationDetailModal';
 import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories, getStoryById } from '../../../api/story/storyApi';
-import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, claimStory, claimChapter } from '../../../api/moderator/moderatorApi';
+import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, getRejectedChapterVersionsHistory, claimStory, claimChapter } from '../../../api/moderator/moderatorApi';
 import { getProfileByUserId } from '../../../api/account/accountApi';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
@@ -155,6 +155,35 @@ function mapReviewedChapterToItem(c) {
         wordCount: c.wordCount ?? c.WordCount ?? 0,
         rejectionReason: c.rejectionReason ?? c.RejectionReason ?? null,
         rejectedAt: c.rejectedAt ?? c.RejectedAt ?? null,
+    };
+}
+
+/** Map version bị từ chối (history) sang format dùng chung (type chapter). */
+function mapRejectedVersionToItem(v) {
+    const id = v.id ?? v.Id;
+    const chapterId = v.chapterId ?? v.ChapterId;
+    const storyId = v.storyId ?? v.StoryId;
+    const versionNumber = Number(v.versionNumber ?? v.VersionNumber ?? 0) || 0;
+    const chapterTitle = v.chapterTitle ?? v.ChapterTitle ?? '';
+    const titleSnapshot = v.titleSnapshot ?? v.TitleSnapshot ?? '';
+    const label = versionNumber > 0 ? `Phiên bản #${versionNumber}` : 'Phiên bản';
+    return {
+        id,
+        chapterId: chapterId ?? id,
+        versionId: id,
+        versionNumber,
+        storyId,
+        type: 'chapter',
+        storyTitle: v.storyTitle ?? v.StoryTitle ?? '',
+        storyCover: '',
+        chapterTitle: `${chapterTitle}${chapterTitle ? ' — ' : ''}${label}${titleSnapshot ? `: ${titleSnapshot}` : ''}`,
+        orderIndex: v.chapterOrderIndex ?? v.ChapterOrderIndex ?? 0,
+        status: 'rejected',
+        submittedAt: null,
+        wordCount: v.wordCount ?? v.WordCount ?? 0,
+        rejectionReason: v.rejectionReason ?? v.RejectionReason ?? null,
+        rejectedAt: v.rejectedAt ?? v.RejectedAt ?? null,
+        isVersionHistory: true,
     };
 }
 
@@ -387,20 +416,22 @@ export function PublicationManagement() {
             .finally(() => setApprovedCacheLoading(false));
     }, []);
 
-    /** Preload Từ chối: truyện REJECTED + chương REJECTED (gộp theo truyện), cập nhật rejectedCache và stats. */
+    /** Preload Từ chối: truyện REJECTED + chương REJECTED + version REJECTED (gộp theo truyện), cập nhật rejectedCache và stats. */
     const loadRejectedCache = useCallback(() => {
         setRejectedCacheLoading(true);
         Promise.all([
             getModeratorReviewedStories({ status: 'REJECTED', pageSize: 500, sortBy: 'updated_at', sortOrder: 'desc' }),
             getModeratorReviewedChapters({ status: 'REJECTED', pageSize: 500, sortBy: 'updated_at', sortOrder: 'desc' }),
+            getRejectedChapterVersionsHistory(),
         ])
-            .then(([storiesRes, chaptersRes]) => {
+            .then(([storiesRes, chaptersRes, versionsRes]) => {
                 const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
                 const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
                 const storyPubs = Array.isArray(storyItems) ? storyItems.map(mapStoryToPublication) : [];
                 const chapterList = Array.isArray(chapterItems) ? chapterItems.map(mapReviewedChapterToItem) : [];
+                const versionList = Array.isArray(versionsRes) ? versionsRes.map(mapRejectedVersionToItem) : [];
                 const byStory = new Map();
-                for (const ch of chapterList) {
+                for (const ch of [...chapterList, ...versionList]) {
                     const sid = ch.storyId;
                     if (!sid) continue;
                     if (!byStory.has(sid)) byStory.set(sid, { storyId: sid, storyTitle: ch.storyTitle, storyCover: '', author: null, categories: [], chapters: [] });
@@ -591,14 +622,16 @@ export function PublicationManagement() {
             Promise.all([
                 getModeratorReviewedStories({ status: statusParam, pageSize: 500, sortBy: 'updated_at', sortOrder: 'desc' }),
                 getModeratorReviewedChapters({ status: statusParam, pageSize: 500, sortBy: 'updated_at', sortOrder: 'desc' }),
+                getRejectedChapterVersionsHistory(),
             ])
-                .then(([storiesRes, chaptersRes]) => {
+                .then(([storiesRes, chaptersRes, versionsRes]) => {
                     const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
                     const chapterItems = chaptersRes?.items ?? chaptersRes?.Items ?? [];
                     const storyPubs = Array.isArray(storyItems) ? storyItems.map(mapStoryToPublication) : [];
                     const chapterList = Array.isArray(chapterItems) ? chapterItems.map(mapReviewedChapterToItem) : [];
+                    const versionList = Array.isArray(versionsRes) ? versionsRes.map(mapRejectedVersionToItem) : [];
                     const byStory = new Map();
-                    for (const ch of chapterList) {
+                    for (const ch of [...chapterList, ...versionList]) {
                         const sid = ch.storyId;
                         if (!sid) continue;
                         if (!byStory.has(sid)) byStory.set(sid, { storyId: sid, storyTitle: ch.storyTitle, storyCover: '', author: null, categories: [], chapters: [] });

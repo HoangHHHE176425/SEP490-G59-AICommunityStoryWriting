@@ -238,7 +238,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
         return () => { cancelled = true; };
     }, [chapterIdsKey]);
 
-    /** Khi tab được focus lại (vd: duyệt version ở tab khác rồi chuyển về tab này), refetch list version để version đã duyệt biến mất ngay. */
+    /** Khi tab được focus lại (vd: duyệt version ở tab khác rồi chuyển về tab này), refetch list version để cập nhật trạng thái (version đã duyệt vẫn hiển thị). */
     useEffect(() => {
         const onVisibilityChange = () => {
             if (document.visibilityState === 'visible' && expandedChapterId) {
@@ -1145,22 +1145,22 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                     )}
                                                                                     <button
                                                                                         type="button"
-                                                                                        onClick={(e) => { e.stopPropagation(); if (vStatusLower !== 'pending_review') onEditVersion?.(chapter, v); }}
-                                                                                        title={vStatusLower === 'pending_review' ? 'Phiên bản đang chờ duyệt, không thể chỉnh sửa' : 'Chỉnh sửa phiên bản'}
-                                                                                        disabled={vStatusLower === 'pending_review'}
+                                                                                        onClick={(e) => { e.stopPropagation(); if (vStatusLower !== 'pending_review' && vStatusLower !== 'published') onEditVersion?.(chapter, v); }}
+                                                                                        title={vStatusLower === 'pending_review' ? 'Phiên bản đang chờ duyệt, không thể chỉnh sửa' : vStatusLower === 'published' ? 'Phiên bản đã xuất bản, không thể chỉnh sửa' : 'Chỉnh sửa phiên bản'}
+                                                                                        disabled={vStatusLower === 'pending_review' || vStatusLower === 'published'}
                                                                                         style={{
                                                                                             display: 'inline-flex',
                                                                                             alignItems: 'center',
                                                                                             gap: '0.25rem',
                                                                                             padding: '0.4rem 0.75rem',
-                                                                                            backgroundColor: vStatusLower === 'pending_review' ? '#f1f5f9' : '#f0fdf4',
-                                                                                            border: `1px solid ${vStatusLower === 'pending_review' ? '#e2e8f0' : '#86efac'}`,
+                                                                                            backgroundColor: (vStatusLower === 'pending_review' || vStatusLower === 'published') ? '#f1f5f9' : '#f0fdf4',
+                                                                                            border: `1px solid ${(vStatusLower === 'pending_review' || vStatusLower === 'published') ? '#e2e8f0' : '#86efac'}`,
                                                                                             borderRadius: '9999px',
                                                                                             fontSize: '0.75rem',
                                                                                             fontWeight: 600,
-                                                                                            color: vStatusLower === 'pending_review' ? '#94a3b8' : '#15803d',
-                                                                                            cursor: vStatusLower === 'pending_review' ? 'not-allowed' : 'pointer',
-                                                                                            opacity: vStatusLower === 'pending_review' ? 0.8 : 1,
+                                                                                            color: (vStatusLower === 'pending_review' || vStatusLower === 'published') ? '#94a3b8' : '#15803d',
+                                                                                            cursor: (vStatusLower === 'pending_review' || vStatusLower === 'published') ? 'not-allowed' : 'pointer',
+                                                                                            opacity: (vStatusLower === 'pending_review' || vStatusLower === 'published') ? 0.8 : 1,
                                                                                             whiteSpace: 'nowrap',
                                                                                             transition: 'all 0.2s'
                                                                                         }}

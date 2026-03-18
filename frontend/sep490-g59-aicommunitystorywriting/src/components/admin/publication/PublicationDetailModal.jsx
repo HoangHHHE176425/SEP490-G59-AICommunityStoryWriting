@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar } from 'lucide-react';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
-import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters } from '../../../api/moderator/moderatorApi';
+import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion } from '../../../api/moderator/moderatorApi';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { useToast } from '../../author/story-editor/Toast';
 
@@ -24,12 +24,19 @@ function mapChapterItem(item) {
 
 /** Map chương từ story_group (tab Từ chối: publication.chapters) sang format modal */
 function mapStoryGroupChapterToModal(ch) {
+    const isVersion = !!(ch.isVersionHistory || ch.versionId);
     const orderIndex = ch.orderIndex ?? 0;
     return {
-        id: ch.id ?? ch.chapterId,
+        // Với version history: id = versionId (để load detail version); vẫn giữ chapterId riêng.
+        id: isVersion ? (ch.versionId ?? ch.id) : (ch.id ?? ch.chapterId),
+        chapterId: ch.chapterId ?? ch.id ?? null,
+        versionId: ch.versionId ?? null,
+        versionNumber: ch.versionNumber ?? null,
+        isVersionHistory: isVersion,
         orderIndex,
-        chapterNumber: orderIndex + 1,
+        chapterNumber: isVersion ? (orderIndex ? orderIndex + 1 : null) : (orderIndex + 1),
         title: ch.chapterTitle ?? '',
+        titleSnapshot: ch.titleSnapshot ?? null,
         content: null,
         wordCount: ch.wordCount ?? 0,
         status: ch.status ?? 'rejected',
@@ -160,7 +167,14 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             setChapterReviewContent({});
             // Tab Đã duyệt / Từ chối: item là story_group có sẵn danh sách chương (đã duyệt hoặc bị từ chối) — chỉ hiển thị các chương đó, không gọi API lấy hết chương.
             if (publication?.type === 'story_group' && Array.isArray(publication?.chapters) && publication.chapters.length > 0) {
-                const mapped = publication.chapters.map(mapStoryGroupChapterToModal);
+                const mapped = publication.chapters
+                    .map(mapStoryGroupChapterToModal)
+                    // Sidebar lịch sử từ chối: mới nhất → cũ nhất theo thời điểm bị từ chối
+                    .sort((a, b) => {
+                        const ta = a?.rejectedAt ? new Date(a.rejectedAt).getTime() : 0;
+                        const tb = b?.rejectedAt ? new Date(b.rejectedAt).getTime() : 0;
+                        return tb - ta;
+                    });
                 setChapters(mapped);
                 setSelectedChapter(mapped[0] ?? null);
                 setChaptersLoading(false);
@@ -184,7 +198,24 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         return () => { stop(); };
     }, [storyId]);
 
-    const loadChapterContent = useCallback(async (chapterId) => {
+    const loadChapterContent = useCallback(async (item) => {
+        const key = item?.id;
+        if (!key) return;
+        // Lịch sử version bị từ chối: load content snapshot từ API moderator/chapters/{chapterId}/versions/{versionId}
+        if (item?.isVersionHistory && item?.chapterId && item?.versionId) {
+            try {
+                const data = await getModeratorChapterVersion(item.chapterId, item.versionId);
+                const content = data?.contentSnapshot ?? data?.ContentSnapshot ?? '';
+                setChapterReviewContent((prev) => ({ ...prev, [key]: null }));
+                setChapterContents((prev) => ({ ...prev, [key]: content || '(Không có nội dung phiên bản)' }));
+            } catch {
+                setChapterReviewContent((prev) => ({ ...prev, [key]: null }));
+                setChapterContents((prev) => ({ ...prev, [key]: '(Không tải được nội dung phiên bản)' }));
+            }
+            return;
+        }
+
+        const chapterId = item?.id;
         try {
             const data = await getChapterReviewContent(chapterId);
             setChapterReviewContent((prev) => ({ ...prev, [chapterId]: data }));
@@ -209,10 +240,10 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
 
     useEffect(() => {
         const id = setTimeout(() => {
-            if (selectedChapter?.id) loadChapterContent(selectedChapter.id);
+            if (selectedChapter?.id) loadChapterContent(selectedChapter);
         }, 0);
         return () => clearTimeout(id);
-    }, [selectedChapter?.id, loadChapterContent]);
+    }, [selectedChapter, loadChapterContent]);
 
     useEffect(() => {
         setContentTab('original');
@@ -249,6 +280,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     /** Tab Từ chối: nếu chương chưa có rejectionReason (từ list API) thì gọi GET /chapters/:id/rejection-reason để hiển thị lý do. */
     useEffect(() => {
         if (publication?.status !== 'rejected' || !selectedChapter?.id) return;
+        if (selectedChapter?.isVersionHistory) return;
         if (selectedChapter.rejectionReason) return;
         getChapterRejectionReason(selectedChapter.id)
             .then((data) => {
@@ -262,7 +294,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 }
             })
             .catch(() => { });
-    }, [publication?.status, selectedChapter?.id, selectedChapter?.rejectionReason]);
+    }, [publication?.status, selectedChapter?.id, selectedChapter?.rejectionReason, selectedChapter?.isVersionHistory]);
 
     const openApproveConfirm = () => {
         if (selectedChapter) setShowApproveConfirm(true);
@@ -409,7 +441,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const selectedOrderIndex = Number(selectedChapter?.orderIndex ?? (selectedChapter?.chapterNumber != null ? selectedChapter.chapterNumber - 1 : -1));
     const minOrderInList = chapters.length > 0 ? Math.min(...chapters.map((c) => Number(c.orderIndex ?? (c.chapterNumber != null ? c.chapterNumber - 1 : 0)))) : -1;
     const isFirstInPendingQueue = selectedOrderIndex >= 0 && minOrderInList >= 0 && selectedOrderIndex === minOrderInList;
-    const canApproveReject = selectedChapter && (
+    const canApproveReject = selectedChapter && !selectedChapter?.isVersionHistory && (
         selectedOrderIndex === 0
         || publishedOrderIndices.has(Number(selectedOrderIndex - 1))
         || (minOrderInList >= 1 && isFirstInPendingQueue)

@@ -195,10 +195,17 @@ namespace Services.Implementations
             }
             else if (statusUpper == "REJECTED")
             {
-                includeStoryIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsWhereLastActionIs("STORY", "REJECTED", isAdmin ? null : moderatorId);
+                // Lịch sử từ chối: giữ lại kể cả khi item đã được duyệt sau đó.
+                // Vì vậy: lấy các target đã từng bị REJECTED (lọc theo moderator nếu không phải admin),
+                // và KHÔNG lọc theo status hiện tại (tránh trường hợp đã PUBLISHED thì bị mất khỏi lịch sử).
+                includeStoryIds = isAdmin
+                    ? DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsFiltered("STORY", moderatorId: null, dateFrom: null, dateTo: null, action: "REJECTED")
+                    : (moderatorId.HasValue
+                        ? DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "STORY", "REJECTED")
+                        : new List<Guid>());
                 if (includeStoryIds == null || includeStoryIds.Count == 0)
                     return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
-                statusIn = new List<string> { "REJECTED", "PENDING_REVIEW" };
+                statusIn = null;
             }
             else if (!isAdmin && moderatorId.HasValue)
             {
@@ -207,9 +214,10 @@ namespace Services.Implementations
                     return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
             }
 
+            var ignoreStatusFilter = statusUpper == "REJECTED" && statusIn == null && includeStoryIds != null;
             var query = new StoryQueryDto
             {
-                Status = statusIn == null ? statusUpper : null,
+                Status = (statusIn == null && !ignoreStatusFilter) ? statusUpper : null,
                 StatusIn = statusIn,
                 Page = page,
                 PageSize = pageSize,
@@ -221,6 +229,16 @@ namespace Services.Implementations
             };
             var result = _storyService.GetAll(query);
             var storyList = result.Items?.ToList() ?? new List<StoryListItemDto>();
+            // Tab "Từ chối": dù story hiện đã PUBLISHED, vẫn cần hiển thị lý do từ chối trước đó trong lịch sử.
+            if (statusUpper == "REJECTED" && storyList.Count > 0)
+            {
+                foreach (var item in storyList)
+                {
+                    var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("STORY", item.Id);
+                    item.RejectionReason = reason;
+                    item.RejectedAt = rejectedAt;
+                }
+            }
             if (storyList.Count > 0 && isAdmin)
             {
                 var logInfo = DataAccessObjects.DAOs.ModerationLogDAO.GetLogInfoByTargets("STORY", storyList.Select(s => s.Id).ToList(), logAction);
@@ -261,10 +279,15 @@ namespace Services.Implementations
             }
             else if (statusUpper == "REJECTED")
             {
-                includeChapterIds = DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsWhereLastActionIs("CHAPTER", "REJECTED", isAdmin ? null : moderatorId);
+                // Lịch sử từ chối: giữ lại kể cả khi chapter đã được duyệt sau đó (PUBLISHED).
+                includeChapterIds = isAdmin
+                    ? DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsFiltered("CHAPTER", moderatorId: null, dateFrom: null, dateTo: null, action: "REJECTED")
+                    : (moderatorId.HasValue
+                        ? DataAccessObjects.DAOs.ModerationLogDAO.GetTargetIdsByModeratorAndAction(moderatorId.Value, "CHAPTER", "REJECTED")
+                        : new List<Guid>());
                 if (includeChapterIds == null || includeChapterIds.Count == 0)
                     return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
-                statusIn = new List<string> { "REJECTED", "PENDING_REVIEW" };
+                statusIn = null;
             }
             else if (!isAdmin && moderatorId.HasValue)
             {
@@ -281,9 +304,10 @@ namespace Services.Implementations
             if (storyIdsFilter != null && storyIdsFilter.Count == 0)
                 return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
 
+            var ignoreStatusFilter = statusUpper == "REJECTED" && statusIn == null && includeChapterIds != null;
             var query = new ChapterQueryDto
             {
-                Status = statusIn == null ? statusUpper : null,
+                Status = (statusIn == null && !ignoreStatusFilter) ? statusUpper : null,
                 StatusIn = statusIn,
                 StoryIds = storyIdsFilter,
                 IncludeChapterIds = includeChapterIds,
@@ -295,6 +319,16 @@ namespace Services.Implementations
             };
             var result = _chapterService.GetAll(query);
             var chapterList = result.Items?.ToList() ?? new List<ChapterListItemDto>();
+            // Tab "Từ chối": dù chapter hiện đã PUBLISHED, vẫn cần hiển thị lý do từ chối trước đó trong lịch sử.
+            if (statusUpper == "REJECTED" && chapterList.Count > 0)
+            {
+                foreach (var item in chapterList)
+                {
+                    var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", item.Id);
+                    item.RejectionReason = reason;
+                    item.RejectedAt = rejectedAt;
+                }
+            }
             if (chapterList.Count > 0 && isAdmin)
             {
                 var logInfo = DataAccessObjects.DAOs.ModerationLogDAO.GetLogInfoByTargets("CHAPTER", chapterList.Select(c => c.Id).ToList(), logAction);

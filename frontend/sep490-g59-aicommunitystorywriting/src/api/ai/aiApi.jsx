@@ -45,3 +45,29 @@ export async function coCreate(storyId, authorIdea) {
     const response = await axiosInstance.post("ai/co-create", { storyId, authorIdea: trimmed });
     return response.data;
 }
+
+/**
+ * Check chapter content: chính tả + từ cấm/chính sách.
+ * @param {Object} payload - { content: string, storyId?: string|null, chapterTitle?: string|null }
+ * @returns {Promise<{ passed: boolean, spellingIssues: Array<{ wordOrPhrase, suggestion, context? }>, policyViolations: Array<{ type, description, quote? }>, hasInappropriateContent: boolean, summary?: string|null }>}
+ */
+export async function checkChapter(payload) {
+    const content = (payload?.content ?? '').toString();
+    if (!content.trim()) throw new Error("Content là bắt buộc.");
+    const body = {
+        content,
+        storyId: payload?.storyId ?? null,
+        chapterTitle: payload?.chapterTitle ?? null,
+    };
+    const response = await axiosInstance.post("ai/check-chapter", body);
+    return response.data;
+}
+
+/**
+ * Xem giới hạn sử dụng AI của user hiện tại (số lần/24h).
+ * @returns {Promise<{ limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string }>}
+ */
+export async function getAiUsageLimit() {
+    const response = await axiosInstance.get("ai/usage-limit");
+    return response.data;
+}

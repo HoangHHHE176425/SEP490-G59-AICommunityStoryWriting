@@ -4,6 +4,7 @@ using Services.DTOs.Moderation;
 using Services.Interfaces;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using DataAccessObjects.DAOs;
 
 namespace AIStory.API.Controllers
 {
@@ -130,6 +131,49 @@ namespace AIStory.API.Controllers
             {
                 _logger.LogError(ex, "GetReviewedChapters failed");
                 return StatusCode(500, new { message = "Lỗi lấy danh sách chapter đã duyệt/từ chối", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Lịch sử phiên bản chương bị từ chối (version). 
+        /// - Moderator: chỉ thấy version do mình từ chối (reviewed_by = moderator).
+        /// - Admin: thấy tất cả.
+        /// </summary>
+        [HttpGet("chapter-versions/rejected-history")]
+        public IActionResult GetRejectedChapterVersionsHistory()
+        {
+            try
+            {
+                var moderatorId = GetCurrentUserId();
+                if (!moderatorId.HasValue)
+                    return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+
+                // Lịch sử từ chối version: lấy tất cả version đã từng bị từ chối (không lọc theo moderator để tránh thiếu dữ liệu).
+                var list = ChapterVersionDAO.GetRejectedHistory(null)
+                    .Select(v => new RejectedChapterVersionItemDto
+                    {
+                        Id = v.id,
+                        ChapterId = v.chapter_id,
+                        StoryId = v.chapter?.story_id,
+                        StoryTitle = v.chapter?.story?.title,
+                        ChapterTitle = v.chapter?.title,
+                        ChapterOrderIndex = v.chapter != null ? v.chapter.order_index : null,
+                        VersionNumber = v.version_number,
+                        TitleSnapshot = v.title_snapshot,
+                        Status = v.status,
+                        WordCount = string.IsNullOrWhiteSpace(v.content_snapshot)
+                            ? 0
+                            : v.content_snapshot.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length,
+                        RejectionReason = v.rejection_reason,
+                        RejectedAt = v.reviewed_at ?? v.created_at
+                    })
+                    .ToList();
+                return Ok(list);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetRejectedChapterVersionsHistory failed");
+                return StatusCode(500, new { message = "Lỗi lấy lịch sử từ chối phiên bản", error = ex.Message });
             }
         }
 
