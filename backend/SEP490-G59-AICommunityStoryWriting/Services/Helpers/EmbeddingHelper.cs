@@ -24,7 +24,10 @@ public static class EmbeddingHelper
             return null;
         if (provider.Equals("Ollama", StringComparison.OrdinalIgnoreCase))
             return (baseUrl, null, model);
+        // Allow using a single OpenRouter/OpenAI key for both chat + embedding.
         var apiKey = configuration["AI:EmbeddingApiKey"];
+        if (string.IsNullOrWhiteSpace(apiKey))
+            apiKey = configuration["AI:ApiKey"];
         if (string.IsNullOrWhiteSpace(apiKey))
             return null;
         if (!baseUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))

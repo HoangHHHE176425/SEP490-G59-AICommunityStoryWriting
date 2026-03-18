@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
@@ -18,6 +18,8 @@ import {
     Shield,
     Brain,
     AlertTriangle,
+    Wallet,
+    Landmark,
 } from 'lucide-react';
 
 const ROLE_LABELS = {
@@ -30,6 +32,7 @@ const ROLE_LABELS = {
 
 const ALL_MENU_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'wallet-dashboard', label: 'Ví hệ thống', icon: Wallet },
     { id: 'categories', label: 'Quản lý thể loại', icon: Bookmark },
     { id: 'publication', label: 'Quản lý xuất bản', icon: CheckSquare },
     { id: 'stories', label: 'Quản lý truyện', icon: FileText },
@@ -37,7 +40,9 @@ const ALL_MENU_ITEMS = [
     { id: 'users', label: 'Quản lý người dùng', icon: Users },
     { id: 'comments', label: 'Quản lý bình luận', icon: MessageSquare },
     { id: 'policies', label: 'Quản lý Policy', icon: Shield },
-    { id: 'ai-config', label: 'AI Config', icon: Brain },
+    { id: 'transactions', label: 'Quản lý giao dịch', icon: Wallet },
+    { id: 'bank-accounts', label: 'Xác thực tài khoản NH', icon: Landmark },
+    { id: 'ai-config', label: 'Cấu hình AI', icon: Brain },
     { id: 'settings', label: 'Cài đặt', icon: Settings },
 ];
 
@@ -57,6 +62,20 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
     const roleLabel = ROLE_LABELS[roleUpper] ?? 'Quản trị';
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+    // Số dư ví hệ thống (mock – sau nối GET /api/admin/wallet/summary hoặc header)
+    const [systemWalletBalance, setSystemWalletBalance] = useState(null);
+    useEffect(() => {
+        // TODO: gọi API lấy số dư ví hệ thống, ví dụ GET /api/admin/wallet/header-balance
+        setSystemWalletBalance(1_250_000);
+    }, []);
+    useEffect(() => {
+        const handler = (evt) => {
+            const next = evt?.detail?.balance;
+            if (typeof next === 'number' && Number.isFinite(next)) setSystemWalletBalance(next);
+        };
+        window.addEventListener('system-wallet:balance', handler);
+        return () => window.removeEventListener('system-wallet:balance', handler);
+    }, []);
 
     const handleLogout = async () => {
         try {
@@ -149,6 +168,36 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                                 }}
                             />
                         </div>
+
+                        {/* Icon ví hệ thống + số dư */}
+                        <button
+                            onClick={() => onNavigate('wallet-dashboard')}
+                            title="Ví hệ thống"
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                padding: '0.5rem 0.75rem',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '0.5rem',
+                                backgroundColor: '#f0fdf4',
+                                cursor: 'pointer',
+                                transition: 'background-color 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = '#dcfce7';
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = '#f0fdf4';
+                            }}
+                        >
+                            <Wallet style={{ width: '18px', height: '18px', color: '#16a34a' }} />
+                            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#166534' }}>
+                                {systemWalletBalance != null
+                                    ? `${Number(systemWalletBalance).toLocaleString('vi-VN')} Coin`
+                                    : '...'}
+                            </span>
+                        </button>
 
                         <button
                             style={{
