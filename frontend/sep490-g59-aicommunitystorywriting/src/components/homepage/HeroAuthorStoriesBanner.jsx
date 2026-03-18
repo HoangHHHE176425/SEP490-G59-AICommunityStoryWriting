@@ -1,25 +1,50 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { 
-  Sparkles, Brain, Users, Star, UserPlus, CheckCircle, 
+  Sparkles, Brain, Users, Star, UserPlus, UserMinus, CheckCircle, 
   ChevronLeft, ChevronRight
 } from 'lucide-react';
 import thandaoco from '../../assets/image/thandaoco.jpg';
 import voluendinhphong from '../../assets/image/voluendinhphong.jpg';
 import linhVuThienHa from '../../assets/image/linh-vu-thien-ha.jpg';
+import { useNavigate } from 'react-router-dom';
+import { getStories } from '../../api/story/storyApi';
+import { getProfileByUserId } from '../../api/account/accountApi';
+import { getAuthorFollowing, followAuthor, unfollowAuthor, getAuthorFollowersCount } from '../../api/author/authorApi';
+import { useAuth } from '../../contexts/AuthContext';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 export function HeroAuthorStoriesBanner() {
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
 
-  const featuredAuthorStories = [
+  const formatCompactNumber = (num) => {
+    if (num === null || num === undefined || Number.isNaN(Number(num))) return '0';
+    const n = Number(num);
+    if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+    if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+    return String(Math.round(n));
+  };
+
+  const formatRating = (num) => {
+    if (num === null || num === undefined || Number.isNaN(Number(num))) return '-';
+    const n = Number(num);
+    return n > 0 ? n.toFixed(1) : '-';
+  };
+
+  const [featuredAuthorStories, setFeaturedAuthorStories] = useState([
     {
       id: 1,
       storyTitle: 'Hành Trình Vạn Cổ',
       author: {
         name: 'Cô Độc Bại Thân',
         avatar: 'https://images.unsplash.com/photo-1738566061505-556830f8b8f5?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxhc2lhbiUyMG1hbiUyMHBvcnRyYWl0JTIwcHJvZmVzc2lvbmFsfGVufDF8fHx8MTc3MDIxODA0OXww&ixlib=rb-4.1.0&q=80&w=1080',
+        id: null,
         followers: '125K',
+        followersNum: 0,
+        isFollowing: false,
         verified: true
       },
       description: 'Tác phẩm mới nhất từ bậc thầy tiên hiệp, thế giới tu tiên hoành tráng với hệ thống tu luyện độc đáo.',
@@ -39,7 +64,10 @@ export function HeroAuthorStoriesBanner() {
       author: {
         name: 'Mạc Mặc',
         avatar: 'https://images.unsplash.com/photo-1686543972602-da0c7ea61ce2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxhc2lhbiUyMG1hbGUlMjB3cml0ZXIlMjBnbGFzc2VzfGVufDF8fHx8MTc3MDI4NTE1M3ww&ixlib=rb-4.1.0&q=80&w=1080',
+        id: null,
         followers: '98K',
+        followersNum: 0,
+        isFollowing: false,
         verified: true
       },
       description: 'Hành trình tu luyện võ đạo đầy cảm hứng, cốt truyện hấp dẫn qua từng chương.',
@@ -59,7 +87,10 @@ export function HeroAuthorStoriesBanner() {
       author: {
         name: 'Vũ Phong',
         avatar: 'https://images.unsplash.com/photo-1754954865833-c6ee8cb8726d?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxhc2lhbiUyMHlvdW5nJTIwbWFuJTIwY3JlYXRpdmV8ZW58MXx8fHwxNzcwMjg1MTU2fDA&ixlib=rb-4.1.0&q=80&w=1080',
+        id: null,
         followers: '87K',
+        followersNum: 0,
+        isFollowing: false,
         verified: true
       },
       description: 'Truyện đoạt giải Tác Phẩm Của Năm - sự kết hợp hoàn hảo giữa văn phong và cốt truyện.',
@@ -73,10 +104,180 @@ export function HeroAuthorStoriesBanner() {
       badge: 'AWARD WINNING',
       image: linhVuThienHa,
     },
-  ];
+  ]);
+
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [followLoadingByAuthorId, setFollowLoadingByAuthorId] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFromApi() {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const res = await getStories({
+          status: 'PUBLISHED',
+          page: 1,
+          pageSize: 12,
+          sortBy: 'total_views',
+          sortOrder: 'desc',
+        });
+
+        const items = Array.isArray(res?.items) ? res.items : Array.isArray(res?.Items) ? res.Items : [];
+        const pickedStories = items.slice(0, 6);
+        if (pickedStories.length === 0) {
+          if (!cancelled) setFeaturedAuthorStories([]);
+          return;
+        }
+
+        const authorIds = [
+          ...new Set(pickedStories.map((s) => s?.authorId ?? s?.AuthorId).filter(Boolean)),
+        ];
+
+        const profiles = await Promise.all(authorIds.map((id) => getProfileByUserId(id).catch(() => null)));
+        const followersCounts = await Promise.all(
+          authorIds.map((id) => getAuthorFollowersCount(id).catch(() => ({ followersCount: 0 })))
+        );
+        const profileMap = {};
+        authorIds.forEach((id, idx) => {
+          profileMap[id] = profiles[idx];
+        });
+        const followersCountMap = {};
+        authorIds.forEach((id, idx) => {
+          followersCountMap[id] = followersCounts[idx]?.followersCount ?? 0;
+        });
+
+        const mapped = pickedStories.map((item) => {
+          const storyId = item.id ?? item.Id;
+          const storyTitle = item.title ?? item.Title ?? 'Không có tiêu đề';
+          const summary = item.summary ?? item.Summary ?? '';
+          const coverPath = item.coverImage ?? item.CoverImage ?? '';
+          const image = coverPath ? resolveBackendUrl(coverPath) : '';
+
+          const categoryNamesStr = item.categoryNames ?? item.CategoryNames ?? '';
+          const categoryNamesArr = categoryNamesStr
+            ? String(categoryNamesStr).split(',').map((s) => s.trim()).filter(Boolean)
+            : [];
+          const genre = categoryNamesArr[0] ?? 'Chưa phân loại';
+
+          const authorId = item.authorId ?? item.AuthorId;
+          const profile = authorId ? profileMap[authorId] : null;
+
+          const views = item.totalViews ?? item.TotalViews ?? 0;
+          const likes = item.totalFavorites ?? item.TotalFavorites ?? 0;
+          const ratingRaw = item.avgRating ?? item.AvgRating ?? 0;
+          const rating = Number(ratingRaw);
+          const chapters =
+            item.publishedChaptersCount ??
+            item.PublishedChaptersCount ??
+            item.totalChapters ??
+            item.TotalChapters ??
+            0;
+
+          const followersNum = Number(followersCountMap[authorId] ?? 0) || 0;
+
+          const badge = rating >= 4.8 ? 'ĐỈNH CAO' : rating >= 4.5 ? 'NỔI BẬT' : 'AWARD WINNING';
+
+          return {
+            id: storyId,
+            storyTitle,
+            author: {
+              name: profile?.displayName ?? item.authorName ?? item.AuthorName ?? 'Ẩn danh',
+              avatar: profile?.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '',
+              id: authorId ?? null,
+              followersNum,
+              followers: followersNum ? formatCompactNumber(followersNum) : '-',
+              verified: Boolean(profile?.isVerified),
+              isFollowing: false,
+            },
+            description: summary,
+            genre,
+            chapters,
+            views: formatCompactNumber(views),
+            likes: formatCompactNumber(likes),
+            rating: formatRating(rating),
+            coWriting: false,
+            aiAssisted: 0,
+            badge,
+            image,
+          };
+        });
+
+        if (!cancelled) setFeaturedAuthorStories(mapped.slice(0, 3));
+      } catch (e) {
+        if (!cancelled) setLoadError(e?.message ?? 'Không tải được banner');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadFromApi();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!featuredAuthorStories.length) return;
+    if (currentSlide >= featuredAuthorStories.length) setCurrentSlide(0);
+  }, [featuredAuthorStories, currentSlide]);
+
+  useEffect(() => {
+    if (loadError) console.error('HeroAuthorStoriesBanner load error:', loadError);
+  }, [loadError]);
+
+  const authorIdsKey = featuredAuthorStories
+    .map((s) => s?.author?.id)
+    .filter(Boolean)
+    .sort()
+    .join(',');
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadFollowingStates() {
+      if (!isAuthenticated) return;
+      if (!authorIdsKey) return;
+
+      const authorIds = featuredAuthorStories
+        .map((s) => s?.author?.id)
+        .filter(Boolean);
+      const uniqueIds = Array.from(new Set(authorIds));
+
+      if (uniqueIds.length === 0) return;
+
+      const followingResults = await Promise.all(
+        uniqueIds.map((id) =>
+          getAuthorFollowing(id)
+            .then((data) => !!(data?.following ?? data?.Following))
+            .catch(() => false)
+        )
+      );
+
+      if (cancelled) return;
+      const followingMap = {};
+      uniqueIds.forEach((id, idx) => {
+        followingMap[id] = followingResults[idx];
+      });
+
+      setFeaturedAuthorStories((prev) =>
+        prev.map((s) => {
+          const aid = s?.author?.id;
+          if (!aid || followingMap[aid] === undefined) return s;
+          return { ...s, author: { ...s.author, isFollowing: followingMap[aid] } };
+        })
+      );
+    }
+
+    loadFollowingStates();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, authorIdsKey]);
 
   const handleSlideChange = (newSlide) => {
-    if (isTransitioning) return;
+    if (isTransitioning || loading) return;
     setIsTransitioning(true);
     setTimeout(() => {
       setCurrentSlide(newSlide);
@@ -95,6 +296,65 @@ export function HeroAuthorStoriesBanner() {
   };
 
   const current = featuredAuthorStories[currentSlide];
+
+  const handleToggleFollow = async () => {
+    const authorId = current?.author?.id;
+    if (!authorId) return;
+
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+
+    if (followLoadingByAuthorId[authorId]) return;
+
+    const nextFollowing = !current?.author?.isFollowing;
+    setFollowLoadingByAuthorId((prev) => ({ ...prev, [authorId]: true }));
+
+    try {
+      if (nextFollowing) await followAuthor(authorId);
+      else await unfollowAuthor(authorId);
+
+      const delta = nextFollowing ? 1 : -1;
+
+      setFeaturedAuthorStories((prev) =>
+        prev.map((s) => {
+          if (s?.author?.id !== authorId) return s;
+          const followersNum = Math.max(0, Number(s?.author?.followersNum ?? 0) + delta);
+          return {
+            ...s,
+            author: {
+              ...s.author,
+              isFollowing: nextFollowing,
+              followersNum,
+              followers: followersNum ? formatCompactNumber(followersNum) : '-',
+            },
+          };
+        })
+      );
+    } catch (err) {
+      console.error('HeroAuthorStoriesBanner follow toggle failed:', err);
+    } finally {
+      setFollowLoadingByAuthorId((prev) => ({ ...prev, [authorId]: false }));
+    }
+  };
+
+  if (!featuredAuthorStories.length || !current) {
+    return (
+      <section className="relative bg-gradient-to-br from-[#0A0F16] to-[#0F1923] overflow-hidden">
+        <div className="max-w-[1400px] mx-auto px-6 py-16 relative z-10">
+          <div
+            className="relative h-[540px] rounded-3xl overflow-hidden shadow-2xl flex items-center justify-center"
+            style={{ background: 'linear-gradient(135deg, #0A0F16 0%, #0F1923 100%)' }}
+          >
+            <div className="text-white font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[18px]">
+              Đang tải banner...
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="relative bg-gradient-to-br from-[#0A0F16] to-[#0F1923] overflow-hidden">
@@ -238,12 +498,38 @@ export function HeroAuthorStoriesBanner() {
 
                   {/* CTA Buttons */}
                   <div className="flex items-center gap-3">
-                    <button className="px-6 py-3 bg-gradient-to-r from-[#13EC5B] to-[#11D350] text-white rounded-xl hover:shadow-xl hover:scale-[1.02] transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[14px] shadow-lg shadow-[#13EC5B]/30">
+                    <button
+                      onClick={() => {
+                        if (!current?.id || loading) return;
+                        navigate(`/story/${current.id}`);
+                      }}
+                      disabled={loading}
+                      className="px-6 py-3 bg-gradient-to-r from-[#13EC5B] to-[#11D350] text-white rounded-xl hover:shadow-xl hover:scale-[1.02] transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[14px] shadow-lg shadow-[#13EC5B]/30"
+                    >
                       Đọc ngay
                     </button>
-                    <button className="px-6 py-3 bg-white/5 border border-white/10 text-white rounded-xl hover:border-white/20 hover:bg-white/10 transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[14px] flex items-center gap-2">
-                      <UserPlus className="w-4 h-4" />
-                      Theo dõi
+                    <button
+                      onClick={handleToggleFollow}
+                      disabled={!current?.author?.id || loading || !!followLoadingByAuthorId[current?.author?.id]}
+                      className={`px-6 py-3 rounded-xl transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[14px] flex items-center gap-2 ${
+                        current?.author?.isFollowing
+                          ? 'bg-white/10 border border-white/20 text-white hover:bg-white/15 hover:border-white/30'
+                          : 'bg-white/5 border border-white/10 text-white hover:border-white/20 hover:bg-white/10'
+                      }`}
+                    >
+                      {followLoadingByAuthorId[current?.author?.id] ? (
+                        'Đang xử lý...'
+                      ) : current?.author?.isFollowing ? (
+                        <>
+                          <UserMinus className="w-4 h-4" />
+                          Bỏ theo dõi
+                        </>
+                      ) : (
+                        <>
+                          <UserPlus className="w-4 h-4" />
+                          Theo dõi
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -254,14 +540,14 @@ export function HeroAuthorStoriesBanner() {
           {/* Navigation Arrows */}
           <button 
             onClick={prevSlide} 
-            disabled={isTransitioning} 
+            disabled={isTransitioning || loading} 
             className="absolute left-6 top-1/2 -translate-y-1/2 z-30 w-12 h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 transition-all shadow-lg disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
           >
             <ChevronLeft className="w-6 h-6 text-white" />
           </button>
           <button 
             onClick={nextSlide} 
-            disabled={isTransitioning} 
+            disabled={isTransitioning || loading} 
             className="absolute right-6 top-1/2 -translate-y-1/2 z-30 w-12 h-12 bg-white/10 border border-white/20 rounded-full flex items-center justify-center hover:bg-white/20 hover:scale-110 transition-all shadow-lg disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:scale-100"
           >
             <ChevronRight className="w-6 h-6 text-white" />
@@ -273,7 +559,7 @@ export function HeroAuthorStoriesBanner() {
               <button 
                 key={index} 
                 onClick={() => handleSlideChange(index)} 
-                disabled={isTransitioning} 
+                disabled={isTransitioning || loading} 
                 className={`h-2.5 rounded-full transition-all disabled:cursor-not-allowed ${
                   index === currentSlide 
                     ? 'w-8 bg-[#13EC5B] shadow-lg shadow-[#13EC5B]/50' 

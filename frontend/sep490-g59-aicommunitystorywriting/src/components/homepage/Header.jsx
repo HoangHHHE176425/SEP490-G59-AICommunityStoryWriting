@@ -118,7 +118,7 @@ export function Header() {
     const handleLogout = async () => {
         await logout();
         setIsUserMenuOpen(false);
-        navigate('/');
+        navigate('/home');
     };
 
     const handleBecomeAuthor = () => {
