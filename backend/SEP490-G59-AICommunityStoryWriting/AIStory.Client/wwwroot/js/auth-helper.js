@@ -174,8 +174,9 @@ const AuthHelper = {
         if (this.isTokenExpired()) {
             try {
                 const response = await ApiService.refreshToken();
-                if (response?.accessToken) {
-                    this.setToken(response.accessToken);
+                const token = response?.accessToken ?? response?.AccessToken;
+                if (token) {
+                    this.setToken(token);
                     return true;
                 }
             } catch (error) {
