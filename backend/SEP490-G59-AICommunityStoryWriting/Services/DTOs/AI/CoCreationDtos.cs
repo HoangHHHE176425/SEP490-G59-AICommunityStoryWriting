@@ -6,8 +6,10 @@ public class CoCreationRequest
     /// <summary>ID truyện (bắt buộc).</summary>
     public Guid StoryId { get; set; }
 
-    /// <summary>Ý tưởng của tác giả (1–2 câu hoặc đoạn ngắn mô tả hướng nội dung muốn viết tiếp).</summary>
-    public string AuthorIdea { get; set; } = null!;
+    /// <summary>
+    /// Ý tưởng của tác giả (tùy chọn). Nếu để trống/null, hệ thống sẽ tự viết chương tiếp theo dựa trên mạch truyện hiện có.
+    /// </summary>
+    public string? AuthorIdea { get; set; }
 }
 
 /// <summary>Response đồng sáng tác: dàn ý + nội dung cuối + trạng thái kiểm duyệt. Có thể kèm feedback khi ý tưởng tác giả mâu thuẫn với truyện.</summary>

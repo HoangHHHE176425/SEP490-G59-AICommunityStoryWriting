@@ -118,8 +118,14 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         if (story.author_id != authorUserId)
             throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được sử dụng tính năng đồng sáng tác.");
 
+        var rawIdea = request.AuthorIdea?.Trim();
+        var hasAuthorIdea = !string.IsNullOrWhiteSpace(rawIdea);
+        var effectiveIdea = hasAuthorIdea
+            ? rawIdea!
+            : "Hãy viết tiếp chương tiếp theo một cách tự nhiên dựa trên mạch truyện hiện có (không thêm plot twist lớn nếu chưa được gợi mở).";
+
         string contextBlock = await _memoryEngine.BuildContextForCoCreateAsync(
-            request.StoryId, request.AuthorIdea, cancellationToken);
+            request.StoryId, effectiveIdea, cancellationToken);
 
         var storyLanguage = StoryLanguageHelper.DetectFromStoryContext(contextBlock);
         var languageInstruction = StoryLanguageHelper.GetLanguageInstruction(storyLanguage);
@@ -130,7 +136,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         var (p1, m1, k1, u1) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentPlanner);
         var clientPlanner = AIClientHelper.CreateChatClient(p1, m1, k1, u1);
         var swOutline = Stopwatch.StartNew();
-        var outlineJson = await RunAgent1OutlineAsync(clientPlanner, story, contextBlock, request.AuthorIdea, languageInstruction, cancellationToken);
+        var outlineJson = await RunAgent1OutlineAsync(clientPlanner, story, contextBlock, effectiveIdea, languageInstruction, cancellationToken);
         swOutline.Stop();
         durations.Add(new AgentDuration { Step = "Outline", DurationMs = swOutline.ElapsedMilliseconds });
         progress?.Report(new CoCreateProgressEvent { Step = "Outline", DurationMs = swOutline.ElapsedMilliseconds, Message = "Đã xong dàn ý" });
@@ -199,7 +205,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         else
         {
             var swReview = Stopwatch.StartNew();
-            review = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, languageInstruction, cancellationToken);
+            review = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, effectiveIdea, languageInstruction, cancellationToken);
             swReview.Stop();
             durations.Add(new AgentDuration { Step = "Review", DurationMs = swReview.ElapsedMilliseconds });
             progress?.Report(new CoCreateProgressEvent { Step = "Review", DurationMs = swReview.ElapsedMilliseconds, Message = "Đã kiểm duyệt nhất quán" });
@@ -249,7 +255,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             }
 
             var swRevReview = Stopwatch.StartNew();
-            review = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, languageInstruction, cancellationToken);
+            review = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, effectiveIdea, languageInstruction, cancellationToken);
             swRevReview.Stop();
             durations.Add(new AgentDuration { Step = $"Revision_Review_{revisionCount}", DurationMs = swRevReview.ElapsedMilliseconds });
             progress?.Report(new CoCreateProgressEvent { Step = $"Revision_Review_{revisionCount}", DurationMs = swRevReview.ElapsedMilliseconds, Message = "Đã kiểm duyệt nhất quán" });
@@ -259,7 +265,11 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             reviewFeedback = review.Feedback;
         }
 
-        var saved = SaveDraftChapterAndAiContent(request.StoryId, authorUserId, request.AuthorIdea, draft);
+        var saved = SaveDraftChapterAndAiContent(
+            request.StoryId,
+            authorUserId,
+            hasAuthorIdea ? rawIdea! : "[AUTO] Tiếp tục theo mạch truyện (không có gợi ý tác giả)",
+            draft);
         return new CoCreationResponse
         {
             Outline = outlineForPrompt,
@@ -386,6 +396,11 @@ Ví dụ mâu thuẫn rõ:
 
 Nếu mâu thuẫn nhẹ hoặc có thể điều chỉnh:
 → TỰ ĐIỀU CHỈNH ý tưởng để phù hợp với context, KHÔNG từ chối.
+
+Nếu ý tưởng của tác giả CỐ Ý tạo plot twist/retcon (ví dụ: muốn nhân vật đã hy sinh “trở lại”):
+→ KHÔNG từ chối ngay.
+→ Outline bắt buộc phải thêm một hoặc nhiều bước “giải thích hợp lý” để làm plot twist THUYẾT PHỤC và nhất quán (ví dụ: hiểu nhầm/giả chết, hồi ức, song sinh, cứu kịp thời, phép thuật đã được gợi mở, v.v.).
+→ Nếu thế giới truyện không cho phép (không có cơ chế hợp lý nào trong context) thì đề xuất phương án plot twist “ít phá” hơn và vẫn bám ý tưởng tác giả.
 
 Nếu bắt buộc phải từ chối, chỉ trả về JSON:
 { "ideaContradiction": true, "feedback": "Giải thích ngắn gọn bằng tiếng Việt." }
@@ -904,6 +919,12 @@ Xử lý thông minh (QUAN TRỌNG):
 - Không yêu cầu viết lại toàn bộ nếu không cần thiết
 - Feedback phải ngắn gọn, actionable
 
+Xử lý plot twist theo ý tác giả:
+- Nếu Ý TƯỞNG TÁC GIẢ yêu cầu một plot twist/retcon có vẻ “mâu thuẫn” với context (ví dụ nhân vật đã hy sinh nhưng tác giả muốn họ trở lại):
+  - Không tự động đánh CRITICAL chỉ vì mâu thuẫn đó.
+  - Chỉ đánh CRITICAL nếu bản nháp KHÔNG đưa ra “cầu nối/giải thích hợp lý” để plot twist trở nên nhất quán với thế giới truyện.
+  - Nếu có thể cứu bằng cách thêm 1–3 câu/đoạn ngắn giải thích: trả về violation với `fix` hướng dẫn thêm giải thích tối thiểu (targeted fix).
+
 ---
 
 Kết luận:
@@ -939,9 +960,10 @@ Trường hợp có lỗi:
 }
 """ + "\n\n" + ConstitutionalRules;
 
-    private async Task<ReviewResult> RunAgent3ReviewAsync(ChatClient client, string contextBlock, string outline, string draft, string languageInstruction, CancellationToken ct)
+    private async Task<ReviewResult> RunAgent3ReviewAsync(ChatClient client, string contextBlock, string outline, string draft, string authorIdea, string languageInstruction, CancellationToken ct)
     {
-        var userPrompt = $"{DbContextLabel}\n\n{contextBlock}\n\n---\nDàn ý:\n{outline}\n\nBản nháp:\n{draft}\n\n{languageInstruction}\n\nTrả lời bằng tiếng Việt nếu truyện tiếng Việt. Chỉ output một JSON duy nhất (approved, feedback, violations), không markdown hay giải thích.";
+        var userPrompt =
+            $"{DbContextLabel}\n\n{contextBlock}\n\n---\nÝ tưởng tác giả (có thể trống):\n{authorIdea}\n\n---\nDàn ý:\n{outline}\n\nBản nháp:\n{draft}\n\n{languageInstruction}\n\nTrả lời bằng tiếng Việt nếu truyện tiếng Việt. Chỉ output một JSON duy nhất (approved, feedback, violations), không markdown hay giải thích.";
         var messages = new List<ChatMessage>
         {
             new SystemChatMessage(GetAgent3SystemPrompt()),
