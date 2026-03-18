@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List, Wallet, History, Coins, ArrowDownToLine } from 'lucide-react';
+import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List, Wallet, History, Coins, ArrowDownToLine, Landmark, ShieldCheck, ShieldX } from 'lucide-react';
 import { StoryEditor } from './StoryEditor';
 import { StoryInfoEditor } from './StoryInfoEditor';
 import { ChapterListManager } from '../author/ChapterListManager';
@@ -109,6 +109,81 @@ export function AuthorStoryManagement({ onBack }) {
     const [withdrawAmount, setWithdrawAmount] = useState('');
     const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
     const [withdrawError, setWithdrawError] = useState(null);
+    // Rút tiền: chọn TK ngân hàng từ danh sách của author
+    const [selectedBankAccountIdx, setSelectedBankAccountIdx] = useState(-1);
+
+    // Danh sách ngân hàng (dùng cho form thêm tài khoản ngân hàng)
+    const BANK_OPTIONS = [
+        'Vietcombank',
+        'VietinBank',
+        'BIDV',
+        'Agribank',
+        'Techcombank',
+        'MB Bank',
+        'ACB',
+        'Sacombank',
+        'VPBank',
+        'TPBank',
+        'SHB',
+        'HDBank',
+        'OCB',
+        'VIB',
+        'Eximbank',
+        'MSB',
+    ];
+
+    // Form "Thêm tài khoản ngân hàng" (tách khỏi phần rút tiền)
+    const [bankName, setBankName] = useState('');
+    const [accountNumber, setAccountNumber] = useState('');
+    const [accountHolderName, setAccountHolderName] = useState('');
+    const [branchName, setBranchName] = useState('');
+    const [isBankVerified, setIsBankVerified] = useState(true); // demo UI
+
+    // Danh sách tài khoản ngân hàng (demo)
+    const [bankAccounts, setBankAccounts] = useState([
+        {
+            user_id: authorId || 'me',
+            bank_name: 'Vietcombank',
+            account_number: '0123456789',
+            account_holder_name: userDisplayName?.toUpperCase?.() ? userDisplayName.toUpperCase() : userDisplayName,
+            branch_name: 'CN TP.HCM',
+            is_verified: true,
+            updated_at: new Date().toISOString(),
+        },
+    ]);
+
+    const maskAccountNumber = (value) => {
+        const s = String(value || '').replace(/\s+/g, '');
+        if (!s) return '—';
+        if (s.length <= 4) return s;
+        return `${'•'.repeat(Math.max(0, s.length - 4))}${s.slice(-4)}`;
+    };
+
+    const formatTime = (iso) => {
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return iso || '—';
+        return d.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+
+    const verifiedBankAccounts = bankAccounts.filter((a) => a.is_verified);
+    const selectedBankAccount = verifiedBankAccounts[selectedBankAccountIdx] ?? null;
+
+    const buildBankInfoStringFromAccount = (acc) => {
+        if (!acc) return null;
+        const bn = String(acc.bank_name || '').trim();
+        const an = String(acc.account_number || '').trim();
+        const ah = String(acc.account_holder_name || '').trim();
+        const br = String(acc.branch_name || '').trim();
+        const verified = !!acc.is_verified;
+        if (!bn || !an || !ah) return null;
+        return [
+            `bank_name=${bn}`,
+            `account_number=${an}`,
+            `account_holder_name=${ah}`,
+            `branch_name=${br || '-'}`,
+            `is_verified=${verified ? '1' : '0'}`,
+        ].join(' | ');
+    };
 
     const loadStories = useCallback((page = 1, options = {}) => {
         if (!authorId) {
@@ -935,6 +1010,41 @@ export function AuthorStoryManagement({ onBack }) {
 
                         <button
                             onClick={() => {
+                                setActiveMenu('bank-accounts');
+                                setActiveView('bank-accounts');
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'bank-accounts' ? '#f0fdf4' : 'transparent',
+                                border: 'none',
+                                borderLeft: activeMenu === 'bank-accounts' ? '3px solid #13ec5b' : '3px solid transparent',
+                                borderRadius: '9999px',
+                                marginLeft: '0.5rem',
+                                marginRight: '0.5rem',
+                                textAlign: 'left',
+                                fontSize: '0.875rem',
+                                fontWeight: activeMenu === 'bank-accounts' ? 600 : 500,
+                                color: activeMenu === 'bank-accounts' ? '#13ec5b' : '#333333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'bank-accounts') e.currentTarget.style.backgroundColor = '#f9fafb';
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'bank-accounts') e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                        >
+                            <Landmark style={{ width: '20px', height: '20px' }} />
+                            Tài khoản ngân hàng
+                        </button>
+
+                        <button
+                            onClick={() => {
                                 setActiveMenu('history');
                                 setActiveView('history');
                             }}
@@ -1087,6 +1197,60 @@ export function AuthorStoryManagement({ onBack }) {
                                     <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '0.75rem' }}>{withdrawError}</p>
                                 )}
                                 <div style={{ marginBottom: '1.25rem' }}>
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                        Tài khoản ngân hàng (đã xác thực)
+                                    </label>
+                                    <select
+                                        value={selectedBankAccountIdx >= 0 ? String(selectedBankAccountIdx) : ''}
+                                        onChange={(e) => setSelectedBankAccountIdx(e.target.value === '' ? -1 : Number(e.target.value))}
+                                        style={{
+                                            width: '100%',
+                                            maxWidth: '520px',
+                                            padding: '0.75rem 1rem',
+                                            border: '1px solid #e5e7eb',
+                                            borderRadius: '10px',
+                                            fontSize: '0.9375rem',
+                                            outline: 'none',
+                                            backgroundColor: '#ffffff'
+                                        }}
+                                        onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                        onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                    >
+                                        <option value="">Chọn tài khoản ngân hàng</option>
+                                        {verifiedBankAccounts.map((acc, idx) => (
+                                            <option key={`${acc.bank_name}-${acc.account_number}-${idx}`} value={String(idx)}>
+                                                {acc.bank_name} • {maskAccountNumber(acc.account_number)} • {acc.account_holder_name}
+                                            </option>
+                                        ))}
+                                    </select>
+
+                                    {verifiedBankAccounts.length === 0 ? (
+                                        <p style={{ fontSize: '0.8125rem', color: '#b45309', margin: '0.5rem 0 0 0' }}>
+                                            Bạn chưa có tài khoản ngân hàng đã xác thực. Vào tab <b>Tài khoản ngân hàng</b> để thêm và xác thực trước khi rút.
+                                        </p>
+                                    ) : !selectedBankAccount ? (
+                                        <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.5rem 0 0 0' }}>
+                                            Chọn 1 tài khoản để gửi kèm theo yêu cầu rút tiền.
+                                        </p>
+                                    ) : (
+                                        <div style={{
+                                            marginTop: '0.75rem',
+                                            padding: '0.75rem 1rem',
+                                            backgroundColor: '#f8fafc',
+                                            border: '1px solid #e5e7eb',
+                                            borderRadius: '12px',
+                                            maxWidth: '640px'
+                                        }}>
+                                            <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827' }}>
+                                                {selectedBankAccount.bank_name} — {selectedBankAccount.branch_name || '—'}
+                                            </div>
+                                            <div style={{ fontSize: '0.8125rem', color: '#64748b', marginTop: '0.25rem' }}>
+                                                {selectedBankAccount.account_holder_name} • {selectedBankAccount.account_number}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                                <div style={{ marginBottom: '1.25rem' }}>
                                     <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Số coin muốn rút</label>
                                     <input
                                         type="number"
@@ -1107,10 +1271,21 @@ export function AuthorStoryManagement({ onBack }) {
                                         onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
                                         onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
                                     />
+                                    {!selectedBankAccount && (
+                                        <p style={{ fontSize: '0.8125rem', color: '#b45309', margin: '0.5rem 0 0 0' }}>
+                                            Vui lòng chọn tài khoản ngân hàng để rút tiền.
+                                        </p>
+                                    )}
                                 </div>
                                 <button
                                     type="button"
-                                    disabled={withdrawSubmitting || !withdrawAmount || (withdrawBalance != null && Number(withdrawAmount) > withdrawBalance) || Number(withdrawAmount) < 1}
+                                    disabled={
+                                        withdrawSubmitting ||
+                                        !withdrawAmount ||
+                                        !selectedBankAccount ||
+                                        (withdrawBalance != null && Number(withdrawAmount) > withdrawBalance) ||
+                                        Number(withdrawAmount) < 1
+                                    }
                                     style={{
                                         padding: '0.625rem 1.5rem',
                                         backgroundColor: '#13ec5b',
@@ -1129,9 +1304,14 @@ export function AuthorStoryManagement({ onBack }) {
                                     onClick={async () => {
                                         const amount = Number(withdrawAmount);
                                         if (!amount || amount < 1) return;
+                                        const bankInfo = buildBankInfoStringFromAccount(selectedBankAccount);
+                                        if (!bankInfo) {
+                                            setWithdrawError('Vui lòng chọn tài khoản ngân hàng hợp lệ.');
+                                            return;
+                                        }
                                         setWithdrawSubmitting(true);
                                         setWithdrawError(null);
-                                        const res = await coinApi.createWithdrawRequest({ amountCoins: amount });
+                                        const res = await coinApi.createWithdrawRequest({ amountCoins: amount, bankInfo });
                                         setWithdrawSubmitting(false);
                                         if (res?.success) {
                                             setWithdrawAmount('');
@@ -1145,6 +1325,264 @@ export function AuthorStoryManagement({ onBack }) {
                                 >
                                     {withdrawSubmitting ? 'Đang gửi...' : 'Gửi yêu cầu rút tiền'}
                                 </button>
+                            </div>
+                        </div>
+                    ) : activeView === 'bank-accounts' ? (
+                        <div style={{ maxWidth: '960px' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '1rem',
+                                marginBottom: '1.75rem',
+                                padding: '1.5rem 1.75rem',
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                            }}>
+                                <div style={{
+                                    width: '52px', height: '52px', borderRadius: '14px',
+                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    boxShadow: '0 4px 14px rgba(19, 236, 91, 0.3)'
+                                }}>
+                                    <Landmark style={{ width: '28px', height: '28px', color: '#ffffff' }} />
+                                </div>
+                                <div>
+                                    <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: '#1A2332', margin: 0, letterSpacing: '-0.02em' }}>
+                                        Danh sách tài khoản ngân hàng
+                                    </h2>
+                                    <p style={{ fontSize: '0.875rem', color: '#90A1B9', margin: '6px 0 0 0' }}>
+                                        Quản lý tài khoản nhận tiền và trạng thái xác thực (demo UI)
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div style={{
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                padding: '1.75rem',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                marginBottom: '1.5rem'
+                            }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                                    <div style={{ gridColumn: 'span 2' }}>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                            Ngân hàng
+                                        </label>
+                                        <select
+                                            value={bankName}
+                                            onChange={(e) => setBankName(e.target.value)}
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none', backgroundColor: '#ffffff' }}
+                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                        >
+                                            <option value="">Chọn ngân hàng</option>
+                                            {BANK_OPTIONS.map((b) => (
+                                                <option key={b} value={b}>{b}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                            Số tài khoản
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={accountNumber}
+                                            onChange={(e) => setAccountNumber(e.target.value.replace(/[^\d\s]/g, ''))}
+                                            placeholder="Nhập số tài khoản"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                            Chủ tài khoản
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={accountHolderName}
+                                            onChange={(e) => setAccountHolderName(e.target.value)}
+                                            placeholder="Ví dụ: NGUYỄN VĂN A"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                        />
+                                    </div>
+                                    <div style={{ gridColumn: 'span 2' }}>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                            Chi nhánh (tuỳ chọn)
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={branchName}
+                                            onChange={(e) => setBranchName(e.target.value)}
+                                            placeholder="Ví dụ: CN TP.HCM"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                        />
+                                    </div>
+                                    <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <input id="bank-verified-list" type="checkbox" checked={isBankVerified} onChange={(e) => setIsBankVerified(e.target.checked)} />
+                                        <label htmlFor="bank-verified-list" style={{ fontSize: '0.8125rem', color: '#64748b' }}>
+                                            Đã xác thực (demo)
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const bn = bankName.trim();
+                                            const an = accountNumber.trim();
+                                            const ah = accountHolderName.trim();
+                                            if (!bn || !an || !ah) {
+                                                showToast('Vui lòng nhập đủ: Ngân hàng, Số tài khoản, Chủ tài khoản.', 'error');
+                                                return;
+                                            }
+                                            setBankAccounts((list) => [
+                                                {
+                                                    user_id: authorId || 'me',
+                                                    bank_name: bn,
+                                                    account_number: an,
+                                                    account_holder_name: ah,
+                                                    branch_name: branchName.trim(),
+                                                    is_verified: isBankVerified,
+                                                    updated_at: new Date().toISOString(),
+                                                },
+                                                ...list,
+                                            ]);
+                                            setBankName('');
+                                            setAccountNumber('');
+                                            setAccountHolderName('');
+                                            setBranchName('');
+                                            setIsBankVerified(true);
+                                            showToast('Đã thêm tài khoản ngân hàng (demo).', 'success');
+                                        }}
+                                        style={{
+                                            padding: '0.625rem 1.25rem',
+                                            backgroundColor: '#13ec5b',
+                                            border: 'none',
+                                            borderRadius: '10px',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            color: '#ffffff',
+                                            cursor: 'pointer',
+                                            boxShadow: '0 2px 8px rgba(19, 236, 91, 0.35)',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#10d452'; }}
+                                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#13ec5b'; }}
+                                    >
+                                        Thêm tài khoản
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div style={{
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                overflow: 'hidden'
+                            }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                    <thead>
+                                        <tr style={{ backgroundColor: '#f8fafc' }}>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>NGÂN HÀNG</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>SỐ TK</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>CHỦ TK</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>CHI NHÁNH</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>XÁC THỰC</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>CẬP NHẬT</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>HÀNH ĐỘNG</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {bankAccounts.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={7} style={{ padding: '2.5rem', textAlign: 'center', color: '#64748b' }}>
+                                                    Chưa có tài khoản ngân hàng nào.
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            bankAccounts.map((acc, idx) => (
+                                                <tr key={`${acc.bank_name}-${acc.account_number}-${idx}`} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                    <td style={{ padding: '1rem 1.25rem', color: '#374151', fontWeight: 600 }}>{acc.bank_name}</td>
+                                                    <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{maskAccountNumber(acc.account_number)}</td>
+                                                    <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{acc.account_holder_name}</td>
+                                                    <td style={{ padding: '1rem 1.25rem', color: '#64748b' }}>{acc.branch_name || '—'}</td>
+                                                    <td style={{ padding: '1rem 1.25rem' }}>
+                                                        {acc.is_verified ? (
+                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.25rem 0.5rem', borderRadius: '9999px', backgroundColor: '#ecfdf5', color: '#047857', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #a7f3d0' }}>
+                                                                <ShieldCheck style={{ width: '14px', height: '14px' }} /> Verified
+                                                            </span>
+                                                        ) : (
+                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.25rem 0.5rem', borderRadius: '9999px', backgroundColor: '#fffbeb', color: '#b45309', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #fde68a' }}>
+                                                                <ShieldX style={{ width: '14px', height: '14px' }} /> Unverified
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: '1rem 1.25rem', textAlign: 'right', color: '#64748b' }}>{formatTime(acc.updated_at)}</td>
+                                                    <td style={{ padding: '1rem 1.25rem', textAlign: 'right' }}>
+                                                        <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setBankAccounts((list) =>
+                                                                        list.map((x, i) =>
+                                                                            i === idx
+                                                                                ? { ...x, is_verified: !x.is_verified, updated_at: new Date().toISOString() }
+                                                                                : x
+                                                                        )
+                                                                    );
+                                                                    showToast(acc.is_verified ? 'Đã huỷ xác thực (demo).' : 'Đã xác thực (demo).', 'success');
+                                                                }}
+                                                                style={{
+                                                                    padding: '0.45rem 0.75rem',
+                                                                    borderRadius: '10px',
+                                                                    border: '1px solid #e5e7eb',
+                                                                    backgroundColor: '#ffffff',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: '0.8125rem',
+                                                                    fontWeight: 600,
+                                                                    color: '#111827'
+                                                                }}
+                                                            >
+                                                                {acc.is_verified ? 'Huỷ xác thực' : 'Xác thực'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (!window.confirm('Xoá tài khoản ngân hàng này?')) return;
+                                                                    setBankAccounts((list) => list.filter((_, i) => i !== idx));
+                                                                    showToast('Đã xoá tài khoản (demo).', 'success');
+                                                                }}
+                                                                style={{
+                                                                    padding: '0.45rem 0.75rem',
+                                                                    borderRadius: '10px',
+                                                                    border: '1px solid #fecaca',
+                                                                    backgroundColor: '#fef2f2',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: '0.8125rem',
+                                                                    fontWeight: 700,
+                                                                    color: '#b91c1c'
+                                                                }}
+                                                            >
+                                                                Xoá
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     ) : activeView === 'history' ? (
