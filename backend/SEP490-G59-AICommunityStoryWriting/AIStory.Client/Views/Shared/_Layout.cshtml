@@ -79,6 +79,14 @@
                                     </a>
                                 </li>
                                 <li>
+                                    <a class="dropdown-item" href="/Home/WalletHistory">
+                                        <i class="bi bi-clock-history"></i> Lịch sử ví
+                                    </a>
+                                </li>
+                                <li class="px-3 py-2 text-muted small" id="userWalletBalanceItem" style="white-space: normal; display: none;">
+                                    <i class="bi bi-wallet2 me-1"></i> Ví coin: <span id="userWalletBalanceValue">0</span>
+                                </li>
+                                <li>
                                     <a class="dropdown-item" href="#" id="profileLink">
                                         <i class="bi bi-person"></i> Hồ sơ
                                     </a>
@@ -183,6 +191,26 @@
                         userEmail.textContent = decoded.sub;
                     }
                 }
+
+                // Load wallet coin balance
+                const walletItem = document.getElementById('userWalletBalanceItem');
+                const walletValueEl = document.getElementById('userWalletBalanceValue');
+                if (walletItem && walletValueEl) {
+                    walletItem.style.display = 'block';
+                    walletValueEl.textContent = '0';
+                    ApiService.getMyWallet()
+                        .then(function (w) {
+                            const balanceCoin = w?.balanceCoin ?? w?.BalanceCoin ?? w?.balance_coin ?? w?.Balance_coin ?? 0;
+                            const incomeBalance = w?.incomeBalance ?? w?.IncomeBalance ?? w?.income_balance ?? w?.Income_balance ?? 0;
+                            // For AUTHORS, the unlock chapter income is stored in income_balance (withdrawable),
+                            // while balance_coin is typically 0 until funds are withdrawn/released.
+                            const isAuthor = (typeof AuthHelper !== 'undefined' && AuthHelper.isAuthor && AuthHelper.isAuthor());
+                            walletValueEl.textContent = String(isAuthor ? incomeBalance : balanceCoin);
+                        })
+                        .catch(function () {
+                            walletItem.style.display = 'none';
+                        });
+                }
             } else {
                 // Hiển thị login/register
                 loginNavItem.style.display = 'block';
@@ -194,6 +222,9 @@
                 if (adminNav) adminNav.style.display = 'none';
                 var notificationBell = document.getElementById('notificationBellItem');
                 if (notificationBell) notificationBell.style.display = 'none';
+
+                const walletItem = document.getElementById('userWalletBalanceItem');
+                if (walletItem) walletItem.style.display = 'none';
             }
         }
 

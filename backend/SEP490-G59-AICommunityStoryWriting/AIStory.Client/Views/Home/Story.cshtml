@@ -167,6 +167,7 @@
         let replyingToCommentId = null;
         let replyingToDisplayName = null;
         let userIsFollowingAuthor = false;
+        let authorFollowerCount = 0;
 
         document.addEventListener('DOMContentLoaded', async function () {
             await AuthHelper.loadUserInfo().catch(() => {});
@@ -183,6 +184,7 @@
 
         async function loadStory() {
             story = await ApiService.getStoryById(storyId);
+            authorFollowerCount = 0;
             if (story && story.authorId && typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated()) {
                 try {
                     userIsFollowingAuthor = await ApiService.getAuthorFollowing(story.authorId);
@@ -191,6 +193,13 @@
                 }
             } else {
                 userIsFollowingAuthor = false;
+            }
+            if (story && story.authorId) {
+                try {
+                    authorFollowerCount = await ApiService.getAuthorFollowerCount(story.authorId);
+                } catch (_) {
+                    authorFollowerCount = 0;
+                }
             }
             renderHeader();
             renderStats();
@@ -264,7 +273,7 @@
                 : '';
 
             const authorLabel = authorId
-                ? `<div class="text-muted small mt-1"><i class="bi bi-person"></i> Tác giả: ${escapeHtml(authorName)}</div>`
+                ? `<div class="text-muted small mt-1"><i class="bi bi-person"></i> Tác giả: ${escapeHtml(authorName)} <span class="text-muted">· ${Utils.formatNumber(authorFollowerCount)} người theo dõi</span></div>`
                 : '';
 
             const el = document.getElementById('storyHeaderCard');
@@ -308,9 +317,11 @@
                 if (userIsFollowingAuthor) {
                     await ApiService.unfollowAuthor(story.authorId);
                     userIsFollowingAuthor = false;
+                    authorFollowerCount = Math.max(0, (authorFollowerCount || 0) - 1);
                 } else {
                     await ApiService.followAuthor(story.authorId);
                     userIsFollowingAuthor = true;
+                    authorFollowerCount = Math.max(0, (authorFollowerCount || 0) + 1);
                 }
                 renderHeader();
             } catch (e) {
