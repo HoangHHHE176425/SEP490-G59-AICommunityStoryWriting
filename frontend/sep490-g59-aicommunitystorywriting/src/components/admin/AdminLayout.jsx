@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { getSystemWalletBalance } from '../../api/admin/walletApi';
 import {
     LayoutDashboard,
     Bookmark,
@@ -62,11 +63,22 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
     const roleLabel = ROLE_LABELS[roleUpper] ?? 'Quản trị';
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-    // Số dư ví hệ thống (mock – sau nối GET /api/admin/wallet/summary hoặc header)
+    // Số dư ví hệ thống (API: GET /api/admin/wallet/balance)
     const [systemWalletBalance, setSystemWalletBalance] = useState(null);
     useEffect(() => {
-        // TODO: gọi API lấy số dư ví hệ thống, ví dụ GET /api/admin/wallet/header-balance
-        setSystemWalletBalance(1_250_000);
+        let cancelled = false;
+        (async () => {
+            try {
+                const data = await getSystemWalletBalance();
+                const balance = data?.balanceCoin ?? data?.balance_coin ?? data?.systemWalletBalanceCoins;
+                if (!cancelled && typeof balance === 'number') setSystemWalletBalance(balance);
+            } catch {
+                // Best-effort: keep null if API fails
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
     }, []);
     useEffect(() => {
         const handler = (evt) => {

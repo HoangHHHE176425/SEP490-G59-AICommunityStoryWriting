@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     Wallet,
     ArrowDownCircle,
@@ -14,6 +14,7 @@ import {
     ChevronRight,
     Filter,
 } from 'lucide-react';
+import { getAdminWalletSummary, getTopAuthorsByIncome, getTopSpenders } from '../../../api/admin/walletApi';
 
 // FE mock: Ví hệ thống (admin) - sau này nối API:
 // - GET /api/admin/wallet/summary
@@ -44,6 +45,37 @@ const MOCK_WALLET_TRANSACTIONS = [
     { id: 'tx8', type: 'WITHDRAW', userId: 'author_nga', userDisplay: 'Ngã Cật Tây Hồng Thị', amountCoins: 0, amountVnd: 2_500_000, status: 'PENDING', refId: 'WD-2024-090', createdAt: '2025-03-17T08:00:00Z' },
 ];
 
+// Mock summary/top lists (fallback when API unavailable)
+const MOCK_SUMMARY = {
+    totalCoinsInSystem: 12_450_000,
+    totalIncomeBalance: 3_250_000,
+    totalFrozenBalance: 120_000,
+    totalPendingEscrow: 80_000,
+    totalRechargeVnd: 985_000_000,
+    totalWithdrawVnd: 420_000_000,
+    totalWithdrawCoins: 0,
+    platformFeeCoins: 1_250_000,
+    platformRevenueVnd: 565_000_000,
+    coinRateVnd: 100,
+    activeAuthors: 126,
+    activeReaders: 8_540,
+    systemWalletBalanceCoins: 1_250_000,
+};
+
+const MOCK_TOP_AUTHORS = [
+    { id: 'mock-a1', name: 'Thiên Tằm Thổ Đậu', incomeCoins: 42_500_000, stories: 5 },
+    { id: 'mock-a2', name: 'Ngã Cật Tây Hồng Thị', incomeCoins: 30_200_000, stories: 3 },
+    { id: 'mock-a3', name: 'Đường Gia Tam Thiếu', incomeCoins: 18_750_000, stories: 4 },
+    { id: 'mock-a4', name: 'Cổ Long', incomeCoins: 12_300_000, stories: 2 },
+];
+
+const MOCK_TOP_SPENDERS = [
+    { id: 'mock-u1', name: 'user_001', coins: 180_000 },
+    { id: 'mock-u2', name: 'user_029', coins: 125_000 },
+    { id: 'mock-u3', name: 'user_312', coins: 90_000 },
+    { id: 'mock-u4', name: 'user_777', coins: 75_500 },
+];
+
 export function AdminWalletDashboard() {
     const [activeTab, setActiveTab] = useState('overview');
     const [chartRange, setChartRange] = useState('7'); // 7 | 30 ngày
@@ -56,20 +88,13 @@ export function AdminWalletDashboard() {
     const historyPageSize = 5;
     const [transactions, setTransactions] = useState(() => MOCK_WALLET_TRANSACTIONS);
     const [refundLoadingRef, setRefundLoadingRef] = useState('');
-    const [systemWalletBalanceCoins, setSystemWalletBalanceCoins] = useState(1_250_000);
+    const [systemWalletBalanceCoins, setSystemWalletBalanceCoins] = useState(MOCK_SUMMARY.systemWalletBalanceCoins);
+    const [summary, setSummary] = useState(MOCK_SUMMARY);
+    const [topAuthors, setTopAuthors] = useState(MOCK_TOP_AUTHORS);
+    const [topSpenders, setTopSpendersState] = useState(MOCK_TOP_SPENDERS);
+    const [loadError, setLoadError] = useState('');
 
-    // Mock data – thay bằng API sau này
-    const summary = {
-        totalCoinsInSystem: 12_450_000,
-        totalIncomeBalance: 3_250_000,
-        totalFrozenBalance: 120_000,
-        totalPendingEscrow: 80_000,
-        totalRechargeVnd: 985_000_000,
-        totalWithdrawVnd: 420_000_000,
-        platformRevenueVnd: 565_000_000,
-        activeAuthors: 126,
-        activeReaders: 8_540,
-    };
+    const summarySafe = summary ?? MOCK_SUMMARY;
 
     const dailyIncome = useMemo(() => {
         const base = [
@@ -84,19 +109,18 @@ export function AdminWalletDashboard() {
         return chartRange === '30' ? [...base, ...base.slice(0, 3).map((d, i) => ({ day: `T${i + 8}`, income: d.income }))] : base;
     }, [chartRange]);
 
-    const topAuthors = [
-        { id: 1, name: 'Thiên Tằm Thổ Đậu', income: 42_500_000, stories: 5 },
-        { id: 2, name: 'Ngã Cật Tây Hồng Thị', income: 30_200_000, stories: 3 },
-        { id: 3, name: 'Đường Gia Tam Thiếu', income: 18_750_000, stories: 4 },
-        { id: 4, name: 'Cổ Long', income: 12_300_000, stories: 2 },
-    ];
+    const topAuthorsView = topAuthors.map((a) => ({
+        id: a.id,
+        name: a.name,
+        income: a.incomeCoins ?? a.income ?? 0,
+        stories: a.stories ?? 0,
+    }));
 
-    const topSpenders = [
-        { id: 1, name: 'user_001', coins: 180_000 },
-        { id: 2, name: 'user_029', coins: 125_000 },
-        { id: 3, name: 'user_312', coins: 90_000 },
-        { id: 4, name: 'user_777', coins: 75_500 },
-    ];
+    const topSpendersView = topSpenders.map((u) => ({
+        id: u.id,
+        name: u.name,
+        coins: u.coins ?? 0,
+    }));
 
     const maxIncome = useMemo(() => Math.max(...dailyIncome.map((d) => d.income), 1), [dailyIncome]);
 
@@ -131,7 +155,8 @@ export function AdminWalletDashboard() {
     }, [filteredTransactions, historyPage, historyPageSize]);
 
     const formatVnd = (value) => `${Number(value).toLocaleString('vi-VN')} đ`;
-    const formatCoins = (value) => `${Number(value).toLocaleString('vi-VN')} Coins`;
+    const formatCoins = (value) =>
+        `${Number(value).toLocaleString('vi-VN', { maximumFractionDigits: 0 })} Coins`;
 
     const getTypeLabel = (type) => TRANSACTION_TYPES.find((t) => t.value === type)?.label || type;
     const getTypeBadgeClass = (type) => {
@@ -153,9 +178,36 @@ export function AdminWalletDashboard() {
 
     const handleRefreshOverview = async () => {
         setOverviewLoading(true);
-        await new Promise((r) => setTimeout(r, 600));
-        setOverviewLoading(false);
+        try {
+            const [summaryRes, topAuthorsRes, topSpendersRes] = await Promise.all([
+                getAdminWalletSummary(),
+                getTopAuthorsByIncome({ take: 10 }),
+                getTopSpenders({ take: 10 }),
+            ]);
+
+            setLoadError('');
+            if (summaryRes) setSummary(summaryRes);
+            if (topAuthorsRes?.items) setTopAuthors(topAuthorsRes.items);
+            if (topSpendersRes?.items) setTopSpendersState(topSpendersRes.items);
+
+            const bal = summaryRes?.systemWalletBalanceCoins;
+            if (typeof bal === 'number') {
+                setSystemWalletBalanceCoins(bal);
+                window.dispatchEvent(new CustomEvent('system-wallet:balance', { detail: { balance: bal } }));
+            }
+        } catch (err) {
+            // Keep last known data (including mock) if API fails
+            setLoadError(err?.response?.status === 401 ? 'Chưa đăng nhập Admin hoặc token hết hạn.' : 'Không tải được dữ liệu từ API. Đang hiển thị dữ liệu gần nhất.');
+        } finally {
+            setOverviewLoading(false);
+        }
     };
+
+    // Load once on mount
+    useEffect(() => {
+        handleRefreshOverview();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const isRefundable = (tx) => {
         if (!tx) return false;
@@ -236,9 +288,11 @@ export function AdminWalletDashboard() {
 
             // Mock update số dư ví hệ thống: giảm phần fee đã ăn (nếu có)
             const feeCoins = feeTx ? Math.abs(Number(feeTx.amountCoins || 0)) : Math.round(purchaseCoins * 0.3);
-            const newBalance = Math.max(0, (systemWalletBalanceCoins ?? 0) - feeCoins);
-            setSystemWalletBalanceCoins(newBalance);
-            window.dispatchEvent(new CustomEvent('system-wallet:balance', { detail: { balance: newBalance } }));
+            if (typeof systemWalletBalanceCoins === 'number') {
+                const newBalance = Math.max(0, systemWalletBalanceCoins - feeCoins);
+                setSystemWalletBalanceCoins(newBalance);
+                window.dispatchEvent(new CustomEvent('system-wallet:balance', { detail: { balance: newBalance } }));
+            }
         } finally {
             setRefundLoadingRef('');
         }
@@ -246,6 +300,11 @@ export function AdminWalletDashboard() {
 
     return (
         <div className="space-y-6">
+            {loadError ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] font-semibold text-amber-800">
+                    {loadError}
+                </div>
+            ) : null}
             {/* Header + Tabs */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
@@ -302,7 +361,7 @@ export function AdminWalletDashboard() {
                             <div className="flex-1">
                                 <p className="text-xs font-medium text-slate-500">Tổng coin trong hệ thống</p>
                                 <p className="mt-1 text-lg font-bold text-slate-900">
-                                    {overviewLoading ? '...' : formatCoins(summary.totalCoinsInSystem)}
+                                    {overviewLoading ? '...' : formatCoins(summarySafe.totalCoinsInSystem)}
                                 </p>
                                 <p className="mt-1 text-xs text-slate-400">
                                     Bao gồm số dư ví người dùng, ví tác giả, coin đang chờ đối soát.
@@ -317,7 +376,7 @@ export function AdminWalletDashboard() {
                             <div className="flex-1">
                                 <p className="text-xs font-medium text-slate-500">Tổng tiền người dùng đã nạp</p>
                                 <p className="mt-1 text-lg font-bold text-slate-900">
-                                    {overviewLoading ? '...' : formatVnd(summary.totalRechargeVnd)}
+                                    {overviewLoading ? '...' : formatVnd(summarySafe.totalRechargeVnd)}
                                 </p>
                                 <p className="mt-1 text-xs text-slate-400">
                                     Cộng dồn tất cả order PayOS/VNPAY đã thanh toán.
@@ -332,7 +391,11 @@ export function AdminWalletDashboard() {
                             <div className="flex-1">
                                 <p className="text-xs font-medium text-slate-500">Đã chi trả cho tác giả</p>
                                 <p className="mt-1 text-lg font-bold text-slate-900">
-                                    {overviewLoading ? '...' : formatVnd(summary.totalWithdrawVnd)}
+                                    {overviewLoading
+                                        ? '...'
+                                        : summarySafe.totalWithdrawVnd != null
+                                            ? formatVnd(summarySafe.totalWithdrawVnd)
+                                            : formatCoins(summarySafe.totalWithdrawCoins)}
                                 </p>
                                 <p className="mt-1 text-xs text-slate-400">
                                     Tổng số tiền đã rút ra ngân hàng cho tác giả.
@@ -347,10 +410,14 @@ export function AdminWalletDashboard() {
                             <div className="flex-1">
                                 <p className="text-xs font-medium text-slate-500">Doanh thu nền tảng (ước tính)</p>
                                 <p className="mt-1 text-lg font-bold text-slate-900">
-                                    {overviewLoading ? '...' : formatVnd(summary.platformRevenueVnd)}
+                                    {overviewLoading
+                                        ? '...'
+                                        : summarySafe.platformRevenueVnd != null
+                                            ? formatVnd(summarySafe.platformRevenueVnd)
+                                            : '—'}
                                 </p>
                                 <p className="mt-1 text-xs text-slate-400">
-                                    Nạp - chi trả cho tác giả (chưa trừ chi phí vận hành).
+                                    Tổng phí nền tảng thu được (30%) quy đổi theo tỷ giá cố định.
                                 </p>
                             </div>
                         </div>
@@ -382,7 +449,7 @@ export function AdminWalletDashboard() {
                                     <div>
                                         <p className="text-xs text-slate-500">Thu nhập khả dụng của tác giả</p>
                                         <p className="text-sm font-semibold text-slate-900">
-                                            {formatCoins(summary.totalIncomeBalance)}
+                                            {formatCoins(summarySafe.totalIncomeBalance)}
                                         </p>
                                     </div>
                                 </div>
@@ -393,7 +460,7 @@ export function AdminWalletDashboard() {
                                     <div>
                                         <p className="text-xs text-slate-500">Số dư bị khóa</p>
                                         <p className="text-sm font-semibold text-slate-900">
-                                            {formatCoins(summary.totalFrozenBalance)}
+                                            {formatCoins(summarySafe.totalFrozenBalance)}
                                         </p>
                                     </div>
                                 </div>
@@ -404,7 +471,7 @@ export function AdminWalletDashboard() {
                                     <div>
                                         <p className="text-xs text-slate-500">Coin đang treo (escrow)</p>
                                         <p className="text-sm font-semibold text-slate-900">
-                                            {formatCoins(summary.totalPendingEscrow)}
+                                            {formatCoins(summarySafe.totalPendingEscrow)}
                                         </p>
                                     </div>
                                 </div>
@@ -449,7 +516,7 @@ export function AdminWalletDashboard() {
                                         <span className="text-xs font-medium text-slate-600">Độc giả hoạt động</span>
                                     </div>
                                     <p className="text-lg font-bold text-slate-900 mt-1">
-                                        {summary.activeReaders.toLocaleString('vi-VN')}
+                                        {Number(summarySafe.activeReaders).toLocaleString('vi-VN')}
                                     </p>
                                 </div>
                                 <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3 flex flex-col gap-1">
@@ -458,7 +525,7 @@ export function AdminWalletDashboard() {
                                         <span className="text-xs font-medium text-slate-600">Tác giả có thu nhập</span>
                                     </div>
                                     <p className="text-lg font-bold text-slate-900 mt-1">
-                                        {summary.activeAuthors.toLocaleString('vi-VN')}
+                                        {Number(summarySafe.activeAuthors).toLocaleString('vi-VN')}
                                     </p>
                                 </div>
                             </div>
@@ -478,7 +545,7 @@ export function AdminWalletDashboard() {
                         <div className="bg-white rounded-xl border border-slate-200 p-5">
                             <h2 className="text-sm font-semibold text-slate-900 mb-3">Top tác giả theo thu nhập</h2>
                             <div className="space-y-2">
-                                {topAuthors.map((a, idx) => (
+                                {topAuthorsView.map((a, idx) => (
                                     <div
                                         key={a.id}
                                         className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-slate-50 transition-colors"
@@ -500,7 +567,7 @@ export function AdminWalletDashboard() {
                         <div className="bg-white rounded-xl border border-slate-200 p-5">
                             <h2 className="text-sm font-semibold text-slate-900 mb-3">Top độc giả chi tiêu coin</h2>
                             <div className="space-y-2">
-                                {topSpenders.map((u, idx) => (
+                                {topSpendersView.map((u, idx) => (
                                     <div
                                         key={u.id}
                                         className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-slate-50 transition-colors"

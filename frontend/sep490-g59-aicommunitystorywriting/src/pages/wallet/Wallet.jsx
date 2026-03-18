@@ -8,17 +8,23 @@ import ActivityHistory from '../../components/profile/ActivityHistory';
 import * as coinApi from '../../api/coins/coinApi';
 
 export default function Wallet() {
-    const { user } = useAuth();
+    const { user, role } = useAuth();
     const [activeTab, setActiveTab] = useState('recharge');
 
     const [walletBalance, setWalletBalance] = useState(null);
+    const [incomeBalance, setIncomeBalance] = useState(0);
+    const [frozenBalance, setFrozenBalance] = useState(0);
     const [totalRechargeCoins, setTotalRechargeCoins] = useState(0);
     const [totalSpentCoins, setTotalSpentCoins] = useState(0); // chưa có API
-    const [lockedCoins, setLockedCoins] = useState(0); // chưa có API
+    const [lockedCoins, setLockedCoins] = useState(0); // map từ frozen_balance (tạm khóa khi rút)
     const [loadingStats, setLoadingStats] = useState(true);
     const [statsError, setStatsError] = useState('');
 
-    const balance = walletBalance ?? (user?.stats?.currentCoins ?? 0);
+    const normalizedRole = (role ?? '').toString().trim().toUpperCase();
+    const isAuthor = normalizedRole === 'AUTHOR' || user?.isAuthor === true;
+    const displayBalance = isAuthor
+        ? incomeBalance
+        : walletBalance ?? (user?.stats?.currentCoins ?? 0);
 
     const spentPercent = useMemo(() => {
         if (totalRechargeCoins <= 0) return 0;
@@ -44,6 +50,8 @@ export default function Wallet() {
                 if (cancelled) return;
 
                 setWalletBalance(walletRes?.data?.balanceCoin ?? 0);
+                setIncomeBalance(Number(walletRes?.data?.incomeBalance ?? 0) || 0);
+                setFrozenBalance(Number(walletRes?.data?.frozenBalance ?? 0) || 0);
 
                 const orders = Array.isArray(ordersRes.data) ? ordersRes.data : [];
                 const totalPaid = orders
@@ -52,7 +60,8 @@ export default function Wallet() {
 
                 setTotalRechargeCoins(totalPaid);
                 setTotalSpentCoins(0);
-                setLockedCoins(0);
+                // frozen_balance = coin đang bị khóa do yêu cầu rút (chờ admin duyệt)
+                setLockedCoins(Number(walletRes?.data?.frozenBalance ?? 0) || 0);
             } catch (e) {
                 if (cancelled) return;
                 setStatsError(e?.message || 'Không thể tải dữ liệu ví');
@@ -111,7 +120,7 @@ export default function Wallet() {
                                     Số dư hiện tại
                                 </p>
                                 <p className="text-2xl font-bold text-primary">
-                                    {Number(balance || 0).toLocaleString()} Coins
+                                    {Number(displayBalance || 0).toLocaleString()} Coins
                                 </p>
                             </div>
                         </div>
@@ -140,9 +149,9 @@ export default function Wallet() {
                                     <ArrowUpCircle className="w-5 h-5 text-amber-500" />
                                 </div>
                                 <div>
-                                    <p className="text-xs text-slate-500 dark:text-slate-400">Đã sử dụng</p>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">Thu nhập khả dụng</p>
                                     <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                                        {loadingStats ? '...' : `${totalSpentCoins.toLocaleString()} Coins`}
+                                        {loadingStats ? '...' : `${incomeBalance.toLocaleString()} Coins`}
                                     </p>
                                 </div>
                             </div>
