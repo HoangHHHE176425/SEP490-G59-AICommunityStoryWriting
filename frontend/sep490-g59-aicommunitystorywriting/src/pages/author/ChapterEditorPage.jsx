@@ -3,7 +3,7 @@ import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'luc
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
-import { indexRag, suggestNextChapter, coCreate, checkChapter } from '../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, checkChapter, getAiUsageLimit } from '../../api/ai/aiApi';
 import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 
 // Helper function to count words
@@ -206,6 +206,23 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     const [showSuggestPopup, setShowSuggestPopup] = useState(false);
     const [suggestLoading, setSuggestLoading] = useState(false);
     const [suggestions, setSuggestions] = useState([]);
+    const [suggestError, setSuggestError] = useState(null);
+    const [aiUsageLimit, setAiUsageLimit] = useState(null);
+
+    const loadAiUsageLimit = async () => {
+        try {
+            const data = await getAiUsageLimit();
+            setAiUsageLimit({
+                limitPerDay: Number(data?.limitPerDay ?? data?.LimitPerDay ?? 0) || 0,
+                usedInWindow: Number(data?.usedInWindow ?? data?.UsedInWindow ?? 0) || 0,
+                remaining: Number(data?.remaining ?? data?.Remaining ?? 0) || 0,
+                resetsAtUtc: data?.resetsAtUtc ?? data?.ResetsAtUtc ?? null,
+            });
+        } catch {
+            // ignore (user có thể chưa đăng nhập / BE lỗi)
+            setAiUsageLimit(null);
+        }
+    };
 
     // Popup đồng sáng tác (AI gợi ý chương): bước 1 = nhập ý tưởng, bước 2 = xem kết quả + đồng ý
     const [showCoCreateIdeaPopup, setShowCoCreateIdeaPopup] = useState(false);
@@ -398,6 +415,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             }
             setSuggestLoading(true);
             setSuggestions([]);
+            setSuggestError(null);
             setShowSuggestPopup(true);
             try {
                 // Gọi index-rag nền (không chờ). Gợi ý chạy ngay; BE dùng RAG nếu đã index, không thì dùng Story Context.
@@ -406,15 +424,20 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 const data = await suggestNextChapter(storyId, afterChapterId);
                 const list = data?.suggestions ?? data?.Suggestions ?? [];
                 setSuggestions(Array.isArray(list) ? list : []);
+                // Cập nhật số lượt còn lại sau khi gọi AI thành công
+                loadAiUsageLimit();
             } catch (err) {
                 const status = err?.response?.status;
                 const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi gợi ý AI.';
                 if (status === 429) {
                     showToast('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.', 'error');
+                    setSuggestError('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.');
                 } else if (status === 403) {
                     showToast(msg || 'Chỉ tác giả của truyện mới được sử dụng tính năng này.', 'error');
+                    setSuggestError(msg || 'Chỉ tác giả của truyện mới được sử dụng tính năng này.');
                 } else {
                     showToast(msg, 'error');
+                    setSuggestError(msg);
                 }
                 setSuggestions([]);
             } finally {
@@ -433,6 +456,11 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             setShowCoCreateIdeaPopup(true);
         }
     };
+
+    // Load số lượt AI khi vào trang (nếu đã đăng nhập)
+    useEffect(() => {
+        loadAiUsageLimit();
+    }, []);
 
     const handleCoCreateSubmit = async () => {
         const storyId = story?.id ?? story?.Id;
@@ -868,6 +896,10 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
                             {suggestLoading ? (
                                 <p style={{ margin: 0, color: '#6b7280', textAlign: 'center' }}>Đang tải gợi ý...</p>
+                            ) : suggestError ? (
+                                <div style={{ padding: '12px 14px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '10px', color: '#b91c1c', fontSize: '0.875rem' }}>
+                                    {suggestError}
+                                </div>
                             ) : suggestions.length === 0 ? (
                                 <p style={{ margin: 0, color: '#6b7280', textAlign: 'center' }}>Không có gợi ý.</p>
                             ) : (
@@ -1608,22 +1640,22 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                         <>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý đoạn văn
+                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
                                             </span>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý chương
+                                                AI gợi ý chương{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
                                             </span>
                                         </>
                                     ) : (
                                         <>
                                             <button type="button" onClick={() => handleAISuggestion('paragraph')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý đoạn văn
+                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
                                             </button>
                                             <button type="button" onClick={() => handleAISuggestion('chapter')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý chương
+                                                AI gợi ý chương{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
                                             </button>
                                         </>
                                     )}

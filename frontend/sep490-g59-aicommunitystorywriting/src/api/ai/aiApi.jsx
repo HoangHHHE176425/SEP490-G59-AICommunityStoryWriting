@@ -62,3 +62,12 @@ export async function checkChapter(payload) {
     const response = await axiosInstance.post("ai/check-chapter", body);
     return response.data;
 }
+
+/**
+ * Xem giới hạn sử dụng AI của user hiện tại (số lần/24h).
+ * @returns {Promise<{ limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string }>}
+ */
+export async function getAiUsageLimit() {
+    const response = await axiosInstance.get("ai/usage-limit");
+    return response.data;
+}
