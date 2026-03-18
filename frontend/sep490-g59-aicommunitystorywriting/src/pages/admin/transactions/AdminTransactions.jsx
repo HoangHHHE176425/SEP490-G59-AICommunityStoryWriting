@@ -1,69 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { approveWithdraw, getAdminTransactions, rejectWithdraw } from '../../../api/admin/transactionsApi';
 
-const MOCK_TRANSACTIONS = [
-    {
-        id: 'TX-20260317-0001',
-        createdAt: '2026-03-17T09:12:00Z',
-        user: { id: 'U-0001', name: 'Nguyễn Văn A', email: 'a.admin@test.com' },
-        type: 'DEPOSIT',
-        amountVnd: 200000,
-        method: 'PayOS',
-        status: 'SUCCESS',
-        note: 'Nạp ví',
-        gatewayRef: 'PAYOS_100200300',
-    },
-    {
-        id: 'TX-20260317-0002',
-        createdAt: '2026-03-17T10:05:00Z',
-        user: { id: 'U-0002', name: 'Trần Thị B', email: 'b.user@test.com' },
-        type: 'WITHDRAW',
-        amountVnd: 150000,
-        method: 'BankTransfer',
-        status: 'PENDING',
-        note: 'Rút về ngân hàng',
-        gatewayRef: 'BANK_WD_889911',
-        bankAccount: {
-            user_id: 'U-0002',
-            bank_name: 'Vietcombank',
-            account_number: '0123456789',
-            account_holder_name: 'TRẦN THỊ B',
-            branch_name: 'CN TP.HCM',
-            is_verified: true,
-            updated_at: '2026-03-10T04:00:00Z',
-        },
-    },
-    {
-        id: 'TX-20260316-0003',
-        createdAt: '2026-03-16T15:41:00Z',
-        user: { id: 'U-0003', name: 'Lê Văn C', email: 'c.user@test.com' },
-        type: 'DEPOSIT',
-        amountVnd: 50000,
-        method: 'PayOS',
-        status: 'FAILED',
-        note: 'Nạp ví (lỗi)',
-        gatewayRef: 'PAYOS_100200999',
-    },
-    {
-        id: 'TX-20260315-0004',
-        createdAt: '2026-03-15T08:20:00Z',
-        user: { id: 'U-0004', name: 'Phạm Thị D', email: 'd.user@test.com' },
-        type: 'WITHDRAW',
-        amountVnd: 300000,
-        method: 'BankTransfer',
-        status: 'SUCCESS',
-        note: 'Rút về ngân hàng',
-        gatewayRef: 'BANK_WD_771122',
-        bankAccount: {
-            user_id: 'U-0004',
-            bank_name: 'Techcombank',
-            account_number: '2345678901',
-            account_holder_name: 'PHẠM THỊ D',
-            branch_name: 'CN Hà Nội',
-            is_verified: true,
-            updated_at: '2026-03-12T09:30:00Z',
-        },
-    },
-];
+function safeBankAccount(tx) {
+    // API returns bankAccount (object) or null. Older mock used snake_case.
+    const b = tx?.bankAccount ?? null;
+    if (!b || typeof b !== 'object') return null;
+    return {
+        bank_name: b.bank_name ?? b.bankName ?? b.bank_name_snapshot ?? '-',
+        account_number: b.account_number ?? b.accountNumber ?? '-',
+        account_holder_name: b.account_holder_name ?? b.accountHolderName ?? '-',
+        branch_name: b.branch_name ?? b.branchName ?? '-',
+        is_verified: b.is_verified ?? b.isVerified ?? null,
+        updated_at: b.updated_at ?? b.updatedAt ?? null,
+    };
+}
 
 function maskAccountNumber(value) {
     const s = String(value || '');
@@ -110,7 +60,7 @@ function typeBadge(type) {
 }
 
 export function AdminTransactions() {
-    const [transactions, setTransactions] = useState(() => MOCK_TRANSACTIONS);
+    const [transactions, setTransactions] = useState(() => []);
     const [typeFilter, setTypeFilter] = useState('ALL'); // ALL | DEPOSIT | WITHDRAW
     const [statusFilter, setStatusFilter] = useState('ALL'); // ALL | SUCCESS | PENDING | FAILED
     const [query, setQuery] = useState('');
@@ -119,37 +69,49 @@ export function AdminTransactions() {
     const [selected, setSelected] = useState(null);
     const [actionLoading, setActionLoading] = useState(false);
     const [toast, setToast] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [page, setPage] = useState(1);
+    const [pageSize] = useState(20);
+    const [totalCount, setTotalCount] = useState(0);
+    const [totalPages, setTotalPages] = useState(1);
+    const [loadError, setLoadError] = useState('');
 
-    const filtered = useMemo(() => {
-        const q = query.trim().toLowerCase();
-        const from = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
-        const to = toDate ? new Date(`${toDate}T23:59:59`).getTime() : null;
+    async function loadList(nextPage = page) {
+        try {
+            setLoading(true);
+            setLoadError('');
+            const res = await getAdminTransactions({
+                type: typeFilter,
+                status: statusFilter,
+                q: query || undefined,
+                from: fromDate || undefined,
+                to: toDate || undefined,
+                page: nextPage,
+                pageSize,
+            });
+            setTransactions(res.items ?? []);
+            setTotalCount(res.totalCount ?? 0);
+            setTotalPages(res.totalPages ?? 1);
+            setPage(res.page ?? nextPage);
+        } catch (err) {
+            setLoadError(err?.response?.status === 401 ? 'Chưa đăng nhập Admin hoặc token hết hạn.' : 'Không tải được danh sách giao dịch.');
+            setTransactions([]);
+            setTotalCount(0);
+            setTotalPages(1);
+        } finally {
+            setLoading(false);
+        }
+    }
 
-        return transactions.filter((tx) => {
-            if (typeFilter !== 'ALL' && tx.type !== typeFilter) return false;
-            if (statusFilter !== 'ALL' && tx.status !== statusFilter) return false;
+    // Load whenever filters change
+    useEffect(() => {
+        setPage(1);
+        loadList(1);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [typeFilter, statusFilter, query, fromDate, toDate]);
 
-            const t = new Date(tx.createdAt).getTime();
-            if (from != null && t < from) return false;
-            if (to != null && t > to) return false;
-
-            if (!q) return true;
-            const haystack = [
-                tx.id,
-                tx.gatewayRef,
-                tx.user?.name,
-                tx.user?.email,
-                tx.method,
-                tx.note,
-                tx.status,
-                tx.type,
-            ]
-                .filter(Boolean)
-                .join(' ')
-                .toLowerCase();
-            return haystack.includes(q);
-        }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    }, [fromDate, query, statusFilter, toDate, typeFilter, transactions]);
+    // Keep a "filtered" alias to minimize UI changes
+    const filtered = useMemo(() => transactions, [transactions]);
 
     const selectedFresh = useMemo(() => {
         if (!selected?.id) return null;
@@ -170,27 +132,20 @@ export function AdminTransactions() {
 
         try {
             setActionLoading(true);
-            // FE mock: giả lập độ trễ như gọi API
-            await new Promise((r) => setTimeout(r, 450));
+            const adminNote =
+                decision === 'APPROVE'
+                    ? 'Đã duyệt bởi Admin'
+                    : 'Bị từ chối bởi Admin';
+            if (decision === 'APPROVE') {
+                await approveWithdraw(selectedFresh.id, adminNote);
+            } else {
+                await rejectWithdraw(selectedFresh.id, adminNote);
+            }
 
-            const nextStatus = decision === 'APPROVE' ? 'SUCCESS' : 'CANCELLED';
-            setTransactions((list) =>
-                list.map((tx) =>
-                    tx.id === selectedFresh.id
-                        ? {
-                              ...tx,
-                              status: nextStatus,
-                              note:
-                                  decision === 'APPROVE'
-                                      ? `${tx.note || ''}${tx.note ? ' • ' : ''}Đã duyệt bởi Admin`
-                                      : `${tx.note || ''}${tx.note ? ' • ' : ''}Bị từ chối bởi Admin`,
-                          }
-                        : tx
-                )
-            );
-            setSelected((prev) => (prev ? { ...prev, status: nextStatus } : prev));
             setToast(decision === 'APPROVE' ? 'Đã duyệt yêu cầu rút tiền.' : 'Đã từ chối yêu cầu rút tiền.');
             window.setTimeout(() => setToast(''), 2500);
+            setSelected(null);
+            await loadList(page);
         } finally {
             setActionLoading(false);
         }
@@ -198,6 +153,11 @@ export function AdminTransactions() {
 
     return (
         <div className="space-y-5">
+            {loadError ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] font-semibold text-amber-800">
+                    {loadError}
+                </div>
+            ) : null}
             {toast ? (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[12px] font-semibold text-emerald-800">
                     {toast}
@@ -213,7 +173,7 @@ export function AdminTransactions() {
                     </p>
                 </div>
                 <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">
-                    {filtered.length} giao dịch
+                    {loading ? '...' : `${totalCount} giao dịch`}
                 </span>
             </div>
 
@@ -249,6 +209,7 @@ export function AdminTransactions() {
                         <option value="SUCCESS">Thành công</option>
                         <option value="PENDING">Đang xử lý</option>
                         <option value="FAILED">Thất bại</option>
+                        <option value="CANCELLED">Đã hủy</option>
                     </select>
 
                     <div className="flex items-center gap-2 ml-auto">
@@ -283,6 +244,7 @@ export function AdminTransactions() {
                             setToDate('');
                             setStatusFilter('ALL');
                             setTypeFilter('ALL');
+                            setPage(1);
                         }}
                         className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
                     >
@@ -298,8 +260,6 @@ export function AdminTransactions() {
                                 <th className="px-3 py-2 font-medium">Người dùng</th>
                                 <th className="px-3 py-2 font-medium">Loại</th>
                                 <th className="px-3 py-2 font-medium text-right">Số tiền</th>
-                                <th className="px-3 py-2 font-medium">Ngân hàng</th>
-                                <th className="px-3 py-2 font-medium">Số tài khoản</th>
                                 <th className="px-3 py-2 font-medium">Phương thức</th>
                                 <th className="px-3 py-2 font-medium">Trạng thái</th>
                                 <th className="px-3 py-2 font-medium">Mã tham chiếu</th>
@@ -308,8 +268,8 @@ export function AdminTransactions() {
                         <tbody className="bg-white">
                             {filtered.length === 0 ? (
                                 <tr>
-                                    <td className="px-3 py-10 text-center text-slate-500" colSpan={9}>
-                                        Không có giao dịch phù hợp bộ lọc.
+                                    <td className="px-3 py-10 text-center text-slate-500" colSpan={7}>
+                                        {loading ? 'Đang tải...' : 'Không có giao dịch phù hợp bộ lọc.'}
                                     </td>
                                 </tr>
                             ) : (
@@ -339,12 +299,6 @@ export function AdminTransactions() {
                                         </td>
                                         <td className="px-3 py-2 text-right font-semibold text-slate-900">
                                             {formatVnd(tx.amountVnd)}
-                                        </td>
-                                        <td className="px-3 py-2 text-slate-700">
-                                            {tx.type === 'WITHDRAW' ? (tx.bankAccount?.bank_name || '-') : '-'}
-                                        </td>
-                                        <td className="px-3 py-2 text-slate-700">
-                                            {tx.type === 'WITHDRAW' ? maskAccountNumber(tx.bankAccount?.account_number) : '-'}
                                         </td>
                                         <td className="px-3 py-2 text-slate-700">{tx.method}</td>
                                         <td className="px-3 py-2">
@@ -439,24 +393,9 @@ export function AdminTransactions() {
                             </div>
                             {selectedFresh.type === 'WITHDRAW' && (
                                 <div className="md:col-span-2 rounded-xl bg-slate-50 p-3">
-                                    <p className="text-slate-500">Tài khoản nhận</p>
-                                    <p className="mt-1 font-semibold text-slate-900">
-                                        {selectedFresh.bankAccount?.bank_name || '-'} — {selectedFresh.bankAccount?.branch_name || '-'}
-                                    </p>
-                                    <p className="text-slate-700">
-                                        {selectedFresh.bankAccount?.account_holder_name || '-'} • {selectedFresh.bankAccount?.account_number || '-'}
-                                        {selectedFresh.bankAccount?.is_verified ? (
-                                            <span className="ml-2 inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                                                Verified
-                                            </span>
-                                        ) : (
-                                            <span className="ml-2 inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-amber-200">
-                                                Unverified
-                                            </span>
-                                        )}
-                                    </p>
-                                    <p className="text-slate-500">
-                                        Cập nhật: {selectedFresh.bankAccount?.updated_at ? formatTime(selectedFresh.bankAccount.updated_at) : '-'}
+                                    <p className="text-slate-500">Thông tin nhận</p>
+                                    <p className="mt-1 text-slate-800">
+                                        Hệ thống hiện không lưu trường <span className="font-semibold">Ngân hàng</span> và <span className="font-semibold">Số tài khoản</span> trong DB.
                                     </p>
                                 </div>
                             )}
