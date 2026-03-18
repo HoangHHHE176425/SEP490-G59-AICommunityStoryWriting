@@ -38,6 +38,11 @@ namespace Services.DTOs.Stories
         /// <summary>Trong queue moderator: thời điểm nhận duyệt.</summary>
         public DateTime? ClaimedAt { get; set; }
 
+        /// <summary>Lý do từ chối (lịch sử từ chối; có thể có ngay cả khi story hiện đã PUBLISHED).</summary>
+        public string? RejectionReason { get; set; }
+        /// <summary>Thời điểm moderator từ chối (lịch sử từ chối).</summary>
+        public DateTime? RejectedAt { get; set; }
+
         /// <summary>Admin: thời điểm gửi duyệt (dùng updated_at khi PENDING_REVIEW).</summary>
         public DateTime? PendingSince { get; set; }
         /// <summary>Admin: hạn duyệt (PendingSince + 7 ngày, có thể gia hạn).</summary>
