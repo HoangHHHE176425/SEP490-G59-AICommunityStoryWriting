@@ -133,12 +133,7 @@ namespace AIStory.API.Controllers
                 await Response.WriteAsJsonAsync(new { message = "StoryId là bắt buộc." }, cancellationToken);
                 return;
             }
-            if (string.IsNullOrWhiteSpace(request.AuthorIdea))
-            {
-                Response.StatusCode = 400;
-                await Response.WriteAsJsonAsync(new { message = "AuthorIdea (ý tưởng) là bắt buộc." }, cancellationToken);
-                return;
-            }
+            // AuthorIdea là tùy chọn (option 1: để trống → AI tự viết theo mạch truyện).
 
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var authorUserId))

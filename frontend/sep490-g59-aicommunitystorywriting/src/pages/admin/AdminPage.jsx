@@ -8,6 +8,9 @@ import { UserManagement } from './user/UserManagement';
 import { PolicyManagement } from './policy/PolicyManagement';
 import { AiConfig } from './ai/AiConfig';
 import ViolationManagement from './violation/ViolationManagement';
+import { AdminTransactions } from './transactions/AdminTransactions';
+import { AdminBankAccounts } from './bank-accounts/AdminBankAccounts';
+import { AdminWalletDashboard } from './wallet/AdminWalletDashboard';
 
 export function AdminPage() {
     const { role } = useAuth();
@@ -51,8 +54,14 @@ export function AdminPage() {
                         </p>
                     </div>
                 );
+            case 'wallet-dashboard':
+                return <AdminWalletDashboard />;
             case 'ai-config':
                 return <AiConfig />;
+            case 'transactions':
+                return <AdminTransactions />;
+            case 'bank-accounts':
+                return <AdminBankAccounts />;
             case 'settings':
                 return (
                     <div className="text-center py-12">
