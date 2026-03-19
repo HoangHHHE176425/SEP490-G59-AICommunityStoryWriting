@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List, Wallet, History, Coins, ArrowDownToLine, Landmark, ShieldCheck, ShieldX } from 'lucide-react';
+import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List, Wallet, History, Coins, ArrowDownToLine, Landmark, ShieldCheck, ShieldX, Percent } from 'lucide-react';
 import { StoryEditor } from './StoryEditor';
 import { StoryInfoEditor } from './StoryInfoEditor';
 import { ChapterListManager } from '../author/ChapterListManager';
@@ -1185,6 +1185,51 @@ export function AuthorStoryManagement({ onBack }) {
                             </div>
 
                             <div style={{
+                                backgroundColor: '#fff7ed',
+                                borderRadius: '16px',
+                                padding: '1.25rem 1.25rem',
+                                border: '1px solid #fed7aa',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                                marginBottom: '1.5rem'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                    <div style={{
+                                        width: '44px',
+                                        height: '44px',
+                                        borderRadius: '14px',
+                                        backgroundColor: '#fef3c7',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 4px 14px rgba(234,179,8,0.25)',
+                                        flexShrink: 0
+                                    }}>
+                                        <Percent style={{ width: '22px', height: '22px', color: '#ea580c' }} />
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#9a3412', marginBottom: '0.25rem' }}>
+                                            Phí nền tảng 30% - Bạn nhận 70%
+                                        </div>
+                                        <div style={{ fontSize: '0.8125rem', color: '#7c2d12', lineHeight: 1.5 }}>
+                                            Mỗi lần donate, nền tảng giữ <b>30%</b> phí. Phần <b>70%</b> còn lại được cộng vào <b>income balance</b> và là số coin bạn có thể rút ở đây.
+                                        </div>
+                                        <div style={{ marginTop: '0.75rem' }}>
+                                            <div style={{
+                                                height: '10px',
+                                                borderRadius: '9999px',
+                                                background: 'linear-gradient(90deg, #13ec5b 0%, #13ec5b 70%, #f59e0b 70%, #f59e0b 100%)',
+                                                border: '1px solid #fde68a'
+                                            }} />
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#7c2d12', marginTop: '0.4rem' }}>
+                                                <span>70% bạn nhận</span>
+                                                <span>30% nền tảng</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{
                                 backgroundColor: '#ffffff',
                                 borderRadius: '16px',
                                 padding: '1.75rem',
@@ -1619,6 +1664,39 @@ export function AuthorStoryManagement({ onBack }) {
                                     <p style={{ fontSize: '0.875rem', color: '#90A1B9', margin: '6px 0 0 0' }}>Xem lịch sử nhận donate và các lần rút tiền</p>
                                 </div>
                             </div>
+
+                            <div style={{
+                                backgroundColor: '#f0fdf4',
+                                borderRadius: '16px',
+                                padding: '1.1rem 1.25rem',
+                                border: '1px solid #bbf7d0',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                                marginBottom: '1.25rem'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                    <div style={{
+                                        width: '40px',
+                                        height: '40px',
+                                        borderRadius: '14px',
+                                        backgroundColor: '#dcfce7',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 4px 14px rgba(19,236,91,0.18)',
+                                        flexShrink: 0
+                                    }}>
+                                        <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>
+                                            Tỷ lệ chia sẻ: 70% cho author, 30% nền tảng
+                                        </div>
+                                        <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
+                                            Các khoản <b>Donate</b> trong lịch sử là phần author nhận sau khi nền tảng trừ <b>30%</b> phí.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <div style={{
                                 backgroundColor: '#ffffff',
                                 borderRadius: '16px',
@@ -1632,21 +1710,22 @@ export function AuthorStoryManagement({ onBack }) {
                                             <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>THỜI GIAN</th>
                                             <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>LOẠI</th>
                                             <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>SỐ COIN</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>THỰC NHẬN</th>
                                             <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>GHI CHÚ</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {authorActivityLoading ? (
                                             <tr>
-                                                <td colSpan={4} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
+                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
                                             </tr>
                                         ) : authorActivityError ? (
                                             <tr>
-                                                <td colSpan={4} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorActivityError}</td>
+                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorActivityError}</td>
                                             </tr>
                                         ) : authorActivityItems.length === 0 ? (
                                             <tr>
-                                                <td colSpan={4} style={{ padding: '3rem 1.5rem', textAlign: 'center' }}>
+                                                <td colSpan={5} style={{ padding: '3rem 1.5rem', textAlign: 'center' }}>
                                                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
                                                         <div style={{
                                                             width: '56px', height: '56px', borderRadius: '50%',
@@ -1666,6 +1745,11 @@ export function AuthorStoryManagement({ onBack }) {
                                                 const timeStr = createdAt ? new Date(createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
                                                 const typeLabel = (item.type || item.Type) === 'WITHDRAW' ? 'Rút tiền' : 'Donate';
                                                 const amount = item.amount ?? item.Amount ?? 0;
+                                                // DONATE: nền tảng giữ 30% phí => author nhận net = amount - floor(amount * 0.3)
+                                                // WITHDRAW: lượng coin rút thực tế chính là amount (đã là phần author nhận từ trước).
+                                                const netReceived = (item.type || item.Type) === 'WITHDRAW'
+                                                    ? Number(amount)
+                                                    : Math.max(0, Number(amount) - Math.floor(Number(amount) * 0.3));
                                                 const note = (item.type || item.Type) === 'DONATE'
                                                     ? (item.senderDisplayName ?? item.SenderDisplayName ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}` : (item.note ?? item.Note) || '—')
                                                     : (item.withdrawStatus ?? item.WithdrawStatus) === 'PENDING' ? 'Chờ xử lý' : (item.note ?? item.Note) || (item.withdrawStatus ?? item.WithdrawStatus) || '—';
@@ -1675,6 +1759,9 @@ export function AuthorStoryManagement({ onBack }) {
                                                         <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{typeLabel}</td>
                                                         <td style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: (item.type || item.Type) === 'WITHDRAW' ? '#dc2626' : '#15803d' }}>
                                                             {(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin
+                                                        </td>
+                                                        <td style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 700, color: (item.type || item.Type) === 'WITHDRAW' ? '#b91c1c' : '#16a34a' }}>
+                                                            {(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(netReceived).toLocaleString()} coin
                                                         </td>
                                                         <td style={{ padding: '1rem 1.25rem', color: '#64748b', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</td>
                                                     </tr>

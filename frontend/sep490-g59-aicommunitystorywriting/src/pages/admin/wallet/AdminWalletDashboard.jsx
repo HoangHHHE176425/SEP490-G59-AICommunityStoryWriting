@@ -12,9 +12,9 @@ import {
     Search,
     ChevronLeft,
     ChevronRight,
-    Filter,
 } from 'lucide-react';
 import { getAdminWalletSummary, getTopAuthorsByIncome, getTopSpenders } from '../../../api/admin/walletApi';
+import { AdminTransactions } from '../transactions/AdminTransactions';
 
 // FE mock: Ví hệ thống (admin) - sau này nối API:
 // - GET /api/admin/wallet/summary
@@ -26,7 +26,7 @@ const TRANSACTION_TYPES = [
     { value: 'DEPOSIT', label: 'Nạp coin' },
     { value: 'PURCHASE_CHAPTER', label: 'Mua chương VIP' },
     { value: 'AUTHOR_INCOME', label: 'Thu nhập tác giả' },
-    { value: 'PLATFORM_FEE', label: 'Phí nền tảng (30%)' },
+    { value: 'PLATFORM_FEE', label: 'Phí nền tảng' },
     { value: 'WITHDRAW', label: 'Rút tiền' },
     { value: 'REFUND', label: 'Hoàn coin' },
     { value: 'PROMOTION', label: 'Khuyến mãi' },
@@ -35,14 +35,22 @@ const TRANSACTION_TYPES = [
 // Mock danh sách giao dịch ví hệ thống
 const MOCK_WALLET_TRANSACTIONS = [
     { id: 'tx1', type: 'DEPOSIT', userId: 'user_001', userDisplay: 'user_001', amountCoins: 50000, amountVnd: 50000, status: 'SUCCESS', refId: 'ORD-2024-001', createdAt: '2025-03-17T10:30:00Z' },
-    { id: 'tx2', type: 'PURCHASE_CHAPTER', userId: 'user_029', userDisplay: 'user_029', amountCoins: -500, amountVnd: 0, status: 'SUCCESS', refId: 'CH-abc-12', storyTitle: 'Tu Tiên Chi Lộ', createdAt: '2025-03-17T09:15:00Z' },
-    { id: 'tx3', type: 'AUTHOR_INCOME', userId: 'author_tt', userDisplay: 'Thiên Tằm Thổ Đậu', amountCoins: 350, amountVnd: 0, status: 'SUCCESS', refId: 'CH-abc-12', storyTitle: 'Tu Tiên Chi Lộ', createdAt: '2025-03-17T09:15:01Z' },
-    { id: 'tx3-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 150, amountVnd: 0, status: 'SUCCESS', refId: 'CH-abc-12', storyTitle: 'Tu Tiên Chi Lộ', createdAt: '2025-03-17T09:15:02Z' },
+    { id: 'tx2', type: 'PURCHASE_CHAPTER', userId: 'user_029', userDisplay: 'user_029', amountCoins: -500, amountVnd: 0, status: 'SUCCESS', refId: 'CH-abc-12', storyTitle: 'Tu Tiên Chi Lộ', feeSource: 'UNLOCK', createdAt: '2025-03-17T09:15:00Z' },
+    { id: 'tx3', type: 'AUTHOR_INCOME', userId: 'author_tt', userDisplay: 'Thiên Tằm Thổ Đậu', amountCoins: 350, amountVnd: 0, status: 'SUCCESS', refId: 'CH-abc-12', storyTitle: 'Tu Tiên Chi Lộ', feeSource: 'UNLOCK', createdAt: '2025-03-17T09:15:01Z' },
+    { id: 'tx3-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 150, amountVnd: 0, status: 'SUCCESS', refId: 'CH-abc-12', storyTitle: 'Tu Tiên Chi Lộ', feeSource: 'UNLOCK', createdAt: '2025-03-17T09:15:02Z' },
     { id: 'tx4', type: 'WITHDRAW', userId: 'author_tt', userDisplay: 'Thiên Tằm Thổ Đậu', amountCoins: 0, amountVnd: 5_000_000, status: 'SUCCESS', refId: 'WD-2024-089', createdAt: '2025-03-16T14:00:00Z' },
     { id: 'tx5', type: 'DEPOSIT', userId: 'user_312', userDisplay: 'user_312', amountCoins: 100000, amountVnd: 100000, status: 'SUCCESS', refId: 'ORD-2024-002', createdAt: '2025-03-16T11:20:00Z' },
     { id: 'tx6', type: 'REFUND', userId: 'user_777', userDisplay: 'user_777', amountCoins: 200, amountVnd: 0, status: 'SUCCESS', refId: 'REF-003', createdAt: '2025-03-15T16:45:00Z' },
     { id: 'tx7', type: 'PROMOTION', userId: 'user_new', userDisplay: 'user_new', amountCoins: 1000, amountVnd: 0, status: 'SUCCESS', refId: 'PROMO-SIGNUP', createdAt: '2025-03-15T08:00:00Z' },
     { id: 'tx8', type: 'WITHDRAW', userId: 'author_nga', userDisplay: 'Ngã Cật Tây Hồng Thị', amountCoins: 0, amountVnd: 2_500_000, status: 'PENDING', refId: 'WD-2024-090', createdAt: '2025-03-17T08:00:00Z' },
+    // Donate event: hệ thống chỉ tăng số dư từ phần phí nền tảng (30%), nhưng chúng ta gom nhóm đủ ngữ cảnh.
+    { id: 'tx9', type: 'AUTHOR_INCOME', userId: 'author_tt', userDisplay: 'Thiên Tằm Thổ Đậu', amountCoins: 70, amountVnd: 0, status: 'SUCCESS', refId: 'DN-2024-010', feeSource: 'DONATE', createdAt: '2025-03-17T09:10:00Z' },
+    { id: 'tx10-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 30, amountVnd: 0, status: 'SUCCESS', refId: 'DN-2024-010', feeSource: 'DONATE', createdAt: '2025-03-17T09:10:01Z' },
+    { id: 'tx11-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 90, amountVnd: 0, status: 'SUCCESS', refId: 'CH-abc-13', storyTitle: 'Tu Tiên Chi Lộ 2', feeSource: 'UNLOCK', createdAt: '2025-03-17T08:50:02Z' },
+    { id: 'tx12-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 45, amountVnd: 0, status: 'SUCCESS', refId: 'DN-2024-011', feeSource: 'DONATE', createdAt: '2025-03-17T08:45:01Z' },
+    { id: 'tx13-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 120, amountVnd: 0, status: 'SUCCESS', refId: 'CH-xyz-02', storyTitle: 'Ngã Rẽ Đảo Hải', feeSource: 'UNLOCK', createdAt: '2025-03-17T08:30:10Z' },
+    { id: 'tx14-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 15, amountVnd: 0, status: 'PENDING', refId: 'DN-2024-012', feeSource: 'DONATE', createdAt: '2025-03-16T19:20:00Z' },
+    { id: 'tx15-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 60, amountVnd: 0, status: 'SUCCESS', refId: 'CH-def-09', storyTitle: 'Thiên Lộ Tập 3', feeSource: 'UNLOCK', createdAt: '2025-03-16T12:10:30Z' },
 ];
 
 // Mock summary/top lists (fallback when API unavailable)
@@ -76,16 +84,16 @@ const MOCK_TOP_SPENDERS = [
     { id: 'mock-u4', name: 'user_777', coins: 75_500 },
 ];
 
-export function AdminWalletDashboard() {
-    const [activeTab, setActiveTab] = useState('overview');
+export function AdminWalletDashboard({ initialActiveTab } = {}) {
+    const [activeTab, setActiveTab] = useState(initialActiveTab || 'overview');
     const [chartRange, setChartRange] = useState('7'); // 7 | 30 ngày
     const [overviewLoading, setOverviewLoading] = useState(false);
-    const [historyTypeFilter, setHistoryTypeFilter] = useState('');
+    const [historyFeeSourceFilter, setHistoryFeeSourceFilter] = useState('ALL'); // ALL | DONATE | UNLOCK
     const [historySearch, setHistorySearch] = useState('');
     const [historyDateFrom, setHistoryDateFrom] = useState('');
     const [historyDateTo, setHistoryDateTo] = useState('');
     const [historyPage, setHistoryPage] = useState(1);
-    const historyPageSize = 5;
+    const historyPageSize = 6;
     const [transactions, setTransactions] = useState(() => MOCK_WALLET_TRANSACTIONS);
     const [refundLoadingRef, setRefundLoadingRef] = useState('');
     const [systemWalletBalanceCoins, setSystemWalletBalanceCoins] = useState(MOCK_SUMMARY.systemWalletBalanceCoins);
@@ -127,8 +135,10 @@ export function AdminWalletDashboard() {
     // Lọc lịch sử giao dịch (mock)
     const filteredTransactions = useMemo(() => {
         let list = [...transactions];
-        if (historyTypeFilter) {
-            list = list.filter((t) => t.type === historyTypeFilter);
+        // Chỉ hiển thị phần phí nền tảng (30%) vì đây là phần thay đổi trực tiếp vào “ví hệ thống”.
+        list = list.filter((t) => t.type === 'PLATFORM_FEE');
+        if (historyFeeSourceFilter && historyFeeSourceFilter !== 'ALL') {
+            list = list.filter((t) => (t.feeSource ?? null) === historyFeeSourceFilter);
         }
         if (historySearch.trim()) {
             const q = historySearch.trim().toLowerCase();
@@ -146,7 +156,7 @@ export function AdminWalletDashboard() {
             list = list.filter((t) => t.createdAt <= historyDateTo + 'T23:59:59Z');
         }
         return list.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-    }, [historyTypeFilter, historySearch, historyDateFrom, historyDateTo, transactions]);
+    }, [historyFeeSourceFilter, historySearch, historyDateFrom, historyDateTo, transactions]);
 
     const totalHistoryPages = Math.max(1, Math.ceil(filteredTransactions.length / historyPageSize));
     const paginatedTransactions = useMemo(() => {
@@ -158,7 +168,19 @@ export function AdminWalletDashboard() {
     const formatCoins = (value) =>
         `${Number(value).toLocaleString('vi-VN', { maximumFractionDigits: 0 })} Coins`;
 
-    const getTypeLabel = (type) => TRANSACTION_TYPES.find((t) => t.value === type)?.label || type;
+    const getTypeLabel = (tx) => {
+        if (tx?.type === 'PLATFORM_FEE' && tx?.feeSource) {
+            if (tx.feeSource === 'DONATE') return 'Donate';
+            if (tx.feeSource === 'UNLOCK') return 'Mở khóa chương';
+        }
+        if (tx?.type === 'AUTHOR_INCOME' && tx?.feeSource) {
+            // Hiện tại màn lịch sử ví hệ thống đang chỉ hiển thị PLATFORM_FEE,
+            // nhưng giữ label cho trường hợp API/mock trả về AUTHOR_INCOME.
+            if (tx.feeSource === 'DONATE') return 'Donate';
+            if (tx.feeSource === 'UNLOCK') return 'Mở khóa chương';
+        }
+        return TRANSACTION_TYPES.find((t) => t.value === tx?.type)?.label || tx?.type || '-';
+    };
     const getTypeBadgeClass = (type) => {
         const map = {
             DEPOSIT: 'bg-emerald-100 text-emerald-700',
@@ -170,6 +192,38 @@ export function AdminWalletDashboard() {
             PROMOTION: 'bg-pink-100 text-pink-700',
         };
         return map[type] || 'bg-slate-100 text-slate-600';
+    };
+
+    const exportHistoryCsv = () => {
+        if (!filteredTransactions.length) return;
+
+        const csvEscape = (value) => {
+            const s = String(value ?? '');
+            return `"${s.replace(/"/g, '""')}"`;
+        };
+
+        const headers = ['Thời gian', 'Loại', 'User / Tác giả', 'Coin', 'VND', 'Trạng thái', 'Tham chiếu'];
+        const csvRows = filteredTransactions.map((tx) => [
+            csvEscape(formatDate(tx.createdAt)),
+            csvEscape(getTypeLabel(tx)),
+            csvEscape(tx.userDisplay || tx.userId || ''),
+            csvEscape(tx.amountCoins !== 0 ? String(tx.amountCoins) : ''),
+            csvEscape(tx.amountVnd ? String(tx.amountVnd) : ''),
+            csvEscape(tx.status === 'PENDING' ? 'Chờ xử lý' : 'Thành công'),
+            csvEscape(tx.refId || ''),
+        ]);
+
+        const csv = [headers.map(csvEscape).join(','), ...csvRows.map((r) => r.join(','))].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `admin-wallet-history-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
     };
     const formatDate = (iso) => {
         const d = new Date(iso);
@@ -607,20 +661,18 @@ export function AdminWalletDashboard() {
                             />
                         </div>
                         <div className="flex items-center gap-2">
-                            <Filter className="w-4 h-4 text-slate-400" />
+                            <span className="text-xs text-slate-500 whitespace-nowrap">Nguồn phí nền tảng</span>
                             <select
-                                value={historyTypeFilter}
+                                value={historyFeeSourceFilter}
                                 onChange={(e) => {
-                                    setHistoryTypeFilter(e.target.value);
+                                    setHistoryFeeSourceFilter(e.target.value);
                                     setHistoryPage(1);
                                 }}
                                 className="px-3 py-2 text-sm border border-slate-200 rounded-lg text-slate-700"
                             >
-                                {TRANSACTION_TYPES.map((t) => (
-                                    <option key={t.value || 'all'} value={t.value}>
-                                        {t.label}
-                                    </option>
-                                ))}
+                                <option value="ALL">Tất cả</option>
+                                <option value="DONATE">Donate</option>
+                                <option value="UNLOCK">Mở khóa chương</option>
                             </select>
                         </div>
                         <input
@@ -642,6 +694,18 @@ export function AdminWalletDashboard() {
                             }}
                             className="px-3 py-2 text-sm border border-slate-200 rounded-lg text-slate-700"
                         />
+                        <button
+                            type="button"
+                            onClick={exportHistoryCsv}
+                            disabled={filteredTransactions.length === 0}
+                            className={`px-3 py-2 text-sm font-semibold rounded-lg border ${
+                                filteredTransactions.length === 0
+                                    ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                            }`}
+                        >
+                            Xuất CSV
+                        </button>
                     </div>
 
                     {/* Table */}
@@ -674,7 +738,7 @@ export function AdminWalletDashboard() {
                                             </td>
                                             <td className="px-4 py-3">
                                                 <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getTypeBadgeClass(tx.type)}`}>
-                                                    {getTypeLabel(tx.type)}
+                                                    {getTypeLabel(tx)}
                                                 </span>
                                             </td>
                                             <td className="px-4 py-3">{tx.userDisplay || tx.userId || '—'}</td>
@@ -761,6 +825,11 @@ export function AdminWalletDashboard() {
                             </div>
                         </div>
                     )}
+
+                    {/* Đẩy phần quản lý giao dịch (Nạp / Rút) sang trang Ví hệ thống */}
+                    <div className="border-t border-slate-200 p-4 bg-white">
+                        <AdminTransactions />
+                    </div>
                 </div>
             )}
         </div>

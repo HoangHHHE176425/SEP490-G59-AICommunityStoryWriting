@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Coins, Calendar, ArrowDown, ArrowUp, RefreshCcw } from 'lucide-react';
+import { Coins, Calendar, ArrowDown, ArrowUp, RefreshCcw, LockKeyhole } from 'lucide-react';
 import * as coinApi from '../../api/coins/coinApi';
 
 export default function ActivityHistory({ mode = 'default' } = {}) {
     const isWalletMode = mode === 'wallet';
-    const [filter, setFilter] = useState(isWalletMode ? 'recharge' : 'all');
+    const [filter, setFilter] = useState(isWalletMode ? 'all' : 'all');
+    const [timeFilter, setTimeFilter] = useState('all'); // all | 24h | 7d | 30d
     const [rechargeActivities, setRechargeActivities] = useState([]);
+    const [unlockActivities, setUnlockActivities] = useState([]);
+    const [donateActivities, setDonateActivities] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
@@ -39,6 +42,7 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
                     date,
                     time,
                     status: o.status || 'PENDING',
+                    createdAtTs: o.createdAt ? new Date(o.createdAt).getTime() : 0,
                 };
             });
             setRechargeActivities(mapped);
@@ -50,14 +54,41 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
         }
     }, []);
 
+    // NOTE: Hiện backend đang chỉ hỗ trợ nạp coin (coin_orders) qua `getMyCoinOrders`.
+    // Các loại "mở khóa chương" và "donate cho tác giả" sẽ được hiển thị trong UI và sẵn sàng hook khi API có.
+    const loadOtherActivities = useCallback(async () => {
+        // giữ async để đồng bộ UI refresh theo một luồng
+        setUnlockActivities([]);
+        setDonateActivities([]);
+    }, []);
+
     useEffect(() => {
-        loadRechargeActivities();
-    }, [loadRechargeActivities]);
+        let cancelled = false;
+        const run = async () => {
+            setError('');
+            setLoading(true);
+            try {
+                await loadRechargeActivities();
+                await loadOtherActivities();
+            } catch (e) {
+                if (cancelled) return;
+                setError(e?.message || 'Không thể tải lịch sử giao dịch');
+            } finally {
+                if (cancelled) return;
+                setLoading(false);
+            }
+        };
+        run();
+        return () => { cancelled = true; };
+    }, [loadRechargeActivities, loadOtherActivities]);
 
     const filteredActivities = (() => {
-        if (isWalletMode) return rechargeActivities;
-        if (filter === 'recharge' || filter === 'all') return rechargeActivities;
-        return [];
+        const all = [...rechargeActivities, ...unlockActivities, ...donateActivities];
+        if (filter === 'all') return all.sort((a, b) => (b.createdAtTs ?? 0) - (a.createdAtTs ?? 0));
+        if (filter === 'recharge') return rechargeActivities;
+        if (filter === 'unlock') return unlockActivities;
+        if (filter === 'donate') return donateActivities;
+        return all;
     })();
 
     const getIcon = (type) => {
@@ -65,12 +96,45 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
             case 'recharge':
                 return <ArrowDown className="w-5 h-5 text-green-500" />;
             case 'unlock':
-            case 'payment':
-                return <ArrowUp className="w-5 h-5 text-red-500" />;
+                return <LockKeyhole className="w-5 h-5 text-red-500" />;
+            case 'donate':
+                return <ArrowUp className="w-5 h-5 text-emerald-700" />;
             default:
                 return <Coins className="w-5 h-5 text-slate-400" />;
         }
     };
+
+    const emptyMessage = (() => {
+        if (!isWalletMode) {
+            if (filter === 'recharge' || filter === 'all') return 'Không có hoạt động nào';
+            return 'Chức năng này đang được phát triển.';
+        }
+        if (filter === 'recharge') return 'Chưa có giao dịch nạp coin';
+        if (filter === 'unlock') return 'Chưa có giao dịch mở khóa chương';
+        if (filter === 'donate') return 'Chưa có donate cho tác giả';
+        return 'Chưa có giao dịch nào';
+    })();
+
+    const isSpendingType = (type) => type === 'unlock' || type === 'donate';
+
+    const matchesTimeFilter = (createdAtTs) => {
+        if (timeFilter === 'all') return true;
+        if (!createdAtTs) return false;
+
+        const now = Date.now();
+        switch (timeFilter) {
+            case '24h':
+                return createdAtTs >= now - 24 * 60 * 60 * 1000;
+            case '7d':
+                return createdAtTs >= now - 7 * 24 * 60 * 60 * 1000;
+            case '30d':
+                return createdAtTs >= now - 30 * 24 * 60 * 60 * 1000;
+            default:
+                return true;
+        }
+    };
+
+    const timeFilteredActivities = filteredActivities.filter((a) => matchesTimeFilter(a.createdAtTs));
 
     return (
         <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-8 border border-slate-200 dark:border-slate-700">
@@ -79,7 +143,7 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
                     {isWalletMode ? 'Lịch sử giao dịch' : 'Lịch sử hoạt động'}
                 </h3>
                 <div className="flex items-center gap-2">
-                    {!isWalletMode && (
+                    {(
                         <>
                             <button
                                 onClick={() => setFilter('all')}
@@ -99,7 +163,7 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
                                         : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
                                 }`}
                             >
-                                Nạp coin
+                                Nạp tiền
                             </button>
                             <button
                                 onClick={() => setFilter('unlock')}
@@ -109,22 +173,69 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
                                         : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
                                 }`}
                             >
-                                Mở khóa
+                                Mở khóa chương
                             </button>
                             <button
-                                onClick={() => setFilter('payment')}
+                                onClick={() => setFilter('donate')}
                                 className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${
-                                    filter === 'payment'
+                                    filter === 'donate'
                                         ? 'bg-primary text-white'
                                         : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
                                 }`}
                             >
-                                Thanh toán
+                                Donate cho tác giả
                             </button>
                         </>
                     )}
+
+                    <div className="flex items-center gap-2 ml-1">
+                        <button
+                            onClick={() => setTimeFilter('all')}
+                            className={`px-3 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                                timeFilter === 'all'
+                                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                            }`}
+                        >
+                            Tất cả
+                        </button>
+                        <button
+                            onClick={() => setTimeFilter('7d')}
+                            className={`px-3 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                                timeFilter === '7d'
+                                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                            }`}
+                        >
+                            7 ngày
+                        </button>
+                        <button
+                            onClick={() => setTimeFilter('30d')}
+                            className={`px-3 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                                timeFilter === '30d'
+                                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                            }`}
+                        >
+                            30 ngày
+                        </button>
+                        <button
+                            onClick={() => setTimeFilter('24h')}
+                            className={`px-3 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                                timeFilter === '24h'
+                                    ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900'
+                                    : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                            }`}
+                        >
+                            24h
+                        </button>
+                    </div>
+
                     <button
-                        onClick={loadRechargeActivities}
+                        onClick={async () => {
+                            await loadRechargeActivities();
+                            await loadOtherActivities();
+                        }}
                         disabled={loading}
                         className="ml-2 inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50"
                     >
@@ -141,20 +252,16 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
                     </div>
                 )}
 
-                {!isWalletMode && filter !== 'all' && filter !== 'recharge' ? (
-                    <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-                        Chức năng này đang được phát triển.
-                    </div>
-                ) : loading ? (
+                {loading ? (
                     <div className="text-center py-12 text-slate-500 dark:text-slate-400">
                         Đang tải dữ liệu...
                     </div>
-                ) : filteredActivities.length === 0 ? (
+                ) : timeFilteredActivities.length === 0 ? (
                     <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-                        {isWalletMode ? 'Chưa có giao dịch nạp coin' : 'Không có hoạt động nào'}
+                        {emptyMessage}
                     </div>
                 ) : (
-                    filteredActivities.map((activity) => (
+                    timeFilteredActivities.map((activity) => (
                         <div
                             key={activity.id}
                             className="flex items-center gap-4 p-4 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
@@ -189,7 +296,7 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
                                         : 'text-red-600 dark:text-red-400'
                                 }`}
                             >
-                                {activity.amount > 0 ? '+' : ''}
+                                {activity.amount > 0 && !isSpendingType(activity.type) ? '+' : ''}
                                 {activity.amount.toLocaleString()} Coins
                             </div>
                         </div>
