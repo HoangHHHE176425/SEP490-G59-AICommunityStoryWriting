@@ -59,17 +59,6 @@ export function AdminPage() {
                 return <AiConfig />;
             case 'transactions':
                 return <AdminTransactions />;
-            case 'settings':
-                return (
-                    <div className="text-center py-12">
-                        <h2 className="text-xl font-bold text-slate-900 mb-2">
-                            Cài đặt
-                        </h2>
-                        <p className="text-slate-500">
-                            Trang đang được phát triển...
-                        </p>
-                    </div>
-                );
             default:
                 return <CategoryManagement />;
         }
