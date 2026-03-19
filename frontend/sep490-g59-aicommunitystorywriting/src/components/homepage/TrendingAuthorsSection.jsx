@@ -1,8 +1,15 @@
 import { ImageWithFallback } from '../figma/ImageWithFallback';
-import { TrendingUp, Flame, CheckCircle, UserPlus } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { TrendingUp, Flame, CheckCircle, UserPlus, UserMinus } from 'lucide-react';
+import { getStories } from '../../api/story/storyApi';
+import { getProfileByUserId } from '../../api/account/accountApi';
+import { getAuthorFollowing, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 
 export function TrendingAuthorsSection() {
-  const trendingAuthors = [
+  const [trendingAuthors, setTrendingAuthors] = useState([
     {
       id: 1,
       name: 'Nguyệt Hạ',
@@ -11,9 +18,12 @@ export function TrendingAuthorsSection() {
       genre: 'Ngôn Tình',
       growth: '+245%',
       followers: '12K',
+      followersNum: 12000,
       newFollowers: '+8.2K',
+      newFollowersNum: 8200,
       reason: 'Viral trên MXH',
-      verified: true
+      verified: true,
+      isFollowing: false
     },
     {
       id: 2,
@@ -23,9 +33,12 @@ export function TrendingAuthorsSection() {
       genre: 'Huyền Huyễn',
       growth: '+189%',
       followers: '9.5K',
+      followersNum: 9500,
       newFollowers: '+6.1K',
+      newFollowersNum: 6100,
       reason: 'Giải nhất cuộc thi',
-      verified: false
+      verified: false,
+      isFollowing: false
     },
     {
       id: 3,
@@ -35,11 +48,239 @@ export function TrendingAuthorsSection() {
       genre: 'Học Đường',
       growth: '+156%',
       followers: '7.8K',
+      followersNum: 7800,
       newFollowers: '+4.9K',
+      newFollowersNum: 4900,
       reason: 'Hợp tác AI xuất sắc',
-      verified: true
+      verified: true,
+      isFollowing: false
     },
-  ];
+  ]);
+
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [followLoadingByAuthorId, setFollowLoadingByAuthorId] = useState({});
+
+  const parseCompactNumber = (input) => {
+    if (input === null || input === undefined) return 0;
+    const raw = String(input).trim().replace(/,/g, '');
+    if (!raw) return 0;
+    const sign = raw.startsWith('-') ? -1 : 1;
+    const s = raw.replace(/^[-+]/, '');
+    if (s.endsWith('M')) return sign * parseFloat(s.slice(0, -1)) * 1e6;
+    if (s.endsWith('K')) return sign * parseFloat(s.slice(0, -1)) * 1e3;
+    return sign * parseFloat(s) || 0;
+  };
+
+  const formatCompactNumber = (num) => {
+    if (num === null || num === undefined || Number.isNaN(Number(num))) return '0';
+    const n = Number(num);
+    if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+    if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+    return String(Math.round(n));
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFromApi() {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const res = await getStories({
+          status: 'PUBLISHED',
+          page: 1,
+          pageSize: 40,
+          sortBy: 'total_views',
+          sortOrder: 'desc',
+        });
+        const items = Array.isArray(res?.items) ? res.items : Array.isArray(res?.Items) ? res.Items : [];
+        if (items.length === 0) {
+          if (!cancelled) setTrendingAuthors([]);
+          return;
+        }
+
+        // Group by authorId using totalViews to approximate "trending"
+        const authorAgg = new Map(); // authorId => { authorId, views, latestStory, genre }
+        for (const s of items) {
+          const authorId = s?.authorId ?? s?.AuthorId;
+          if (!authorId) continue;
+
+          const views = s?.totalViews ?? s?.TotalViews ?? 0;
+          const categoryNamesStr = s?.categoryNames ?? s?.CategoryNames ?? '';
+          const categoryNamesArr = categoryNamesStr
+            ? String(categoryNamesStr).split(',').map((x) => x.trim()).filter(Boolean)
+            : [];
+          const genre = categoryNamesArr[0] ?? 'Chưa phân loại';
+          const storyTitle = s?.title ?? s?.Title ?? '';
+
+          const prev = authorAgg.get(authorId);
+          if (!prev) {
+            authorAgg.set(authorId, { authorId, views: Number(views) || 0, latestStory: storyTitle, genre });
+          } else {
+            authorAgg.set(authorId, {
+              ...prev,
+              views: (prev.views ?? 0) + (Number(views) || 0),
+              // latestStory: keep the first seen (already sorted by total_views desc)
+              genre: prev.genre || genre,
+            });
+          }
+        }
+
+        const authorList = Array.from(authorAgg.values()).sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
+        const topAuthors = authorList.slice(0, 3);
+
+        const profiles = await Promise.all(topAuthors.map((a) => getProfileByUserId(a.authorId).catch(() => null)));
+        const profileMap = {};
+        topAuthors.forEach((a, idx) => {
+          profileMap[a.authorId] = profiles[idx];
+        });
+
+        const overallMaxViews = Math.max(...authorList.map((x) => x.views ?? 0), 1);
+
+        const mapped = topAuthors.map((a, idx) => {
+          const profile = profileMap[a.authorId];
+          const followersRaw = profile?.stats?.totalReads ?? 0;
+          const followersNum = profile ? Number(followersRaw) || 0 : 0;
+          const followers = profile ? formatCompactNumber(followersNum) : '-';
+          const verified = Boolean(profile?.isVerified);
+
+          const growthRatio = overallMaxViews > 0 ? (a.views ?? 0) / overallMaxViews : 0;
+          const growthPct = Math.max(0, Math.round(growthRatio * 100));
+
+          const newFollowersNum = Math.round(followersNum * 0.08);
+          const newFollowers = profile ? `+${formatCompactNumber(newFollowersNum)}` : '+0';
+
+          return {
+            id: a.authorId,
+            name: profile?.displayName ?? a.authorId ?? 'Ẩn danh',
+            avatar: profile?.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '',
+            latestStory: a.latestStory,
+            genre: a.genre,
+            growth: `+${growthPct}%`,
+            followers,
+            followersNum,
+            newFollowers,
+            newFollowersNum,
+            reason: verified ? 'Uy tín trong cộng đồng' : 'Đang nổi bật theo lượt xem',
+            verified,
+            isFollowing: false,
+          };
+        });
+
+        if (!cancelled) setTrendingAuthors(mapped);
+      } catch (e) {
+        if (!cancelled) setLoadError(e?.message ?? 'Không tải được trending authors');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadFromApi();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (loadError) console.error('TrendingAuthorsSection load error:', loadError);
+  }, [loadError]);
+
+  const authorIdsKey = trendingAuthors
+    .map((a) => a?.id)
+    .filter(Boolean)
+    .sort()
+    .join(',');
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (!authorIdsKey) return;
+
+    const authorIds = Array.from(new Set(trendingAuthors.map((a) => a?.id).filter(Boolean)));
+    if (authorIds.length === 0) return;
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const followingResults = await Promise.all(
+          authorIds.map((id) =>
+            getAuthorFollowing(id)
+              .then((data) => !!(data?.following ?? data?.Following))
+              .catch(() => false)
+          )
+        );
+
+        if (cancelled) return;
+        const followingMap = {};
+        authorIds.forEach((id, idx) => {
+          followingMap[id] = followingResults[idx];
+        });
+
+        setTrendingAuthors((prev) =>
+          prev.map((a) => {
+            const fid = a?.id;
+            if (!fid) return a;
+            if (followingMap[fid] === undefined) return a;
+            return { ...a, isFollowing: followingMap[fid] };
+          })
+        );
+      } catch {
+        // Best-effort
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, authorIdsKey]);
+
+  const handleToggleFollow = async (authorId) => {
+    if (!authorId) return;
+
+    const target = trendingAuthors.find((a) => a?.id === authorId);
+    if (!target) return;
+
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+
+    if (followLoadingByAuthorId[authorId]) return;
+
+    const nextFollowing = !target?.isFollowing;
+    setFollowLoadingByAuthorId((prev) => ({ ...prev, [authorId]: true }));
+
+    try {
+      if (nextFollowing) await followAuthor(authorId);
+      else await unfollowAuthor(authorId);
+
+      const delta = nextFollowing ? 1 : -1;
+      setTrendingAuthors((prev) =>
+        prev.map((a) => {
+          if (a?.id !== authorId) return a;
+          const followersNum = Math.max(0, Number(a?.followersNum ?? 0) + delta);
+          const newFollowersNum = Math.max(0, Number(a?.newFollowersNum ?? 0) + delta);
+
+          return {
+            ...a,
+            isFollowing: nextFollowing,
+            followersNum,
+            followers: followersNum ? formatCompactNumber(followersNum) : '0',
+            newFollowersNum,
+            newFollowers: `+${formatCompactNumber(newFollowersNum)}`,
+          };
+        })
+      );
+    } catch (err) {
+      console.error('TrendingAuthorsSection follow toggle failed:', err);
+    } finally {
+      setFollowLoadingByAuthorId((prev) => ({ ...prev, [authorId]: false }));
+    }
+  };
 
   return (
     <section className="bg-white rounded-2xl border border-gray-200 p-6">
@@ -60,7 +301,20 @@ export function TrendingAuthorsSection() {
       </div>
 
       <div className="space-y-4">
-        {trendingAuthors.map((author, index) => (
+        {loading ? (
+          <div className="text-center py-10 text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] text-[14px]">
+            Đang tải trending...
+          </div>
+        ) : loadError ? (
+          <div className="text-center py-10 text-red-500 font-['Plus_Jakarta_Sans',sans-serif] text-[14px]">
+            {loadError}
+          </div>
+        ) : trendingAuthors.length === 0 ? (
+          <div className="text-center py-10 text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] text-[14px]">
+            Không có dữ liệu
+          </div>
+        ) : (
+          trendingAuthors.map((author, index) => (
           <div key={author.id} className="group relative p-5 border border-gray-200 rounded-xl hover:border-[#FB2C36] hover:shadow-md transition-all cursor-pointer">
             {/* Rank Badge */}
             <div className="absolute top-4 left-4 w-8 h-8 bg-gradient-to-br from-[#FFA500] to-[#FF8C00] rounded-lg flex items-center justify-center text-white font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[16px] shadow-lg">
@@ -105,13 +359,34 @@ export function TrendingAuthorsSection() {
               </div>
 
               {/* Follow Button */}
-              <button className="px-4 py-2 bg-[#FB2C36]/10 text-[#FB2C36] rounded-lg hover:bg-[#FB2C36] hover:text-white transition-colors font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[13px] flex items-center gap-2">
-                <UserPlus className="w-4 h-4" />
-                Theo dõi
+              <button
+                type="button"
+                onClick={() => handleToggleFollow(author.id)}
+                disabled={followLoadingByAuthorId[author.id]}
+                className={`px-4 py-2 rounded-lg transition-colors font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[13px] flex items-center gap-2 ${
+                  author.isFollowing
+                    ? 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                    : 'bg-[#FB2C36]/10 text-[#FB2C36] hover:bg-[#FB2C36] hover:text-white'
+                }`}
+              >
+                {followLoadingByAuthorId[author.id] ? (
+                  'Đang xử lý...'
+                ) : author.isFollowing ? (
+                  <>
+                    <UserMinus className="w-4 h-4" />
+                    Bỏ theo dõi
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-4 h-4" />
+                    Theo dõi
+                  </>
+                )}
               </button>
             </div>
           </div>
-        ))}
+          ))
+        )}
       </div>
     </section>
   );

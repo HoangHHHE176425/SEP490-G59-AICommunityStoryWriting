@@ -313,7 +313,9 @@ export function AuthorStoryManagement({ onBack }) {
         coinApi.getMyWallet()
             .then((res) => {
                 if (res?.success && res?.data != null) {
-                    setWithdrawBalance(res.data.balanceCoin ?? res.data.balance_coin ?? 0);
+                    // Tác giả rút tiền từ `income_balance` (khả dụng để withdraw),
+                    // còn `balance_coin` là phần spendable.
+                    setWithdrawBalance(res.data.incomeBalance ?? res.data.income_balance ?? 0);
                 } else {
                     setWithdrawBalance(0);
                 }
@@ -1316,8 +1318,14 @@ export function AuthorStoryManagement({ onBack }) {
                                         if (res?.success) {
                                             setWithdrawAmount('');
                                             showToast('Đã gửi yêu cầu rút tiền. Quản trị viên sẽ xử lý.', 'success');
-                                            coinApi.getMyWallet().then((r) => { if (r?.success && r?.data) setWithdrawBalance(r.data.balanceCoin ?? r.data.balance_coin ?? 0); });
+                                            coinApi.getMyWallet().then((r) => {
+                                                if (r?.success && r?.data) {
+                                                    setWithdrawBalance(r.data.incomeBalance ?? r.data.income_balance ?? 0);
+                                                }
+                                            });
                                             coinApi.getAuthorActivity({ page: 1, pageSize: 100 }).then((ar) => { if (ar?.success && ar?.data?.items) setAuthorActivityItems(ar.data.items); });
+                                            // Để Header/Wallet trang cập nhật tổng coin ngay khi income_balance chuyển sang frozen_balance
+                                            window.dispatchEvent(new Event('wallet:changed'));
                                         } else {
                                             setWithdrawError(res?.message ?? 'Không gửi được yêu cầu rút tiền.');
                                         }
