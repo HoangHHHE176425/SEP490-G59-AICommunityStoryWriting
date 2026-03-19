@@ -1,0 +1,272 @@
+﻿@{
+    ViewData["Title"] = "Lịch sử thu nhập (AUTHOR)";
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <h2 class="mb-0"><i class="bi bi-cash-coin"></i> Lịch sử thu nhập (mở khóa chapter)</h2>
+            <div class="text-muted small mt-1">Chỉ hiển thị các giao dịch từ `CHAPTER_UNLOCK`.</div>
+        </div>
+        <a class="btn btn-outline-secondary btn-sm" href="/"><i class="bi bi-arrow-left"></i> Trang chủ</a>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header bg-light">
+            <i class="bi bi-funnel"></i> Bộ lọc
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Tìm kiếm (story)</label>
+                    <input type="text" class="form-control" id="unlockIncomeSearchStory" placeholder="Tên truyện hoặc một phần tên...">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Tháng từ</label>
+                    <input type="month" class="form-control" id="unlockIncomeMonthFrom">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Tháng đến</label>
+                    <input type="month" class="form-control" id="unlockIncomeMonthTo">
+                </div>
+            </div>
+            <div class="row g-3 mt-1">
+                <div class="col-md-4">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" id="unlockIncomeStatus">
+                        <option value="ALL" selected>Tất cả</option>
+                        <option value="AVAILABLE">AVAILABLE</option>
+                        <option value="PENDING">PENDING</option>
+                        <option value="FROZEN">FROZEN</option>
+                    </select>
+                </div>
+                <div class="col-md-4 d-grid">
+                    <button class="btn btn-primary" id="btnUnlockIncomeApply" type="button">
+                        <i class="bi bi-check2-circle"></i> Áp dụng
+                    </button>
+                </div>
+                <div class="col-md-4 d-grid">
+                    <button class="btn btn-outline-secondary" id="btnUnlockIncomeClear" type="button">
+                        <i class="bi bi-x-circle"></i> Xóa
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="unlockIncomeHistoryLoading" class="text-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+        <div class="mt-2 text-muted small">Đang tải...</div>
+    </div>
+
+    <div id="unlockIncomeHistoryError" class="alert alert-warning d-none" role="alert"></div>
+
+    <div id="unlockIncomeHistoryContent" style="display:none;">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="fw-semibold"><i class="bi bi-list-check"></i> Danh sách giao dịch</div>
+                    <div class="small text-white-50" id="unlockIncomeHistoryMeta"></div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="unlockIncomeHistoryList"></div>
+                <div id="unlockIncomeHistoryEmpty" class="text-muted py-4 text-center d-none">
+                    Chưa có lịch sử mở khóa chapter.
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-center mt-3">
+            <button class="btn btn-outline-primary btn-sm d-none" id="btnUnlockIncomeLoadMore" onclick="loadMore()">
+                <i class="bi bi-arrow-down-circle"></i> Tải thêm
+            </button>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        let page = 1;
+        const pageSize = 10;
+        let totalCount = 0;
+        let isLoading = false;
+        let currentFilters = {};
+
+        document.addEventListener('DOMContentLoaded', function () {
+            if (typeof AuthHelper === 'undefined' || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) {
+                showError('Bạn chưa đăng nhập.');
+                return;
+            }
+            if (!AuthHelper.isAuthor || !AuthHelper.isAuthor()) {
+                showError('Chỉ AUTHOR mới được xem trang này.');
+                return;
+            }
+
+            const applyBtn = document.getElementById('btnUnlockIncomeApply');
+            const clearBtn = document.getElementById('btnUnlockIncomeClear');
+
+            if (applyBtn) {
+                applyBtn.addEventListener('click', async function () {
+                    currentFilters = getFiltersFromInputs();
+                    await load(true);
+                });
+            }
+
+            if (clearBtn) {
+                clearBtn.addEventListener('click', async function () {
+                    clearFilterInputs();
+                    currentFilters = getFiltersFromInputs();
+                    await load(true);
+                });
+            }
+
+            currentFilters = getFiltersFromInputs();
+            load(true);
+        });
+
+        function showError(msg) {
+            const err = document.getElementById('unlockIncomeHistoryError');
+            const loading = document.getElementById('unlockIncomeHistoryLoading');
+            const content = document.getElementById('unlockIncomeHistoryContent');
+            err.textContent = msg || 'Lỗi không xác định';
+            err.classList.remove('d-none');
+            loading.style.display = 'none';
+            content.style.display = 'none';
+        }
+
+        function getFiltersFromInputs() {
+            const search = document.getElementById('unlockIncomeSearchStory')?.value?.trim();
+            const monthFrom = document.getElementById('unlockIncomeMonthFrom')?.value?.trim();
+            const monthTo = document.getElementById('unlockIncomeMonthTo')?.value?.trim();
+            const status = document.getElementById('unlockIncomeStatus')?.value;
+
+            const filters = {};
+            if (search) filters.search = search;
+            if (monthFrom) filters.monthFrom = monthFrom;
+            if (monthTo) filters.monthTo = monthTo;
+            if (status && status !== 'ALL') filters.status = status;
+            return filters;
+        }
+
+        function clearFilterInputs() {
+            const ids = ['unlockIncomeSearchStory', 'unlockIncomeMonthFrom', 'unlockIncomeMonthTo'];
+            ids.forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            const statusEl = document.getElementById('unlockIncomeStatus');
+            if (statusEl) statusEl.value = 'ALL';
+        }
+
+        async function load(reset) {
+            if (isLoading) return;
+            isLoading = true;
+
+            const loading = document.getElementById('unlockIncomeHistoryLoading');
+            const content = document.getElementById('unlockIncomeHistoryContent');
+            const list = document.getElementById('unlockIncomeHistoryList');
+            const empty = document.getElementById('unlockIncomeHistoryEmpty');
+            const meta = document.getElementById('unlockIncomeHistoryMeta');
+            const btn = document.getElementById('btnUnlockIncomeLoadMore');
+
+            if (reset) {
+                page = 1;
+                totalCount = 0;
+                list.innerHTML = '';
+                empty.classList.add('d-none');
+                if (btn) btn.classList.add('d-none');
+            }
+
+            loading.style.display = 'block';
+            content.style.display = 'none';
+
+            try {
+                const resp = await ApiService.getAuthorChapterUnlockIncomeHistoryByStory(page, pageSize, currentFilters);
+                const items = resp?.items || resp?.Items || [];
+                totalCount = resp?.totalCount ?? resp?.TotalCount ?? 0;
+
+                loading.style.display = 'none';
+                content.style.display = 'block';
+                if (meta) meta.textContent = totalCount > 0 ? `Tổng: ${totalCount} story` : '';
+
+                if (items.length === 0 && reset) {
+                    empty.classList.remove('d-none');
+                }
+
+                // render/append
+                const html = items.map(function (item) {
+                    const storyId = item.storyId ?? item.StoryId;
+                    const storyUrl = '/Home/Story/' + storyId;
+                    const storyTitle = item.storyTitle ?? item.StoryTitle ?? '';
+                    const gross = Number(item.grossAmount ?? item.GrossAmount ?? 0);
+                    const platform = Number(item.platformFee ?? item.PlatformFee ?? 0);
+                    const net = Number(item.netAmount ?? item.NetAmount ?? 0);
+                    const unlockCount = item.unlockCount ?? item.UnlockCount ?? 0;
+                    const lastUnlockedAt = item.lastUnlockedAt ?? item.LastUnlockedAt;
+
+                    return `
+                        <div class="d-flex align-items-center border-bottom py-3 gap-3">
+                            <div class="flex-grow-1 min-width-0">
+                                <div class="fw-medium text-dark">
+                                    <a href="${storyUrl}" class="text-decoration-none text-dark">${escapeHtml(storyTitle)}</a>
+                                </div>
+                                <div class="small text-muted">
+                                    Số lần unlock: ${escapeHtml(unlockCount)}
+                                </div>
+                                <div class="small text-muted">Last unlock: ${escapeHtml(formatDate(lastUnlockedAt))}</div>
+                            </div>
+                            <div class="text-end">
+                                <div class="small text-muted">Gross: ${gross} · Platform: ${platform}</div>
+                                <div class="text-success fw-semibold">Net: ${net} coin</div>
+                                <a class="btn btn-outline-primary btn-sm mt-2" href="${storyUrl}">
+                                    <i class="bi bi-book-half"></i> Xem story
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                if (html) list.insertAdjacentHTML('beforeend', html);
+
+                // pagination
+                page += 1;
+                if (btn) {
+                    const maxPage = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 1;
+                    btn.classList.remove('d-none');
+                    if (page > maxPage) btn.classList.add('d-none');
+                }
+            } catch (e) {
+                showError((e && e.message) ? e.message : 'Không tải được lịch sử.');
+            } finally {
+                isLoading = false;
+            }
+        }
+
+        function loadMore() {
+            load(false);
+        }
+
+        function escapeHtml(text) {
+            if (text == null) return '';
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function formatDate(d) {
+            if (!d) return '';
+            try {
+                if (typeof Utils !== 'undefined' && Utils.formatDate) return Utils.formatDate(d);
+                const dt = new Date(d);
+                return isNaN(dt.getTime()) ? '' : dt.toLocaleString('vi-VN');
+            } catch (_) {
+                return '';
+            }
+        }
+    </script>
+}
+

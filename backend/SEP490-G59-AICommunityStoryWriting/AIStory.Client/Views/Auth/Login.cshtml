@@ -93,7 +93,8 @@
                 const response = await ApiService.login(email, password);
 
                 // Lưu token vào localStorage
-                AuthHelper.setToken(response.accessToken);
+                const token = response?.accessToken ?? response?.AccessToken;
+                AuthHelper.setToken(token);
 
                 // Lấy thông tin user từ token (bao gồm Author ID)
                 await AuthHelper.loadUserInfo();

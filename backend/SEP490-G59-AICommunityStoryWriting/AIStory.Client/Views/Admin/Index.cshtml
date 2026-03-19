@@ -130,6 +130,16 @@
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="tab-performance" data-bs-toggle="tab" data-bs-target="#panel-performance" type="button"><i class="bi bi-bar-chart me-1"></i> Moderator Performance</button>
             </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-platform-wallet" data-bs-toggle="tab" data-bs-target="#panel-platform-wallet" type="button">
+                    <i class="bi bi-wallet2 me-1"></i> Ví hệ thống
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-system-coin-ledger" data-bs-toggle="tab" data-bs-target="#panel-system-coin-ledger" type="button">
+                    <i class="bi bi-list-ul me-1"></i> Nhật ký tiền hệ thống
+                </button>
+            </li>
         </ul>
 
         <div class="tab-content" id="adminTabContent">
@@ -204,6 +214,233 @@
                     </div>
                 </div>
             </div>
+            <div class="tab-pane fade" id="panel-platform-wallet">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <h5 class="mb-0"><i class="bi bi-wallet2"></i> Ví hệ thống (platform_wallet)</h5>
+                            <div class="text-muted small">Coin dùng để chia nền tảng (30%) khi unlock chapter.</div>
+                        </div>
+
+                        <div id="platformWalletError" class="alert alert-warning d-none" role="alert"></div>
+
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-4">
+                                <div class="card border-primary h-100">
+                                    <div class="card-body">
+                                        <div class="text-muted small mb-1">Số dư ví hệ thống (coin)</div>
+                                        <div class="fs-4 fw-bold" id="platformWalletBalanceCoin">0</div>
+                                        <div class="text-muted small mt-1" id="platformWalletUpdatedAt"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card border-success h-100">
+                                    <div class="card-body">
+                                        <div class="text-muted small mb-1">Tổng coin trong hệ thống</div>
+                                        <div class="fs-4 fw-bold" id="platformWalletTotalCoinsInSystem">0</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card border-warning h-100">
+                                    <div class="card-body">
+                                        <div class="text-muted small mb-1">Platform fee revenue (ước tính)</div>
+                                        <div class="fs-4 fw-bold" id="platformWalletPlatformFeeCoins">0</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="filter-panel p-3 mb-4">
+                            <h6 class="mb-3"><i class="bi bi-gear"></i> Điều chỉnh số dư (ADMIN)</h6>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-0">Số coin</label>
+                                    <input type="number" class="form-control form-control-sm" id="platformWalletAdjustAmount" min="1" step="1" placeholder="Ví dụ: 1000">
+                                    <div class="mt-2">
+                                        <label class="form-label small mb-0">Ví người dùng (userId/email/nickname)</label>
+                                        <input type="text" class="form-control form-control-sm" id="platformWalletAdjustTarget" placeholder="vd: userId hoặc email">
+                                    </div>
+                                    <div class="mt-2">
+                                        <label class="form-label small mb-0">Lý do điều chỉnh (note)</label>
+                                        <input type="text" class="form-control form-control-sm" id="platformWalletAdjustNote" placeholder="vd: Bù trừ admin">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-0">Hành động</label>
+                                    <select class="form-select form-select-sm" id="platformWalletAdjustDirection">
+                                        <option value="ADD">ADD (cộng)</option>
+                                        <option value="SUB" selected>SUB (trừ)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 d-grid">
+                                    <button type="button" class="btn btn-primary btn-sm" id="btnPlatformWalletApply">
+                                        <i class="bi bi-check2-circle"></i> Áp dụng
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="text-muted small mt-2">
+                                Lưu ý: Không cho phép trừ khiến số dư âm.
+                            </div>
+                        </div>
+
+                        <div class="filter-panel p-3 mb-3">
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                                <h6 class="mb-0"><i class="bi bi-funnel"></i> Lọc lịch sử</h6>
+                                <div class="text-muted small" id="platformWalletFilterSummary">–</div>
+                            </div>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Từ ngày</label>
+                                    <input type="date" class="form-control form-control-sm" id="platformWalletFilterDateFrom">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Đến ngày</label>
+                                    <input type="date" class="form-control form-control-sm" id="platformWalletFilterDateTo">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Loại</label>
+                                    <select class="form-select form-select-sm" id="platformWalletFilterType">
+                                        <option value="ALL" selected>Tất cả</option>
+                                        <option value="ADD">ADD</option>
+                                        <option value="SUB">SUB</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Tìm note</label>
+                                    <input type="text" class="form-control form-control-sm" id="platformWalletFilterQ" placeholder="Nhập từ khóa...">
+                                </div>
+                                <div class="col-md-3 d-grid">
+                                    <button type="button" class="btn btn-primary btn-sm" id="btnPlatformWalletFilterApply">
+                                        <i class="bi bi-check2-circle"></i> Áp dụng
+                                    </button>
+                                </div>
+                                <div class="col-md-3 d-grid">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnPlatformWalletFilterClear">
+                                        <i class="bi bi-x-circle"></i> Xóa
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                                    <h6 class="mb-0"><i class="bi bi-clock-history"></i> Gần đây</h6>
+                                    <div class="text-muted small" id="platformWalletAdjustMeta"></div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Thời gian</th>
+                                                <th>Loại</th>
+                                                <th>Coins</th>
+                                                <th>Lý do</th>
+                                                <th>UserId</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="platformWalletAdjustmentsBody">
+                                            <tr><td colspan="5" class="text-center text-muted">Đang tải...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div class="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnPlatformWalletHistoryPrev">
+                                        <i class="bi bi-arrow-left"></i> Trước
+                                    </button>
+                                    <div class="text-muted small" id="platformWalletHistoryPageMeta">Trang 1 / 1</div>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnPlatformWalletHistoryNext">
+                                        Sau <i class="bi bi-arrow-right"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="panel-system-coin-ledger">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <h5 class="mb-0"><i class="bi bi-list-ul"></i> Nhật ký tiền hệ thống</h5>
+                            <div class="text-muted small">Unlock / platform adj / withdraw</div>
+                        </div>
+
+                        <div class="filter-panel p-3 mb-3">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Từ ngày</label>
+                                    <input type="date" class="form-control form-control-sm" id="sysLedgerDateFrom">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Đến ngày</label>
+                                    <input type="date" class="form-control form-control-sm" id="sysLedgerDateTo">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Loại</label>
+                                    <select class="form-select form-select-sm" id="sysLedgerType">
+                                        <option value="ALL" selected>Tất cả</option>
+                                        <option value="UNLOCK">UNLOCK</option>
+                                        <option value="PLATFORM_ADJ">PLATFORM_ADJ</option>
+                                        <option value="WITHDRAW_REQUESTED">WITHDRAW_REQUESTED</option>
+                                        <option value="WITHDRAW_APPROVED">WITHDRAW_APPROVED</option>
+                                        <option value="WITHDRAW_REJECTED">WITHDRAW_REJECTED</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 d-grid">
+                                    <button type="button" class="btn btn-primary btn-sm" id="btnSysLedgerApply">
+                                        <i class="bi bi-check2-circle"></i> Áp dụng
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="sysLedgerLoading" class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status"></div>
+                            <div class="mt-2 text-muted small">Đang tải...</div>
+                        </div>
+
+                        <div id="sysLedgerError" class="alert alert-warning d-none" role="alert"></div>
+
+                        <div id="sysLedgerContent" style="display:none;">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>Thời gian</th>
+                                            <th>Loại</th>
+                                            <th>Platform</th>
+                                            <th>Buyer</th>
+                                            <th>BuyerId</th>
+                                            <th>Author income</th>
+                                            <th>Author frozen</th>
+                                            <th>AuthorId</th>
+                                            <th>Story/Chapter</th>
+                                            <th>Note</th>
+                                            <th>AdminId</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="sysLedgerList"></tbody>
+                                </table>
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSysLedgerPrev">
+                                    <i class="bi bi-arrow-left"></i> Trước
+                                </button>
+                                <div class="text-muted small" id="sysLedgerMeta">Trang 1 / 1</div>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSysLedgerNext">
+                                    Sau <i class="bi bi-arrow-right"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -253,6 +490,7 @@
                 else if (id === 'panel-rejected-chapters') loadRejectedChapters();
                 else if (id === 'panel-logs') loadModerationLogs(1);
                 else if (id === 'panel-performance') loadModeratorPerformance();
+                else if (id === 'panel-platform-wallet') loadPlatformWallet();
             }
 
             function timeStatusBadge(ts) {
@@ -433,6 +671,370 @@
                 }
             }
 
+            let platformWalletHistoryPage = 1;
+            const platformWalletHistoryPageSize = 10;
+
+            function escapeHtml(text) {
+                if (text == null) return '';
+                return String(text)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+
+            function getPlatformWalletHistoryFilters() {
+                var dateFromEl = document.getElementById('platformWalletFilterDateFrom');
+                var dateToEl = document.getElementById('platformWalletFilterDateTo');
+                var typeEl = document.getElementById('platformWalletFilterType');
+                var qEl = document.getElementById('platformWalletFilterQ');
+
+                var f = {};
+                var df = dateFromEl && dateFromEl.value ? dateFromEl.value.trim() : '';
+                var dt = dateToEl && dateToEl.value ? dateToEl.value.trim() : '';
+                var tp = typeEl && typeEl.value ? typeEl.value.trim() : 'ALL';
+                var q = qEl && qEl.value ? qEl.value.trim() : '';
+
+                if (df) f.dateFrom = df;
+                if (dt) f.dateTo = dt;
+                if (tp && tp !== 'ALL') f.type = tp;
+                if (q) f.q = q;
+                return f;
+            }
+
+            function renderPlatformWalletFilterSummary() {
+                var meta = document.getElementById('platformWalletFilterSummary');
+                if (!meta) return;
+
+                var f = getPlatformWalletHistoryFilters();
+                var parts = [];
+                if (f.dateFrom) parts.push('Từ ' + f.dateFrom);
+                if (f.dateTo) parts.push('Đến ' + f.dateTo);
+                if (f.type) parts.push('Loại ' + f.type);
+                if (f.q) parts.push('Note: ' + f.q);
+                meta.textContent = parts.length ? parts.join(' · ') : 'Không có bộ lọc';
+            }
+
+            async function loadPlatformWalletSummary() {
+                var balanceEl = document.getElementById('platformWalletBalanceCoin');
+                var updatedAtEl = document.getElementById('platformWalletUpdatedAt');
+                var totalCoinsEl = document.getElementById('platformWalletTotalCoinsInSystem');
+                var platformFeeCoinsEl = document.getElementById('platformWalletPlatformFeeCoins');
+
+                var bal = await ApiService.adminGetPlatformWalletBalance();
+                var summary = await ApiService.adminGetPlatformWalletSummary();
+
+                if (balanceEl) balanceEl.textContent = String(bal?.balanceCoin ?? bal?.balance_coin ?? bal?.balanceCoin ?? 0);
+                if (updatedAtEl) {
+                    var ts = bal?.updatedAt ?? bal?.updated_at;
+                    updatedAtEl.textContent = ts ? ('Cập nhật: ' + formatDate(ts)) : '';
+                }
+                if (totalCoinsEl) totalCoinsEl.textContent = String(summary?.totalCoinsInSystem ?? summary?.totalCoinsInSystem ?? 0);
+                if (platformFeeCoinsEl) platformFeeCoinsEl.textContent = String(summary?.platformFeeCoins ?? summary?.platformFeeCoins ?? 0);
+            }
+
+            async function loadPlatformWalletAdjustments(page) {
+                var err = document.getElementById('platformWalletError');
+                if (err) {
+                    err.classList.add('d-none');
+                    err.textContent = '';
+                }
+
+                var bodyEl = document.getElementById('platformWalletAdjustmentsBody');
+                var metaEl = document.getElementById('platformWalletAdjustMeta');
+                var pageMetaEl = document.getElementById('platformWalletHistoryPageMeta');
+
+                if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Đang tải...</td></tr>';
+
+                var f = getPlatformWalletHistoryFilters();
+
+                try {
+                    var adj = await ApiService.adminGetUserWalletAdjustments(page, platformWalletHistoryPageSize, f);
+                    var items = adj?.items || adj?.Items || [];
+                    var totalCount = adj?.totalCount ?? adj?.TotalCount ?? 0;
+
+                    if (metaEl) metaEl.textContent = 'Tổng: ' + totalCount;
+
+                    var totalPages = Math.max(1, Math.ceil(totalCount / platformWalletHistoryPageSize));
+                    if (pageMetaEl) pageMetaEl.textContent = 'Trang ' + page + ' / ' + totalPages;
+
+                    var btnPrev = document.getElementById('btnPlatformWalletHistoryPrev');
+                    var btnNext = document.getElementById('btnPlatformWalletHistoryNext');
+                    if (btnPrev) btnPrev.disabled = page <= 1;
+                    if (btnNext) btnNext.disabled = page >= totalPages;
+
+                    if (!bodyEl) return;
+                    if (!items || items.length === 0) {
+                        bodyEl.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Chưa có lịch sử điều chỉnh</td></tr>';
+                        return;
+                    }
+
+                    bodyEl.innerHTML = items.map(function (x) {
+                        var adjustedAt = x.adjustedAt ?? x.AdjustedAt ?? x.createdAt ?? x.CreatedAt;
+                        var deltaCoins = Number(x.deltaCoins ?? x.DeltaCoins ?? 0);
+                        var userId = x.userId ?? x.UserId ?? '–';
+                        var note = x.note ?? x.Note ?? '';
+                        var absCoins = Math.abs(deltaCoins);
+                        var type = deltaCoins >= 0 ? 'ADD' : 'SUB';
+                        return '<tr>' +
+                            '<td>' + (adjustedAt ? formatDate(adjustedAt) : '–') + '</td>' +
+                            '<td>' + type + '</td>' +
+                            '<td>' + absCoins + '</td>' +
+                            '<td>' + escapeHtml(note) + '</td>' +
+                            '<td>' + escapeHtml(userId || '–') + '</td>' +
+                            '</tr>';
+                    }).join('');
+                } catch (e) {
+                    if (err) {
+                        err.classList.remove('d-none');
+                        err.textContent = (e && e.message) ? e.message : 'Không tải được ví hệ thống.';
+                    }
+                    if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Lỗi tải dữ liệu</td></tr>';
+                }
+            }
+
+            async function loadPlatformWallet() {
+                renderPlatformWalletFilterSummary();
+                await loadPlatformWalletSummary();
+                await loadPlatformWalletAdjustments(platformWalletHistoryPage);
+            }
+
+            async function applyPlatformWalletAdjust() {
+                var err = document.getElementById('platformWalletError');
+                if (err) {
+                    err.classList.add('d-none');
+                    err.textContent = '';
+                }
+
+                var amountEl = document.getElementById('platformWalletAdjustAmount');
+                var dirEl = document.getElementById('platformWalletAdjustDirection');
+                var targetEl = document.getElementById('platformWalletAdjustTarget');
+                var noteEl = document.getElementById('platformWalletAdjustNote');
+                var applyBtn = document.getElementById('btnPlatformWalletApply');
+
+                var amount = amountEl ? Number(amountEl.value) : 0;
+                var dir = dirEl ? dirEl.value : 'SUB';
+                var target = targetEl ? targetEl.value.trim() : '';
+                var note = noteEl ? noteEl.value.trim() : '';
+
+                if (!amount || amount <= 0) {
+                    if (err) {
+                        err.classList.remove('d-none');
+                        err.textContent = 'Số coin điều chỉnh phải lớn hơn 0.';
+                    }
+                    return;
+                }
+
+                if (!target) {
+                    if (err) {
+                        err.classList.remove('d-none');
+                        err.textContent = 'Chọn user (userId/email/nickname) để điều chỉnh.';
+                    }
+                    return;
+                }
+
+                var delta = dir === 'ADD' ? amount : -amount;
+
+                try {
+                    if (applyBtn) applyBtn.disabled = true;
+                    await ApiService.adminAdjustUserWallet(target, delta, note);
+                    if (amountEl) amountEl.value = '';
+                    if (targetEl) targetEl.value = '';
+                    if (noteEl) noteEl.value = '';
+                    await loadPlatformWallet();
+                } catch (e) {
+                    if (err) {
+                        err.classList.remove('d-none');
+                        err.textContent = (e && e.message) ? e.message : 'Không thể điều chỉnh ví hệ thống.';
+                    }
+                } finally {
+                    if (applyBtn) applyBtn.disabled = false;
+                }
+            }
+
+            // -----------------------
+            // System coin ledger (unlock / platform adj / withdraw)
+            // -----------------------
+            let sysLedgerPage = 1;
+            const sysLedgerPageSize = 20;
+            let sysLedgerIsLoading = false;
+
+            function getSysLedgerFilters() {
+                const dateFrom = document.getElementById('sysLedgerDateFrom')?.value;
+                const dateTo = document.getElementById('sysLedgerDateTo')?.value;
+                const type = document.getElementById('sysLedgerType')?.value;
+                const filters = {};
+                if (dateFrom) filters.dateFrom = dateFrom;
+                if (dateTo) filters.dateTo = dateTo;
+                if (type && type !== 'ALL') filters.type = type;
+                return filters;
+            }
+
+            async function loadSysLedger(reset) {
+                const loading = document.getElementById('sysLedgerLoading');
+                const content = document.getElementById('sysLedgerContent');
+                const list = document.getElementById('sysLedgerList');
+                const errorEl = document.getElementById('sysLedgerError');
+                const metaEl = document.getElementById('sysLedgerMeta');
+                const prevBtn = document.getElementById('btnSysLedgerPrev');
+                const nextBtn = document.getElementById('btnSysLedgerNext');
+
+                if (sysLedgerIsLoading) return;
+                sysLedgerIsLoading = true;
+
+                if (errorEl) {
+                    errorEl.classList.add('d-none');
+                    errorEl.textContent = '';
+                }
+
+                if (reset) {
+                    sysLedgerPage = 1;
+                    if (list) list.innerHTML = '';
+                }
+
+                if (loading) loading.style.display = 'block';
+                if (content) content.style.display = 'none';
+
+                try {
+                    const resp = await ApiService.adminGetSystemCoinLedger(sysLedgerPage, sysLedgerPageSize, getSysLedgerFilters());
+                    const items = resp?.items ?? resp?.Items ?? [];
+                    const totalCount = resp?.totalCount ?? resp?.TotalCount ?? 0;
+
+                    if (metaEl) {
+                        const totalPages = Math.max(1, Math.ceil(totalCount / sysLedgerPageSize));
+                        metaEl.textContent = `Trang ${sysLedgerPage} / ${totalPages}`;
+                    }
+
+                    if (prevBtn) prevBtn.disabled = sysLedgerPage <= 1;
+                    if (nextBtn) nextBtn.disabled = sysLedgerPage >= Math.ceil(totalCount / sysLedgerPageSize);
+
+                    if (!list) return;
+                    if (!items || items.length === 0) {
+                        list.innerHTML = '<tr><td colspan="11" class="text-center text-muted">Chưa có dữ liệu</td></tr>';
+                    } else {
+                        list.innerHTML = items.map(function (x) {
+                            const eventType = x.eventType ?? x.EventType ?? '';
+                            const eventTime = x.eventTime ?? x.EventTime ?? x.adjustedAt ?? x.AdjustedAt;
+                            const platform = Number(x.platformDeltaCoins ?? x.PlatformDeltaCoins ?? 0);
+                            const buyer = Number(x.buyerDeltaCoins ?? x.BuyerDeltaCoins ?? 0);
+                            const buyerId = x.buyerUserId ?? x.BuyerUserId ?? '–';
+                            const authorIncome = Number(x.authorIncomeDeltaCoins ?? x.AuthorIncomeDeltaCoins ?? 0);
+                            const authorFrozen = Number(x.authorFrozenDeltaCoins ?? x.AuthorFrozenDeltaCoins ?? 0);
+                            const authorId = x.authorUserId ?? x.AuthorUserId ?? '–';
+                            const storyTitle = x.storyTitle ?? x.StoryTitle ?? '';
+                            const chapterTitle = x.chapterTitle ?? x.ChapterTitle ?? '';
+                            const note = x.note ?? x.Note ?? '';
+                            const adminId = x.adminId ?? x.AdminId ?? '–';
+
+                            const storyText = storyTitle
+                                ? storyTitle + (chapterTitle ? (' / ' + chapterTitle) : '')
+                                : (chapterTitle ? chapterTitle : '-');
+
+                            return `
+                                <tr>
+                                    <td>${eventTime ? escapeHtml(formatDate(eventTime)) : '–'}</td>
+                                    <td>${escapeHtml(eventType)}</td>
+                                    <td>${platform}</td>
+                                    <td>${buyer}</td>
+                                            <td>${escapeHtml(buyerId || '–')}</td>
+                                    <td>${authorIncome}</td>
+                                    <td>${authorFrozen}</td>
+                                            <td>${escapeHtml(authorId || '–')}</td>
+                                    <td>${escapeHtml(storyText)}</td>
+                                    <td>${escapeHtml(note)}</td>
+                                            <td>${escapeHtml(adminId || '–')}</td>
+                                </tr>
+                            `;
+                        }).join('');
+                    }
+
+                    if (loading) loading.style.display = 'none';
+                    if (content) content.style.display = 'block';
+                } catch (e) {
+                    if (errorEl) {
+                        errorEl.classList.remove('d-none');
+                        errorEl.textContent = (e && e.message) ? e.message : 'Không tải được nhật ký hệ thống.';
+                    }
+                } finally {
+                    sysLedgerIsLoading = false;
+                }
+            }
+
+            var btnPlatformWalletFilterApply = document.getElementById('btnPlatformWalletFilterApply');
+            if (btnPlatformWalletFilterApply) {
+                btnPlatformWalletFilterApply.addEventListener('click', function () {
+                    platformWalletHistoryPage = 1;
+                    loadPlatformWallet();
+                });
+            }
+
+            var btnSysLedgerApply = document.getElementById('btnSysLedgerApply');
+            if (btnSysLedgerApply) {
+                btnSysLedgerApply.addEventListener('click', function () {
+                    loadSysLedger(true);
+                });
+            }
+
+            var btnSysLedgerPrev = document.getElementById('btnSysLedgerPrev');
+            if (btnSysLedgerPrev) {
+                btnSysLedgerPrev.addEventListener('click', function () {
+                    if (sysLedgerPage > 1) {
+                        sysLedgerPage -= 1;
+                        loadSysLedger(false);
+                    }
+                });
+            }
+
+            var btnSysLedgerNext = document.getElementById('btnSysLedgerNext');
+            if (btnSysLedgerNext) {
+                btnSysLedgerNext.addEventListener('click', function () {
+                    sysLedgerPage += 1;
+                    loadSysLedger(false);
+                });
+            }
+
+            var tabSysLedger = document.getElementById('tab-system-coin-ledger');
+            if (tabSysLedger) {
+                tabSysLedger.addEventListener('shown.bs.tab', function () {
+                    loadSysLedger(true);
+                });
+            }
+
+            var btnPlatformWalletFilterClear = document.getElementById('btnPlatformWalletFilterClear');
+            if (btnPlatformWalletFilterClear) {
+                btnPlatformWalletFilterClear.addEventListener('click', function () {
+                    var ids = ['platformWalletFilterDateFrom', 'platformWalletFilterDateTo', 'platformWalletFilterQ'];
+                    ids.forEach(function (id) {
+                        var el = document.getElementById(id);
+                        if (el) el.value = '';
+                    });
+                    var typeEl = document.getElementById('platformWalletFilterType');
+                    if (typeEl) typeEl.value = 'ALL';
+                    platformWalletHistoryPage = 1;
+                    loadPlatformWallet();
+                });
+            }
+
+            var btnPlatformWalletHistoryPrev = document.getElementById('btnPlatformWalletHistoryPrev');
+            if (btnPlatformWalletHistoryPrev) {
+                btnPlatformWalletHistoryPrev.addEventListener('click', function () {
+                    if (platformWalletHistoryPage > 1) {
+                        platformWalletHistoryPage -= 1;
+                        loadPlatformWallet();
+                    }
+                });
+            }
+
+            var btnPlatformWalletHistoryNext = document.getElementById('btnPlatformWalletHistoryNext');
+            if (btnPlatformWalletHistoryNext) {
+                btnPlatformWalletHistoryNext.addEventListener('click', function () {
+                    if (btnPlatformWalletHistoryNext.disabled) return;
+                    platformWalletHistoryPage += 1;
+                    loadPlatformWallet();
+                });
+            }
+
             document.getElementById('tab-pending-stories').addEventListener('shown.bs.tab', loadPendingStories);
             document.getElementById('tab-pending-chapters').addEventListener('shown.bs.tab', loadPendingChapters);
             document.getElementById('tab-approved-stories').addEventListener('shown.bs.tab', loadApprovedStories);
@@ -441,6 +1043,10 @@
             document.getElementById('tab-rejected-chapters').addEventListener('shown.bs.tab', loadRejectedChapters);
             document.getElementById('tab-logs').addEventListener('shown.bs.tab', function() { loadModerationLogs(1); });
             document.getElementById('tab-performance').addEventListener('shown.bs.tab', loadModeratorPerformance);
+            document.getElementById('tab-platform-wallet').addEventListener('shown.bs.tab', loadPlatformWallet);
+
+            var platformApplyBtn = document.getElementById('btnPlatformWalletApply');
+            if (platformApplyBtn) platformApplyBtn.addEventListener('click', applyPlatformWalletAdjust);
 
             window.loadApprovedStories = loadApprovedStories;
             window.loadRejectedStories = loadRejectedStories;
@@ -448,6 +1054,7 @@
             window.loadRejectedChapters = loadRejectedChapters;
             window.loadModerationLogs = loadModerationLogs;
             window.loadModeratorPerformance = loadModeratorPerformance;
+            window.loadPlatformWallet = loadPlatformWallet;
             window.reloadActiveTab = reloadActiveTab;
 
             var btnApply = document.getElementById('btnApplyFilter');

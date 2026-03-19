@@ -54,6 +54,32 @@
                     </div>
                 </div>
 
+                <!-- Unlock paid chapter modal -->
+                <div class="modal fade" id="unlockPaidChapterModal" tabindex="-1" aria-hidden="true">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="bi bi-lock-fill me-2"></i>Mở khóa chương trả phí</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div id="unlockPaidChapterMessage" class="mb-2 text-muted"></div>
+                                <div class="mb-3">
+                                    Giá: <strong id="unlockPaidChapterCoinPrice">0</strong> coin
+                                </div>
+                                <div class="alert alert-danger d-none mb-0" id="unlockPaidChapterErrorBox"></div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Để sau</button>
+                                <button type="button" class="btn btn-primary" id="unlockPaidChapterBtn" onclick="unlockPaidChapter()">
+                                    <span class="spinner-border spinner-border-sm me-2 d-none" id="unlockPaidChapterSpinner" role="status"></span>
+                                    <i class="bi bi-unlock me-1"></i>Mua để mở khóa
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Navigation -->
                 <div class="d-flex justify-content-between align-items-center mt-5 pt-4 border-top">
                     <button class="btn btn-outline-primary" id="prevChapterBtn" onclick="navigateChapter('prev')" disabled>
@@ -178,6 +204,7 @@
         let currentChapterIndex = -1;
         let replyingToCommentId = null;
         let replyingToDisplayName = null;
+        let isChapterUnlocked = false;
 
         const CHAPTER_COMMENT_REACTIONS = [
             { type: 'LIKE', icon: 'bi-hand-thumbs-up', label: 'Thích' },
@@ -218,11 +245,20 @@
                 }
 
                 storyId = currentChapter.storyId;
+                const isPaidChapter = (currentChapter.accessType || '').toUpperCase() === 'PAID' && (currentChapter.coinPrice ?? 0) > 0;
+                isChapterUnlocked = !isPaidChapter || (currentChapter.IsUnlocked ?? currentChapter.isUnlocked ?? false);
 
                 // Render chapter first so user can read even if other calls fail
                 renderChapter();
                 updateSaveProgressButton();
-                loadChapterComments();
+
+                if (isPaidChapter && !isChapterUnlocked) {
+                    showUnlockPaidChapterModal(currentChapter.coinPrice ?? 0);
+                    disableLockedChapterUI(true);
+                } else {
+                    disableLockedChapterUI(false);
+                    loadChapterComments();
+                }
 
                 // Load story info - non-critical, show warning if fails
                 try {
@@ -280,6 +316,8 @@
 
             // Render content
             const contentDiv = document.getElementById('chapterContent');
+            const isPaidChapter = (currentChapter.accessType || '').toUpperCase() === 'PAID' && (currentChapter.coinPrice ?? 0) > 0;
+            const unlocked = !isPaidChapter || (currentChapter.IsUnlocked ?? currentChapter.isUnlocked ?? false);
             if (currentChapter.content) {
                 // Split content into paragraphs
                 const paragraphs = currentChapter.content
@@ -289,7 +327,11 @@
 
                 contentDiv.innerHTML = paragraphs.map(p => `<p>${p}</p>`).join('');
             } else {
-                contentDiv.innerHTML = '<p class="text-muted text-center">Chương này chưa có nội dung.</p>';
+                if (isPaidChapter && !unlocked) {
+                    contentDiv.innerHTML = '<p class="text-muted text-center">Chương này trả phí. Vui lòng mở khóa để đọc.</p>';
+                } else {
+                    contentDiv.innerHTML = '<p class="text-muted text-center">Chương này chưa có nội dung.</p>';
+                }
             }
 
             // Render stats
@@ -306,10 +348,115 @@
         function updateSaveProgressButton() {
             const btn = document.getElementById('btnSaveReadingProgress');
             if (!btn) return;
+            if (!isChapterUnlocked) {
+                btn.style.display = 'none';
+                return;
+            }
             if (storyId && chapterId && typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated()) {
                 btn.style.display = 'inline-block';
             } else {
                 btn.style.display = 'none';
+            }
+        }
+
+        let unlockPaidChapterModalInstance = null;
+
+        function showUnlockPaidChapterModal(price) {
+            const modalEl = document.getElementById('unlockPaidChapterModal');
+            if (!modalEl) return;
+            const coinPriceEl = document.getElementById('unlockPaidChapterCoinPrice');
+            const msgEl = document.getElementById('unlockPaidChapterMessage');
+            const errorBox = document.getElementById('unlockPaidChapterErrorBox');
+            const btn = document.getElementById('unlockPaidChapterBtn');
+
+            if (coinPriceEl) coinPriceEl.textContent = price ?? 0;
+            if (msgEl) msgEl.textContent = 'Bạn cần thanh toán bằng coin để mở khóa chương này.';
+            if (errorBox) {
+                errorBox.textContent = '';
+                errorBox.classList.add('d-none');
+            }
+            if (btn) btn.disabled = false;
+
+            unlockPaidChapterModalInstance = unlockPaidChapterModalInstance || new bootstrap.Modal(modalEl);
+            unlockPaidChapterModalInstance.show();
+        }
+
+        function disableLockedChapterUI(isLocked) {
+            const commentHint = document.getElementById('chapterCommentRuleHint');
+            const commentTextarea = document.getElementById('chapterNewCommentContent');
+            const commentBtn = document.getElementById('chapterSubmitCommentBtn');
+
+            if (isLocked) {
+                const chapterInfoEl = document.getElementById('chapterInfo');
+                if (chapterInfoEl) {
+                    chapterInfoEl.innerHTML = `
+                        <h1 class="chapter-title">Chương trả phí</h1>
+                        <div class="text-muted small mt-1">Vui lòng mở khóa để đọc nội dung.</div>
+                    `;
+                }
+
+                const contentDiv = document.getElementById('chapterContent');
+                if (contentDiv) {
+                    contentDiv.innerHTML = '<p class="text-muted text-center">Chương này trả phí. Vui lòng mở khóa để đọc.</p>';
+                }
+
+                const statsDiv = document.getElementById('chapterStats');
+                if (statsDiv) statsDiv.innerHTML = '';
+
+                const prevBtn = document.getElementById('prevChapterBtn');
+                const nextBtn = document.getElementById('nextChapterBtn');
+                if (prevBtn) prevBtn.disabled = true;
+                if (nextBtn) nextBtn.disabled = true;
+
+                if (commentHint) {
+                    commentHint.innerHTML = 'Chương này trả phí. Vui lòng mở khóa để có thể bình luận.';
+                }
+                if (commentTextarea) commentTextarea.disabled = true;
+                if (commentBtn) commentBtn.disabled = true;
+            } else {
+                if (commentHint) {
+                    commentHint.innerHTML = 'Để comment: bạn cần <strong>đăng nhập</strong> và <strong>đọc ít nhất 1 chapter</strong> của truyện này.';
+                }
+                if (commentTextarea) commentTextarea.disabled = false;
+                if (commentBtn && typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated()) {
+                    commentBtn.disabled = false;
+                }
+            }
+        }
+
+        async function unlockPaidChapter() {
+            if (!chapterId) return;
+            const btn = document.getElementById('unlockPaidChapterBtn');
+            const spinner = document.getElementById('unlockPaidChapterSpinner');
+            const errorBox = document.getElementById('unlockPaidChapterErrorBox');
+
+            if (btn) btn.disabled = true;
+            if (spinner) spinner.classList.remove('d-none');
+            if (errorBox) {
+                errorBox.textContent = '';
+                errorBox.classList.add('d-none');
+            }
+
+            try {
+                await ApiService.unlockChapter(chapterId);
+
+                const modalEl = document.getElementById('unlockPaidChapterModal');
+                if (unlockPaidChapterModalInstance) unlockPaidChapterModalInstance.hide();
+                else if (modalEl) (new bootstrap.Modal(modalEl)).hide();
+
+                // Reload to get full content + IsUnlocked=true
+                await loadChapter();
+            } catch (e) {
+                const msg = e?.message || e || 'Lỗi không xác định';
+                if (errorBox) {
+                    errorBox.textContent = msg;
+                    errorBox.classList.remove('d-none');
+                } else {
+                    alert(msg);
+                }
+            } finally {
+                if (spinner) spinner.classList.add('d-none');
+                if (btn) btn.disabled = false;
             }
         }
 
@@ -501,6 +648,14 @@
             const prevBtn = document.getElementById('prevChapterBtn');
             const nextBtn = document.getElementById('nextChapterBtn');
 
+            if (!isChapterUnlocked) {
+                if (prevBtn) prevBtn.disabled = true;
+                if (nextBtn) nextBtn.disabled = true;
+                if (prevBtn) prevBtn.onclick = null;
+                if (nextBtn) nextBtn.onclick = null;
+                return;
+            }
+
             if (!allChapters || !Array.isArray(allChapters) || allChapters.length === 0) {
                 prevBtn.disabled = true;
                 nextBtn.disabled = true;
@@ -575,6 +730,9 @@
             if (!allChapters || !Array.isArray(allChapters) || allChapters.length === 0) {
                 return;
             }
+
+            // When locked, prevent navigation to other chapters.
+            if (!isChapterUnlocked) return;
 
             // Left arrow - previous chapter
             if (e.key === 'ArrowLeft' && currentChapterIndex > 0 && currentChapterIndex < allChapters.length) {

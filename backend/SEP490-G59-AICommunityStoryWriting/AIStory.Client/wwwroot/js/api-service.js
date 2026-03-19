@@ -49,7 +49,8 @@ class ApiService {
                 let errorMessage = response.statusText;
                 try {
                     const errorBody = await response.json();
-                    errorMessage = errorBody.message || errorBody.error || errorMessage;
+                    // Prefer detailed error message if backend provides `error`.
+                    errorMessage = errorBody.error || errorBody.message || errorMessage;
                 } catch {
                     // If response body is not JSON, use statusText
                 }
@@ -84,8 +85,9 @@ class ApiService {
             });
             if (!res.ok) return false;
             const data = await res.json().catch(() => null);
-            if (data && data.accessToken && typeof AuthHelper !== 'undefined') {
-                AuthHelper.setToken(data.accessToken);
+            const token = data?.accessToken ?? data?.AccessToken;
+            if (token && typeof AuthHelper !== 'undefined') {
+                AuthHelper.setToken(token);
                 return true;
             }
             return false;
@@ -298,6 +300,11 @@ class ApiService {
         return res && res.following === true;
     }
 
+    static async getAuthorFollowerCount(authorId) {
+        const res = await this.request(`/authors/${authorId}/followers-count`);
+        return res && typeof res.followersCount !== 'undefined' ? res.followersCount : 0;
+    }
+
     static async followAuthor(authorId) {
         return this.request(`/authors/${authorId}/follow`, { method: 'POST' });
     }
@@ -359,6 +366,12 @@ class ApiService {
 
     static async getChapterById(id) {
         return this.request(`/chapters/${id}`);
+    }
+
+    static async unlockChapter(chapterId) {
+        return this.request(`/chapters/${chapterId}/unlock`, {
+            method: 'POST'
+        });
     }
 
     static async getChapterComments(chapterId) {
@@ -622,6 +635,88 @@ class ApiService {
         return this.request(`/admin/moderation/moderator-performance?${params.toString()}`);
     }
 
+    // Admin Wallet API (ví hệ thống platform_wallet)
+    static async adminGetPlatformWalletBalance() {
+        return this.request(`/admin/wallet/balance`, {
+            method: 'GET'
+        });
+    }
+
+    static async adminGetPlatformWalletSummary() {
+        return this.request(`/admin/wallet/summary`, {
+            method: 'GET'
+        });
+    }
+
+    static async adminAdjustPlatformWallet(deltaCoins, note = null) {
+        return this.request(`/admin/wallet/adjust`, {
+            method: 'POST',
+            body: JSON.stringify({ deltaCoins, note })
+        });
+    }
+
+    static async adminGetPlatformWalletAdjustments(page = 1, pageSize = 20, filters = {}) {
+        const params = new URLSearchParams({
+            page: String(page),
+            pageSize: String(pageSize)
+        });
+
+        if (filters) {
+            if (filters.dateFrom) params.set('dateFrom', filters.dateFrom);
+            if (filters.dateTo) params.set('dateTo', filters.dateTo);
+            if (filters.type) params.set('type', filters.type);
+            if (filters.q) params.set('q', filters.q);
+        }
+
+        return this.request(`/admin/wallet/adjustments?${params.toString()}`, {
+            method: 'GET'
+        });
+    }
+
+    // Admin User Wallet API (adjust specific user wallet balance_coin)
+    static async adminAdjustUserWallet(targetUser, deltaCoins, note = null) {
+        return this.request(`/admin/wallet/adjust-user-wallet`, {
+            method: 'POST',
+            body: JSON.stringify({ targetUser, deltaCoins, note })
+        });
+    }
+
+    static async adminGetUserWalletAdjustments(page = 1, pageSize = 20, filters = {}) {
+        const params = new URLSearchParams({
+            page: String(page),
+            pageSize: String(pageSize)
+        });
+
+        if (filters) {
+            if (filters.dateFrom) params.set('dateFrom', filters.dateFrom);
+            if (filters.dateTo) params.set('dateTo', filters.dateTo);
+            if (filters.type) params.set('type', filters.type);
+            if (filters.q) params.set('q', filters.q);
+        }
+
+        return this.request(`/admin/wallet/user-adjustments?${params.toString()}`, {
+            method: 'GET'
+        });
+    }
+
+    // Admin System Coin Ledger API (unlock / platform adj / withdraw)
+    static async adminGetSystemCoinLedger(page = 1, pageSize = 20, filters = {}) {
+        const params = new URLSearchParams({
+            page: String(page),
+            pageSize: String(pageSize)
+        });
+
+        if (filters) {
+            if (filters.dateFrom) params.set('dateFrom', filters.dateFrom);
+            if (filters.dateTo) params.set('dateTo', filters.dateTo);
+            if (filters.type) params.set('type', filters.type);
+        }
+
+        return this.request(`/admin/wallet/system-coin-ledger?${params.toString()}`, {
+            method: 'GET'
+        });
+    }
+
     // Notifications API
     static async getNotifications(options = {}) {
         const params = new URLSearchParams();
@@ -687,6 +782,61 @@ class ApiService {
         return this.request('/auth/reset-password', {
             method: 'POST',
             body: JSON.stringify({ token, newPassword })
+        });
+    }
+
+    // Coins / Wallet API
+    static async getMyWallet() {
+        return this.request('/coins/wallet', {
+            method: 'GET'
+        });
+    }
+
+    static async getMyChapterUnlockHistory(page = 1, pageSize = 20, filters = {}) {
+        const params = new URLSearchParams({
+            page: String(page),
+            pageSize: String(pageSize),
+        });
+
+        if (filters) {
+            if (filters.search) params.set('search', filters.search);
+            if (filters.dateFrom) params.set('dateFrom', filters.dateFrom);
+            if (filters.dateTo) params.set('dateTo', filters.dateTo);
+
+            if (filters.minCoins !== null && filters.minCoins !== undefined && filters.minCoins !== '') {
+                params.set('minCoins', String(filters.minCoins));
+            }
+            if (filters.maxCoins !== null && filters.maxCoins !== undefined && filters.maxCoins !== '') {
+                params.set('maxCoins', String(filters.maxCoins));
+            }
+        }
+
+        return this.request(`/coins/wallet/unlock-history?${params.toString()}`, {
+            method: 'GET'
+        });
+    }
+
+    static async getAuthorChapterUnlockIncomeHistory(page = 1, pageSize = 20) {
+        return this.request(`/coins/author/unlock-chapter-income-history?page=${encodeURIComponent(page)}&pageSize=${encodeURIComponent(pageSize)}`, {
+            method: 'GET'
+        });
+    }
+
+    static async getAuthorChapterUnlockIncomeHistoryByStory(page = 1, pageSize = 20, filters = {}) {
+        const params = new URLSearchParams({
+            page: String(page),
+            pageSize: String(pageSize)
+        });
+
+        if (filters) {
+            if (filters.search) params.set('search', filters.search);
+            if (filters.monthFrom) params.set('monthFrom', filters.monthFrom);
+            if (filters.monthTo) params.set('monthTo', filters.monthTo);
+            if (filters.status) params.set('status', filters.status);
+        }
+
+        return this.request(`/coins/author/unlock-chapter-income-history/by-story?${params.toString()}`, {
+            method: 'GET'
         });
     }
 }
