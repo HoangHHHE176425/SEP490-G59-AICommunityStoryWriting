@@ -303,3 +303,14 @@ export async function setChapterCommentReaction(chapterId, commentId, reactionTy
     });
     return response.data;
 }
+
+/**
+ * POST /api/chapters/{chapterId}/unlock
+ * Mở khóa chapter trả phí: trừ coin người mua, chia 30%/70% và ghi lịch sử purchases + author_income_logs.
+ * @param {string} chapterId
+ * @returns {Promise<{unlocked: boolean, alreadyUnlocked?: boolean}>}
+ */
+export async function unlockPaidChapter(chapterId) {
+    const response = await axiosInstance.post(`/chapters/${chapterId}/unlock`);
+    return response.data;
+}

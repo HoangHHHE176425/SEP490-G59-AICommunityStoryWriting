@@ -7,7 +7,8 @@ export function ChapterContent({
     backgroundColor,
     textColor,
     lineHeight,
-    onPayClick
+    onPayClick,
+    isUnlocking = false,
 }) {
     const isPaidLocked = chapter?.isPaidLocked === true;
     const coinPrice = Number(chapter?.coinPrice ?? 0) || 0;
@@ -87,6 +88,7 @@ export function ChapterContent({
                         <button
                             type="button"
                             onClick={onPayClick || (() => { })}
+                            disabled={isUnlocking}
                             style={{
                                 padding: '1rem 1.75rem',
                                 fontSize: '1rem',
@@ -95,17 +97,19 @@ export function ChapterContent({
                                 backgroundColor: '#f59e0b',
                                 border: 'none',
                                 borderRadius: '0.5rem',
-                                cursor: 'pointer',
+                                cursor: isUnlocking ? 'not-allowed' : 'pointer',
                                 boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
                             }}
                             onMouseEnter={(e) => {
+                                if (isUnlocking) return;
                                 e.currentTarget.style.backgroundColor = '#d97706';
                             }}
                             onMouseLeave={(e) => {
+                                if (isUnlocking) return;
                                 e.currentTarget.style.backgroundColor = '#f59e0b';
                             }}
                         >
-                            Thanh toán {coinPrice} xu
+                            {isUnlocking ? 'Đang mở khóa...' : `Thanh toán ${coinPrice} xu`}
                         </button>
                     </div>
                 </div>
