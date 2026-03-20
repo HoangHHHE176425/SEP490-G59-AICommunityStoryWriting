@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
+using Services.Integrations.PayOS;
 
 namespace AIStory.API.Controllers
 {
@@ -15,13 +16,32 @@ namespace AIStory.API.Controllers
     public sealed class AdminTransactionsController : ControllerBase
     {
         private readonly StoryPlatformDbContext _db;
+        private readonly PayOSClient _payos;
 
         // Fixed conversion rate: 100 coin = 10,000 VND => 1 coin = 100 VND
         private const decimal CoinRateVnd = 100m;
 
-        public AdminTransactionsController(StoryPlatformDbContext db)
+        public AdminTransactionsController(StoryPlatformDbContext db, PayOSClient payos)
         {
             _db = db;
+            _payos = payos;
+        }
+
+        private static string? Extract(string? snapshot, string key)
+        {
+            if (string.IsNullOrWhiteSpace(snapshot) || string.IsNullOrWhiteSpace(key)) return null;
+            // FE snapshot format: key=value | key2=value2 | ...
+            var parts = snapshot.Split('|', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var raw in parts)
+            {
+                var part = raw.Trim();
+                var kv = part.Split('=', 2, StringSplitOptions.RemoveEmptyEntries);
+                if (kv.Length != 2) continue;
+                var k = kv[0].Trim();
+                if (string.Equals(k, key, StringComparison.OrdinalIgnoreCase))
+                    return kv[1].Trim();
+            }
+            return null;
         }
 
         private Guid? GetCurrentAdminId()
@@ -158,8 +178,12 @@ namespace AIStory.API.Controllers
                 {
                     withdrawQ = statusUpper switch
                     {
-                        "SUCCESS" => withdrawQ.Where(x => (x.status ?? "PENDING") == "SUCCESS"),
+                        // Backward compatibility: some old records may still use "SUCCESS".
+                        "SUCCESS" => withdrawQ.Where(x => (x.status ?? "PENDING") == "SUCCESS" || (x.status ?? "PENDING") == "COMPLETED"),
+                        "COMPLETED" => withdrawQ.Where(x => (x.status ?? "PENDING") == "COMPLETED"),
+                        "PROCESSING" => withdrawQ.Where(x => (x.status ?? "PENDING") == "PROCESSING"),
                         "PENDING" => withdrawQ.Where(x => (x.status ?? "PENDING") == "PENDING"),
+                        "PENDING_REVIEW" => withdrawQ.Where(x => (x.status ?? "PENDING") == "PENDING_REVIEW"),
                         "FAILED" => withdrawQ.Where(x => (x.status ?? "PENDING") == "FAILED"),
                         "CANCELLED" => withdrawQ.Where(x => (x.status ?? "PENDING") == "CANCELLED"),
                         _ => withdrawQ
@@ -221,7 +245,16 @@ namespace AIStory.API.Controllers
                         status = statusMapped,
                         note = "Rút về ngân hàng",
                         gatewayRef = $"WD-{w.id.ToString()[..8]}",
-                        bankAccount = bankAccount
+                        bankAccount = bankAccount,
+                        fraudReview = new
+                        {
+                            isSuspectedFraud = w.is_suspected_fraud ?? false,
+                            riskScore = w.risk_score,
+                            riskFlags = w.risk_flags,
+                            riskReason = w.risk_reason,
+                            reviewedBy = w.reviewed_by,
+                            reviewedAt = w.reviewed_at
+                        }
                     };
 
                     if (!string.IsNullOrWhiteSpace(query))
@@ -249,72 +282,303 @@ namespace AIStory.API.Controllers
             });
         }
 
-        /// <summary>Duyệt yêu cầu rút (withdraw_requests) - chuyển PENDING -> SUCCESS.</summary>
+        /// <summary>
+        /// Duyệt yêu cầu rút (withdraw_requests):
+        /// - PENDING/PENDING_REVIEW -> PROCESSING
+        /// - Tạo PayOS payout batch và sync trạng thái về COMPLETED/FAILED trong background.
+        /// </summary>
         [HttpPost("withdraw/{id:guid}/approve")]
         public async Task<IActionResult> ApproveWithdraw(Guid id, [FromBody] AdminWithdrawDecisionRequest? body, CancellationToken cancellationToken)
         {
             var adminId = GetCurrentAdminId();
             var req = await _db.withdraw_requests.FirstOrDefaultAsync(x => x.id == id, cancellationToken);
             if (req == null) return NotFound(new { message = "Withdraw request not found." });
-            if (!string.Equals(req.status, "PENDING", StringComparison.OrdinalIgnoreCase))
-                return BadRequest(new { message = "Only PENDING withdraw requests can be approved." });
+            var s = (req.status ?? "PENDING").ToUpperInvariant();
+            if (s != "PENDING" && s != "PENDING_REVIEW")
+                return BadRequest(new { message = "Only PENDING/PENDING_REVIEW withdraw requests can be approved." });
+            if (s == "PENDING_REVIEW" && string.IsNullOrWhiteSpace(body?.AdminNote))
+                return BadRequest(new { message = "Admin note is required when approving a PENDING_REVIEW withdraw request." });
 
-            using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+            if (req.author_id == null)
+                return BadRequest(new { message = "Withdraw request missing author_id." });
 
-            req.status = "SUCCESS";
-            req.processed_at = DateTime.UtcNow;
-            req.processed_by = adminId;
-            if (!string.IsNullOrWhiteSpace(body?.AdminNote)) req.admin_note = body!.AdminNote!.Trim();
-
-            // Funds were moved to frozen_balance when the request was created.
-            // On approve, we release frozen funds (completed payout off-platform).
-            if (req.author_id.HasValue)
+            string DigitsOnly(string? s)
             {
-                var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == req.author_id.Value, cancellationToken);
-                if (wallet != null)
+                if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+                var sb = new System.Text.StringBuilder(s.Length);
+                foreach (var ch in s)
                 {
-                    wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - req.amount_requested);
-                    wallet.updated_at = DateTime.UtcNow;
+                    if (char.IsDigit(ch)) sb.Append(ch);
                 }
+                return sb.ToString();
             }
 
-            await _db.SaveChangesAsync(cancellationToken);
-            await tx.CommitAsync(cancellationToken);
-            return Ok(new { success = true });
+            var bankBin = DigitsOnly(Extract(req.bank_info_snapshot, "bank_bin"));
+            var toAccountNumber = DigitsOnly(Extract(req.bank_info_snapshot, "account_number"));
+
+            if (string.IsNullOrWhiteSpace(bankBin) || string.IsNullOrWhiteSpace(toAccountNumber))
+            {
+                return BadRequest(new
+                {
+                    message = "Missing bank_bin/account_number in withdraw request. FE must provide toBin for PayOS payout."
+                });
+            }
+
+            // Convert coins (income_balance) -> VND and create payout.
+            var amountVnd = req.amount_requested * CoinRateVnd;
+            var amountVndInt = (long)Math.Round(amountVnd, 0, MidpointRounding.AwayFromZero);
+
+            // Create payout batch to route transfer to author.
+            var payoutReferenceId = $"wd_{req.id}";
+            var payoutItemReferenceId = $"wd_{req.id}_1";
+
+            var executionStrategy = _db.Database.CreateExecutionStrategy();
+            IActionResult result = StatusCode(500, new { message = "Unexpected error." });
+
+            await executionStrategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+                try
+                {
+                    // Quick auth check: payouts-account/balance doesn't require x-signature.
+                    // If this fails (e.g. IP blocked), we still continue so we can see the real error from CreatePayoutBatchAsync.
+                    string? balanceCheckError = null;
+                    try
+                    {
+                        var balanceCheck = await _payos.GetPayoutAccountBalanceAsync(cancellationToken);
+                        if (!string.Equals(balanceCheck.Code, "00", StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException($"PayOS payout auth check failed: code={balanceCheck.Code}, desc={balanceCheck.Desc}");
+                    }
+                    catch (Exception exBal)
+                    {
+                        balanceCheckError = exBal.Message;
+                    }
+
+                    var payoutRes = await _payos.CreatePayoutBatchAsync(new PayOSClient.PayoutBatchRequest(
+                        ReferenceId: payoutReferenceId,
+                        Category: new List<string> { "salary" },
+                        ValidateDestination: true,
+                        Payouts: new List<PayOSClient.PayoutBatchItem>
+                        {
+                            new PayOSClient.PayoutBatchItem(
+                                ReferenceId: payoutItemReferenceId,
+                                Amount: amountVndInt,
+                                // Avoid non-ASCII characters in signature payload to prevent "invalid signature" issues.
+                                Description: "Rut tien",
+                                ToBin: bankBin.Trim(),
+                                ToAccountNumber: toAccountNumber.Trim()
+                            )
+                        }
+                    ), idempotencyKey: payoutReferenceId, cancellationToken: cancellationToken);
+
+                    req.status = "PROCESSING";
+                    req.processed_at = DateTime.UtcNow;
+                    req.processed_by = adminId;
+                    req.reviewed_by = adminId;
+                    req.reviewed_at = DateTime.UtcNow;
+                    if (!string.IsNullOrWhiteSpace(body?.AdminNote)) req.admin_note = body!.AdminNote!.Trim();
+                    if (!string.IsNullOrWhiteSpace(balanceCheckError))
+                    {
+                        var warn = $"PayOS auth check warn: {balanceCheckError}";
+                        if (string.IsNullOrWhiteSpace(req.admin_note))
+                            req.admin_note = warn;
+                        else
+                            req.admin_note = $"{req.admin_note} | {warn}";
+
+                        if (req.admin_note.Length > 500) req.admin_note = req.admin_note.Substring(0, 500);
+                    }
+
+                    // Store PayOS payout id for background sync.
+                    req.transaction_proof_url = payoutRes.PayoutId;
+
+                    await _db.SaveChangesAsync(cancellationToken);
+                    await tx.CommitAsync(cancellationToken);
+                    result = Ok(new { success = true, payoutId = payoutRes.PayoutId });
+                }
+                catch (Exception ex)
+                {
+                    // If payout creation fails, rollback wallet by refunding frozen -> income_balance.
+                    if (req.author_id.HasValue)
+                    {
+                        var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == req.author_id.Value, cancellationToken);
+                        if (wallet != null)
+                        {
+                            wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - req.amount_requested);
+                            wallet.income_balance = (wallet.income_balance ?? 0m) + req.amount_requested;
+                            wallet.updated_at = DateTime.UtcNow;
+                        }
+                    }
+
+                    req.status = "FAILED";
+                    req.processed_at = DateTime.UtcNow;
+                    req.processed_by = adminId;
+                    // Always append PayOS error details so you can see why transaction_proof_url stayed empty.
+                    var baseNote = body?.AdminNote?.Trim();
+                    var payosErr = ex.Message ?? string.Empty;
+                    var combinedNote = string.IsNullOrWhiteSpace(baseNote)
+                        ? $"PayOS payout failed: {payosErr}"
+                        : $"{baseNote} | PayOS payout failed: {payosErr}";
+                    if (combinedNote.Length > 500) combinedNote = combinedNote.Substring(0, 500);
+                    req.admin_note = combinedNote;
+                    _db.withdraw_requests.Update(req);
+                    await _db.SaveChangesAsync(cancellationToken);
+                    await tx.CommitAsync(cancellationToken);
+
+                    result = BadRequest(new { message = $"Create PayOS payout failed: {ex.Message}" });
+                }
+            });
+
+            return result;
         }
 
-        /// <summary>Từ chối yêu cầu rút (withdraw_requests) - chuyển PENDING -> CANCELLED.</summary>
+        /// <summary>Từ chối yêu cầu rút (withdraw_requests) - chuyển PENDING/PENDING_REVIEW -> FAILED.</summary>
         [HttpPost("withdraw/{id:guid}/reject")]
         public async Task<IActionResult> RejectWithdraw(Guid id, [FromBody] AdminWithdrawDecisionRequest? body, CancellationToken cancellationToken)
         {
             var adminId = GetCurrentAdminId();
             var req = await _db.withdraw_requests.FirstOrDefaultAsync(x => x.id == id, cancellationToken);
             if (req == null) return NotFound(new { message = "Withdraw request not found." });
-            if (!string.Equals(req.status, "PENDING", StringComparison.OrdinalIgnoreCase))
-                return BadRequest(new { message = "Only PENDING withdraw requests can be rejected." });
+            var s = (req.status ?? "PENDING").ToUpperInvariant();
+            if (s != "PENDING" && s != "PENDING_REVIEW")
+                return BadRequest(new { message = "Only PENDING/PENDING_REVIEW withdraw requests can be rejected." });
+            if (s == "PENDING_REVIEW" && string.IsNullOrWhiteSpace(body?.AdminNote))
+                return BadRequest(new { message = "Admin note is required when rejecting a PENDING_REVIEW withdraw request." });
 
-            using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+            var executionStrategy = _db.Database.CreateExecutionStrategy();
+            IActionResult result = StatusCode(500, new { message = "Unexpected error." });
 
-            req.status = "CANCELLED";
-            req.processed_at = DateTime.UtcNow;
-            req.processed_by = adminId;
-            if (!string.IsNullOrWhiteSpace(body?.AdminNote)) req.admin_note = body!.AdminNote!.Trim();
-
-            // Refund: frozen -> income_balance (withdrawable again).
-            if (req.author_id.HasValue)
+            await executionStrategy.ExecuteAsync(async () =>
             {
-                var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == req.author_id.Value, cancellationToken);
-                if (wallet != null)
+                await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+                req.status = "FAILED";
+                req.processed_at = DateTime.UtcNow;
+                req.processed_by = adminId;
+                req.reviewed_by = adminId;
+                req.reviewed_at = DateTime.UtcNow;
+                if (!string.IsNullOrWhiteSpace(body?.AdminNote)) req.admin_note = body!.AdminNote!.Trim();
+
+                // Refund: frozen -> income_balance (withdrawable again).
+                if (req.author_id.HasValue)
                 {
-                    wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - req.amount_requested);
-                    wallet.income_balance = (wallet.income_balance ?? 0m) + req.amount_requested;
-                    wallet.updated_at = DateTime.UtcNow;
+                    var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == req.author_id.Value, cancellationToken);
+                    if (wallet != null)
+                    {
+                        wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - req.amount_requested);
+                        wallet.income_balance = (wallet.income_balance ?? 0m) + req.amount_requested;
+                        wallet.updated_at = DateTime.UtcNow;
+                    }
                 }
+
+                await _db.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+                result = Ok(new { success = true });
+            });
+
+            return result;
+        }
+
+        /// <summary>
+        /// Đồng bộ thủ công trạng thái 1 withdraw từ PayOS theo payoutId (transaction_proof_url).
+        /// Dùng khi PayOS đã COMPLETED nhưng DB local vẫn PROCESSING.
+        /// </summary>
+        [HttpPost("withdraw/{id:guid}/sync")]
+        public async Task<IActionResult> SyncWithdrawStatus(Guid id, CancellationToken cancellationToken)
+        {
+            var req = await _db.withdraw_requests.FirstOrDefaultAsync(x => x.id == id, cancellationToken);
+            if (req == null) return NotFound(new { message = "Withdraw request not found." });
+
+            if (string.IsNullOrWhiteSpace(req.transaction_proof_url))
+                return BadRequest(new { message = "Withdraw request does not have payoutId (transaction_proof_url)." });
+
+            var payout = await _payos.GetPayoutInfoAsync(req.transaction_proof_url!, cancellationToken);
+            var mappedStatus = MapPayoutApprovalStateToWithdrawStatus(payout.ApprovalState);
+
+            if (mappedStatus == null)
+            {
+                return Ok(new
+                {
+                    success = true,
+                    message = "Payout is not terminal yet.",
+                    approvalState = payout.ApprovalState,
+                    currentStatus = req.status
+                });
             }
 
-            await _db.SaveChangesAsync(cancellationToken);
-            await tx.CommitAsync(cancellationToken);
-            return Ok(new { success = true });
+            // If already terminal, keep idempotent.
+            var currentStatus = (req.status ?? "").Trim().ToUpperInvariant();
+            if (currentStatus == "COMPLETED" || currentStatus == "FAILED" || currentStatus == "CANCELLED")
+            {
+                return Ok(new
+                {
+                    success = true,
+                    message = "Withdraw already terminal.",
+                    approvalState = payout.ApprovalState,
+                    currentStatus = req.status
+                });
+            }
+
+            var strategy = _db.Database.CreateExecutionStrategy();
+            IActionResult result = StatusCode(500, new { message = "Unexpected error." });
+
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+                var current = await _db.withdraw_requests.FirstOrDefaultAsync(x => x.id == id, cancellationToken);
+                if (current == null)
+                {
+                    result = NotFound(new { message = "Withdraw request not found." });
+                    return;
+                }
+
+                var oldStatus = current.status;
+                var now = DateTime.UtcNow;
+                current.processed_at = now;
+
+                if (mappedStatus == "COMPLETED")
+                {
+                    if (current.author_id.HasValue)
+                    {
+                        var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == current.author_id.Value, cancellationToken);
+                        if (wallet != null)
+                        {
+                            wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - current.amount_requested);
+                            wallet.updated_at = now;
+                        }
+                    }
+                    current.status = "COMPLETED";
+                }
+                else
+                {
+                    if (current.author_id.HasValue)
+                    {
+                        var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == current.author_id.Value, cancellationToken);
+                        if (wallet != null)
+                        {
+                            wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - current.amount_requested);
+                            wallet.income_balance = (wallet.income_balance ?? 0m) + current.amount_requested;
+                            wallet.updated_at = now;
+                        }
+                    }
+                    current.status = "FAILED";
+                }
+
+                await _db.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+
+                result = Ok(new
+                {
+                    success = true,
+                    oldStatus,
+                    newStatus = current.status,
+                    approvalState = payout.ApprovalState,
+                    payoutId = current.transaction_proof_url
+                });
+            });
+
+            return result;
         }
 
         public sealed class AdminWithdrawDecisionRequest
@@ -341,12 +605,24 @@ namespace AIStory.API.Controllers
             var s = (status ?? "PENDING").ToUpperInvariant();
             return s switch
             {
-                "SUCCESS" => "SUCCESS",
+                // Backward compatibility.
+                "SUCCESS" => "COMPLETED",
+                "COMPLETED" => "COMPLETED",
                 "PENDING" => "PENDING",
+                "PENDING_REVIEW" => "PENDING_REVIEW",
+                "PROCESSING" => "PROCESSING",
                 "CANCELLED" => "CANCELLED",
                 "FAILED" => "FAILED",
                 _ => s
             };
+        }
+
+        private static string? MapPayoutApprovalStateToWithdrawStatus(string? approvalState)
+        {
+            var s = (approvalState ?? string.Empty).Trim().ToUpperInvariant();
+            if (s is "SUCCEEDED" or "COMPLETED" or "PARTIAL_COMPLETED") return "COMPLETED";
+            if (s is "FAILED" or "REJECTED" or "CANCELLED") return "FAILED";
+            return null;
         }
     }
 }

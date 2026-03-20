@@ -16,11 +16,13 @@ namespace AIStory.API.Controllers
     {
         private readonly ICoinPaymentService _coinPaymentService;
         private readonly ILogger<CoinsController> _logger;
+        private readonly StoryPlatformDbContext _db;
 
-        public CoinsController(ICoinPaymentService coinPaymentService, ILogger<CoinsController> logger)
+        public CoinsController(ICoinPaymentService coinPaymentService, ILogger<CoinsController> logger, StoryPlatformDbContext db)
         {
             _coinPaymentService = coinPaymentService;
             _logger = logger;
+            _db = db;
         }
 
         private Guid GetUserIdFromToken()
@@ -427,6 +429,160 @@ namespace AIStory.API.Controllers
                 _logger.LogWarning(ex, "CreateWithdrawRequest failed");
                 return BadRequest(new { message = ex.Message });
             }
+        }
+
+        /// <summary>Tác giả hủy yêu cầu rút tiền khi đang chờ admin xử lý.</summary>
+        [HttpPost("author/withdraw/{id:guid}/cancel")]
+        [Authorize]
+        public async Task<IActionResult> CancelWithdrawRequest(Guid id, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                var userId = GetUserIdFromToken();
+                await _coinPaymentService.CancelWithdrawRequestAsync(userId, id, cancellationToken);
+                return Ok(new { success = true });
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "CancelWithdrawRequest failed");
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        // ========= Author bank accounts (for payout to author) =========
+        public sealed class AuthorBankAccountUpsertRequest
+        {
+            public string BankName { get; set; } = null!;
+            public string? BankBin { get; set; } // PayOS toBin (not persisted in current DB schema)
+            public string AccountNumber { get; set; } = null!;
+            public string AccountHolderName { get; set; } = null!;
+            public string? BranchName { get; set; }
+            public bool IsVerified { get; set; }
+        }
+
+        public sealed class AuthorBankAccountVerifyRequest
+        {
+            public bool IsVerified { get; set; }
+        }
+
+        /// <summary>Lấy tài khoản ngân hàng đã lưu của author</summary>
+        [HttpGet("author/bank-accounts")]
+        [Authorize]
+        public async Task<IActionResult> GetAuthorBankAccount(CancellationToken cancellationToken = default)
+        {
+            var userId = GetUserIdFromToken();
+
+            var acc = await _db.author_bank_accounts
+                .AsNoTracking()
+                .FirstOrDefaultAsync(x => x.user_id == userId, cancellationToken);
+
+            if (acc == null)
+                return Ok(new { items = Array.Empty<object>() });
+
+            return Ok(new
+            {
+                items = new[]
+                {
+                    new
+                    {
+                        user_id = acc.user_id,
+                        bank_name = acc.bank_name,
+                        bank_bin = (string?)null,
+                        account_number = acc.account_number,
+                        account_holder_name = acc.account_holder_name,
+                        branch_name = acc.branch_name,
+                        is_verified = acc.is_verified ?? false,
+                        updated_at = acc.updated_at
+                    }
+                }
+            });
+        }
+
+        /// <summary>Thêm/cập nhật tài khoản ngân hàng của author (upsert theo user_id)</summary>
+        [HttpPost("author/bank-accounts")]
+        [Authorize]
+        public async Task<IActionResult> UpsertAuthorBankAccount([FromBody] AuthorBankAccountUpsertRequest request, CancellationToken cancellationToken = default)
+        {
+            if (request == null)
+                return BadRequest(new { message = "Payload không hợp lệ." });
+            if (string.IsNullOrWhiteSpace(request.BankName) ||
+                string.IsNullOrWhiteSpace(request.AccountNumber) ||
+                string.IsNullOrWhiteSpace(request.AccountHolderName))
+            {
+                return BadRequest(new { message = "Thiếu thông tin bank_name/account_number/account_holder_name." });
+            }
+
+            var userId = GetUserIdFromToken();
+
+            // NOTE: author_bank_accounts currently has columns:
+            // bank_name, account_number, account_holder_name, branch_name, is_verified
+            var acc = await _db.author_bank_accounts.FirstOrDefaultAsync(x => x.user_id == userId, cancellationToken);
+            if (acc == null)
+            {
+                acc = new BusinessObjects.Entities.author_bank_accounts
+                {
+                    user_id = userId,
+                    bank_name = request.BankName.Trim(),
+                    account_number = request.AccountNumber.Trim(),
+                    account_holder_name = request.AccountHolderName.Trim(),
+                    branch_name = request.BranchName?.Trim(),
+                    is_verified = request.IsVerified,
+                    updated_at = DateTime.UtcNow
+                };
+                _db.author_bank_accounts.Add(acc);
+            }
+            else
+            {
+                acc.bank_name = request.BankName.Trim();
+                acc.account_number = request.AccountNumber.Trim();
+                acc.account_holder_name = request.AccountHolderName.Trim();
+                acc.branch_name = request.BranchName?.Trim();
+                acc.is_verified = request.IsVerified;
+                acc.updated_at = DateTime.UtcNow;
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+            return Ok(new { success = true });
+        }
+
+        /// <summary>Toggle verified cho tài khoản ngân hàng của author</summary>
+        [HttpPost("author/bank-accounts/verify")]
+        [Authorize]
+        public async Task<IActionResult> VerifyAuthorBankAccount([FromBody] AuthorBankAccountVerifyRequest request, CancellationToken cancellationToken = default)
+        {
+            if (request == null) return BadRequest(new { message = "Payload không hợp lệ." });
+            var userId = GetUserIdFromToken();
+
+            var acc = await _db.author_bank_accounts.FirstOrDefaultAsync(x => x.user_id == userId, cancellationToken);
+            if (acc == null) return NotFound(new { message = "Tài khoản ngân hàng chưa tồn tại." });
+
+            acc.is_verified = request.IsVerified;
+            acc.updated_at = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
+            return Ok(new { success = true });
+        }
+
+        /// <summary>Xóa tài khoản ngân hàng của author</summary>
+        [HttpDelete("author/bank-accounts")]
+        [Authorize]
+        public async Task<IActionResult> DeleteAuthorBankAccount(CancellationToken cancellationToken = default)
+        {
+            var userId = GetUserIdFromToken();
+
+            var acc = await _db.author_bank_accounts.FirstOrDefaultAsync(x => x.user_id == userId, cancellationToken);
+            if (acc == null) return Ok(new { success = true });
+
+            _db.author_bank_accounts.Remove(acc);
+            await _db.SaveChangesAsync(cancellationToken);
+            return Ok(new { success = true });
         }
     }
 }

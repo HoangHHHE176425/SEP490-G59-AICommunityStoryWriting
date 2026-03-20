@@ -122,6 +122,7 @@ namespace AIStory.API
             builder.Services.AddHttpClient<PayOSClient>();
             builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
             builder.Services.AddHostedService<PayOSPendingOrderSyncService>();
+            builder.Services.AddHostedService<PayOSWithdrawPayoutSyncService>();
 
             var jwtKey = builder.Configuration["Jwt:Key"];
             var jwtIssuer = builder.Configuration["Jwt:Issuer"];
