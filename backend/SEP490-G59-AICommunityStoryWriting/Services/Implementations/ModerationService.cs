@@ -14,6 +14,11 @@ namespace Services.Implementations
 {
     public class ModerationService : IModerationService
     {
+        private const int DefaultPolicyDeadlineDays = 7;
+        private const int MinHoursUntilDeadline = 24;
+        private const int MaxDeadlineDaysAhead = 366;
+        private const int ModeratorQueueInMemoryCap = 5000;
+
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
         private readonly IChapterVersionRepository _versionRepository;
@@ -46,7 +51,7 @@ namespace Services.Implementations
             _notificationHubNotifier = notificationHubNotifier;
         }
 
-        public PagedResultDto<StoryListItemDto> GetPendingStories(int page = 1, int pageSize = 20, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null)
+        public PagedResultDto<StoryListItemDto> GetPendingStories(int page = 1, int pageSize = 20, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null, string? timeStatusFilter = null)
         {
             if (categoryIdsFilter != null && categoryIdsFilter.Count == 0)
                 return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
@@ -70,33 +75,87 @@ namespace Services.Implementations
                     : new List<Guid>();
             }
 
+            var sortByNorm = string.IsNullOrWhiteSpace(sortBy) ? "updated_at" : sortBy.Trim();
+            var sortOrderNorm = string.IsNullOrWhiteSpace(sortOrder) ? "asc" : sortOrder.Trim();
+            var useMemory = NeedsInMemoryModeratorQueueProcessing(sortByNorm, timeStatusFilter);
+            var dbSortBy = string.Equals(sortByNorm, "deadline_at", StringComparison.OrdinalIgnoreCase) ? "updated_at" : sortByNorm;
+
             var query = new StoryQueryDto
             {
                 Status = "PENDING_REVIEW",
-                Page = page,
-                PageSize = pageSize,
+                Page = useMemory ? 1 : page,
+                PageSize = useMemory ? ModeratorQueueInMemoryCap : pageSize,
                 Search = search,
-                SortBy = !string.IsNullOrWhiteSpace(sortBy) ? sortBy : "updated_at",
-                SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "asc",
+                SortBy = dbSortBy,
+                SortOrder = sortOrderNorm,
                 CategoryIds = categoryIdsFilter != null ? categoryIdsFilter.ToList() : null,
                 ExcludeStoryIds = excludeStoryIds != null && excludeStoryIds.Count > 0 ? excludeStoryIds : null,
                 IncludeStoryIds = includeStoryIds != null && includeStoryIds.Count > 0 ? includeStoryIds : null
             };
             var result = _storyService.GetAll(query);
-            foreach (var item in result.Items)
+            var pendingEscalationStoryIds = ReviewEscalationDAO.GetPendingTargetIds(ReviewAssignmentDAO.TargetTypeStory);
+
+            if (useMemory)
             {
-                var claim = ReviewAssignmentDAO.GetClaimInfo(ReviewAssignmentDAO.TargetTypeStory, item.Id);
-                if (claim.HasValue)
+                var list = result.Items.ToList();
+                foreach (var item in list)
+                    EnrichPendingStoryItem(item, moderatorId, pendingEscalationStoryIds);
+
+                if (!string.IsNullOrWhiteSpace(timeStatusFilter))
                 {
-                    item.ClaimedAt = claim.Value.AssignedAt;
-                    item.ClaimedByDisplayName = claim.Value.DisplayName;
-                    item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
+                    var ts = timeStatusFilter.Trim();
+                    list = list.Where(i => string.Equals(i.TimeStatus, ts, StringComparison.OrdinalIgnoreCase)).ToList();
                 }
+
+                if (string.Equals(sortByNorm, "deadline_at", StringComparison.OrdinalIgnoreCase))
+                {
+                    var asc = string.Equals(sortOrderNorm, "asc", StringComparison.OrdinalIgnoreCase);
+                    list = asc
+                        ? list.OrderBy(i => i.PendingSince ?? DateTime.MaxValue).ToList()
+                        : list.OrderByDescending(i => i.PendingSince ?? DateTime.MinValue).ToList();
+                }
+
+                var total = list.Count;
+                var pageItems = list.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                return new PagedResultDto<StoryListItemDto>
+                {
+                    Items = pageItems,
+                    TotalCount = total,
+                    Page = page,
+                    PageSize = pageSize
+                };
             }
+
+            foreach (var item in result.Items)
+                EnrichPendingStoryItem(item, moderatorId, pendingEscalationStoryIds);
             return result;
         }
 
-        public PagedResultDto<ChapterListItemDto> GetPendingChapters(int page = 1, int pageSize = 20, Guid? storyId = null, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null)
+        private static bool NeedsInMemoryModeratorQueueProcessing(string? sortBy, string? timeStatusFilter) =>
+            string.Equals(sortBy, "deadline_at", StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrWhiteSpace(timeStatusFilter);
+
+        private void EnrichPendingStoryItem(StoryListItemDto item, Guid? moderatorId, HashSet<Guid> pendingEscalationStoryIds)
+        {
+            var authorSubmitted = ModeratorReviewSlaHelper.GetAuthorSubmittedUtc(
+                ReviewAssignmentDAO.TargetTypeStory, item.Id, _storyRepository, _chapterRepository, _versionRepository);
+            var pendingSince = item.UpdatedAt;
+            item.PendingSince = authorSubmitted ?? pendingSince;
+            var claim = ReviewAssignmentDAO.GetClaimInfo(ReviewAssignmentDAO.TargetTypeStory, item.Id);
+            if (claim.HasValue)
+            {
+                item.ClaimedAt = claim.Value.AssignedAt;
+                item.ClaimedByDisplayName = claim.Value.DisplayName;
+                item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
+            }
+
+            item.HasPendingEscalation = pendingEscalationStoryIds.Contains(item.Id);
+            var fallbackDeadline = ResolveReviewDeadlineUtc(pendingSince, claim);
+            item.DeadlineAt = null;
+            item.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
+        }
+
+        public PagedResultDto<ChapterListItemDto> GetPendingChapters(int page = 1, int pageSize = 20, Guid? storyId = null, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null, string? timeStatusFilter = null)
         {
             if (categoryIdsFilter != null && categoryIdsFilter.Count == 0)
                 return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
@@ -131,6 +190,11 @@ namespace Services.Implementations
             if (includeChapterIds != null && includeChapterIds.Count > 0)
                 pendingVersionChapterIds = pendingVersionChapterIds.Where(id => includeChapterIds.Contains(id)).ToList();
 
+            var sortByNorm = string.IsNullOrWhiteSpace(sortBy) ? "updated_at" : sortBy.Trim();
+            var sortOrderNorm = string.IsNullOrWhiteSpace(sortOrder) ? "asc" : sortOrder.Trim();
+            var useMemory = NeedsInMemoryModeratorQueueProcessing(sortByNorm, timeStatusFilter);
+            var dbSortBy = string.Equals(sortByNorm, "deadline_at", StringComparison.OrdinalIgnoreCase) ? "updated_at" : sortByNorm;
+
             var query = new ChapterQueryDto
             {
                 PendingVersionChapterIds = pendingVersionChapterIds.Count > 0 ? pendingVersionChapterIds : null,
@@ -139,39 +203,85 @@ namespace Services.Implementations
                 StoryIds = storyIdsFilter,
                 ExcludeChapterIds = excludeChapterIds != null && excludeChapterIds.Count > 0 ? excludeChapterIds : null,
                 IncludeChapterIds = includeChapterIds != null && includeChapterIds.Count > 0 ? includeChapterIds : null,
-                Page = page,
-                PageSize = pageSize,
+                Page = useMemory ? 1 : page,
+                PageSize = useMemory ? ModeratorQueueInMemoryCap : pageSize,
                 Search = search,
-                SortBy = !string.IsNullOrWhiteSpace(sortBy) ? sortBy : "created_at",
-                SortOrder = !string.IsNullOrWhiteSpace(sortOrder) ? sortOrder : "asc"
+                SortBy = dbSortBy,
+                SortOrder = sortOrderNorm
             };
             var result = _chapterService.GetAll(query);
-            foreach (var item in result.Items)
+            var pendingEscalationChapterIds = ReviewEscalationDAO.GetPendingTargetIds(ReviewAssignmentDAO.TargetTypeChapter);
+
+            if (useMemory)
             {
-                var claim = ReviewAssignmentDAO.GetClaimInfo(ReviewAssignmentDAO.TargetTypeChapter, item.Id);
-                if (claim.HasValue)
+                var list = result.Items.ToList();
+                foreach (var item in list)
+                    EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds);
+
+                if (!string.IsNullOrWhiteSpace(timeStatusFilter))
                 {
-                    item.ClaimedAt = claim.Value.AssignedAt;
-                    item.ClaimedByDisplayName = claim.Value.DisplayName;
-                    item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
+                    var ts = timeStatusFilter.Trim();
+                    list = list.Where(i => string.Equals(i.TimeStatus, ts, StringComparison.OrdinalIgnoreCase)).ToList();
                 }
-                // Hiển thị đúng tiêu đề/số từ version chờ duyệt ngay trên sidebar (kể cả chapter đang DRAFT — gửi version đi duyệt). Dùng .ToList() để luôn đánh giá đủ version.
-                var pendingVersionsList = _versionRepository.GetByChapterId(item.Id)
-                    .Where(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
-                    .OrderBy(v => v.version_number)
-                    .ToList();
-                var pendingVersion = pendingVersionsList.FirstOrDefault();
-                if (pendingVersion != null)
+
+                if (string.Equals(sortByNorm, "deadline_at", StringComparison.OrdinalIgnoreCase))
                 {
-                    item.PendingVersionTitle = string.IsNullOrWhiteSpace(pendingVersion.title_snapshot)
-                        ? (item.Title ?? null)
-                        : pendingVersion.title_snapshot.Trim();
-                    item.PendingVersionWordCount = string.IsNullOrWhiteSpace(pendingVersion.content_snapshot)
-                        ? 0
-                        : pendingVersion.content_snapshot!.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+                    var asc = string.Equals(sortOrderNorm, "asc", StringComparison.OrdinalIgnoreCase);
+                    list = asc
+                        ? list.OrderBy(i => i.PendingSince ?? DateTime.MaxValue).ToList()
+                        : list.OrderByDescending(i => i.PendingSince ?? DateTime.MinValue).ToList();
                 }
+
+                var total = list.Count;
+                var pageItems = list.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                return new PagedResultDto<ChapterListItemDto>
+                {
+                    Items = pageItems,
+                    TotalCount = total,
+                    Page = page,
+                    PageSize = pageSize
+                };
             }
+
+            foreach (var item in result.Items)
+                EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds);
             return result;
+        }
+
+        private void EnrichPendingChapterItem(ChapterListItemDto item, Guid? moderatorId, HashSet<Guid> pendingEscalationChapterIds)
+        {
+            var pendingSince = item.UpdatedAt ?? item.CreatedAt;
+            var authorSubmitted = ModeratorReviewSlaHelper.GetAuthorSubmittedUtc(
+                ReviewAssignmentDAO.TargetTypeChapter, item.Id, _storyRepository, _chapterRepository, _versionRepository);
+            item.PendingSince = authorSubmitted ?? pendingSince;
+
+            var claim = ReviewAssignmentDAO.GetClaimInfo(ReviewAssignmentDAO.TargetTypeChapter, item.Id);
+            if (claim.HasValue)
+            {
+                item.ClaimedAt = claim.Value.AssignedAt;
+                item.ClaimedByDisplayName = claim.Value.DisplayName;
+                item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
+            }
+
+            item.HasPendingEscalation = pendingEscalationChapterIds.Contains(item.Id);
+            var fallbackDeadline = ResolveReviewDeadlineUtc(pendingSince, claim);
+            item.DeadlineAt = null;
+            item.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
+
+            var pendingVersionsList = _versionRepository.GetByChapterId(item.Id)
+                .Where(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(v => v.version_number)
+                .ToList();
+            var pendingVersion = pendingVersionsList.FirstOrDefault();
+            if (pendingVersion != null)
+            {
+                item.PendingVersionTitle = string.IsNullOrWhiteSpace(pendingVersion.title_snapshot)
+                    ? (item.Title ?? null)
+                    : pendingVersion.title_snapshot.Trim();
+                item.PendingVersionWordCount = string.IsNullOrWhiteSpace(pendingVersion.content_snapshot)
+                    ? 0
+                    : pendingVersion.content_snapshot!.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+            }
         }
 
         public PagedResultDto<StoryListItemDto> GetReviewedStories(int page, int pageSize, string status, string? search, string? sortBy, string? sortOrder, IReadOnlyList<Guid>? categoryIdsFilter, Guid? moderatorId, bool isAdmin, Guid? moderatorIdFilter = null, DateTime? dateFrom = null, DateTime? dateTo = null)
@@ -344,8 +454,11 @@ namespace Services.Implementations
             return result;
         }
 
-        public bool ClaimStory(Guid storyId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
+        public bool ClaimStory(Guid storyId, Guid moderatorId, DateTime reviewDeadlineAtUtc, IReadOnlyList<Guid>? allowedCategoryIds = null)
         {
+            var deadlineUtc = NormalizeToUtc(reviewDeadlineAtUtc);
+            ValidateModeratorReviewDeadline(deadlineUtc);
+
             if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
                 return false;
             var story = _storyRepository.GetById(storyId);
@@ -355,14 +468,17 @@ namespace Services.Implementations
                 return false;
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, storyId))
                 return false;
-            var ok = ReviewAssignmentDAO.TryClaim(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId);
+            var ok = ReviewAssignmentDAO.TryClaim(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId, deadlineUtc);
             if (ok)
                 _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return ok;
         }
 
-        public bool ClaimChapter(Guid chapterId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
+        public bool ClaimChapter(Guid chapterId, Guid moderatorId, DateTime reviewDeadlineAtUtc, IReadOnlyList<Guid>? allowedCategoryIds = null)
         {
+            var deadlineUtc = NormalizeToUtc(reviewDeadlineAtUtc);
+            ValidateModeratorReviewDeadline(deadlineUtc);
+
             if (allowedCategoryIds != null && allowedCategoryIds.Count == 0)
                 return false;
             var chapter = _chapterRepository.GetById(chapterId);
@@ -383,10 +499,62 @@ namespace Services.Implementations
             }
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId))
                 return false;
-            var ok = ReviewAssignmentDAO.TryClaim(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
+            var ok = ReviewAssignmentDAO.TryClaim(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId, deadlineUtc);
             if (ok)
                 _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return ok;
+        }
+
+        /// <summary>Bắt buộc đã "Nhận duyệt" (claim) — không cho duyệt/từ chối khi chưa lock hoặc lock cho người khác.</summary>
+        private static void EnsureModeratorHasClaimedForReview(string targetType, Guid targetId, Guid moderatorId)
+        {
+            if (!ReviewAssignmentDAO.IsLocked(targetType, targetId))
+                throw new InvalidOperationException("Bạn phải nhận duyệt mục này trước khi duyệt hoặc từ chối.");
+            if (!ReviewAssignmentDAO.IsAssignedTo(targetType, targetId, moderatorId))
+                throw new InvalidOperationException("Chỉ moderator đã nhận duyệt mới có thể duyệt hoặc từ chối mục này.");
+        }
+
+        /// <summary>Moderator đã gửi đơn báo cáo admin và đơn còn PENDING → không cho duyệt/từ chối đến khi admin xử lý.</summary>
+        private static void EnsureNoPendingEscalationBlocksModeratorReview(string targetType, Guid targetId, Guid moderatorId)
+        {
+            if (!ReviewEscalationDAO.HasPendingForTarget(targetType, targetId))
+                return;
+            if (!ReviewAssignmentDAO.IsAssignedTo(targetType, targetId, moderatorId))
+                return;
+            throw new InvalidOperationException("Đang có báo cáo chờ admin xử lý — không thể duyệt hoặc từ chối cho đến khi admin quyết định.");
+        }
+
+        private static DateTime NormalizeToUtc(DateTime value)
+        {
+            return value.Kind switch
+            {
+                DateTimeKind.Utc => value,
+                DateTimeKind.Local => value.ToUniversalTime(),
+                _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+            };
+        }
+
+        private static void ValidateModeratorReviewDeadline(DateTime deadlineUtc)
+        {
+            var now = DateTime.UtcNow;
+            if (deadlineUtc <= now.AddHours(MinHoursUntilDeadline))
+                throw new ArgumentException("Hạn duyệt phải sau ít nhất 24 giờ kể từ thời điểm hiện tại.");
+            if (deadlineUtc > now.AddDays(MaxDeadlineDaysAhead))
+                throw new ArgumentException($"Hạn duyệt không được vượt quá {MaxDeadlineDaysAhead} ngày.");
+        }
+
+        /// <summary>Đã nhận duyệt: ưu tiên hạn moderator chọn; bản ghi cũ không có cột → hạn = lúc nhận + 7 ngày. Chưa nhận: hạn gợi ý = lúc gửi + 7 ngày.</summary>
+        private static DateTime? ResolveReviewDeadlineUtc(DateTime? pendingSince, (Guid AssigneeId, DateTime AssignedAt, string DisplayName, DateTime? ReviewDeadlineAt)? claim)
+        {
+            if (claim.HasValue)
+            {
+                if (claim.Value.ReviewDeadlineAt.HasValue)
+                    return NormalizeToUtc(claim.Value.ReviewDeadlineAt.Value);
+                return claim.Value.AssignedAt.AddDays(DefaultPolicyDeadlineDays);
+            }
+            if (pendingSince.HasValue)
+                return pendingSince.Value.AddDays(DefaultPolicyDeadlineDays);
+            return null;
         }
 
         public bool ApproveStory(Guid storyId, Guid moderatorId, IReadOnlyList<Guid>? allowedCategoryIds = null)
@@ -400,13 +568,14 @@ namespace Services.Implementations
                 return false;
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
                 return false;
-            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, storyId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId))
-                return false;
+            EnsureModeratorHasClaimedForReview(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId);
+            EnsureNoPendingEscalationBlocksModeratorReview(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId);
 
             story.status = "PUBLISHED";
             story.published_at = DateTime.Now;
             story.last_published_at = DateTime.Now;
             story.updated_at = DateTime.Now;
+            story.submitted_for_review_at = null;
             _storyRepository.Update(story);
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeStory, storyId);
@@ -436,11 +605,12 @@ namespace Services.Implementations
                 return false;
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
                 return false;
-            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, storyId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId))
-                return false;
+            EnsureModeratorHasClaimedForReview(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId);
+            EnsureNoPendingEscalationBlocksModeratorReview(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId);
 
             story.status = "REJECTED";
             story.updated_at = DateTime.Now;
+            story.submitted_for_review_at = null;
             _storyRepository.Update(story);
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeStory, storyId);
@@ -485,11 +655,8 @@ namespace Services.Implementations
                     return false;
                 }
             }
-            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId))
-            {
-                Console.WriteLine($"[CONSOLE] ApproveChapter RETURN FALSE: chapter locked by another moderator");
-                return false;
-            }
+            EnsureModeratorHasClaimedForReview(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
+            EnsureNoPendingEscalationBlocksModeratorReview(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
 
             // Duyệt theo thứ tự CHỈ khi publish lần đầu cho chapter.
             // Nếu chapter đã từng PUBLISHED (published_at có giá trị) và giờ chỉ gửi version mới,
@@ -528,6 +695,7 @@ namespace Services.Implementations
             chapter.status = "PUBLISHED";
             chapter.published_at = DateTime.Now;
             chapter.updated_at = DateTime.Now;
+            chapter.submitted_for_review_at = null;
             _chapterRepository.Update(chapter);
 
             // Cập nhật last_published_at của story nếu cần và gửi thông báo cho user follow story
@@ -591,8 +759,8 @@ namespace Services.Implementations
                 if (story == null || !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
                     return false;
             }
-            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId) && !ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId))
-                throw new InvalidOperationException("Chương đã được moderator khác nhận duyệt. Chỉ moderator đã nhận mới có thể từ chối.");
+            EnsureModeratorHasClaimedForReview(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
+            EnsureNoPendingEscalationBlocksModeratorReview(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
 
             // Có version chờ duyệt: từ chối (các) version đó, không đổi trạng thái chương gốc (dù chương đang PUBLISHED, DRAFT hay REJECTED).
             // Không ghi LogModeration("CHAPTER", ...) ở đây: lý do từ chối version đã lưu trên từng version (rejection_reason). API "lý do từ chối chương" (GetLatestRejection CHAPTER) chỉ dùng cho khi chương gốc bị từ chối, tránh lý do version đè lên lý do chương.
@@ -610,6 +778,7 @@ namespace Services.Implementations
                     _versionRepository.Update(pv);
                 }
                 chapter.updated_at = DateTime.Now;
+                chapter.submitted_for_review_at = null;
                 _chapterRepository.Update(chapter);
                 ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);
                 var chapterNotif = NotifyChapterResult(chapter, "REJECTED", reason.Trim());
@@ -621,6 +790,7 @@ namespace Services.Implementations
             // Chương gốc đang PENDING_REVIEW: từ chối cả chương.
             chapter.status = "REJECTED";
             chapter.updated_at = DateTime.Now;
+            chapter.submitted_for_review_at = null;
             _chapterRepository.Update(chapter);
 
             ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, chapterId);

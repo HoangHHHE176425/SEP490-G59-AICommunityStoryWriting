@@ -21,6 +21,9 @@ public partial class review_assignments
 
     public DateTime assigned_at { get; set; }
 
+    /// <summary>Hạn hoàn thành duyệt do moderator chọn khi nhận duyệt (UTC).</summary>
+    public DateTime? review_deadline_at { get; set; }
+
     public DateTime? completed_at { get; set; }
 
     public string? note { get; set; }
