@@ -57,11 +57,12 @@ namespace AIStory.API.Controllers
 
         /// <summary>Số thông báo chưa đọc.</summary>
         [HttpGet("unread-count")]
+        [AllowAnonymous]
         public IActionResult GetUnreadCount()
         {
             var userId = GetCurrentUserId();
             if (!userId.HasValue)
-                return Unauthorized(new { message = "Không xác định user." });
+                return Ok(new { count = 0 });
 
             var count = NotificationDAO.GetUnreadCount(userId.Value);
             _logger.LogInformation("GetUnreadCount UserId={UserId} Count={Count}", userId, count);
