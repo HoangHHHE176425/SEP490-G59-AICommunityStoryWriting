@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.IdentityModel.Tokens.Jwt;
+using System.Linq;
 using System.Security.Claims;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Services.DTOs.Comments;
 using Services.DTOs.Stories;
+using Services.Interfaces;
 
 namespace AIStory.API.Controllers
 {
@@ -15,11 +17,13 @@ namespace AIStory.API.Controllers
     public class StoriesController : ControllerBase
     {
         private readonly IStoryService _storyService;
+        private readonly IContentGuardrailService _contentGuardrail;
         private readonly ILogger<StoriesController> _logger;
 
-        public StoriesController(IStoryService storyService, ILogger<StoriesController> logger)
+        public StoriesController(IStoryService storyService, IContentGuardrailService contentGuardrail, ILogger<StoriesController> logger)
         {
             _storyService = storyService;
+            _contentGuardrail = contentGuardrail;
             _logger = logger;
         }
 
@@ -403,7 +407,7 @@ namespace AIStory.API.Controllers
         /// <summary>Comment story. Bắt buộc login + đã đọc ít nhất 1 chapter mới được comment.</summary>
         [HttpPost("{id:guid}/comments")]
         [Authorize]
-        public IActionResult AddStoryComment(Guid id, [FromBody] CreateStoryCommentRequestDto request)
+        public async Task<IActionResult> AddStoryComment(Guid id, [FromBody] CreateStoryCommentRequestDto request)
         {
             try
             {
@@ -416,6 +420,14 @@ namespace AIStory.API.Controllers
                 var content = request.Content.Trim();
                 if (content.Length > 2000)
                     return BadRequest(new { message = "Nội dung comment tối đa 2000 ký tự." });
+
+                var guardrailResult = await _contentGuardrail.CheckAsync(id, content, HttpContext.RequestAborted);
+                if (!guardrailResult.Passed)
+                    return BadRequest(new
+                    {
+                        message = "Nội dung comment chứa từ không được phép.",
+                        violations = guardrailResult.Violations.Select(v => new { v.Type, v.Quote })
+                    });
 
                 var story = StoryDAO.GetById(id);
                 if (story == null)
@@ -497,6 +509,8 @@ namespace AIStory.API.Controllers
                 ParentId = c.parent_id,
                 UserId = c.user_id ?? Guid.Empty,
                 UserDisplayName = display,
+                UserRole = c.userNavigation?.role,
+                UserCreatedAt = c.userNavigation?.created_at,
                 Content = c.content,
                 LikesCount = c.likes_count ?? 0,
                 UserHasLiked = userHasLiked,

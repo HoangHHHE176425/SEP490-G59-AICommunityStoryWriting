@@ -21,13 +21,15 @@ namespace AIStory.API.Controllers
         private readonly IChapterVersionService _chapterVersionService;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IStoryService _storyService;
+        private readonly IContentGuardrailService _contentGuardrail;
 
-        public ChaptersController(IChapterService chapterService, IChapterVersionService chapterVersionService, IServiceScopeFactory scopeFactory, IStoryService storyService)
+        public ChaptersController(IChapterService chapterService, IChapterVersionService chapterVersionService, IServiceScopeFactory scopeFactory, IStoryService storyService, IContentGuardrailService contentGuardrail)
         {
             _chapterService = chapterService;
             _chapterVersionService = chapterVersionService;
             _scopeFactory = scopeFactory;
             _storyService = storyService;
+            _contentGuardrail = contentGuardrail;
         }
 
         private Guid? GetCurrentUserId()
@@ -365,7 +367,7 @@ namespace AIStory.API.Controllers
         /// <summary>Comment chapter. Bắt buộc đăng nhập và đã đọc ít nhất 1 chapter của truyện.</summary>
         [HttpPost("{id:guid}/comments")]
         [Authorize]
-        public IActionResult AddChapterComment(Guid id, [FromBody] CreateStoryCommentRequestDto request)
+        public async Task<IActionResult> AddChapterComment(Guid id, [FromBody] CreateStoryCommentRequestDto request)
         {
             try
             {
@@ -377,6 +379,14 @@ namespace AIStory.API.Controllers
                 var content = request.Content.Trim();
                 if (content.Length > 2000)
                     return BadRequest(new { message = "Nội dung comment tối đa 2000 ký tự." });
+
+                var guardrailResult = await _contentGuardrail.CheckAsync(Guid.Empty, content, HttpContext.RequestAborted);
+                if (!guardrailResult.Passed)
+                    return BadRequest(new
+                    {
+                        message = "Nội dung comment chứa từ không được phép.",
+                        violations = guardrailResult.Violations.Select(v => new { v.Type, v.Quote })
+                    });
 
                 var chapter = _chapterService.GetById(id);
                 if (chapter == null || !chapter.StoryId.HasValue)
@@ -504,6 +514,8 @@ namespace AIStory.API.Controllers
                 ParentId = c.parent_id,
                 UserId = c.user_id ?? Guid.Empty,
                 UserDisplayName = display,
+                UserRole = c.userNavigation?.role,
+                UserCreatedAt = c.userNavigation?.created_at,
                 Content = c.content ?? "",
                 LikesCount = c.likes_count ?? 0,
                 UserHasLiked = userHasLiked,
