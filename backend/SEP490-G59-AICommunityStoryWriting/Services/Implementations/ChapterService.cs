@@ -187,7 +187,8 @@ namespace Services.Implementations
             {
                 var searchLower = query.Search.Trim().ToLower();
                 chaptersQuery = chaptersQuery.Where(c =>
-                    (c.title != null && c.title.ToLower().Contains(searchLower)));
+                    (c.title != null && c.title.ToLower().Contains(searchLower)) ||
+                    (c.story != null && c.story.title != null && c.story.title.ToLower().Contains(searchLower)));
             }
 
             if (query.PendingVersionChapterIds != null && query.PendingVersionChapterIds.Count > 0)
@@ -392,6 +393,11 @@ namespace Services.Implementations
 
                 chapter.status = newStatus;
 
+                if (newStatus == "PENDING_REVIEW" && oldStatus != "PENDING_REVIEW")
+                    chapter.submitted_for_review_at = DateTime.UtcNow;
+                else if (oldStatus == "PENDING_REVIEW" && newStatus != "PENDING_REVIEW")
+                    chapter.submitted_for_review_at = null;
+
                 // If changing to PUBLISHED, set published_at
                 if (newStatus == "PUBLISHED" && oldStatus != "PUBLISHED")
                 {
@@ -500,6 +506,7 @@ namespace Services.Implementations
             // Author "Publish" = gửi chờ duyệt. Chỉ moderator approve mới chuyển sang PUBLISHED và set published_at.
             chapter.status = "PENDING_REVIEW";
             chapter.updated_at = DateTime.Now;
+            chapter.submitted_for_review_at = DateTime.UtcNow;
             // published_at và story.last_published_at chỉ set khi moderator approve (ModerationService.ApproveChapter)
 
             _chapterRepository.Update(chapter);
@@ -520,6 +527,7 @@ namespace Services.Implementations
 
             chapter.status = "DRAFT";
             chapter.updated_at = DateTime.Now;
+            chapter.submitted_for_review_at = null;
 
             _chapterRepository.Update(chapter);
 
