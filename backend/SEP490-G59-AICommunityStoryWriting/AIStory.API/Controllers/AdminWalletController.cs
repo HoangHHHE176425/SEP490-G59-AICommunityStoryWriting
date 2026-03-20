@@ -657,11 +657,11 @@ namespace AIStory.API.Controllers
                         && (toExclusive == null || w.processed_at < toExclusive.Value)
                     select new SystemCoinLedgerItemDto
                     {
-                        EventType = w.status == "SUCCESS" ? "WITHDRAW_APPROVED" : "WITHDRAW_REJECTED",
+                        EventType = (w.status == "SUCCESS" || w.status == "COMPLETED") ? "WITHDRAW_APPROVED" : "WITHDRAW_REJECTED",
                         EventTime = w.processed_at!.Value,
                         PlatformDeltaCoins = 0m,
                         BuyerDeltaCoins = 0m,
-                        AuthorIncomeDeltaCoins = w.status == "SUCCESS" ? 0m : w.amount_requested,
+                        AuthorIncomeDeltaCoins = (w.status == "SUCCESS" || w.status == "COMPLETED") ? 0m : w.amount_requested,
                         AuthorFrozenDeltaCoins = -w.amount_requested,
                         StoryId = null,
                         ChapterId = null,

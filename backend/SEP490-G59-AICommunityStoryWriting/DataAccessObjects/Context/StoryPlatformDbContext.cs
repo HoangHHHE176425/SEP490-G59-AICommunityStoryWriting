@@ -121,7 +121,7 @@ public partial class StoryPlatformDbContext : DbContext
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer(
-                "Server= localhost;uid=sa;password=a123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                     maxRetryCount: 5,
                     maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -1054,6 +1054,10 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.status)
                 .HasMaxLength(20)
                 .HasDefaultValue("PENDING");
+            entity.Property(e => e.is_suspected_fraud).HasDefaultValue(false);
+            entity.Property(e => e.risk_score).HasColumnType("decimal(5, 2)");
+            entity.Property(e => e.risk_flags).HasMaxLength(200);
+            entity.Property(e => e.risk_reason).HasMaxLength(500);
 
             entity.HasOne(d => d.author).WithMany(p => p.withdraw_requestsauthor)
                 .HasForeignKey(d => d.author_id)

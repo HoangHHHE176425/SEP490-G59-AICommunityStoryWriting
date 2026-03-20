@@ -39,8 +39,8 @@ function formatTime(iso) {
 
 function statusPill(status) {
     const s = String(status || '').toUpperCase();
-    if (s === 'SUCCESS') return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
-    if (s === 'PENDING') return 'bg-amber-50 text-amber-700 ring-amber-200';
+    if (s === 'SUCCESS' || s === 'COMPLETED') return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
+    if (s === 'PENDING' || s === 'PENDING_REVIEW' || s === 'PROCESSING') return 'bg-amber-50 text-amber-700 ring-amber-200';
     if (s === 'FAILED' || s === 'CANCELLED') return 'bg-red-50 text-red-700 ring-red-200';
     return 'bg-slate-100 text-slate-700 ring-slate-200';
 }
@@ -59,10 +59,52 @@ function typeBadge(type) {
     return 'bg-slate-100 text-slate-700 ring-slate-200';
 }
 
+function safeFraudReview(tx) {
+    const f = tx?.fraudReview;
+    if (!f || typeof f !== 'object') {
+        return {
+            isSuspectedFraud: false,
+            riskScore: null,
+            riskFlags: [],
+            riskReason: '',
+            reviewedBy: null,
+            reviewedAt: null,
+        };
+    }
+
+    const rawFlags = typeof f.riskFlags === 'string' ? f.riskFlags : '';
+    return {
+        isSuspectedFraud: !!f.isSuspectedFraud,
+        riskScore: typeof f.riskScore === 'number' ? f.riskScore : null,
+        riskFlags: rawFlags
+            .split(',')
+            .map((x) => x.trim())
+            .filter(Boolean),
+        riskReason: f.riskReason || '',
+        reviewedBy: f.reviewedBy || null,
+        reviewedAt: f.reviewedAt || null,
+    };
+}
+
+function toVietnameseRiskFlag(flag) {
+    const key = String(flag || '').trim().toUpperCase();
+    if (key === 'AMOUNT_ANOMALY') return 'Số tiền bất thường';
+    if (key === 'HIGH_FREQUENCY') return 'Tần suất rút cao';
+    if (key === 'NEW_ACCOUNT_FIRST_WITHDRAW') return 'Tài khoản mới rút lần đầu';
+    return key || '-';
+}
+
+function toVietnameseRiskReason(fraud) {
+    if (fraud?.riskFlags?.length) {
+        return `Hệ thống phát hiện dấu hiệu rủi ro: ${fraud.riskFlags.map(toVietnameseRiskFlag).join('; ')}`;
+    }
+    return fraud?.riskReason || '-';
+}
+
 export function AdminTransactions() {
     const [transactions, setTransactions] = useState(() => []);
     const [typeFilter, setTypeFilter] = useState('ALL'); // ALL | DEPOSIT | WITHDRAW
-    const [statusFilter, setStatusFilter] = useState('ALL'); // ALL | SUCCESS | PENDING | FAILED
+    const [statusFilter, setStatusFilter] = useState('ALL'); // ALL | COMPLETED | PENDING | FAILED | CANCELLED
     const [query, setQuery] = useState('');
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
@@ -75,6 +117,16 @@ export function AdminTransactions() {
     const [totalCount, setTotalCount] = useState(0);
     const [totalPages, setTotalPages] = useState(1);
     const [loadError, setLoadError] = useState('');
+    const [fraudOnly, setFraudOnly] = useState(false);
+    const [riskFlagFilters, setRiskFlagFilters] = useState(() => []);
+    const [reviewNote, setReviewNote] = useState('');
+
+    function toggleRiskFlag(flag) {
+        setRiskFlagFilters((prev) => {
+            if (prev.includes(flag)) return prev.filter((x) => x !== flag);
+            return [...prev, flag];
+        });
+    }
 
     async function loadList(nextPage = page) {
         try {
@@ -110,19 +162,33 @@ export function AdminTransactions() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [typeFilter, statusFilter, query, fromDate, toDate]);
 
-    // Keep a "filtered" alias to minimize UI changes
-    const filtered = useMemo(() => transactions, [transactions]);
+    const filtered = useMemo(() => {
+        return transactions.filter((tx) => {
+            const fraud = safeFraudReview(tx);
+            if (fraudOnly && !fraud.isSuspectedFraud) return false;
+            if (riskFlagFilters.length > 0) {
+                const hasAnyFlag = riskFlagFilters.some((flag) => fraud.riskFlags.includes(flag));
+                if (!hasAnyFlag) return false;
+            }
+            return true;
+        });
+    }, [transactions, fraudOnly, riskFlagFilters]);
 
     const selectedFresh = useMemo(() => {
         if (!selected?.id) return null;
         return transactions.find((t) => t.id === selected.id) ?? selected;
     }, [selected, transactions]);
 
-    const canReviewWithdraw = selectedFresh?.type === 'WITHDRAW' && selectedFresh?.status === 'PENDING';
+    const canReviewWithdraw =
+        selectedFresh?.type === 'WITHDRAW' &&
+        ['PENDING', 'PENDING_REVIEW'].includes(String(selectedFresh?.status ?? '').toUpperCase());
+    const requiresReviewNote =
+        canReviewWithdraw && String(selectedFresh?.status ?? '').toUpperCase() === 'PENDING_REVIEW';
 
     async function handleWithdrawDecision(decision) {
         if (!selectedFresh) return;
         if (!canReviewWithdraw) return;
+        const currentStatus = String(selectedFresh?.status ?? '').toUpperCase();
         const ok = window.confirm(
             decision === 'APPROVE'
                 ? `Duyệt giao dịch rút ${formatVnd(selectedFresh.amountVnd)} cho ${selectedFresh.user?.email}?`
@@ -132,10 +198,19 @@ export function AdminTransactions() {
 
         try {
             setActionLoading(true);
-            const adminNote =
+            let adminNote =
                 decision === 'APPROVE'
                     ? 'Đã duyệt bởi Admin'
                     : 'Bị từ chối bởi Admin';
+            if (currentStatus === 'PENDING_REVIEW') {
+                const note = reviewNote.trim();
+                if (!note) {
+                    setToast('Bạn phải nhập ghi chú khi xử lý yêu cầu ở trạng thái chờ xét duyệt gian lận.');
+                    window.setTimeout(() => setToast(''), 3000);
+                    return;
+                }
+                adminNote = note;
+            }
             if (decision === 'APPROVE') {
                 await approveWithdraw(selectedFresh.id, adminNote);
             } else {
@@ -144,8 +219,13 @@ export function AdminTransactions() {
 
             setToast(decision === 'APPROVE' ? 'Đã duyệt yêu cầu rút tiền.' : 'Đã từ chối yêu cầu rút tiền.');
             window.setTimeout(() => setToast(''), 2500);
+            setReviewNote('');
             setSelected(null);
             await loadList(page);
+        } catch (err) {
+            const msg = err?.response?.data?.message || 'Xử lý yêu cầu rút tiền thất bại.';
+            setToast(msg);
+            window.setTimeout(() => setToast(''), 3500);
         } finally {
             setActionLoading(false);
         }
@@ -159,7 +239,7 @@ export function AdminTransactions() {
                 </div>
             ) : null}
             {toast ? (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[12px] font-semibold text-emerald-800">
+                <div className="fixed top-4 right-4 z-[70] max-w-md rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[12px] font-semibold text-emerald-800 shadow-lg">
                     {toast}
                 </div>
             ) : null}
@@ -206,8 +286,11 @@ export function AdminTransactions() {
                         className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] text-slate-900"
                     >
                         <option value="ALL">Tất cả trạng thái</option>
+                        <option value="COMPLETED">Hoàn thành</option>
                         <option value="SUCCESS">Thành công</option>
                         <option value="PENDING">Đang xử lý</option>
+                        <option value="PENDING_REVIEW">Chờ xét duyệt</option>
+                        <option value="PROCESSING">Đang xử lý</option>
                         <option value="FAILED">Thất bại</option>
                         <option value="CANCELLED">Đã hủy</option>
                     </select>
@@ -236,6 +319,38 @@ export function AdminTransactions() {
                         placeholder="Tìm theo mã giao dịch, email, gateway ref…"
                         className="flex-1 min-w-[240px] rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
                     />
+                    {[
+                        { id: 'AMOUNT_ANOMALY', label: 'Số tiền bất thường' },
+                        { id: 'HIGH_FREQUENCY', label: 'Tần suất rút cao' },
+                        { id: 'NEW_ACCOUNT_FIRST_WITHDRAW', label: 'Tài khoản mới rút lần đầu' },
+                    ].map((flag) => {
+                        const active = riskFlagFilters.includes(flag.id);
+                        return (
+                            <button
+                                key={flag.id}
+                                type="button"
+                                onClick={() => toggleRiskFlag(flag.id)}
+                                className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ring-1 transition ${
+                                    active
+                                        ? 'bg-violet-50 text-violet-700 ring-violet-200'
+                                        : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50'
+                                }`}
+                            >
+                                {active ? `Đang lọc: ${flag.label}` : flag.label}
+                            </button>
+                        );
+                    })}
+                    <button
+                        type="button"
+                        onClick={() => setFraudOnly((v) => !v)}
+                        className={`rounded-full px-3 py-1.5 text-[11px] font-semibold ring-1 transition ${
+                            fraudOnly
+                                ? 'bg-rose-50 text-rose-700 ring-rose-200'
+                                : 'bg-white text-slate-700 ring-slate-200 hover:bg-slate-50'
+                        }`}
+                    >
+                        {fraudOnly ? 'Đang lọc: nghi ngờ gian lận' : 'Chỉ xem nghi ngờ gian lận'}
+                    </button>
                     <button
                         type="button"
                         onClick={() => {
@@ -244,6 +359,8 @@ export function AdminTransactions() {
                             setToDate('');
                             setStatusFilter('ALL');
                             setTypeFilter('ALL');
+                            setFraudOnly(false);
+                            setRiskFlagFilters([]);
                             setPage(1);
                         }}
                         className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
@@ -279,7 +396,10 @@ export function AdminTransactions() {
                                         className={`border-t border-slate-100 cursor-pointer ${
                                             idx % 2 === 1 ? 'bg-slate-50/40' : ''
                                         } hover:bg-primary/5`}
-                                        onClick={() => setSelected(tx)}
+                                        onClick={() => {
+                                            setReviewNote('');
+                                            setSelected(tx);
+                                        }}
                                     >
                                         <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
                                             {formatTime(tx.createdAt)}
@@ -302,6 +422,17 @@ export function AdminTransactions() {
                                         </td>
                                         <td className="px-3 py-2 text-slate-700">{tx.method}</td>
                                         <td className="px-3 py-2">
+                                            {(() => {
+                                                const fraud = safeFraudReview(tx);
+                                                if (!fraud.isSuspectedFraud) return null;
+                                                return (
+                                                    <div className="mb-1">
+                                                        <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 bg-rose-50 text-rose-700 ring-rose-200">
+                                                            Nghi ngờ gian lận
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })()}
                                             <span
                                                 className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${statusPill(
                                                     tx.status
@@ -323,7 +454,10 @@ export function AdminTransactions() {
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center">
                     <div
                         className="absolute inset-0 bg-black/40"
-                        onClick={() => setSelected(null)}
+                        onClick={() => {
+                            setReviewNote('');
+                            setSelected(null);
+                        }}
                     />
                     <div className="relative w-full md:max-w-2xl bg-white rounded-t-2xl md:rounded-2xl shadow-xl border border-slate-200 p-5">
                         <div className="flex items-start justify-between gap-4">
@@ -362,13 +496,31 @@ export function AdminTransactions() {
                                 ) : null}
                                 <button
                                     type="button"
-                                    onClick={() => setSelected(null)}
+                                    onClick={() => {
+                                        setReviewNote('');
+                                        setSelected(null);
+                                    }}
                                     className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
                                 >
                                     Đóng
                                 </button>
                             </div>
                         </div>
+
+                        {requiresReviewNote ? (
+                            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                                <label className="block text-[11px] font-semibold text-amber-800">
+                                    Ghi chú xử lý (bắt buộc)
+                                </label>
+                                <textarea
+                                    value={reviewNote}
+                                    onChange={(e) => setReviewNote(e.target.value)}
+                                    rows={3}
+                                    placeholder="Nhập lý do duyệt/từ chối giao dịch nghi ngờ gian lận..."
+                                    className="mt-2 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-[12px] text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                                />
+                            </div>
+                        ) : null}
 
                         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
                             <div className="rounded-xl bg-slate-50 p-3">
@@ -399,6 +551,37 @@ export function AdminTransactions() {
                                     </p>
                                 </div>
                             )}
+                            {selectedFresh.type === 'WITHDRAW' && (() => {
+                                const fraud = safeFraudReview(selectedFresh);
+                                if (!fraud.isSuspectedFraud && !fraud.reviewedAt) return null;
+                                return (
+                                    <div className="md:col-span-2 rounded-xl bg-rose-50/60 p-3 border border-rose-100">
+                                        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-slate-700">
+                                            <p>
+                                                Cờ nghi ngờ: <span className="font-semibold">{fraud.isSuspectedFraud ? 'Có' : 'Không'}</span>
+                                            </p>
+                                            <p>
+                                                Điểm rủi ro: <span className="font-semibold">{fraud.riskScore ?? '-'}</span>
+                                            </p>
+                                            <p className="md:col-span-2">
+                                                Flags:{' '}
+                                                <span className="font-semibold">
+                                                    {fraud.riskFlags.length ? fraud.riskFlags.map(toVietnameseRiskFlag).join(', ') : '-'}
+                                                </span>
+                                            </p>
+                                            <p className="md:col-span-2">
+                                                Lý do: <span className="font-semibold">{toVietnameseRiskReason(fraud)}</span>
+                                            </p>
+                                            <p>
+                                                Thời điểm review: <span className="font-semibold">{fraud.reviewedAt ? formatTime(fraud.reviewedAt) : '-'}</span>
+                                            </p>
+                                            <p>
+                                                Người review: <span className="font-semibold">{fraud.reviewedBy || '-'}</span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
                             <div className="md:col-span-2 rounded-xl bg-slate-50 p-3">
                                 <p className="text-slate-500">Ghi chú</p>
                                 <p className="mt-1 text-slate-800">{selectedFresh.note || '-'}</p>

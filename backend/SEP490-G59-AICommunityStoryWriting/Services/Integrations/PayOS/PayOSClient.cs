@@ -37,6 +37,43 @@ namespace Services.Integrations.PayOS
             string? Code = null
         );
 
+        public sealed record PayoutBatchItem(
+            string ReferenceId,
+            long Amount,
+            string Description,
+            string ToBin,
+            string ToAccountNumber
+        );
+
+        public sealed record PayoutBatchRequest(
+            string ReferenceId,
+            IReadOnlyList<string> Category,
+            bool ValidateDestination,
+            IReadOnlyList<PayoutBatchItem> Payouts
+        );
+
+        public sealed record CreatePayoutBatchResult(
+            string PayoutId,
+            string ReferenceId,
+            string ApprovalState,
+            string RawResponse
+        );
+
+        public sealed record GetPayoutResult(
+            string PayoutId,
+            string ReferenceId,
+            string ApprovalState,
+            string? FirstTransactionState,
+            string RawResponse
+        );
+
+        public sealed record PayoutAccountBalanceResult(
+            string Code,
+            string Desc,
+            decimal? Balance,
+            string RawResponse
+        );
+
         public async Task<CreatePaymentLinkResult> CreatePaymentLinkAsync(
             long orderCode,
             decimal amountVnd,
@@ -47,9 +84,15 @@ namespace Services.Integrations.PayOS
             CancellationToken cancellationToken = default)
         {
             var baseUrl = Require("PayOS:BaseUrl").TrimEnd('/');
-            var clientId = Require("PayOS:ClientId");
-            var apiKey = Require("PayOS:ApiKey");
-            var checksumKey = Require("PayOS:ChecksumKey");
+            var rootUrl = baseUrl;
+            // Allow BaseUrl to be either "...", ".../v1" or ".../v2".
+            if (rootUrl.EndsWith("/v2", StringComparison.OrdinalIgnoreCase))
+                rootUrl = rootUrl[..^3];
+            else if (rootUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+                rootUrl = rootUrl[..^3];
+            var clientId = Require("PayOS:ClientId").Trim();
+            var apiKey = Require("PayOS:ApiKey").Trim();
+            var checksumKey = Require("PayOS:ChecksumKey").Trim();
 
             if (amountVnd <= 0) throw new ArgumentException("Amount must be > 0", nameof(amountVnd));
             if (amountVnd != decimal.Truncate(amountVnd)) throw new ArgumentException("Amount must be an integer value in VND", nameof(amountVnd));
@@ -131,8 +174,14 @@ namespace Services.Integrations.PayOS
             if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("id is required", nameof(id));
 
             var baseUrl = Require("PayOS:BaseUrl").TrimEnd('/');
-            var clientId = Require("PayOS:ClientId");
-            var apiKey = Require("PayOS:ApiKey");
+            var rootUrl = baseUrl;
+            // Allow BaseUrl to be either "...", ".../v1" or ".../v2".
+            if (rootUrl.EndsWith("/v2", StringComparison.OrdinalIgnoreCase))
+                rootUrl = rootUrl[..^3];
+            else if (rootUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+                rootUrl = rootUrl[..^3];
+            var clientId = Require("PayOS:ClientId").Trim();
+            var apiKey = Require("PayOS:ApiKey").Trim();
 
             using var req = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/payment-requests/{id}");
             req.Headers.Add("x-client-id", clientId);
@@ -197,6 +246,321 @@ namespace Services.Integrations.PayOS
             );
         }
 
+        public async Task<CreatePayoutBatchResult> CreatePayoutBatchAsync(
+            PayoutBatchRequest request,
+            string? idempotencyKey = null,
+            CancellationToken cancellationToken = default)
+        {
+            var baseUrl = Require("PayOS:BaseUrl").TrimEnd('/');
+            var rootUrl = baseUrl;
+            // Allow BaseUrl to be either "...", ".../v1" or ".../v2".
+            if (rootUrl.EndsWith("/v2", StringComparison.OrdinalIgnoreCase))
+                rootUrl = rootUrl[..^3];
+            else if (rootUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+                rootUrl = rootUrl[..^3];
+            var clientId = Require("PayOS:PayoutClientId").Trim();
+            var apiKey = Require("PayOS:PayoutApiKey").Trim();
+            var checksumKey = Require("PayOS:PayoutChecksumKey").Trim();
+
+            string Mask(string? v)
+            {
+                var s = v ?? string.Empty;
+                if (s.Length <= 8) return new string('*', s.Length);
+                return $"{s[..4]}...{s[^4]}";
+            }
+
+            if (string.IsNullOrWhiteSpace(request.ReferenceId)) throw new ArgumentException("ReferenceId is required.", nameof(request));
+            if (request.Payouts == null || request.Payouts.Count == 0) throw new ArgumentException("At least one payout item is required.", nameof(request));
+
+            var body = new Dictionary<string, object?>
+            {
+                ["referenceId"] = request.ReferenceId,
+                ["category"] = request.Category,
+                ["validateDestination"] = request.ValidateDestination,
+                ["payouts"] = request.Payouts.Select(p => new Dictionary<string, object?>
+                {
+                    ["referenceId"] = p.ReferenceId,
+                    ["amount"] = p.Amount,
+                    ["description"] = p.Description,
+                    ["toBin"] = p.ToBin,
+                    ["toAccountNumber"] = p.ToAccountNumber
+                }).ToList<object?>()
+            };
+
+            // PayOS uses x-signature computed from the request body payload.
+            var signature = CreateRequestSignature(checksumKey, body);
+            var signaturePreview = signature.Length <= 12 ? signature : $"{signature[..6]}...{signature[^6..]}";
+
+            var resolvedIdempotencyKey = idempotencyKey ?? Guid.NewGuid().ToString();
+
+            var candidateUrls = new List<string>
+            {
+                $"{rootUrl}/v1/payouts/batch",
+                $"{rootUrl}/v2/payouts/batch",
+            };
+
+            string? lastError = null;
+            for (var i = 0; i < candidateUrls.Count; i++)
+            {
+                var url = candidateUrls[i];
+
+                // PayOS may rate-limit batch payouts; wait+retry a couple of times.
+                const int max429Retries = 2;
+                var retry429Count = 0;
+
+                while (true)
+                {
+                    using var httpReq = new HttpRequestMessage(HttpMethod.Post, url);
+                    httpReq.Headers.Add("x-client-id", clientId);
+                    httpReq.Headers.Add("x-api-key", apiKey);
+                    httpReq.Headers.Add("x-idempotency-key", resolvedIdempotencyKey);
+                    httpReq.Headers.Add("x-signature", signature);
+                    httpReq.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                    httpReq.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+
+                    using var httpRes = await _http.SendAsync(httpReq, cancellationToken);
+                    var text = await httpRes.Content.ReadAsStringAsync(cancellationToken);
+
+                    if (httpRes.IsSuccessStatusCode)
+                    {
+                        using var doc = JsonDocument.Parse(text);
+                        var root = doc.RootElement;
+                        // PayOS lỗi thường trả { code, desc, data:null } với HTTP 200.
+                        if (root.TryGetProperty("code", out var codeEl) || root.TryGetProperty("desc", out var descEl))
+                        {
+                            var code = root.TryGetProperty("code", out var cEl) ? cEl.ToString() : null;
+                            var desc = root.TryGetProperty("desc", out var dEl) ? dEl.ToString() : null;
+                            var dataKind = root.TryGetProperty("data", out var dEl2) ? dEl2.ValueKind : JsonValueKind.Undefined;
+                            if (dataKind != JsonValueKind.Object)
+                                throw new InvalidOperationException(
+                                    $"PayOS payout failed. code={code}, desc={desc}, url={url}, clientId={Mask(clientId)}, apiKey={Mask(apiKey)}, x-signature={signaturePreview}");
+                        }
+
+                        if (!root.TryGetProperty("data", out var dataEl) || dataEl.ValueKind != JsonValueKind.Object)
+                            throw new InvalidOperationException(
+                                $"PayOS response missing data: url={url}, clientId={Mask(clientId)}, apiKey={Mask(apiKey)}, x-signature={signaturePreview}, body={text}");
+
+                        var payoutId = dataEl.TryGetProperty("id", out var idEl) ? idEl.ToString() : null;
+                        var referenceId = dataEl.TryGetProperty("referenceId", out var refEl) ? refEl.ToString() : request.ReferenceId;
+                        var approvalState = dataEl.TryGetProperty("approvalState", out var asEl) ? asEl.ToString() : "UNKNOWN";
+
+                        if (string.IsNullOrWhiteSpace(payoutId))
+                            throw new InvalidOperationException($"PayOS response missing payout id: {text}");
+
+                        return new CreatePayoutBatchResult(payoutId!, referenceId ?? request.ReferenceId, approvalState ?? "UNKNOWN", text);
+                    }
+
+                    lastError = $"PayOS error {(int)httpRes.StatusCode} for {url}: {text}";
+
+                    // Handle rate-limiting: 429
+                    if (httpRes.StatusCode == (System.Net.HttpStatusCode)429 && retry429Count < max429Retries)
+                    {
+                        var retryAfterDelay = TimeSpan.FromSeconds(2 * (retry429Count + 1));
+                        if (httpRes.Headers.TryGetValues("Retry-After", out var retryAfterValues))
+                        {
+                            var retryAfter = retryAfterValues.FirstOrDefault();
+                            if (int.TryParse(retryAfter, out var retrySeconds) && retrySeconds > 0)
+                                retryAfterDelay = TimeSpan.FromSeconds(retrySeconds);
+                        }
+
+                        retry429Count++;
+                        await Task.Delay(retryAfterDelay, cancellationToken);
+                        continue;
+                    }
+
+                    // Retry on 404 only (endpoint version mismatch). For other errors, stop.
+                    if (httpRes.StatusCode != System.Net.HttpStatusCode.NotFound)
+                        break;
+
+                    // 404 => try next candidate url
+                    break;
+                }
+            }
+
+            throw new InvalidOperationException(lastError ?? $"PayOS payout batch failed. x-signature={signaturePreview}");
+        }
+
+        public async Task<GetPayoutResult> GetPayoutInfoAsync(string payoutId, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(payoutId)) throw new ArgumentException("payoutId is required.", nameof(payoutId));
+
+            var baseUrl = Require("PayOS:BaseUrl").TrimEnd('/');
+            var rootUrl = baseUrl;
+            // Allow BaseUrl to be either "...", ".../v1" or ".../v2".
+            if (rootUrl.EndsWith("/v2", StringComparison.OrdinalIgnoreCase))
+                rootUrl = rootUrl[..^3];
+            else if (rootUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+                rootUrl = rootUrl[..^3];
+            var clientId = Require("PayOS:PayoutClientId").Trim();
+            var apiKey = Require("PayOS:PayoutApiKey").Trim();
+
+            var candidateUrls = new List<string>
+            {
+                $"{rootUrl}/v1/payouts/{payoutId}",
+                $"{rootUrl}/v2/payouts/{payoutId}",
+            };
+
+            string? lastError = null;
+            for (var i = 0; i < candidateUrls.Count; i++)
+            {
+                var url = candidateUrls[i];
+                using var httpReq = new HttpRequestMessage(HttpMethod.Get, url);
+                httpReq.Headers.Add("x-client-id", clientId);
+                httpReq.Headers.Add("x-api-key", apiKey);
+                httpReq.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+
+                using var httpRes = await _http.SendAsync(httpReq, cancellationToken);
+                var text = await httpRes.Content.ReadAsStringAsync(cancellationToken);
+
+                if (httpRes.IsSuccessStatusCode)
+                {
+                    using var doc = JsonDocument.Parse(text);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("code", out var codeEl) || root.TryGetProperty("desc", out var descEl))
+                    {
+                        var code = root.TryGetProperty("code", out var cEl) ? cEl.ToString() : null;
+                        var desc = root.TryGetProperty("desc", out var dEl) ? dEl.ToString() : null;
+                        var dataKind = root.TryGetProperty("data", out var dEl2) ? dEl2.ValueKind : JsonValueKind.Undefined;
+                        if (dataKind != JsonValueKind.Object)
+                            throw new InvalidOperationException($"PayOS get payout failed. code={code}, desc={desc}, url={url}");
+                    }
+
+                    if (!root.TryGetProperty("data", out var dataEl) || dataEl.ValueKind != JsonValueKind.Object)
+                        throw new InvalidOperationException($"PayOS response missing data: url={url}, body={text}");
+
+                    var id = dataEl.TryGetProperty("id", out var idEl) ? idEl.ToString() : payoutId;
+                    var referenceId = dataEl.TryGetProperty("referenceId", out var refEl) ? refEl.ToString() : null;
+                    var approvalState = dataEl.TryGetProperty("approvalState", out var asEl) ? asEl.ToString() : "UNKNOWN";
+
+                    string? firstTxState = null;
+                    if (dataEl.TryGetProperty("transactions", out var txsEl) && txsEl.ValueKind == JsonValueKind.Object)
+                    {
+                        // Some responses may use object-indexed transactions; best-effort parse.
+                        foreach (var txProp in txsEl.EnumerateObject())
+                        {
+                            if (txProp.Value.ValueKind != JsonValueKind.Object) continue;
+                            if (txProp.Value.TryGetProperty("state", out var stEl))
+                            {
+                                firstTxState = stEl.ToString();
+                                break;
+                            }
+                        }
+                    }
+                    else if (dataEl.TryGetProperty("transactions", out var txArrEl) && txArrEl.ValueKind == JsonValueKind.Array)
+                    {
+                        if (txArrEl.GetArrayLength() > 0)
+                        {
+                            var first = txArrEl[0];
+                            if (first.ValueKind == JsonValueKind.Object && first.TryGetProperty("state", out var stEl))
+                                firstTxState = stEl.ToString();
+                        }
+                    }
+
+                    return new GetPayoutResult(id ?? payoutId, referenceId ?? "", approvalState ?? "UNKNOWN", firstTxState, text);
+                }
+
+                lastError = $"PayOS error {(int)httpRes.StatusCode} for {url}: {text}";
+
+                // Retry on 404 only (endpoint version mismatch).
+                if (httpRes.StatusCode != System.Net.HttpStatusCode.NotFound)
+                    break;
+            }
+
+            throw new InvalidOperationException(lastError ?? "PayOS get payout failed.");
+        }
+
+        /// <summary>
+        /// Endpoint không cần x-signature. Dùng để kiểm tra nhanh x-client-id/x-api-key có hợp lệ cho payouts không.
+        /// </summary>
+        public async Task<PayoutAccountBalanceResult> GetPayoutAccountBalanceAsync(CancellationToken cancellationToken = default)
+        {
+            var baseUrl = Require("PayOS:BaseUrl").TrimEnd('/');
+            var rootUrl = baseUrl;
+            // Allow BaseUrl to be either "...", ".../v1" or ".../v2".
+            if (rootUrl.EndsWith("/v2", StringComparison.OrdinalIgnoreCase))
+                rootUrl = rootUrl[..^3];
+            else if (rootUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+                rootUrl = rootUrl[..^3];
+
+            var clientId = Require("PayOS:PayoutClientId").Trim();
+            var apiKey = Require("PayOS:PayoutApiKey").Trim();
+
+            // PayOS docs: chỉ có GET /v1/payouts-account/balance (không có bản v2). Gọi /v2/... sẽ 404.
+            // https://payos.vn/docs/api#tag/payout-account/operation/get-account-balance
+            var candidateUrls = new List<string>
+            {
+                $"{rootUrl}/v1/payouts-account/balance",
+            };
+
+            // Debug: xác nhận public IP thực tế mà backend đang dùng (có thể khác IP bạn test bằng terminal nếu có VPN/proxy/NAT đổi IP).
+            string? publicIp = null;
+            try
+            {
+                using var ipCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                ipCts.CancelAfter(TimeSpan.FromSeconds(3));
+                publicIp = (await _http.GetStringAsync("https://api.ipify.org", ipCts.Token)).Trim();
+            }
+            catch
+            {
+                // Ignore: nếu không lấy được IP thì vẫn cho PayOS call chạy bình thường.
+            }
+
+            string Mask(string? v)
+            {
+                var s = v ?? string.Empty;
+                if (s.Length <= 8) return new string('*', s.Length);
+                return $"{s[..4]}...{s[^4]}";
+            }
+
+            string? lastError = null;
+            var attemptErrors = new List<string>();
+            for (var i = 0; i < candidateUrls.Count; i++)
+            {
+                var url = candidateUrls[i];
+                using var httpReq = new HttpRequestMessage(HttpMethod.Get, url);
+                httpReq.Headers.Add("x-client-id", clientId);
+                httpReq.Headers.Add("x-api-key", apiKey);
+                httpReq.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+
+                using var httpRes = await _http.SendAsync(httpReq, cancellationToken);
+                var text = await httpRes.Content.ReadAsStringAsync(cancellationToken);
+
+                if (!httpRes.IsSuccessStatusCode)
+                {
+                    lastError = $"PayOS error {(int)httpRes.StatusCode} for {url} (clientId={Mask(clientId)}, apiKey={Mask(apiKey)}, publicIp={publicIp ?? "?"}): {text}";
+                    attemptErrors.Add($"{(int)httpRes.StatusCode} {url} body={text}");
+                    continue;
+                }
+
+                using var doc = JsonDocument.Parse(text);
+                var root = doc.RootElement;
+                var code = root.TryGetProperty("code", out var cEl) ? cEl.ToString() ?? "" : "";
+                var desc = root.TryGetProperty("desc", out var dEl) ? dEl.ToString() ?? "" : "";
+
+                if (root.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == JsonValueKind.Object)
+                {
+                    decimal? balance = null;
+                    // docs show data.balance as string; best-effort parse.
+                    if (dataEl.TryGetProperty("balance", out var balEl))
+                    {
+                        if (balEl.ValueKind == JsonValueKind.Number && balEl.TryGetDecimal(out var b1))
+                            balance = b1;
+                        else if (balEl.ValueKind == JsonValueKind.String && decimal.TryParse(balEl.ToString(), out var b2))
+                            balance = b2;
+                    }
+                    return new PayoutAccountBalanceResult(code, desc, balance, text);
+                }
+
+                // success HTTP but missing data (often error code with data=null)
+                throw new InvalidOperationException(
+                    $"PayOS payout account balance response missing data. code={code}, desc={desc}, url={url}, clientId={Mask(clientId)}, apiKey={Mask(apiKey)}, publicIp={publicIp ?? "?"}, body={text}");
+            }
+
+            throw new InvalidOperationException(
+                lastError ??
+                $"PayOS get payout account balance failed. Attempts: {string.Join(" | ", attemptErrors)}");
+        }
+
         public string ComputeWebhookSignature(JsonElement dataObject)
         {
             var checksumKey = Require("PayOS:ChecksumKey");
@@ -222,11 +586,167 @@ namespace Services.Integrations.PayOS
             return value;
         }
 
+        private string RequireOrFallback(string primaryKey, string fallbackKey)
+        {
+            var primary = _config[primaryKey];
+            if (!string.IsNullOrWhiteSpace(primary))
+                return primary.Trim();
+            return Require(fallbackKey);
+        }
+
         private static string ComputeHmacSha256(string data, string key)
         {
             using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(key));
             var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(data));
             return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        private static object? DeepSortForSignature(object? value, bool sortArrays)
+        {
+            if (value is null) return null;
+
+            if (value is Dictionary<string, object?> dict)
+            {
+                var sorted = new SortedDictionary<string, object?>(StringComparer.Ordinal);
+                foreach (var kv in dict.OrderBy(k => k.Key, StringComparer.Ordinal))
+                {
+                    sorted[kv.Key] = DeepSortForSignature(kv.Value, sortArrays);
+                }
+                return sorted;
+            }
+
+            if (value is SortedDictionary<string, object?> sortedDict)
+            {
+                // Already sorted; still deep sort children.
+                var sorted = new SortedDictionary<string, object?>(StringComparer.Ordinal);
+                foreach (var kv in sortedDict)
+                {
+                    sorted[kv.Key] = DeepSortForSignature(kv.Value, sortArrays);
+                }
+                return sorted;
+            }
+
+            if (value is IReadOnlyList<object?> list)
+            {
+                var outList = new List<object?>(list.Count);
+                foreach (var item in list)
+                    outList.Add(DeepSortForSignature(item, sortArrays));
+
+                if (sortArrays)
+                {
+                    // Deterministic ordering for arrays-of-objects when signature doesn't depend on original ordering.
+                    var jsonOptions = new JsonSerializerOptions { WriteIndented = false };
+                    outList.Sort((a, b) => string.Compare(
+                        JsonSerializer.Serialize(a, jsonOptions),
+                        JsonSerializer.Serialize(b, jsonOptions),
+                        StringComparison.Ordinal));
+                }
+
+                return outList;
+            }
+
+            if (value is IEnumerable<string> strList)
+            {
+                return strList.ToList();
+            }
+
+            return value;
+        }
+
+        private static string CreateRequestSignature(string checksumKey, Dictionary<string, object?> body)
+        {
+            // Mirror PayOS Node SDK: deepSortObj + encodeURIComponent on key/value + HMACSHA256(hex).
+            // Important: PayOS signature expects deep-sorted objects, but array order should be preserved.
+            // If we reorder arrays (sortArrays=true), PayOS may reject with code=201 (invalid signature).
+            var canonical = DeepSortForSignature(body, sortArrays: false);
+            if (canonical is not SortedDictionary<string, object?> canonicalRoot)
+            {
+                throw new InvalidOperationException("Failed to canonicalize payout request body for signature.");
+            }
+
+            // Critical for signature: keep Unicode characters as-is (do not escape to \uXXXX),
+            // to match JS JSON.stringify + encodeURIComponent behavior.
+            var jsonOptions = new JsonSerializerOptions
+            {
+                WriteIndented = false,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            };
+
+            var parts = new List<string>(canonicalRoot.Count);
+            foreach (var kv in canonicalRoot)
+            {
+                var key = kv.Key;
+                var v = kv.Value;
+
+                string valueStr;
+                if (v is null)
+                {
+                    valueStr = string.Empty;
+                }
+                else if (v is bool b)
+                {
+                    valueStr = b ? "true" : "false";
+                }
+                else if (v is string s)
+                {
+                    valueStr = s;
+                }
+                else if (v is long l)
+                {
+                    valueStr = l.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+                else if (v is int i)
+                {
+                    valueStr = i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+                else if (v is decimal d)
+                {
+                    valueStr = d.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
+                else
+                {
+                    // JSON stringify for arrays/objects.
+                    valueStr = JsonSerializer.Serialize(v, jsonOptions);
+                }
+
+                parts.Add($"{EncodeURIComponent(key)}={EncodeURIComponent(valueStr)}");
+            }
+
+            var queryString = string.Join("&", parts);
+            return ComputeHmacSha256(queryString, checksumKey);
+        }
+
+        // Match JavaScript encodeURIComponent behavior:
+        // keep: A-Z a-z 0-9 - _ . ! ~ * ' ( )
+        // escape everything else using UTF-8 percent encoding.
+        private static string EncodeURIComponent(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            var sb = new StringBuilder(s.Length * 3);
+
+            foreach (var rune in s.EnumerateRunes())
+            {
+                // keep: A-Z a-z 0-9 - _ . ! ~ * ' ( )
+                var isAscii =
+                    rune.Value <= 0x7F &&
+                    ((rune.Value >= 'a' && rune.Value <= 'z') ||
+                     (rune.Value >= 'A' && rune.Value <= 'Z') ||
+                     (rune.Value >= '0' && rune.Value <= '9') ||
+                     rune.Value == '-' || rune.Value == '_' || rune.Value == '.' || rune.Value == '!' ||
+                     rune.Value == '~' || rune.Value == '*' || rune.Value == '\'' || rune.Value == '(' || rune.Value == ')');
+
+                if (isAscii)
+                {
+                    sb.Append(rune.ToString());
+                    continue;
+                }
+
+                var bytes = Encoding.UTF8.GetBytes(rune.ToString());
+                foreach (var b in bytes)
+                    sb.Append('%').Append(b.ToString("X2"));
+            }
+
+            return sb.ToString();
         }
     }
 }
