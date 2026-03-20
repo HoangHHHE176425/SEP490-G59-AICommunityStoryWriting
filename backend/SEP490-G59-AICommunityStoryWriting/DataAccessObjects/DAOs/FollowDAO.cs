@@ -44,6 +44,15 @@ namespace DataAccessObjects.DAOs
             }
         }
 
+        /// <summary>Đếm số lượng người đang theo dõi một author.</summary>
+        public static int GetAuthorFollowerCount(Guid authorId)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.follows
+                .AsNoTracking()
+                .Count(f => f.author_id == authorId);
+        }
+
         /// <summary>Lấy danh sách user_id đang theo dõi tác giả (để gửi thông báo khi tác giả có chapter/story mới). Loại trừ author_id để không gửi thông báo cho chính tác giả.</summary>
         public static IReadOnlyList<Guid> GetAuthorFollowerIds(Guid authorId)
         {

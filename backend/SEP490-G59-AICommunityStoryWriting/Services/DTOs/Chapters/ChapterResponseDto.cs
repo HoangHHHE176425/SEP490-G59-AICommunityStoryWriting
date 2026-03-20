@@ -11,6 +11,8 @@ namespace Services.DTOs.Chapters
         public string? Status { get; set; }
         public string? AccessType { get; set; }
         public int? CoinPrice { get; set; }
+        /// <summary>Chỉ dùng cho màn reader: user hiện tại có đang được mở khóa chapter trả phí hay chưa.</summary>
+        public bool IsUnlocked { get; set; }
         public int? WordCount { get; set; }
         public decimal? AiContributionRatio { get; set; }
         /// <summary>Phần trăm giống với bản AI (0–100), cập nhật khi chương PUBLISHED và gọi compare-chapter.</summary>

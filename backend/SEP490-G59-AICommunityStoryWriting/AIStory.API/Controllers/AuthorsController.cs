@@ -29,6 +29,15 @@ namespace AIStory.API.Controllers
             return Ok(new { following });
         }
 
+        /// <summary>Đếm số lượng người theo dõi một author.</summary>
+        [HttpGet("{authorId:guid}/followers-count")]
+        [AllowAnonymous]
+        public IActionResult GetFollowersCount(Guid authorId)
+        {
+            var count = FollowDAO.GetAuthorFollowerCount(authorId);
+            return Ok(new { followersCount = count });
+        }
+
         /// <summary>Theo dõi tác giả. Khi tác giả có truyện/chương mới sẽ nhận thông báo.</summary>
         [HttpPost("{authorId:guid}/follow")]
         public IActionResult FollowAuthor(Guid authorId)

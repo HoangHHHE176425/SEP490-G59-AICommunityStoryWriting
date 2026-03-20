@@ -9,7 +9,6 @@ import {
     Users,
     FileText,
     MessageSquare,
-    Settings,
     Menu,
     LogOut,
     Bell,
@@ -41,10 +40,7 @@ const ALL_MENU_ITEMS = [
     { id: 'users', label: 'Quản lý người dùng', icon: Users },
     { id: 'comments', label: 'Quản lý bình luận', icon: MessageSquare },
     { id: 'policies', label: 'Quản lý Policy', icon: Shield },
-    { id: 'transactions', label: 'Quản lý giao dịch', icon: Wallet },
-    { id: 'bank-accounts', label: 'Xác thực tài khoản NH', icon: Landmark },
     { id: 'ai-config', label: 'Cấu hình AI', icon: Brain },
-    { id: 'settings', label: 'Cài đặt', icon: Settings },
 ];
 
 /** Menu giới hạn cho MODERATOR và COMPLIANCE (dashboard + xuất bản). */

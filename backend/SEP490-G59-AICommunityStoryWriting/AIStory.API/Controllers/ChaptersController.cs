@@ -3,8 +3,10 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
+using BusinessObjects;
 using Services.DTOs.Chapters;
 using Services.DTOs.Comments;
 using Services.Interfaces;
@@ -33,6 +35,17 @@ namespace AIStory.API.Controllers
             var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
                       ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             return Guid.TryParse(sub, out var id) ? id : null;
+        }
+
+        private bool HasUnlockedPaidChapter(Guid userId, Guid chapterId)
+        {
+            using var db = new StoryPlatformDbContext();
+            return db.purchases
+                .AsNoTracking()
+                .Any(p =>
+                    p.user_id == userId &&
+                    p.chapter_id == chapterId &&
+                    ((p.escrow_status ?? string.Empty).ToUpper() == "RELEASED" || p.released_at != null));
         }
 
         /// <summary>Tạo chapter mới - Chỉ AUTHOR. Sau khi lưu, Plot Manager (Agent 4) cập nhật memory nếu có nội dung.</summary>
@@ -88,21 +101,212 @@ namespace AIStory.API.Controllers
                 if (chapter == null)
                     return NotFound(new { message = $"Chapter with ID {id} not found" });
 
-                var sub = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
-                          ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                if (chapter.StoryId.HasValue && Guid.TryParse(sub, out var userId) && userId != Guid.Empty)
+                var userId = GetCurrentUserId();
+                if (chapter.StoryId.HasValue && userId.HasValue && userId.Value != Guid.Empty)
                 {
+                    var story = _storyService.GetById(chapter.StoryId.Value);
+                    var isAuthor = story?.AuthorId.HasValue == true && story.AuthorId.Value == userId.Value;
+                    var accessType = chapter.AccessType?.ToUpper() ?? "FREE";
+                    var coinPrice = chapter.CoinPrice ?? 0;
+
+                    var unlocked = true;
+                    if (string.Equals(accessType, "PAID", StringComparison.OrdinalIgnoreCase) && coinPrice > 0)
+                    {
+                        unlocked = isAuthor || HasUnlockedPaidChapter(userId.Value, id);
+                        chapter.IsUnlocked = unlocked;
+                        if (!unlocked)
+                        {
+                            // Locked chapter: vẫn trả metadata (title/order/giá) nhưng không trả content.
+                            chapter.Content = null;
+                            chapter.WordCount = null;
+                            return Ok(chapter);
+                        }
+                    }
+
+                    // Record đọc chỉ khi đã mở khóa hoặc chapter FREE.
                     var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
                     var ua = Request.Headers.UserAgent.ToString();
-                    _storyService.RecordReadChapter(chapter.StoryId.Value, id, userId, ip, ua);
+                    _storyService.RecordReadChapter(chapter.StoryId.Value, id, userId.Value, ip, ua);
                 }
 
+                if (chapter.AccessType?.ToUpper() == "PAID" && (chapter.CoinPrice ?? 0) > 0 && chapter.IsUnlocked == false)
+                {
+                    // Default fallback when we couldn't determine access yet.
+                    chapter.IsUnlocked = true;
+                }
                 return Ok(chapter);
             }
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while fetching the chapter", error = ex.Message });
             }
+        }
+
+        /// <summary>Unlock chapter trả phí: trừ coin người mua + chia 30% platform / 70% author.</summary>
+        [HttpPost("{id:guid}/unlock")]
+        [Authorize]
+        public async Task<IActionResult> UnlockPaidChapter(Guid id, CancellationToken cancellationToken)
+        {
+            var userId = GetCurrentUserId();
+            if (!userId.HasValue)
+                return Unauthorized(new { message = "User ID not found in token." });
+
+            var chapter = _chapterService.GetById(id);
+            if (chapter == null)
+                return NotFound(new { message = "Chapter không tồn tại." });
+
+            var accessType = chapter.AccessType?.ToUpper() ?? "FREE";
+            var coinPrice = chapter.CoinPrice ?? 0;
+            if (!string.Equals(accessType, "PAID", StringComparison.OrdinalIgnoreCase) || coinPrice <= 0)
+                return BadRequest(new { message = "Chapter này không phải loại trả phí." });
+
+            if (!chapter.StoryId.HasValue)
+                return BadRequest(new { message = "Chapter thiếu StoryId." });
+
+            var story = _storyService.GetById(chapter.StoryId.Value);
+            if (story?.AuthorId == null)
+                return BadRequest(new { message = "Không xác định được author của truyện." });
+
+            var authorId = story.AuthorId.Value;
+            var isAuthor = authorId == userId.Value;
+            if (isAuthor)
+                return Ok(new { unlocked = true, message = "Tác giả có quyền đọc miễn phí." });
+
+            // Platform fee: 30% system, 70% author.
+            var platformFee = (int)Math.Floor(coinPrice * 0.30m);
+            platformFee = Math.Clamp(platformFee, 0, coinPrice);
+            var authorNet = coinPrice - platformFee;
+
+            await using var db = new StoryPlatformDbContext();
+            var strategy = db.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    // Re-check inside transaction to avoid double-charging on race conditions.
+                    var alreadyUnlocked = await db.purchases
+                        .AsNoTracking()
+                        .AnyAsync(p =>
+                            p.user_id == userId.Value &&
+                            p.chapter_id == id &&
+                            ((p.escrow_status ?? string.Empty).ToUpper() == "RELEASED" || p.released_at != null),
+                            cancellationToken);
+                    if (alreadyUnlocked)
+                    {
+                        await tx.RollbackAsync(cancellationToken);
+                        return Ok(new { unlocked = true, alreadyUnlocked = true });
+                    }
+
+                    // Ensure buyer wallet
+                    var buyerWallet = await db.wallets.FirstOrDefaultAsync(w => w.user_id == userId.Value, cancellationToken);
+                    if (buyerWallet == null)
+                    {
+                        buyerWallet = new wallets
+                        {
+                            user_id = userId.Value,
+                            balance_coin = 0,
+                            currency = "VND",
+                            income_balance = 0m,
+                            frozen_balance = 0m,
+                            pending_escrow_balance = 0m,
+                            updated_at = DateTime.UtcNow
+                        };
+                        db.wallets.Add(buyerWallet);
+                        await db.SaveChangesAsync(cancellationToken);
+                    }
+
+                    var buyerBalance = buyerWallet.balance_coin ?? 0;
+                    if (buyerBalance < coinPrice)
+                    {
+                        await tx.RollbackAsync(cancellationToken);
+                        return BadRequest(new { message = $"Số dư coin không đủ. Hiện {buyerBalance}, cần {coinPrice}." });
+                    }
+
+                    buyerWallet.balance_coin = buyerBalance - coinPrice;
+                    buyerWallet.updated_at = DateTime.UtcNow;
+
+                    // Ensure author wallet
+                    var authorWallet = await db.wallets.FirstOrDefaultAsync(w => w.user_id == authorId, cancellationToken);
+                    if (authorWallet == null)
+                    {
+                        authorWallet = new wallets
+                        {
+                            user_id = authorId,
+                            balance_coin = 0,
+                            currency = "VND",
+                            income_balance = 0m,
+                            frozen_balance = 0m,
+                            pending_escrow_balance = 0m,
+                            updated_at = DateTime.UtcNow
+                        };
+                        db.wallets.Add(authorWallet);
+                        await db.SaveChangesAsync(cancellationToken);
+                    }
+
+                    // Ensure platform wallet exists (id=1)
+                    var platformWallet = await db.platform_wallet.FirstOrDefaultAsync(w => w.id == 1, cancellationToken);
+                    if (platformWallet == null)
+                    {
+                        platformWallet = new platform_wallet
+                        {
+                            id = 1,
+                            balance_coin = 0,
+                            updated_at = DateTime.UtcNow
+                        };
+                        db.platform_wallet.Add(platformWallet);
+                        await db.SaveChangesAsync(cancellationToken);
+                    }
+
+                    // Update wallets
+                    platformWallet.balance_coin += platformFee;
+                    platformWallet.updated_at = DateTime.UtcNow;
+
+                    var receiverIncome = authorWallet.income_balance ?? 0m;
+                    authorWallet.income_balance = receiverIncome + authorNet;
+                    authorWallet.updated_at = DateTime.UtcNow;
+
+                    // Create purchase record (history)
+                    var purchase = new purchases
+                    {
+                        id = Guid.NewGuid(),
+                        user_id = userId.Value,
+                        story_id = chapter.StoryId,
+                        chapter_id = id,
+                        price_paid = coinPrice,
+                        purchase_type = "CHAPTER_UNLOCK",
+                        escrow_status = "RELEASED",
+                        released_at = DateTime.UtcNow,
+                        // DB type is decimal(5,2); store platform fee as percent with 2 decimals.
+                        platform_fee_ratio = 30.00m,
+                        created_at = DateTime.UtcNow
+                    };
+                    db.purchases.Add(purchase);
+
+                    // Log author income for analytics/withdraw flows
+                    db.author_income_logs.Add(new author_income_logs
+                    {
+                        author_id = authorId,
+                        source_type = "CHAPTER_UNLOCK",
+                        source_id = purchase.id,
+                        gross_amount = coinPrice,
+                        platform_fee = platformFee,
+                        net_amount = authorNet,
+                        status = "AVAILABLE",
+                        created_at = DateTime.UtcNow
+                    });
+
+                    await db.SaveChangesAsync(cancellationToken);
+                    await tx.CommitAsync(cancellationToken);
+
+                    return Ok(new { unlocked = true });
+                }
+                catch (Exception ex)
+                {
+                    try { await tx.RollbackAsync(cancellationToken); } catch { /* ignore */ }
+                    return StatusCode(500, new { message = "Unlock chapter failed.", error = ex.Message });
+                }
+            });
         }
 
         /// <summary>Lấy tất cả chapters của một story (Guid) (cho phép xem không cần đăng nhập)</summary>
