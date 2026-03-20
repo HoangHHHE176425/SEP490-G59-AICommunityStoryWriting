@@ -91,6 +91,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IAdminUserService, AdminUserService>();
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
             builder.Services.AddScoped<IModerationService, ModerationService>();
+            builder.Services.AddScoped<IReviewEscalationService, ReviewEscalationService>();
             builder.Services.AddSignalR();
             builder.Services.AddSingleton<IUserIdProvider, SignalRUserIdProvider>();
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
@@ -122,7 +123,6 @@ namespace AIStory.API
             builder.Services.AddHttpClient<PayOSClient>();
             builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
             builder.Services.AddHostedService<PayOSPendingOrderSyncService>();
-            builder.Services.AddHostedService<PayOSWithdrawPayoutSyncService>();
 
             var jwtKey = builder.Configuration["Jwt:Key"];
             var jwtIssuer = builder.Configuration["Jwt:Issuer"];

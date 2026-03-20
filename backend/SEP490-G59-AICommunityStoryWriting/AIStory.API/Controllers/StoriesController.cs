@@ -395,7 +395,8 @@ namespace AIStory.API.Controllers
                     return NotFound(new { message = $"Story with ID {id} not found" });
                 var entities = CommentDAO.GetStoryComments(id);
                 var currentUserId = GetCurrentUserId();
-                var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId)).ToList();
+                var storyAuthorId = story.author_id;
+                var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId, storyAuthorId)).ToList();
                 return Ok(dtos);
             }
             catch (Exception ex)
@@ -461,7 +462,7 @@ namespace AIStory.API.Controllers
                         _logger.LogWarning(ex, "NotifyCommentReply failed for parent {ParentId}", parent.id);
                     }
                 }
-                var dto = MapToStoryCommentDto(entity, userId);
+                var dto = MapToStoryCommentDto(entity, userId, story.author_id);
                 return Created($"/api/stories/{id}/comments/{dto.Id}", dto);
             }
             catch (InvalidOperationException ex)
@@ -478,7 +479,20 @@ namespace AIStory.API.Controllers
             }
         }
 
-        private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null)
+        /// <summary>Tag AUTHOR chỉ khi commenter trùng tác giả truyện; tài khoản có role AUTHOR nhưng không phải chủ truyện → USER.</summary>
+        private static string? ResolveCommentDisplayUserRole(string? accountRole, Guid? commentUserId, Guid? storyAuthorId)
+        {
+            var r = accountRole?.Trim();
+            if (string.IsNullOrEmpty(r)) return null;
+            if (string.Equals(r, "AUTHOR", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!storyAuthorId.HasValue || !commentUserId.HasValue || commentUserId.Value != storyAuthorId.Value)
+                    return "USER";
+            }
+            return r;
+        }
+
+        private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null, Guid? storyAuthorId = null)
         {
             var nickname = c.userNavigation?.user_profiles?.nickname;
             var email = c.userNavigation?.email;
@@ -509,7 +523,7 @@ namespace AIStory.API.Controllers
                 ParentId = c.parent_id,
                 UserId = c.user_id ?? Guid.Empty,
                 UserDisplayName = display,
-                UserRole = c.userNavigation?.role,
+                UserRole = ResolveCommentDisplayUserRole(c.userNavigation?.role, c.user_id, storyAuthorId),
                 UserCreatedAt = c.userNavigation?.created_at,
                 Content = c.content,
                 LikesCount = c.likes_count ?? 0,

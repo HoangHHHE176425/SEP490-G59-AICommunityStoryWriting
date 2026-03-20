@@ -353,9 +353,15 @@ namespace AIStory.API.Controllers
                 var chapter = _chapterService.GetById(id);
                 if (chapter == null)
                     return NotFound(new { message = "Chapter not found." });
+                Guid? storyAuthorId = null;
+                if (chapter.StoryId.HasValue)
+                {
+                    var st = StoryDAO.GetById(chapter.StoryId.Value);
+                    storyAuthorId = st?.author_id;
+                }
                 var entities = CommentDAO.GetChapterComments(id);
                 var currentUserId = GetCurrentUserId();
-                var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId)).ToList();
+                var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId, storyAuthorId)).ToList();
                 return Ok(dtos);
             }
             catch (Exception ex)
@@ -417,7 +423,7 @@ namespace AIStory.API.Controllers
                     }
                     catch { /* best effort */ }
                 }
-                var dto = MapToStoryCommentDto(entity, userId);
+                var dto = MapToStoryCommentDto(entity, userId, story.author_id);
                 return Created($"/api/chapters/{id}/comments/{dto.Id}", dto);
             }
             catch (Exception ex)
@@ -486,7 +492,19 @@ namespace AIStory.API.Controllers
             }
         }
 
-        private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null)
+        private static string? ResolveCommentDisplayUserRole(string? accountRole, Guid? commentUserId, Guid? storyAuthorId)
+        {
+            var r = accountRole?.Trim();
+            if (string.IsNullOrEmpty(r)) return null;
+            if (string.Equals(r, "AUTHOR", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!storyAuthorId.HasValue || !commentUserId.HasValue || commentUserId.Value != storyAuthorId.Value)
+                    return "USER";
+            }
+            return r;
+        }
+
+        private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null, Guid? storyAuthorId = null)
         {
             var nickname = c.userNavigation?.user_profiles?.nickname;
             var email = c.userNavigation?.email;
@@ -514,7 +532,7 @@ namespace AIStory.API.Controllers
                 ParentId = c.parent_id,
                 UserId = c.user_id ?? Guid.Empty,
                 UserDisplayName = display,
-                UserRole = c.userNavigation?.role,
+                UserRole = ResolveCommentDisplayUserRole(c.userNavigation?.role, c.user_id, storyAuthorId),
                 UserCreatedAt = c.userNavigation?.created_at,
                 Content = c.content ?? "",
                 LikesCount = c.likes_count ?? 0,

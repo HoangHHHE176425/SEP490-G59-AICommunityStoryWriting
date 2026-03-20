@@ -7,7 +7,7 @@
         public Guid? ParentId { get; set; }
         public Guid UserId { get; set; }
         public string? UserDisplayName { get; set; }
-        /// <summary>Role của user comment (ví dụ: AUTHOR/USER/ADMIN).</summary>
+        /// <summary>Role hiển thị trên comment: ADMIN/MODERATOR/USER như tài khoản; AUTHOR chỉ khi user là tác giả của truyện (story) chứa comment.</summary>
         public string? UserRole { get; set; }
         /// <summary>Thời điểm user tham gia hệ thống (users.created_at) để phân loại tag theo “tuổi tài khoản”.</summary>
         public DateTime? UserCreatedAt { get; set; }
