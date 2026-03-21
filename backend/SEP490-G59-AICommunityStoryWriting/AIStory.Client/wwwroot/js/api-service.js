@@ -487,6 +487,7 @@ class ApiService {
         if (options.sortBy) params.append('sortBy', options.sortBy);
         if (options.sortOrder) params.append('sortOrder', options.sortOrder);
         if (options.claimFilter) params.append('claimFilter', options.claimFilter);
+        if (options.timeStatus) params.append('timeStatus', options.timeStatus);
         return this.request(`/moderator/stories/pending?${params.toString()}`);
     }
 
@@ -499,11 +500,15 @@ class ApiService {
         if (options.sortBy) params.append('sortBy', options.sortBy);
         if (options.sortOrder) params.append('sortOrder', options.sortOrder);
         if (options.claimFilter) params.append('claimFilter', options.claimFilter);
+        if (options.timeStatus) params.append('timeStatus', options.timeStatus);
         return this.request(`/moderator/chapters/pending?${params.toString()}`);
     }
 
-    static async moderatorClaimStory(id) {
-        return this.request(`/moderator/stories/${id}/claim`, { method: 'POST' });
+    static async moderatorClaimStory(id, reviewDeadlineAtIso) {
+        return this.request(`/moderator/stories/${id}/claim`, {
+            method: 'POST',
+            body: JSON.stringify({ reviewDeadlineAt: reviewDeadlineAtIso })
+        });
     }
 
     static async moderatorApproveStory(id) {
@@ -517,8 +522,11 @@ class ApiService {
         });
     }
 
-    static async moderatorClaimChapter(id) {
-        return this.request(`/moderator/chapters/${id}/claim`, { method: 'POST' });
+    static async moderatorClaimChapter(id, reviewDeadlineAtIso) {
+        return this.request(`/moderator/chapters/${id}/claim`, {
+            method: 'POST',
+            body: JSON.stringify({ reviewDeadlineAt: reviewDeadlineAtIso })
+        });
     }
 
     static async moderatorApproveChapter(id) {
@@ -538,6 +546,20 @@ class ApiService {
 
     static async moderatorGetChapterVersion(chapterId, versionId) {
         return this.request(`/moderator/chapters/${chapterId}/versions/${versionId}`);
+    }
+
+    static async moderatorGetReviewAssignmentSelf(targetType, targetId) {
+        const params = new URLSearchParams();
+        params.append('targetType', targetType);
+        params.append('targetId', targetId);
+        return this.request(`/moderator/review-assignment/self?${params.toString()}`);
+    }
+
+    static async moderatorSubmitReviewEscalation(body) {
+        return this.request('/moderator/review-escalations', {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
     }
 
     // Admin Moderation API (chỉ role ADMIN)
@@ -562,6 +584,53 @@ class ApiService {
         if (options.sortOrder) params.append('sortOrder', options.sortOrder);
         if (options.claimFilter) params.append('claimFilter', options.claimFilter);
         return this.request(`/admin/moderation/pending-chapters?${params.toString()}`);
+    }
+
+    static async adminGetPendingReviewEscalations(urgencyTier) {
+        const params = new URLSearchParams();
+        if (urgencyTier) params.append('urgencyTier', urgencyTier);
+        const q = params.toString();
+        return this.request(`/admin/moderation/review-escalations/pending${q ? '?' + q : ''}`);
+    }
+
+    static async adminGetReviewEscalationHistory(skip, take) {
+        const params = new URLSearchParams();
+        if (skip != null && skip !== undefined) params.append('skip', skip);
+        if (take != null && take !== undefined) params.append('take', take);
+        const q = params.toString();
+        return this.request(`/admin/moderation/review-escalations/history${q ? '?' + q : ''}`);
+    }
+
+    /** Log đơn escalation: filter + search + phân trang (query keys khớp ReviewEscalationLogQueryDto). */
+    static async adminGetReviewEscalationLog(options = {}) {
+        const params = new URLSearchParams();
+        const n = (k, v) => { if (v !== undefined && v !== null && v !== '') params.append(k, v); };
+        n('page', options.page);
+        n('pageSize', options.pageSize);
+        n('search', options.search);
+        n('status', options.status);
+        n('requestKind', options.requestKind);
+        n('targetType', options.targetType);
+        n('senderId', options.senderId);
+        n('resolverId', options.resolverId);
+        n('createdFrom', options.createdFrom);
+        n('createdTo', options.createdTo);
+        n('resolvedFrom', options.resolvedFrom);
+        n('resolvedTo', options.resolvedTo);
+        n('sortBy', options.sortBy);
+        n('sortOrder', options.sortOrder);
+        return this.request(`/admin/moderation/review-escalations/log?${params.toString()}`);
+    }
+
+    static async adminGetModeratorsForAssignment() {
+        return this.request('/admin/moderation/moderators-for-assignment');
+    }
+
+    static async adminResolveReviewEscalation(id, body) {
+        return this.request(`/admin/moderation/review-escalations/${id}/resolve`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
     }
 
     static async adminGetApprovedStories(options = {}) {
@@ -618,20 +687,36 @@ class ApiService {
 
     static async adminGetModerationLogs(options = {}) {
         const params = new URLSearchParams();
-        params.append('page', options.page ?? 1);
-        params.append('pageSize', options.pageSize ?? 20);
-        if (options.moderatorId) params.append('moderatorId', options.moderatorId);
-        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
-        if (options.dateTo) params.append('dateTo', options.dateTo);
-        if (options.action) params.append('action', options.action);
-        if (options.targetType) params.append('targetType', options.targetType);
+        const n = (k, v) => { if (v !== undefined && v !== null && v !== '') params.append(k, v); };
+        n('page', options.page ?? 1);
+        n('pageSize', options.pageSize ?? 20);
+        n('search', options.search);
+        n('moderatorId', options.moderatorId);
+        n('dateFrom', options.dateFrom);
+        n('dateTo', options.dateTo);
+        n('action', options.action);
+        n('targetType', options.targetType);
+        n('targetId', options.targetId);
+        n('processingTimeMinMs', options.processingTimeMinMs);
+        n('processingTimeMaxMs', options.processingTimeMaxMs);
+        n('sortBy', options.sortBy);
+        n('sortOrder', options.sortOrder);
         return this.request(`/admin/moderation/logs?${params.toString()}`);
     }
 
     static async adminGetModeratorPerformance(options = {}) {
         const params = new URLSearchParams();
-        if (options.dateFrom) params.append('dateFrom', options.dateFrom);
-        if (options.dateTo) params.append('dateTo', options.dateTo);
+        const n = (k, v) => { if (v !== undefined && v !== null && v !== '') params.append(k, v); };
+        n('page', options.page ?? 1);
+        n('pageSize', options.pageSize ?? 20);
+        n('dateFrom', options.dateFrom);
+        n('dateTo', options.dateTo);
+        n('targetType', options.targetType);
+        n('search', options.search);
+        n('minTotalActions', options.minTotalActions);
+        n('sortBy', options.sortBy);
+        n('sortOrder', options.sortOrder);
+        n('moderatorId', options.moderatorId);
         return this.request(`/admin/moderation/moderator-performance?${params.toString()}`);
     }
 
@@ -858,6 +943,59 @@ const Utils = {
         if (!dateString) return 'N/A';
         const date = new Date(dateString);
         return date.toLocaleString('vi-VN');
+    },
+
+    /** Thời điểm trong quá khứ (UTC) → "đã gửi x giây trước" / "đã gửi x tháng trước" (tiếng Việt). */
+    formatRelativePastVi: (iso) => {
+        if (!iso) return '';
+        const t = new Date(iso).getTime();
+        if (isNaN(t)) return '';
+        const sec = Math.floor((Date.now() - t) / 1000);
+        if (sec < 0) return 'vừa mới';
+        if (sec < 10) return 'vừa xong';
+        if (sec < 60) return `đã gửi ${sec} giây trước`;
+        const min = Math.floor(sec / 60);
+        if (min < 60) return `đã gửi ${min} phút trước`;
+        const hr = Math.floor(min / 60);
+        if (hr < 24) return `đã gửi ${hr} giờ trước`;
+        const day = Math.floor(hr / 24);
+        if (day < 30) return `đã gửi ${day} ngày trước`;
+        const approxMonth = Math.floor(day / 30);
+        if (approxMonth < 12) return `đã gửi ${approxMonth} tháng trước`;
+        const yr = Math.floor(day / 365);
+        return `đã gửi ${yr} năm trước`;
+    },
+
+    /** Đếm ngược tới hạn SLA (ISO UTC/local) — "còn X ngày …" / "đã quá hạn …". */
+    formatCountdownRemainingVi: (isoDeadline) => {
+        if (!isoDeadline) return '';
+        const end = new Date(isoDeadline).getTime();
+        if (isNaN(end)) return '';
+        const sec = Math.floor((end - Date.now()) / 1000);
+        if (sec < 0) {
+            const over = Math.abs(sec);
+            const d = Math.floor(over / 86400);
+            const h = Math.floor((over % 86400) / 3600);
+            if (d >= 1) return `đã quá hạn ${d} ngày`;
+            if (h >= 1) return `đã quá hạn ${h} giờ`;
+            const m = Math.floor(over / 60);
+            return m >= 1 ? `đã quá hạn ${m} phút` : 'đã quá hạn';
+        }
+        const d = Math.floor(sec / 86400);
+        const h = Math.floor((sec % 86400) / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        if (d >= 1) return `còn ${d} ngày ${h} giờ`;
+        if (h >= 1) return `còn ${h} giờ ${m} phút`;
+        if (m >= 1) return `còn ${m} phút`;
+        return 'sắp hết hạn';
+    },
+
+    /** Badge theo thời gian đã chờ kể từ lúc tác giả gửi (OnTime | Warning | Critical | Overdue). */
+    moderatorDeadlineBadgeHtml: (timeStatus) => {
+        if (timeStatus === 'Overdue') return '<span class="badge bg-danger badge-status">Chờ quá lâu</span>';
+        if (timeStatus === 'Critical') return '<span class="badge bg-danger badge-status">Chờ lâu</span>';
+        if (timeStatus === 'Warning') return '<span class="badge bg-warning text-dark badge-status">Chờ khá lâu</span>';
+        return '<span class="badge bg-success badge-status">Mới gửi</span>';
     },
 
     formatNumber: (num) => {

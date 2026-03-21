@@ -24,6 +24,10 @@ namespace Services.DTOs.Chapters
         public string? ClaimedByDisplayName { get; set; }
         /// <summary>Trong queue moderator: thời điểm nhận duyệt.</summary>
         public DateTime? ClaimedAt { get; set; }
+
+        /// <summary>Có đơn báo cáo lên admin đang chờ xử lý — moderator đang nhận duyệt không được duyệt/từ chối đến khi admin xử lý.</summary>
+        public bool HasPendingEscalation { get; set; }
+
         /// <summary>Lý do từ chối (khi status = REJECTED).</summary>
         public string? RejectionReason { get; set; }
         /// <summary>Thời điểm moderator từ chối.</summary>
@@ -34,11 +38,11 @@ namespace Services.DTOs.Chapters
         /// <summary>Số từ của version chờ duyệt (khi có).</summary>
         public int? PendingVersionWordCount { get; set; }
 
-        /// <summary>Admin: thời điểm gửi duyệt.</summary>
+        /// <summary>Mốc tác giả gửi duyệt (submitted_for_review_at; fallback nếu cũ).</summary>
         public DateTime? PendingSince { get; set; }
-        /// <summary>Admin: hạn duyệt (PendingSince + 7 ngày).</summary>
+        /// <summary>Moderator queue: không dùng (null). SLA theo <see cref="PendingSince"/> + <see cref="TimeStatus"/>.</summary>
         public DateTime? DeadlineAt { get; set; }
-        /// <summary>Admin: trạng thái thời hạn — OnTime, Warning, Overdue.</summary>
+        /// <summary>Mức ưu tiên theo thời gian chờ từ mốc gửi (OnTime / Warning / Critical / Overdue).</summary>
         public string? TimeStatus { get; set; }
         /// <summary>Admin: thời điểm moderator duyệt/từ chối.</summary>
         public DateTime? ReviewedAt { get; set; }

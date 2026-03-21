@@ -3,6 +3,7 @@ using AIStory.API.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
+using Services.DTOs.AI;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 using Xunit;
@@ -13,7 +14,10 @@ public class UC13_RateLikeStoryTests
 {
     private static StoriesController CreateController(Guid? userId, IStoryService? storyService = null)
     {
-        var ctrl = new StoriesController(storyService ?? new DelegateStoryService(), NullLogger<StoriesController>.Instance);
+        var ctrl = new StoriesController(
+            storyService ?? new DelegateStoryService(),
+            new FakeContentGuardrailService(),
+            NullLogger<StoriesController>.Instance);
         ctrl.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -113,6 +117,12 @@ public class UC13_RateLikeStoryTests
             return (avg, count);
         }
         public (string? reason, DateTime? rejectedAt) GetLatestRejectionForStory(Guid storyId) => (null, null);
+    }
+
+    private sealed class FakeContentGuardrailService : IContentGuardrailService
+    {
+        public Task<GuardrailResult> CheckAsync(Guid storyId, string draftContent, System.Threading.CancellationToken cancellationToken = default)
+            => Task.FromResult(new GuardrailResult { Passed = true, Violations = new() });
     }
 }
 

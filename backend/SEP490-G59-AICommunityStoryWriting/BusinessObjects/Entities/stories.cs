@@ -39,6 +39,9 @@ public partial class stories
 
     public DateTime? updated_at { get; set; }
 
+    /// <summary>Thời điểm tác giả gửi duyệt lần này (UTC). Không cập nhật khi sửa nội dung lúc đang chờ duyệt.</summary>
+    public DateTime? submitted_for_review_at { get; set; }
+
     public DateTime? published_at { get; set; }
 
     public virtual users? author { get; set; }

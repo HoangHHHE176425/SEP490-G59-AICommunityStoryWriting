@@ -84,7 +84,7 @@
     <div class="row mb-4">
         <div class="col-12">
             <h2 class="mb-1"><i class="bi bi-shield-check text-primary"></i> Bảng điều khiển kiểm duyệt</h2>
-            <p class="text-muted small mb-0">Duyệt và từ chối truyện, chapter. <strong>Nhận duyệt</strong> = lock mục (chỉ bạn thấy); queue <strong>ai gửi trước → duyệt trước</strong>.</p>
+            <p class="text-muted small mb-0">Duyệt và từ chối truyện, chapter. <strong>Nhận duyệt</strong> = lock mục (chỉ bạn thấy); khi nhận bạn <strong>bắt buộc chọn hạn hoàn thành duyệt</strong> (7 / 14 ngày hoặc tùy chọn) và xác nhận cam kết. Queue <strong>ai gửi trước → duyệt trước</strong>.</p>
             <p class="text-muted small mb-0 mt-1">
                 <i class="bi bi-broadcast"></i> Cập nhật real-time qua WebSocket
                 <span class="ms-2">• Lần cuối: <span id="lastRefreshTime">--:--:--</span></span>
@@ -158,12 +158,23 @@
                         </div>
                         <div class="col-md-2">
                             <label class="form-label small mb-0">Tìm kiếm (tiêu đề, tóm tắt)</label>
-                            <input type="text" class="form-control form-control-sm" id="storySearch" placeholder="Nhập từ khóa...">
+                            <input type="text" class="form-control form-control-sm" id="storySearch" placeholder="Từ khóa…" autocomplete="off">
+                        </div>
+                        <div class="col-md-2 col-lg-2">
+                            <label class="form-label small mb-0">Mức cảnh báo (thời gian chờ)</label>
+                            <select class="form-select form-select-sm" id="storyTimeStatus" title="Lọc theo thời gian đã chờ kể từ lúc tác giả gửi">
+                                <option value="">Tất cả</option>
+                                <option value="Overdue">Chờ quá lâu (≥7 ngày)</option>
+                                <option value="Critical">Chờ lâu (≥4 ngày)</option>
+                                <option value="Warning">Chờ khá lâu (≥2 ngày)</option>
+                                <option value="OnTime">Mới gửi (&lt;2 ngày)</option>
+                            </select>
                         </div>
                         <div class="col-md-2">
                             <label class="form-label small mb-0">Sắp xếp</label>
                             <select class="form-select form-select-sm" id="storySortBy">
-                                <option value="updated_at" selected>Thời gian gửi (gửi trước duyệt trước)</option>
+                                <option value="updated_at" selected>Tác giả gửi (cũ → mới)</option>
+                                <option value="deadline_at">Chờ lâu nhất trước</option>
                                 <option value="created_at">Ngày tạo</option>
                                 <option value="title">Tiêu đề</option>
                             </select>
@@ -228,19 +239,30 @@
                         </div>
                         <div class="col-md-2">
                             <label class="form-label small mb-0">Story ID (lọc truyện)</label>
-                            <input type="text" class="form-control form-control-sm" id="chapterStoryIdFilter" placeholder="Guid hoặc để trống">
+                            <input type="text" class="form-control form-control-sm" id="chapterStoryIdFilter" placeholder="Guid hoặc để trống" autocomplete="off">
                         </div>
                         <div class="col-md-2">
-                            <label class="form-label small mb-0">Tìm theo tiêu đề chapter</label>
-                            <input type="text" class="form-control form-control-sm" id="chapterSearch" placeholder="Từ khóa...">
+                            <label class="form-label small mb-0">Tìm chapter / truyện</label>
+                            <input type="text" class="form-control form-control-sm" id="chapterSearch" placeholder="Tiêu đề chương hoặc truyện…" autocomplete="off">
+                        </div>
+                        <div class="col-md-2 col-lg-2">
+                            <label class="form-label small mb-0">Mức cảnh báo (thời gian chờ)</label>
+                            <select class="form-select form-select-sm" id="chapterTimeStatus" title="Lọc theo thời gian đã chờ kể từ lúc tác giả gửi">
+                                <option value="">Tất cả</option>
+                                <option value="Overdue">Chờ quá lâu (≥7 ngày)</option>
+                                <option value="Critical">Chờ lâu (≥4 ngày)</option>
+                                <option value="Warning">Chờ khá lâu (≥2 ngày)</option>
+                                <option value="OnTime">Mới gửi (&lt;2 ngày)</option>
+                            </select>
                         </div>
                         <div class="col-md-2">
                             <label class="form-label small mb-0">Sắp xếp</label>
                             <select class="form-select form-select-sm" id="chapterSortBy">
-                                <option value="updated_at" selected>Thời gian gửi (gửi trước duyệt trước)</option>
+                                <option value="updated_at" selected>Tác giả gửi (cũ → mới)</option>
+                                <option value="deadline_at">Chờ lâu nhất trước</option>
                                 <option value="created_at">Ngày tạo</option>
                                 <option value="order_index">Thứ tự chương</option>
-                                <option value="title">Tiêu đề</option>
+                                <option value="title">Tiêu đề chapter</option>
                             </select>
                         </div>
                         <div class="col-md-2">
@@ -322,6 +344,86 @@
     </div>
 </div>
 
+<!-- Nhận duyệt: chọn hạn + cam kết (2 bước) -->
+<div class="modal fade" id="claimModal" tabindex="-1" aria-labelledby="claimModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title" id="claimModalTitle"><i class="bi bi-calendar-check text-warning me-2"></i> Nhận duyệt – Chọn hạn</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+            </div>
+            <div class="modal-body pt-2">
+                <div id="claimStep1">
+                    <p class="small text-muted mb-2">Chọn <strong>thời điểm hạn duyệt</strong> — thời điểm bạn cam kết hoàn thành kiểm duyệt. Hạn phải cách hiện tại <strong>ít nhất 24 giờ</strong>.</p>
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="setClaimQuickDeadline(7)">7 ngày (cuối ngày)</button>
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="setClaimQuickDeadline(14)">14 ngày (cuối ngày)</button>
+                    </div>
+                    <div class="mb-3">
+                        <label for="claimDeadlineLocal" class="form-label small mb-0">Hạn duyệt (ngày &amp; giờ) <span class="text-danger">*</span></label>
+                        <input type="datetime-local" class="form-control" id="claimDeadlineLocal" required>
+                    </div>
+                    <div class="form-check mb-0">
+                        <input class="form-check-input" type="checkbox" id="claimCommitmentCheck">
+                        <label class="form-check-label small" for="claimCommitmentCheck">Tôi cam kết hoàn thành kiểm duyệt trước hạn đã chọn.</label>
+                    </div>
+                </div>
+                <div id="claimStep2" class="d-none">
+                    <div class="alert alert-light border mb-3" id="claimConfirmSummary"></div>
+                    <p class="small text-muted mb-0">Nhấn <strong>Xác nhận nhận duyệt</strong> để khóa mục này cho bạn.</p>
+                </div>
+            </div>
+            <div class="modal-footer border-0" id="claimModalFooterStep1">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-warning" onclick="goClaimConfirmStep()"><i class="bi bi-arrow-right me-1"></i> Tiếp tục xác nhận</button>
+            </div>
+            <div class="modal-footer border-0 d-none" id="claimModalFooterStep2">
+                <button type="button" class="btn btn-outline-secondary" onclick="claimGoBack()"><i class="bi bi-arrow-left me-1"></i> Quay lại</button>
+                <button type="button" class="btn btn-warning" onclick="submitClaim()"><i class="bi bi-lock-fill me-1"></i> Xác nhận nhận duyệt</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Báo cáo admin: gia hạn hoặc hủy nhận duyệt -->
+<div class="modal fade" id="escalationModal" tabindex="-1" aria-labelledby="escalationModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title" id="escalationModalTitle"><i class="bi bi-exclamation-octagon text-danger me-2"></i> Báo cáo lên Admin</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+            </div>
+            <div class="modal-body pt-2">
+                <p class="small text-muted mb-2">Dùng khi bạn <strong>không thể hoàn thành duyệt đúng hạn</strong>. Admin sẽ xác nhận: <strong>gia hạn hạn duyệt</strong> hoặc <strong>hủy nhận</strong> để moderator khác nhận.</p>
+                <div id="escalationMeta" class="alert alert-light border small mb-3"></div>
+                <div class="mb-3">
+                    <label class="form-label small mb-1">Loại yêu cầu <span class="text-danger">*</span></label>
+                    <select class="form-select form-select-sm" id="escRequestKind" onchange="toggleEscExtendFields()">
+                        <option value="EXTEND_DEADLINE">Gia hạn hạn duyệt</option>
+                        <option value="RELEASE_ASSIGNMENT">Hủy nhận duyệt (chuyển cho người khác)</option>
+                    </select>
+                </div>
+                <div id="escExtendBlock" class="mb-3">
+                    <label class="form-label small mb-1">Hạn duyệt đề xuất <span class="text-danger">*</span></label>
+                    <div class="d-flex flex-wrap gap-2 mb-2">
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="setEscQuickDeadline(7)">+7 ngày (23:59)</button>
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="setEscQuickDeadline(14)">+14 ngày (23:59)</button>
+                    </div>
+                    <input type="datetime-local" class="form-control" id="escProposedDeadlineLocal">
+                </div>
+                <div class="mb-0">
+                    <label class="form-label small mb-1">Lý do chi tiết <span class="text-danger">*</span> <span class="text-muted">(ít nhất 10 ký tự)</span></label>
+                    <textarea class="form-control" id="escReason" rows="4" placeholder="Mô tả ngắn gọn lý do (bận đột xuất, khối lượng lớn, v.v.)"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                <button type="button" class="btn btn-danger" onclick="submitEscalation()"><i class="bi bi-send me-1"></i> Gửi báo cáo</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @section Scripts {
     <script src="https://cdn.jsdelivr.net/npm/@@microsoft/signalr@@8.0.0/dist/browser/signalr.min.js" crossorigin="anonymous"></script>
     <script>
@@ -333,6 +435,8 @@
         let chaptersTotalCount = 0;
         let storiesPageSize = 10;
         let chaptersPageSize = 10;
+        let claimModalState = { type: '', id: '', deadlineIso: '' };
+        let escalationModalState = { type: '', id: '' };
         const apiBaseForImages = (typeof API_BASE_URL !== 'undefined' ? (API_BASE_URL || '').replace(/\/api\/?$/, '') : '') || 'http://localhost:5000';
         const hubBaseUrl = apiBaseForImages;
         var moderatorHubConnection = null;
@@ -369,7 +473,7 @@
                 .withAutomaticReconnect()
                 .build();
             moderatorHubConnection.on('PendingListChanged', async function () {
-                if (document.querySelector('#rejectModal.show')) return;
+                if (document.querySelector('#rejectModal.show') || document.querySelector('#claimModal.show') || document.querySelector('#escalationModal.show')) return;
                 await Promise.all([
                     loadPendingStories(storiesCurrentPage, true),
                     loadPendingChapters(chaptersCurrentPage, true)
@@ -386,6 +490,195 @@
             moderatorHubConnection.onreconnected(function () { setSignalRStatus('(Đã kết nối)', false); });
             moderatorHubConnection.onreconnecting(function () { setSignalRStatus('(Đang kết nối lại...)', true); });
             moderatorHubConnection.onclose(function () { setSignalRStatus('(Mất kết nối)', true); });
+        }
+
+        function modTimeStatusBadge(ts) {
+            if (typeof Utils !== 'undefined' && Utils.moderatorDeadlineBadgeHtml) return Utils.moderatorDeadlineBadgeHtml(ts);
+            if (ts === 'Overdue') return '<span class="badge bg-danger badge-status">Chờ quá lâu</span>';
+            if (ts === 'Critical') return '<span class="badge bg-danger badge-status">Chờ lâu</span>';
+            if (ts === 'Warning') return '<span class="badge bg-warning text-dark badge-status">Chờ khá lâu</span>';
+            return '<span class="badge bg-success badge-status">Mới gửi</span>';
+        }
+
+        function authorSentLine(iso) {
+            if (!iso) return '';
+            var abs = Utils.formatDate(iso);
+            var rel = Utils.formatRelativePastVi ? Utils.formatRelativePastVi(iso) : '';
+            return '<span class="small text-muted d-block mt-1"><i class="bi bi-send"></i> Tác giả gửi: <strong>' + abs + '</strong>' + (rel ? ' · <em>' + rel + '</em>' : '') + '</span>';
+        }
+
+        function toDatetimeLocalValue(d) {
+            var pad = function (n) { return n.toString().padStart(2, '0'); };
+            return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        }
+
+        function setClaimQuickDeadline(days) {
+            var d = new Date();
+            d.setDate(d.getDate() + days);
+            d.setHours(23, 59, 0, 0);
+            var el = document.getElementById('claimDeadlineLocal');
+            if (el) el.value = toDatetimeLocalValue(d);
+        }
+
+        function openClaimModal(type, id) {
+            claimModalState = { type: type, id: id, deadlineIso: '' };
+            document.getElementById('claimStep1').classList.remove('d-none');
+            document.getElementById('claimStep2').classList.add('d-none');
+            document.getElementById('claimModalFooterStep1').classList.remove('d-none');
+            document.getElementById('claimModalFooterStep2').classList.add('d-none');
+            var chk = document.getElementById('claimCommitmentCheck');
+            if (chk) chk.checked = false;
+            setClaimQuickDeadline(7);
+            new bootstrap.Modal(document.getElementById('claimModal')).show();
+        }
+
+        function goClaimConfirmStep() {
+            var localStr = (document.getElementById('claimDeadlineLocal') || {}).value;
+            if (!localStr) {
+                Utils.showAlert('Vui lòng chọn hạn duyệt.', 'warning');
+                return;
+            }
+            if (!document.getElementById('claimCommitmentCheck').checked) {
+                Utils.showAlert('Vui lòng tick xác nhận cam kết hoàn thành duyệt trước hạn.', 'warning');
+                return;
+            }
+            var dt = new Date(localStr);
+            if (isNaN(dt.getTime())) {
+                Utils.showAlert('Thời gian không hợp lệ.', 'warning');
+                return;
+            }
+            var minMs = Date.now() + 24 * 60 * 60 * 1000;
+            if (dt.getTime() <= minMs) {
+                Utils.showAlert('Hạn duyệt phải sau ít nhất 24 giờ so với hiện tại.', 'warning');
+                return;
+            }
+            var maxMs = Date.now() + 366 * 24 * 60 * 60 * 1000;
+            if (dt.getTime() > maxMs) {
+                Utils.showAlert('Hạn duyệt không được vượt quá 366 ngày.', 'warning');
+                return;
+            }
+            claimModalState.deadlineIso = dt.toISOString();
+            var label = claimModalState.type === 'STORY' ? 'truyện' : 'chapter';
+            document.getElementById('claimConfirmSummary').innerHTML =
+                '<p class="small mb-2">Bạn sắp <strong>nhận duyệt ' + label + '</strong> và <strong>cam kết</strong> hoàn thành kiểm duyệt trước:</p>' +
+                '<p class="fw-semibold mb-0">' + Utils.formatDate(claimModalState.deadlineIso) + '</p>';
+            document.getElementById('claimStep1').classList.add('d-none');
+            document.getElementById('claimStep2').classList.remove('d-none');
+            document.getElementById('claimModalFooterStep1').classList.add('d-none');
+            document.getElementById('claimModalFooterStep2').classList.remove('d-none');
+        }
+
+        function claimGoBack() {
+            document.getElementById('claimStep2').classList.add('d-none');
+            document.getElementById('claimStep1').classList.remove('d-none');
+            document.getElementById('claimModalFooterStep2').classList.add('d-none');
+            document.getElementById('claimModalFooterStep1').classList.remove('d-none');
+        }
+
+        async function submitClaim() {
+            var id = claimModalState.id;
+            var iso = claimModalState.deadlineIso;
+            var type = claimModalState.type;
+            if (!id || !iso) {
+                Utils.showAlert('Thiếu thông tin hạn duyệt. Vui lòng thử lại.', 'warning');
+                return;
+            }
+            try {
+                if (type === 'STORY')
+                    await ApiService.moderatorClaimStory(id, iso);
+                else
+                    await ApiService.moderatorClaimChapter(id, iso);
+                var modalEl = document.getElementById('claimModal');
+                var inst = bootstrap.Modal.getInstance(modalEl);
+                if (inst) inst.hide();
+                Utils.showAlert('Đã nhận duyệt. Chỉ bạn thấy mục này; bạn có thể Duyệt hoặc Từ chối.', 'success');
+                if (type === 'STORY')
+                    loadPendingStories(storiesCurrentPage, true);
+                else
+                    loadPendingChapters(chaptersCurrentPage, true);
+            } catch (e) {
+                Utils.showAlert(e.message || 'Lỗi nhận duyệt (có thể đã được người khác nhận).', 'danger');
+            }
+        }
+
+        function toggleEscExtendFields() {
+            var kind = (document.getElementById('escRequestKind') || {}).value;
+            var block = document.getElementById('escExtendBlock');
+            if (block) block.style.display = kind === 'EXTEND_DEADLINE' ? 'block' : 'none';
+        }
+
+        function setEscQuickDeadline(days) {
+            var d = new Date();
+            d.setDate(d.getDate() + days);
+            d.setHours(23, 59, 0, 0);
+            var el = document.getElementById('escProposedDeadlineLocal');
+            if (el) el.value = toDatetimeLocalValue(d);
+        }
+
+        async function openEscalationModal(type, id) {
+            escalationModalState = { type: type, id: id };
+            document.getElementById('escReason').value = '';
+            document.getElementById('escRequestKind').value = 'EXTEND_DEADLINE';
+            toggleEscExtendFields();
+            setEscQuickDeadline(7);
+            try {
+                var self = await ApiService.moderatorGetReviewAssignmentSelf(type, id);
+                if (!self.isAssignedToMe) {
+                    Utils.showAlert('Bạn không phải người đang nhận duyệt mục này.', 'warning');
+                    return;
+                }
+                if (self.hasPendingEscalation) {
+                    Utils.showAlert('Đã có đơn báo cáo chờ admin xử lý cho mục này.', 'info');
+                    return;
+                }
+                var meta = document.getElementById('escalationMeta');
+                var dl = self.reviewDeadlineAt ? Utils.formatDate(self.reviewDeadlineAt) : '—';
+                meta.innerHTML = '<strong>Hạn duyệt hiện tại:</strong> ' + dl +
+                    (self.hasPendingEscalation ? '<br><span class="text-warning fw-semibold">Đang có đơn chờ admin — không gửi trùng.</span>' : '');
+                new bootstrap.Modal(document.getElementById('escalationModal')).show();
+            } catch (e) {
+                Utils.showAlert(e.message || 'Không tải được trạng thái nhận duyệt.', 'danger');
+            }
+        }
+
+        async function submitEscalation() {
+            var type = escalationModalState.type;
+            var id = escalationModalState.id;
+            var kind = (document.getElementById('escRequestKind') || {}).value;
+            var reason = (document.getElementById('escReason') || {}).value.trim();
+            if (reason.length < 10) {
+                Utils.showAlert('Lý do cần ít nhất 10 ký tự.', 'warning');
+                return;
+            }
+            var body = {
+                targetType: type,
+                targetId: id,
+                requestKind: kind,
+                reason: reason
+            };
+            if (kind === 'EXTEND_DEADLINE') {
+                var localStr = (document.getElementById('escProposedDeadlineLocal') || {}).value;
+                if (!localStr) {
+                    Utils.showAlert('Chọn hạn duyệt đề xuất.', 'warning');
+                    return;
+                }
+                var dt = new Date(localStr);
+                if (isNaN(dt.getTime()) || dt.getTime() <= Date.now() + 24 * 60 * 60 * 1000) {
+                    Utils.showAlert('Hạn đề xuất phải sau ít nhất 24 giờ.', 'warning');
+                    return;
+                }
+                body.proposedDeadlineAt = dt.toISOString();
+            }
+            try {
+                await ApiService.moderatorSubmitReviewEscalation(body);
+                var inst = bootstrap.Modal.getInstance(document.getElementById('escalationModal'));
+                if (inst) inst.hide();
+                Utils.showAlert('Đã gửi báo cáo. Admin sẽ xử lý — bạn không thể duyệt/từ chối cho đến khi admin quyết định.', 'success');
+                loadPendingStories(storiesCurrentPage, true);
+                loadPendingChapters(chaptersCurrentPage, true);
+            } catch (e) {
+                Utils.showAlert(e.message || 'Gửi báo cáo thất bại.', 'danger');
+            }
         }
 
         function updateStatCards() {
@@ -415,8 +708,18 @@
                 updateStatCards();
             });
             document.getElementById('stories-tab').addEventListener('shown.bs.tab', updateStatCards);
+            var storySearchDebounce = null;
+            var chapterSearchDebounce = null;
             document.getElementById('storySearch').addEventListener('keypress', function (e) { if (e.key === 'Enter') applyStoryFilters(); });
+            document.getElementById('storySearch').addEventListener('input', function () {
+                clearTimeout(storySearchDebounce);
+                storySearchDebounce = setTimeout(function () { applyStoryFilters(); }, 480);
+            });
             document.getElementById('chapterSearch').addEventListener('keypress', function (e) { if (e.key === 'Enter') applyChapterFilters(); });
+            document.getElementById('chapterSearch').addEventListener('input', function () {
+                clearTimeout(chapterSearchDebounce);
+                chapterSearchDebounce = setTimeout(function () { applyChapterFilters(); }, 480);
+            });
             document.getElementById('chapterStoryIdFilter').addEventListener('keypress', function (e) { if (e.key === 'Enter') applyChapterFilters(); });
             document.getElementById('rejectQuickReason').addEventListener('change', function () {
                 var q = this.value;
@@ -439,13 +742,15 @@
             var pageSizeEl = document.getElementById('storyPageSize');
             storiesPageSize = parseInt(pageSizeEl ? pageSizeEl.value : 10, 10);
             var claimEl = document.getElementById('storyClaimFilter');
+            var tsEl = document.getElementById('storyTimeStatus');
             return {
                 page: p,
                 pageSize: storiesPageSize,
                 search: (document.getElementById('storySearch') || {}).value?.trim() || null,
                 sortBy: (document.getElementById('storySortBy') || {}).value || 'updated_at',
                 sortOrder: (document.getElementById('storySortOrder') || {}).value || 'asc',
-                claimFilter: (claimEl && claimEl.value) ? claimEl.value : null
+                claimFilter: (claimEl && claimEl.value) ? claimEl.value : null,
+                timeStatus: (tsEl && tsEl.value) ? tsEl.value : null
             };
         }
 
@@ -455,6 +760,7 @@
             chaptersPageSize = parseInt(pageSizeEl ? pageSizeEl.value : 10, 10);
             var storyIdRaw = (document.getElementById('chapterStoryIdFilter') || {}).value?.trim();
             var claimEl = document.getElementById('chapterClaimFilter');
+            var tsEl = document.getElementById('chapterTimeStatus');
             return {
                 page: p,
                 pageSize: chaptersPageSize,
@@ -462,7 +768,8 @@
                 search: (document.getElementById('chapterSearch') || {}).value?.trim() || null,
                 sortBy: (document.getElementById('chapterSortBy') || {}).value || 'updated_at',
                 sortOrder: (document.getElementById('chapterSortOrder') || {}).value || 'asc',
-                claimFilter: (claimEl && claimEl.value) ? claimEl.value : null
+                claimFilter: (claimEl && claimEl.value) ? claimEl.value : null,
+                timeStatus: (tsEl && tsEl.value) ? tsEl.value : null
             };
         }
 
@@ -470,6 +777,8 @@
         function resetStoryFilters() {
             document.getElementById('storySearch').value = '';
             document.getElementById('storyClaimFilter').value = '';
+            var st = document.getElementById('storyTimeStatus');
+            if (st) st.value = '';
             document.getElementById('storySortBy').value = 'updated_at';
             document.getElementById('storySortOrder').value = 'asc';
             document.getElementById('storyPageSize').value = '10';
@@ -480,6 +789,8 @@
             document.getElementById('chapterStoryIdFilter').value = '';
             document.getElementById('chapterSearch').value = '';
             document.getElementById('chapterClaimFilter').value = '';
+            var ct = document.getElementById('chapterTimeStatus');
+            if (ct) ct.value = '';
             document.getElementById('chapterSortBy').value = 'updated_at';
             document.getElementById('chapterSortOrder').value = 'asc';
             document.getElementById('chapterPageSize').value = '10';
@@ -522,9 +833,21 @@
                 return;
             }
             var html = pendingStories.map(function (s) {
+                var escalationLocked = !!(s.isClaimedByMe && s.hasPendingEscalation);
                 var cover = s.coverImage ? '<img src="' + apiBaseForImages + (s.coverImage.indexOf('/') === 0 ? '' : '/') + s.coverImage + '" class="cover-wrap img-fluid" alt="" style="width:120px;height:100px;object-fit:cover;">' : '<div class="cover-wrap d-flex align-items-center justify-content-center bg-secondary bg-opacity-25" style="width:120px;height:100px;"><i class="bi bi-image text-muted" style="font-size:2rem;"></i></div>';
                 var summary = (s.summary || '').substring(0, 180);
                 if ((s.summary || '').length > 180) summary += '...';
+                var reviewBtns;
+                if (escalationLocked) {
+                    reviewBtns = '<span class="small text-muted align-self-center"><i class="bi bi-hourglass-split"></i> Chờ admin xử lý đơn báo cáo — không thể duyệt/từ chối.</span>';
+                } else if (s.isClaimedByMe) {
+                    reviewBtns = '<button type="button" class="btn btn-success btn-sm" onclick="approveStory(\'' + s.id + '\')"><i class="bi bi-check-circle"></i> Duyệt</button>' +
+                      '<button type="button" class="btn btn-danger btn-sm" onclick="showRejectModal(\'STORY\',\'' + s.id + '\')"><i class="bi bi-x-circle"></i> Từ chối</button>';
+                } else if (s.claimedByDisplayName) {
+                    reviewBtns = '<span class="small text-muted">Người khác đang nhận duyệt — bạn không thể duyệt/từ chối.</span>';
+                } else {
+                    reviewBtns = '<span class="small text-muted">Nhận duyệt trước khi duyệt hoặc từ chối.</span>';
+                }
                 return '<div class="card story-card-mod mb-3">' +
                     '<div class="card-body p-3">' +
                     '<div class="d-flex gap-3 flex-wrap">' +
@@ -532,19 +855,21 @@
                     '<div class="flex-grow-1 min-w-0">' +
                     '<h6 class="card-title mb-1">' + (s.title || 'N/A') + '</h6>' +
                     '<p class="card-text small text-muted mb-2">' + summary + '</p>' +
+                    authorSentLine(s.pendingSince || s.updatedAt) + (s.timeStatus ? ' ' + modTimeStatusBadge(s.timeStatus) : '') +
                     '<div class="d-flex flex-wrap align-items-center gap-2 mb-2">' +
                     (s.categoryNames ? '<span class="badge bg-secondary badge-status">' + s.categoryNames + '</span>' : '') +
                     '<span class="badge bg-warning text-dark badge-status">' + (s.status || 'PENDING_REVIEW') + '</span>' +
                     ((s.isClaimedByMe || s.claimedByDisplayName) ? '<span class="badge bg-info badge-status" title="' + (s.claimedAt ? Utils.formatDate(s.claimedAt) : '') + '">' + (s.isClaimedByMe ? '<i class="bi bi-person-check me-1"></i> Bạn đang duyệt' : '<i class="bi bi-person me-1"></i> ' + (s.claimedByDisplayName || '–')) + (s.claimedAt ? ' • ' + Utils.formatDate(s.claimedAt) : '') + '</span>' : '') +
+                    (escalationLocked ? '<span class="badge bg-secondary badge-status"><i class="bi bi-shield-lock me-1"></i> Chờ admin</span>' : '') +
                     (s.authorName ? '<span class="small text-muted">' + s.authorName + '</span>' : '') +
                     '<span class="small text-muted">Cập nhật: ' + Utils.formatDate(s.updatedAt) + '</span>' +
                     '</div>' +
                     '<div class="btn-action-group d-flex flex-wrap gap-1">' +
-                    (!(s.isClaimedByMe || s.claimedByDisplayName) ? '<button type="button" class="btn btn-warning btn-sm" onclick="claimStory(\'' + s.id + '\')" title="Nhận duyệt – lock, người khác không thấy"><i class="bi bi-lock-fill"></i> Nhận duyệt</button>' : '') +
+                    (!(s.isClaimedByMe || s.claimedByDisplayName) ? '<button type="button" class="btn btn-warning btn-sm" onclick="openClaimModal(\'STORY\',\'' + s.id + '\')" title="Nhận duyệt – chọn hạn &amp; cam kết"><i class="bi bi-lock-fill"></i> Nhận duyệt</button>' : '') +
+                    (s.isClaimedByMe && !escalationLocked ? '<button type="button" class="btn btn-outline-danger btn-sm" onclick="openEscalationModal(\'STORY\',\'' + s.id + '\')" title="Gửi admin: gia hạn hoặc hủy nhận"><i class="bi bi-shield-exclamation"></i> Báo cáo admin</button>' : '') +
                     '<a href="/Moderator/ReviewStory/' + s.id + '" class="btn btn-primary btn-sm"><i class="bi bi-eye"></i> Xem & duyệt</a>' +
                     '<a href="/Stories/Details/' + s.id + '" class="btn btn-outline-secondary btn-sm" target="_blank">Chi tiết</a>' +
-                    '<button type="button" class="btn btn-success btn-sm" onclick="approveStory(\'' + s.id + '\')"><i class="bi bi-check-circle"></i> Duyệt</button>' +
-                    '<button type="button" class="btn btn-danger btn-sm" onclick="showRejectModal(\'STORY\',\'' + s.id + '\')"><i class="bi bi-x-circle"></i> Từ chối</button>' +
+                    reviewBtns +
                     '</div>' +
                     '</div></div></div>';
             }).join('');
@@ -563,23 +888,6 @@
             html += '<li class="page-item ' + (currentPage === totalPages ? 'disabled' : '') + '"><a class="page-link" href="#" onclick="loadPendingStories(' + (currentPage + 1) + '); return false;">Sau</a></li>';
             html += '</ul>';
             nav.innerHTML = html;
-        }
-
-        async function claimStory(id) {
-            try {
-                await ApiService.moderatorClaimStory(id);
-                var idx = pendingStories.findIndex(function (s) { return s.id === id; });
-                if (idx >= 0) {
-                    pendingStories[idx].isClaimedByMe = true;
-                    pendingStories[idx].claimedByDisplayName = 'Bạn';
-                    pendingStories[idx].claimedAt = new Date().toISOString();
-                    renderPendingStories();
-                }
-                Utils.showAlert('Đã nhận duyệt truyện. Chỉ bạn thấy mục này; bạn có thể Duyệt hoặc Từ chối.', 'success');
-                loadPendingStories(storiesCurrentPage, true);
-            } catch (e) {
-                Utils.showAlert(e.message || 'Lỗi nhận duyệt (có thể đã được người khác nhận).', 'danger');
-            }
         }
 
         async function approveStory(id) {
@@ -628,8 +936,20 @@
                 return;
             }
             var tableRows = pendingChapters.map(function (c) {
+                var escalationLocked = !!(c.isClaimedByMe && c.hasPendingEscalation);
                 var storyTitle = (c.storyTitle || '').trim() || ('ID: ' + (c.storyId || '').toString().substring(0, 8) + '…');
                 var claimBadge = (c.claimedByDisplayName || c.isClaimedByMe) ? '<span class="badge bg-info badge-status" title="' + (c.claimedAt ? Utils.formatDate(c.claimedAt) : '') + '">' + (c.isClaimedByMe ? '<i class="bi bi-person-check me-1"></i> Bạn' : '<i class="bi bi-person me-1"></i> ' + (c.claimedByDisplayName || '–')) + (c.claimedAt ? ' • ' + Utils.formatDate(c.claimedAt) : '') + '</span>' : '–';
+                var reviewBtns;
+                if (escalationLocked) {
+                    reviewBtns = '<span class="small text-muted align-self-center"><i class="bi bi-hourglass-split"></i> Chờ admin xử lý đơn báo cáo — không thể duyệt/từ chối.</span>';
+                } else if (c.isClaimedByMe) {
+                    reviewBtns = '<button type="button" class="btn btn-success btn-sm" onclick="approveChapter(\'' + c.id + '\')"><i class="bi bi-check-circle"></i> Duyệt</button>' +
+                      '<button type="button" class="btn btn-danger btn-sm" onclick="showRejectModal(\'CHAPTER\',\'' + c.id + '\')"><i class="bi bi-x-circle"></i> Từ chối</button>';
+                } else if (c.claimedByDisplayName) {
+                    reviewBtns = '<span class="small text-muted">Người khác đang nhận duyệt — bạn không thể duyệt/từ chối.</span>';
+                } else {
+                    reviewBtns = '<span class="small text-muted">Nhận duyệt trước khi duyệt hoặc từ chối.</span>';
+                }
                 return '<tr class="chapter-row-mod">' +
                     '<td class="align-middle"><span class="text-dark fw-medium">' + (c.title || 'N/A') + '</span></td>' +
                     '<td class="align-middle small"><a href="/Stories/Details/' + (c.storyId || '') + '" class="text-decoration-none" target="_blank">' + storyTitle + '</a></td>' +
@@ -637,17 +957,18 @@
                     '<td class="align-middle">' + (c.wordCount != null ? c.wordCount.toLocaleString() : '–') + '</td>' +
                     '<td class="align-middle small text-muted">' + Utils.formatDate(c.createdAt) + '</td>' +
                     '<td class="align-middle"><span class="badge bg-warning text-dark badge-status">' + (c.status || 'PENDING_REVIEW') + '</span></td>' +
-                    '<td class="align-middle small">' + claimBadge + '</td>' +
+                    '<td class="align-middle small">' + claimBadge + (escalationLocked ? ' <span class="badge bg-secondary badge-status">Chờ admin</span>' : '') + '</td>' +
+                    '<td class="align-middle small">' + (c.pendingSince || c.updatedAt || c.createdAt ? '<div><strong>' + Utils.formatDate(c.pendingSince || c.updatedAt || c.createdAt) + '</strong></div><div><em>' + (Utils.formatRelativePastVi ? Utils.formatRelativePastVi(c.pendingSince || c.updatedAt || c.createdAt) : '') + '</em> ' + modTimeStatusBadge(c.timeStatus) + '</div>' : '–') + '</td>' +
                     '<td class="align-middle">' +
                     '<div class="btn-action-group d-flex flex-wrap gap-1">' +
-                    (!(c.isClaimedByMe || c.claimedByDisplayName) ? '<button type="button" class="btn btn-warning btn-sm" onclick="claimChapter(\'' + c.id + '\')" title="Nhận duyệt – lock, người khác không thấy"><i class="bi bi-lock-fill"></i> Nhận duyệt</button>' : '') +
+                    (!(c.isClaimedByMe || c.claimedByDisplayName) ? '<button type="button" class="btn btn-warning btn-sm" onclick="openClaimModal(\'CHAPTER\',\'' + c.id + '\')" title="Nhận duyệt – chọn hạn &amp; cam kết"><i class="bi bi-lock-fill"></i> Nhận duyệt</button>' : '') +
+                    (c.isClaimedByMe && !escalationLocked ? '<button type="button" class="btn btn-outline-danger btn-sm" onclick="openEscalationModal(\'CHAPTER\',\'' + c.id + '\')" title="Gửi admin: gia hạn hoặc hủy nhận"><i class="bi bi-shield-exclamation"></i> Báo cáo admin</button>' : '') +
                     '<a href="/Moderator/ReviewChapter/' + c.id + '" class="btn btn-primary btn-sm"><i class="bi bi-eye"></i> Xem & duyệt</a>' +
                     '<a href="/Chapters/Index?storyId=' + (c.storyId || '') + '" class="btn btn-outline-secondary btn-sm" target="_blank">Chi tiết</a>' +
-                    '<button type="button" class="btn btn-success btn-sm" onclick="approveChapter(\'' + c.id + '\')"><i class="bi bi-check-circle"></i> Duyệt</button>' +
-                    '<button type="button" class="btn btn-danger btn-sm" onclick="showRejectModal(\'CHAPTER\',\'' + c.id + '\')"><i class="bi bi-x-circle"></i> Từ chối</button>' +
+                    reviewBtns +
                     '</div></td></tr>';
             }).join('');
-            container.innerHTML = '<div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead class="table-light"><tr><th>Chapter</th><th>Truyện</th><th>Thứ tự</th><th>Số từ</th><th>Ngày tạo</th><th>Trạng thái</th><th>Người duyệt</th><th>Thao tác</th></tr></thead><tbody>' + tableRows + '</tbody></table></div>';
+            container.innerHTML = '<div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead class="table-light"><tr><th>Chapter</th><th>Truyện</th><th>Thứ tự</th><th>Số từ</th><th>Ngày tạo</th><th>Trạng thái</th><th>Người duyệt</th><th>Gửi duyệt &amp; chờ</th><th>Thao tác</th></tr></thead><tbody>' + tableRows + '</tbody></table></div>';
         }
 
         function renderChaptersPagination(totalPages, currentPage) {
@@ -662,23 +983,6 @@
             html += '<li class="page-item ' + (currentPage === totalPages ? 'disabled' : '') + '"><a class="page-link" href="#" onclick="loadPendingChapters(' + (currentPage + 1) + '); return false;">Sau</a></li>';
             html += '</ul>';
             nav.innerHTML = html;
-        }
-
-        async function claimChapter(id) {
-            try {
-                await ApiService.moderatorClaimChapter(id);
-                var idx = pendingChapters.findIndex(function (c) { return c.id === id; });
-                if (idx >= 0) {
-                    pendingChapters[idx].isClaimedByMe = true;
-                    pendingChapters[idx].claimedByDisplayName = 'Bạn';
-                    pendingChapters[idx].claimedAt = new Date().toISOString();
-                    renderPendingChapters();
-                }
-                Utils.showAlert('Đã nhận duyệt chapter. Chỉ bạn thấy mục này; bạn có thể Duyệt hoặc Từ chối.', 'success');
-                loadPendingChapters(chaptersCurrentPage, true);
-            } catch (e) {
-                Utils.showAlert(e.message || 'Lỗi nhận duyệt (có thể đã được người khác nhận).', 'danger');
-            }
         }
 
         async function approveChapter(id) {

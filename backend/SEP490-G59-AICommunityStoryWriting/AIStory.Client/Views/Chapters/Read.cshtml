@@ -484,6 +484,29 @@
             return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
         }
 
+        // Format time ago like Facebook: 14 giây / 14 phút / 4 giờ / 3 ngày ...
+        function formatTimeAgo(value) {
+            if (!value) return '';
+            const d = (value instanceof Date) ? value : new Date(value);
+            if (isNaN(d.getTime())) return '';
+
+            let diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+            if (diffSec < 0) diffSec = 0;
+
+            if (diffSec < 60) return `${Math.max(1, diffSec)} giây`;
+            const diffMin = Math.floor(diffSec / 60);
+            if (diffMin < 60) return `${diffMin} phút`;
+            const diffHour = Math.floor(diffMin / 60);
+            if (diffHour < 24) return `${diffHour} giờ`;
+            const diffDay = Math.floor(diffHour / 24);
+            if (diffDay < 7) return `${diffDay} ngày`;
+
+            const diffMonth = Math.floor(diffDay / 30);
+            if (diffMonth < 12) return `${diffMonth} tháng`;
+            const diffYear = Math.floor(diffDay / 365);
+            return `${diffYear} năm`;
+        }
+
         async function loadChapterComments() {
             if (!chapterId) return;
             try {
@@ -513,7 +536,39 @@
             }
             function renderNode(c, depth) {
                 const name = escapeHtml(c.userDisplayName || 'Ẩn danh');
-                const time = c.createdAt && typeof Utils !== 'undefined' && Utils.formatDate ? Utils.formatDate(c.createdAt) : (c.createdAt || '');
+                const role = (c.userRole || '').toString().trim().toUpperCase();
+                const roleMeta = {
+                    AUTHOR: { label: 'Tác giả', className: 'bg-warning text-dark', title: 'Tác giả' },
+                    USER: { label: 'Độc giả', className: 'bg-primary text-white', title: 'Độc giả' },
+                    ADMIN: { label: 'Quản trị viên', className: 'bg-danger text-white', title: 'Quản trị viên' },
+                    MODERATOR: { label: 'Kiểm duyệt', className: 'bg-success text-white', title: 'Kiểm duyệt' }
+                };
+                // USER tag depends on account age.
+                // Config/thresholds (days since created_at):
+                // - < 30  : Thành viên mới
+                // - < 180 : Độc giả
+                // - >=180 : Độc giả kỳ cựu
+                let meta = roleMeta[role];
+                if (role === 'USER') {
+                    const createdAt = c.userCreatedAt ? new Date(c.userCreatedAt) : null;
+                    let days = null;
+                    if (createdAt && !isNaN(createdAt.getTime())) {
+                        days = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+                    }
+                    if (days !== null) {
+                        if (days < 30) meta = { label: 'Thành viên mới', className: 'bg-info text-dark', title: 'Thành viên mới' };
+                        else if (days < 180) meta = { label: 'Độc giả', className: 'bg-primary text-white', title: 'Độc giả' };
+                        else meta = { label: 'Độc giả kỳ cựu', className: 'bg-success text-white', title: 'Độc giả kỳ cựu' };
+                    } else {
+                        meta = { label: 'Độc giả', className: 'bg-primary text-white', title: 'Độc giả' };
+                    }
+                }
+                const roleBadge = meta
+                    ? '<span class="badge ' + meta.className + ' ms-2" title="' + escapeHtml(meta.title || meta.label) + '">' + escapeHtml(meta.label) + '</span>'
+                    : (role
+                        ? '<span class="badge bg-light text-dark border ms-2" title="' + escapeHtml('Role ' + role) + '">' + escapeHtml(role) + '</span>'
+                        : '');
+                const time = formatTimeAgo(c.createdAt);
                 const content = escapeHtml(c.content || '');
                 const canReply = typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated();
                 const reactionCounts = c.reactionCounts || {};
@@ -535,7 +590,7 @@
                 const children = byParent.get(c.id) || [];
                 const indent = Math.min(depth, 6) * 16;
                 return '<div class="py-2 comment-node" style="margin-left:' + indent + 'px;" data-comment-id="' + c.id + '">' +
-                    '<div class="d-flex justify-content-between align-items-start gap-2"><div class="fw-medium">' + name + replyBadge + '</div><div class="text-muted small">' + time + '</div></div>' +
+                    '<div class="d-flex justify-content-between align-items-start gap-2"><div class="fw-medium">' + name + roleBadge + replyBadge + '</div><div class="text-muted small">' + time + '</div></div>' +
                     '<div class="mb-1">' + content + '</div>' +
                     '<div class="small d-flex gap-2 align-items-center flex-wrap">' + replyBtn + '<span class="d-flex gap-1 align-items-center flex-wrap">' + reactionBtns + '</span>' + totalReactionsHtml + '</div>' +
                     (children.length ? children.map(function(ch) { return renderNode(ch, depth + 1); }).join('') : '') +

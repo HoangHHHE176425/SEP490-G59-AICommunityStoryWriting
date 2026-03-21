@@ -118,6 +118,7 @@ namespace Services.Implementations
             _versionRepository.Update(v);
 
             chapter.updated_at = DateTime.UtcNow;
+            chapter.submitted_for_review_at = DateTime.UtcNow;
             if (chapterStatusUpper == "PUBLISHED")
             {
                 // Chapter đã xuất bản: giữ nguyên trạng thái PUBLISHED, chỉ version chuyển sang PENDING_REVIEW. Không ghi đè nội dung chapter để moderator thấy bản gốc và so sánh với version.
@@ -166,6 +167,7 @@ namespace Services.Implementations
             _versionRepository.Update(v);
 
             chapter.updated_at = DateTime.UtcNow;
+            chapter.submitted_for_review_at = null;
             // Chỉ đưa chapter về DRAFT nếu nó đang PENDING_REVIEW (do gửi version từ chapter DRAFT). Nếu chapter đang PUBLISHED thì giữ nguyên.
             if (string.Equals(chapter.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
                 chapter.status = "DRAFT";
