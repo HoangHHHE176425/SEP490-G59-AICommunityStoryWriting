@@ -10,15 +10,18 @@ import linhVuThienHa from '../../assets/image/linh-vu-thien-ha.jpg';
 import { useNavigate } from 'react-router-dom';
 import { getStories } from '../../api/story/storyApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
-import { getAuthorFollowing, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
+import { getAuthorFollowing, getAuthorFollowersCount, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { resolveAuthorAvatarUrl, resolveAuthorDisplayName } from '../../utils/storyAuthorAvatar';
 
 export function HeroAuthorStoriesBanner() {
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
+
+  const getStoryAuthorName = (storyItem, profile) => resolveAuthorDisplayName(storyItem, profile);
 
   const formatCompactNumber = (num) => {
     if (num === null || num === undefined || Number.isNaN(Number(num))) return '0';
@@ -136,10 +139,23 @@ export function HeroAuthorStoriesBanner() {
           ...new Set(pickedStories.map((s) => s?.authorId ?? s?.AuthorId).filter(Boolean)),
         ];
 
-        const profiles = await Promise.all(authorIds.map((id) => getProfileByUserId(id).catch(() => null)));
+        // Guest: không gọi profile (401); dùng authorName từ GET /stories (BE StoryListItemDto).
+        const profiles =
+          isAuthenticated && authorIds.length > 0
+            ? await Promise.all(authorIds.map((id) => getProfileByUserId(id).catch(() => null)))
+            : authorIds.map(() => null);
         const profileMap = {};
         authorIds.forEach((id, idx) => {
           profileMap[id] = profiles[idx];
+        });
+
+        const followerCounts =
+          authorIds.length > 0
+            ? await Promise.all(authorIds.map((id) => getAuthorFollowersCount(id).catch(() => 0)))
+            : [];
+        const followerMap = {};
+        authorIds.forEach((id, idx) => {
+          followerMap[id] = followerCounts[idx];
         });
 
         const mapped = pickedStories.map((item) => {
@@ -169,20 +185,20 @@ export function HeroAuthorStoriesBanner() {
             item.TotalChapters ??
             0;
 
-          const followersRaw = profile?.stats?.totalReads ?? 0;
-          const followersNum = profile ? Number(followersRaw) || 0 : 0;
+          const followersNum = Math.max(0, Number(authorId ? followerMap[authorId] : 0) || 0);
 
           const badge = rating >= 4.8 ? 'ĐỈNH CAO' : rating >= 4.5 ? 'NỔI BẬT' : 'AWARD WINNING';
+          const authorName = getStoryAuthorName(item, profile);
 
           return {
             id: storyId,
             storyTitle,
             author: {
-              name: profile?.displayName ?? item.authorName ?? item.AuthorName ?? 'Ẩn danh',
-              avatar: profile?.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '',
+              name: authorName,
+              avatar: resolveAuthorAvatarUrl(item, profile, authorName),
               id: authorId ?? null,
               followersNum,
-              followers: followersNum ? formatCompactNumber(followersNum) : '-',
+              followers: formatCompactNumber(followersNum),
               verified: Boolean(profile?.isVerified),
               isFollowing: false,
             },
@@ -211,7 +227,7 @@ export function HeroAuthorStoriesBanner() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (!featuredAuthorStories.length) return;
@@ -321,7 +337,7 @@ export function HeroAuthorStoriesBanner() {
               ...s.author,
               isFollowing: nextFollowing,
               followersNum,
-              followers: followersNum ? formatCompactNumber(followersNum) : '-',
+              followers: formatCompactNumber(followersNum),
             },
           };
         })

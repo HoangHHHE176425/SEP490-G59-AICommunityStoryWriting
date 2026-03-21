@@ -7,9 +7,13 @@ import cyber from '../../assets/image/cyber.jpg';
 import phamNhanTuTien from '../../assets/image/pham-nhan-tu-tien.jpg';
 import { getStories } from '../../api/story/storyApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
+import { getAuthorFollowersCount } from '../../api/author/authorApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { resolveAuthorAvatarUrl, resolveAuthorDisplayName } from '../../utils/storyAuthorAvatar';
+import { useAuth } from '../../contexts/AuthContext';
 
 export function NewAuthorDebutsSection() {
+  const { isAuthenticated } = useAuth();
   const [debuts, setDebuts] = useState([
     {
       id: 1,
@@ -131,10 +135,21 @@ export function NewAuthorDebutsSection() {
         }
 
         const authorIds = Object.keys(storyByAuthor);
-        const profiles = await Promise.all(authorIds.map((id) => getProfileByUserId(id).catch(() => null)));
+        const profiles =
+          isAuthenticated && authorIds.length > 0
+            ? await Promise.all(authorIds.map((id) => getProfileByUserId(id).catch(() => null)))
+            : authorIds.map(() => null);
         const profileMap = {};
         authorIds.forEach((id, idx) => {
           profileMap[id] = profiles[idx];
+        });
+
+        const followerCounts = await Promise.all(
+          authorIds.map((id) => getAuthorFollowersCount(id).catch(() => 0))
+        );
+        const followerMap = {};
+        authorIds.forEach((id, idx) => {
+          followerMap[id] = followerCounts[idx];
         });
 
         const mapped = authorIds
@@ -153,7 +168,6 @@ export function NewAuthorDebutsSection() {
             const image = coverPath ? resolveBackendUrl(coverPath) : '';
 
             const views = story.totalViews ?? story.TotalViews ?? 0;
-            const likes = story.totalFavorites ?? story.TotalFavorites ?? 0;
             const chapters =
               story.publishedChaptersCount ??
               story.PublishedChaptersCount ??
@@ -162,19 +176,23 @@ export function NewAuthorDebutsSection() {
               0;
 
             const joinDate = profile?.joinDate ?? profile?.JoinDate ?? '';
+            const storyCreated = story.createdAt ?? story.CreatedAt ?? story.updatedAt ?? story.UpdatedAt;
+            const authorDisplay = resolveAuthorDisplayName(story, profile);
 
             return {
               id: story.id ?? story.Id,
               story: story.title ?? story.Title ?? 'Không có tiêu đề',
               author: {
-                name: profile?.displayName ?? story.authorName ?? story.AuthorName ?? 'Ẩn danh',
-                avatar: profile?.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '',
-                joinDate: profile ? formatRelativeDate(joinDate) : '—',
+                name: authorDisplay,
+                avatar: resolveAuthorAvatarUrl(story, profile, authorDisplay),
+                joinDate: profile
+                  ? formatRelativeDate(joinDate)
+                  : formatRelativeDate(storyCreated),
+                followers: formatCompactNumber(followerMap[authorId] ?? 0),
               },
               genre,
               chapters,
               views: formatCompactNumber(views),
-              likes: formatCompactNumber(likes),
               description: story.summary ?? story.Summary ?? '',
               image,
             };
@@ -199,7 +217,7 @@ export function NewAuthorDebutsSection() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (loadError) console.error('NewAuthorDebutsSection load error:', loadError);
@@ -292,9 +310,9 @@ export function NewAuthorDebutsSection() {
                         <span>{item.views}</span>
                       </div>
                       <span>•</span>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1" title="Người theo dõi tác giả">
                         <Heart className="w-3 h-3" />
-                        <span>{item.likes}</span>
+                        <span>{item.author.followers ?? '0'}</span>
                       </div>
                     </div>
                   </div>

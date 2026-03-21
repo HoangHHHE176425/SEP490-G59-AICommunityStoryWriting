@@ -5,6 +5,13 @@ import { Mail, Lock, User, Eye, EyeOff, AlertCircle, CheckCircle, UserPlus } fro
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { PolicyModal } from '../../components/PolicyModal';
+import {
+    validateRegisterFields,
+    EMAIL_MAX_LENGTH,
+    DISPLAY_NAME_MIN,
+    DISPLAY_NAME_MAX,
+    PASSWORD_MIN_LENGTH,
+} from '../../utils/registerValidation';
 
 export default function Register() {
     const navigate = useNavigate();
@@ -30,28 +37,18 @@ export default function Register() {
         setError('');
     };
 
+    /** BR-01 / BR-02: kiểm tra trước khi gọi API (BR-02 phần trùng email xử lý qua phản hồi BE). */
     const validateForm = () => {
-        if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword) {
-            setError('Vui lòng điền đầy đủ thông tin');
+        const result = validateRegisterFields({
+            name: formData.name,
+            email: formData.email,
+            password: formData.password,
+            confirmPassword: formData.confirmPassword,
+        });
+        if (!result.ok) {
+            setError(result.message);
             return false;
         }
-
-        if (formData.password.length < 6) {
-            setError('Mật khẩu phải có ít nhất 6 ký tự');
-            return false;
-        }
-
-        if (formData.password !== formData.confirmPassword) {
-            setError('Mật khẩu xác nhận không khớp');
-            return false;
-        }
-
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(formData.email)) {
-            setError('Email không hợp lệ');
-            return false;
-        }
-
         return true;
     };
 
@@ -65,7 +62,7 @@ export default function Register() {
             if (result.success) {
                 setSuccess(true);
                 setTimeout(() => {
-                    navigate(`/verify-otp?email=${encodeURIComponent(formData.email)}`);
+                    navigate(`/verify-otp?email=${encodeURIComponent(formData.email.trim())}`);
                 }, 900);
             } else {
                 setError(result.message || 'Đăng ký thất bại');
@@ -223,8 +220,11 @@ export default function Register() {
                                     htmlFor="name"
                                     className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2"
                                 >
-                                    Họ và tên
+                                    Họ và tên (tên hiển thị)
                                 </label>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                                    {DISPLAY_NAME_MIN}–{DISPLAY_NAME_MAX} ký tự, không chứa từ ngữ không phù hợp.
+                                </p>
                                 <div className="relative">
                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                         <User className="w-5 h-5 text-slate-400" />
@@ -237,6 +237,8 @@ export default function Register() {
                                         onChange={handleChange}
                                         className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
                                         placeholder="Nguyễn Văn A"
+                                        maxLength={DISPLAY_NAME_MAX}
+                                        autoComplete="name"
                                         required
                                     />
                                 </div>
@@ -261,6 +263,8 @@ export default function Register() {
                                         onChange={handleChange}
                                         className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
                                         placeholder="email@example.com"
+                                        maxLength={EMAIL_MAX_LENGTH}
+                                        autoComplete="email"
                                         required
                                     />
                                 </div>
@@ -273,6 +277,9 @@ export default function Register() {
                                 >
                                     Mật khẩu
                                 </label>
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
+                                    Ít nhất {PASSWORD_MIN_LENGTH} ký tự, gồm cả chữ cái và chữ số.
+                                </p>
                                 <div className="relative">
                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                         <Lock className="w-5 h-5 text-slate-400" />
@@ -285,6 +292,7 @@ export default function Register() {
                                         onChange={handleChange}
                                         className="block w-full pl-10 pr-12 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
                                         placeholder="••••••••"
+                                        autoComplete="new-password"
                                         required
                                     />
                                     <button
@@ -320,6 +328,7 @@ export default function Register() {
                                         onChange={handleChange}
                                         className="block w-full pl-10 pr-12 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
                                         placeholder="••••••••"
+                                        autoComplete="new-password"
                                         required
                                     />
                                     <button

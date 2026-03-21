@@ -1,4 +1,5 @@
-import { Star, Play, Bookmark, Flag } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Star, Play, Bookmark, Flag, Users } from 'lucide-react';
 
 /** Format số để hiển thị: 1234 -> 1.2K, 1234567 -> 1.2M, nhỏ thì hiển thị nguyên. */
 function formatStatNumber(n) {
@@ -8,7 +9,19 @@ function formatStatNumber(n) {
     return num.toLocaleString();
 }
 
+function authorFollowersLabel(author) {
+    const authorId = author?.id || author?.userId;
+    const raw = author?.followers ?? author?.followerCount ?? author?.FollowersCount;
+    if (authorId && (raw === null || raw === undefined)) return { text: '…', showBadge: true };
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return { text: '0', showBadge: !!authorId };
+    return { text: formatStatNumber(Math.max(0, n)), showBadge: !!authorId };
+}
+
 export default function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, hasUserRated = false, userRatingStars = null, onOpenReport, onReadStory }) {
+    const author = story?.author;
+    const authorId = author?.id || author?.userId;
+    const { text: followerBadgeText, showBadge: showFollowerBadge } = authorFollowersLabel(author);
     return (
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="p-6">
@@ -34,7 +47,25 @@ export default function StoryHeader({ story, isFollowing, onToggleFollow, onOpen
                         <div className="mb-4 space-y-2 text-sm text-slate-700 dark:text-slate-300">
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                 <span className="text-slate-500 dark:text-slate-400">Tác giả:</span>
-                                <span className="font-semibold text-slate-900 dark:text-white">{story.author?.name ?? 'Ẩn danh'}</span>
+                                {authorId ? (
+                                    <Link
+                                        to={`/authors/${authorId}`}
+                                        className="font-semibold text-slate-900 dark:text-white hover:text-primary hover:underline transition-colors"
+                                    >
+                                        {author?.name ?? 'Tác giả'}
+                                    </Link>
+                                ) : (
+                                    <span className="font-semibold text-slate-900 dark:text-white">{author?.name ?? 'Tác giả'}</span>
+                                )}
+                                {showFollowerBadge && (
+                                    <span
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700"
+                                        title="Số người theo dõi tác giả"
+                                    >
+                                        <Users className="w-3.5 h-3.5 shrink-0 opacity-80" aria-hidden />
+                                        <span>{followerBadgeText}</span>
+                                    </span>
+                                )}
                             </div>
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                                 <span className="text-slate-500 dark:text-slate-400">Thể loại:</span>

@@ -26,6 +26,7 @@ import {
 } from '../../api/story/storyApi';
 import { getChapters } from '../../api/chapter/chapterApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
+import { getAuthorFollowersCount } from '../../api/author/authorApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -69,6 +70,56 @@ export function StoryDetail() {
     const [reviewsLoading, setReviewsLoading] = useState(false);
     const [visibleReviewsCount, setVisibleReviewsCount] = useState(3);
 
+    const svgAvatarDataUrl = (name) => {
+        const initial = (String(name || 'T').trim()[0] || 'T').toUpperCase();
+        const svg = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">
+            <defs>
+              <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#13EC5B"/>
+                <stop offset="1" stop-color="#2B7FFF"/>
+              </linearGradient>
+            </defs>
+            <rect width="256" height="256" rx="40" fill="url(#g)"/>
+            <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
+                  font-family="Arial, Helvetica, sans-serif" font-size="120" font-weight="800" fill="white">${initial}</text>
+          </svg>
+        `.trim();
+        return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+    };
+
+    const getStoryAuthorName = (storyRes) => {
+        const name =
+            storyRes?.authorName ??
+            storyRes?.AuthorName ??
+            storyRes?.author?.name ??
+            storyRes?.author?.displayName ??
+            storyRes?.authorDisplayName ??
+            storyRes?.AuthorDisplayName ??
+            storyRes?.createdByName ??
+            storyRes?.CreatedByName ??
+            null;
+
+        return typeof name === 'string' && name.trim() ? name.trim() : 'Tác giả';
+    };
+
+    const getStoryAuthorAvatar = (storyRes, authorName) => {
+        const avatar =
+            storyRes?.authorAvatarUrl ??
+            storyRes?.AuthorAvatarUrl ??
+            storyRes?.authorAvatar ??
+            storyRes?.AuthorAvatar ??
+            storyRes?.author?.avatar ??
+            storyRes?.author?.avatarUrl ??
+            storyRes?.author?.AvatarUrl ??
+            storyRes?.avatarUrl ??
+            storyRes?.AvatarUrl ??
+            null;
+
+        if (avatar && typeof avatar === 'string' && avatar.trim()) return resolveBackendUrl(avatar.trim());
+        return svgAvatarDataUrl(authorName);
+    };
+
     useEffect(() => {
         let cancelled = false;
         const id = setTimeout(() => {
@@ -102,15 +153,17 @@ export function StoryDetail() {
                     const progressStatusRaw = (storyRes?.storyProgressStatus ?? storyRes?.StoryProgressStatus ?? 'ONGOING')?.toString?.() ?? 'ONGOING';
                     const progressUpper = String(progressStatusRaw).toUpperCase();
                     const progressLabel = progressUpper === 'COMPLETED' ? 'Hoàn thành' : progressUpper === 'HIATUS' ? 'Tạm dừng' : 'Đang ra';
+                    const authorName = getStoryAuthorName(storyRes);
                     const storyPayload = {
                         id: storyRes?.id ?? storyRes?.Id,
                         title: storyRes?.title ?? storyRes?.Title ?? 'Không có tiêu đề',
                         author: {
                             id: authorId,
                             userId: authorId,
-                            name: storyRes?.authorName ?? storyRes?.AuthorName ?? 'Ẩn danh',
-                            avatar: '',
-                            followers: 0
+                            name: authorName,
+                            avatar: getStoryAuthorAvatar(storyRes, authorName),
+                            // null = đang chờ GET /authors/{id}/followers-count (tránh hiển thị 0 giả)
+                            followers: authorId ? null : 0,
                         },
                         cover: coverPath ? resolveBackendUrl(coverPath) : '',
                         genre: genreArr.length ? genreArr : ['Chưa phân loại'],
@@ -156,20 +209,36 @@ export function StoryDetail() {
                         setStory(storyPayload);
                         return;
                     }
-                    return getProfileByUserId(authorId)
-                        .then((profile) => {
+                    return Promise.all([
+                        getProfileByUserId(authorId),
+                        getAuthorFollowersCount(authorId).catch(() => 0),
+                    ])
+                        .then(([profile, followerCount]) => {
                             if (cancelled) return;
                             storyPayload.author = {
                                 id: profile.id ?? authorId,
                                 userId: profile.id ?? authorId,
                                 name: profile.displayName ?? storyPayload.author.name,
-                                avatar: profile.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '',
-                                followers: Number(profile.stats?.totalReads ?? profile.stats?.TotalReads ?? 0) || 0
+                                avatar: profile.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : storyPayload.author.avatar,
+                                followers: typeof followerCount === 'number' ? followerCount : 0,
                             };
                             setStory(storyPayload);
                         })
                         .catch(() => {
-                            if (!cancelled) setStory(storyPayload);
+                            if (cancelled) return;
+                            // Profile lỗi vẫn cố lấy số follower (public API)
+                            getAuthorFollowersCount(authorId)
+                                .then((n) => {
+                                    if (cancelled) return;
+                                    storyPayload.author.followers = typeof n === 'number' ? n : 0;
+                                    setStory({ ...storyPayload });
+                                })
+                                .catch(() => {
+                                    if (!cancelled) {
+                                        storyPayload.author.followers = 0;
+                                        setStory({ ...storyPayload });
+                                    }
+                                });
                         });
                 })
                 .catch((err) => {

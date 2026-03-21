@@ -93,17 +93,35 @@ export async function getModeratorChapterVersion(chapterId, versionId) {
 }
 
 /**
- * Moderator nhận duyệt truyện (claim). 1 item chỉ 1 moderator; đã nhận thì người khác không thấy trong queue unclaimed.
+ * Hạn duyệt mặc định: +48h (BE: hạn phải sau ít nhất 24 giờ so với hiện tại).
+ * @returns {string} ISO 8601 UTC
  */
-export async function claimStory(storyId) {
-    await axiosInstance.post(`/moderator/stories/${storyId}/claim`);
+export function getDefaultReviewDeadlineIso() {
+    const d = new Date();
+    d.setTime(d.getTime() + 48 * 60 * 60 * 1000);
+    return d.toISOString();
+}
+
+/**
+ * Moderator nhận duyệt truyện (claim). Body bắt buộc: reviewDeadlineAt (ISO UTC).
+ * @param {string} storyId
+ * @param {string} [reviewDeadlineAt] - mặc định +48h
+ */
+export async function claimStory(storyId, reviewDeadlineAt = getDefaultReviewDeadlineIso()) {
+    await axiosInstance.post(`/moderator/stories/${storyId}/claim`, {
+        reviewDeadlineAt,
+    });
 }
 
 /**
  * Moderator nhận duyệt chương (claim).
+ * @param {string} chapterId
+ * @param {string} [reviewDeadlineAt] - mặc định +48h
  */
-export async function claimChapter(chapterId) {
-    await axiosInstance.post(`/moderator/chapters/${chapterId}/claim`);
+export async function claimChapter(chapterId, reviewDeadlineAt = getDefaultReviewDeadlineIso()) {
+    await axiosInstance.post(`/moderator/chapters/${chapterId}/claim`, {
+        reviewDeadlineAt,
+    });
 }
 
 /**

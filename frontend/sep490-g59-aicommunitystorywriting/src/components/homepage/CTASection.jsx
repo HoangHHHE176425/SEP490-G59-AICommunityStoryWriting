@@ -3,8 +3,19 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 export function CTASection() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, role } = useAuth();
   const navigate = useNavigate();
+  const roleUpper = (role ?? '').toString().toUpperCase();
+  const isAuthor = roleUpper === 'AUTHOR';
+
+  const goStartWriting = () => {
+    if (isAuthor) {
+      navigate('/author');
+      return;
+    }
+    // Giống nút "Trở thành tác giả" trên Header: chính sách + đăng ký tác giả
+    navigate('/policy?type=AUTHOR&from=become-author&next=/author');
+  };
 
   const features = [
     { icon: Brain, text: 'AI hỗ trợ viết truyện', color: 'from-[#13EC5B] to-[#11D350]' },
@@ -72,7 +83,7 @@ export function CTASection() {
                 Đăng Ký Ngay
               </button>
               <button
-                onClick={() => navigate('/stories')}
+                onClick={() => navigate('/story-list')}
                 className="px-10 py-4 bg-[#1A2332] text-white rounded-xl hover:bg-[#0F172A] hover:scale-105 transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[16px] flex items-center gap-2 shadow-xl">
                 <BookOpen className="w-5 h-5" />
                 Khám Phá Truyện
@@ -82,13 +93,14 @@ export function CTASection() {
           ) : (
             <div className="flex items-center justify-center gap-4 flex-wrap">
               <button
-                onClick={() => navigate('/author/stories')}
+                type="button"
+                onClick={goStartWriting}
                 className="px-10 py-4 bg-white text-[#13EC5B] rounded-xl hover:bg-gray-100 hover:scale-105 transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[16px] flex items-center gap-2 shadow-xl">
                 <Sparkles className="w-5 h-5" />
                 Bắt Đầu Viết Ngay
               </button>
               <button
-                onClick={() => navigate('/stories')}
+                onClick={() => navigate('/story-list')}
                 className="px-10 py-4 bg-[#1A2332] text-white rounded-xl hover:bg-[#0F172A] hover:scale-105 transition-all font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[16px] flex items-center gap-2 shadow-xl">
                 <BookOpen className="w-5 h-5" />
                 Khám Phá Truyện
