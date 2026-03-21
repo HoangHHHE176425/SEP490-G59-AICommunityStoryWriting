@@ -1,4 +1,4 @@
-﻿// API Base URL: từ server config (Layout) hoặc mặc định khi chạy API trên port 5000
+// API Base URL: từ server config (Layout) hoặc mặc định khi chạy API trên port 5000
 const API_BASE_URL = (typeof window !== 'undefined' && window.__API_BASE_URL) ? window.__API_BASE_URL : 'http://localhost:5000/api';
 
 // API Service Class

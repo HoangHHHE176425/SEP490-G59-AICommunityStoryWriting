@@ -20,3 +20,8 @@ export async function getTopSpenders(params = {}) {
     return res.data;
 }
 
+export async function getSystemCoinLedger(params = {}) {
+    const res = await axiosInstance.get('/admin/wallet/system-coin-ledger', { params });
+    return res.data;
+}
+

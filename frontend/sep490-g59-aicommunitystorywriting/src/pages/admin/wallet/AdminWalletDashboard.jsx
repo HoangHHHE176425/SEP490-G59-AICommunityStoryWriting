@@ -13,7 +13,7 @@ import {
     ChevronLeft,
     ChevronRight,
 } from 'lucide-react';
-import { getAdminWalletSummary, getTopAuthorsByIncome, getTopSpenders } from '../../../api/admin/walletApi';
+import { getAdminWalletSummary, getSystemCoinLedger, getTopAuthorsByIncome, getTopSpenders } from '../../../api/admin/walletApi';
 import { AdminTransactions } from '../transactions/AdminTransactions';
 
 // FE mock: Ví hệ thống (admin) - sau này nối API:
@@ -21,36 +21,11 @@ import { AdminTransactions } from '../transactions/AdminTransactions';
 // - GET /api/admin/wallet/top-authors, top-spenders
 // - GET /api/admin/wallet/transactions (phân trang, lọc)
 
-const TRANSACTION_TYPES = [
-    { value: '', label: 'Tất cả' },
-    { value: 'DEPOSIT', label: 'Nạp coin' },
-    { value: 'PURCHASE_CHAPTER', label: 'Mua chương VIP' },
-    { value: 'AUTHOR_INCOME', label: 'Thu nhập tác giả' },
-    { value: 'PLATFORM_FEE', label: 'Phí nền tảng' },
-    { value: 'WITHDRAW', label: 'Rút tiền' },
-    { value: 'REFUND', label: 'Hoàn coin' },
-    { value: 'PROMOTION', label: 'Khuyến mãi' },
-];
-
-// Mock danh sách giao dịch ví hệ thống
-const MOCK_WALLET_TRANSACTIONS = [
-    { id: 'tx1', type: 'DEPOSIT', userId: 'user_001', userDisplay: 'user_001', amountCoins: 50000, amountVnd: 50000, status: 'SUCCESS', refId: 'ORD-2024-001', createdAt: '2025-03-17T10:30:00Z' },
-    { id: 'tx2', type: 'PURCHASE_CHAPTER', userId: 'user_029', userDisplay: 'user_029', amountCoins: -500, amountVnd: 0, status: 'SUCCESS', refId: 'CH-abc-12', storyTitle: 'Tu Tiên Chi Lộ', feeSource: 'UNLOCK', createdAt: '2025-03-17T09:15:00Z' },
-    { id: 'tx3', type: 'AUTHOR_INCOME', userId: 'author_tt', userDisplay: 'Thiên Tằm Thổ Đậu', amountCoins: 350, amountVnd: 0, status: 'SUCCESS', refId: 'CH-abc-12', storyTitle: 'Tu Tiên Chi Lộ', feeSource: 'UNLOCK', createdAt: '2025-03-17T09:15:01Z' },
-    { id: 'tx3-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 150, amountVnd: 0, status: 'SUCCESS', refId: 'CH-abc-12', storyTitle: 'Tu Tiên Chi Lộ', feeSource: 'UNLOCK', createdAt: '2025-03-17T09:15:02Z' },
-    { id: 'tx4', type: 'WITHDRAW', userId: 'author_tt', userDisplay: 'Thiên Tằm Thổ Đậu', amountCoins: 0, amountVnd: 5_000_000, status: 'SUCCESS', refId: 'WD-2024-089', createdAt: '2025-03-16T14:00:00Z' },
-    { id: 'tx5', type: 'DEPOSIT', userId: 'user_312', userDisplay: 'user_312', amountCoins: 100000, amountVnd: 100000, status: 'SUCCESS', refId: 'ORD-2024-002', createdAt: '2025-03-16T11:20:00Z' },
-    { id: 'tx6', type: 'REFUND', userId: 'user_777', userDisplay: 'user_777', amountCoins: 200, amountVnd: 0, status: 'SUCCESS', refId: 'REF-003', createdAt: '2025-03-15T16:45:00Z' },
-    { id: 'tx7', type: 'PROMOTION', userId: 'user_new', userDisplay: 'user_new', amountCoins: 1000, amountVnd: 0, status: 'SUCCESS', refId: 'PROMO-SIGNUP', createdAt: '2025-03-15T08:00:00Z' },
-    { id: 'tx8', type: 'WITHDRAW', userId: 'author_nga', userDisplay: 'Ngã Cật Tây Hồng Thị', amountCoins: 0, amountVnd: 2_500_000, status: 'PENDING', refId: 'WD-2024-090', createdAt: '2025-03-17T08:00:00Z' },
-    // Donate event: hệ thống chỉ tăng số dư từ phần phí nền tảng (30%), nhưng chúng ta gom nhóm đủ ngữ cảnh.
-    { id: 'tx9', type: 'AUTHOR_INCOME', userId: 'author_tt', userDisplay: 'Thiên Tằm Thổ Đậu', amountCoins: 70, amountVnd: 0, status: 'SUCCESS', refId: 'DN-2024-010', feeSource: 'DONATE', createdAt: '2025-03-17T09:10:00Z' },
-    { id: 'tx10-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 30, amountVnd: 0, status: 'SUCCESS', refId: 'DN-2024-010', feeSource: 'DONATE', createdAt: '2025-03-17T09:10:01Z' },
-    { id: 'tx11-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 90, amountVnd: 0, status: 'SUCCESS', refId: 'CH-abc-13', storyTitle: 'Tu Tiên Chi Lộ 2', feeSource: 'UNLOCK', createdAt: '2025-03-17T08:50:02Z' },
-    { id: 'tx12-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 45, amountVnd: 0, status: 'SUCCESS', refId: 'DN-2024-011', feeSource: 'DONATE', createdAt: '2025-03-17T08:45:01Z' },
-    { id: 'tx13-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 120, amountVnd: 0, status: 'SUCCESS', refId: 'CH-xyz-02', storyTitle: 'Ngã Rẽ Đảo Hải', feeSource: 'UNLOCK', createdAt: '2025-03-17T08:30:10Z' },
-    { id: 'tx14-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 15, amountVnd: 0, status: 'PENDING', refId: 'DN-2024-012', feeSource: 'DONATE', createdAt: '2025-03-16T19:20:00Z' },
-    { id: 'tx15-fee', type: 'PLATFORM_FEE', userId: 'SYSTEM', userDisplay: 'Nền tảng', amountCoins: 60, amountVnd: 0, status: 'SUCCESS', refId: 'CH-def-09', storyTitle: 'Thiên Lộ Tập 3', feeSource: 'UNLOCK', createdAt: '2025-03-16T12:10:30Z' },
+/** Tab lịch sử ví hệ thống: chỉ donate + mở khóa chương (phí nền tảng 30%). API: type=UNLOCK_AND_DONATE | UNLOCK | DONATE */
+const LEDGER_EVENT_TYPES = [
+    { value: 'UNLOCK_AND_DONATE', label: 'Tất cả (donate + mở khóa)' },
+    { value: 'UNLOCK', label: 'Mở khóa chương' },
+    { value: 'DONATE', label: 'Ủng hộ (donate)' },
 ];
 
 // Mock summary/top lists (fallback when API unavailable)
@@ -88,14 +63,16 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
     const [activeTab, setActiveTab] = useState(initialActiveTab || 'overview');
     const [chartRange, setChartRange] = useState('7'); // 7 | 30 ngày
     const [overviewLoading, setOverviewLoading] = useState(false);
-    const [historyFeeSourceFilter, setHistoryFeeSourceFilter] = useState('ALL'); // ALL | DONATE | UNLOCK
+    const [historyTypeFilter, setHistoryTypeFilter] = useState('UNLOCK_AND_DONATE');
     const [historySearch, setHistorySearch] = useState('');
     const [historyDateFrom, setHistoryDateFrom] = useState('');
     const [historyDateTo, setHistoryDateTo] = useState('');
     const [historyPage, setHistoryPage] = useState(1);
-    const historyPageSize = 6;
-    const [transactions, setTransactions] = useState(() => MOCK_WALLET_TRANSACTIONS);
-    const [refundLoadingRef, setRefundLoadingRef] = useState('');
+    const historyPageSize = 20;
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [transactions, setTransactions] = useState(() => []);
+    const [historyTotalCount, setHistoryTotalCount] = useState(0);
+    const [historyTotalPages, setHistoryTotalPages] = useState(1);
     const [systemWalletBalanceCoins, setSystemWalletBalanceCoins] = useState(MOCK_SUMMARY.systemWalletBalanceCoins);
     const [summary, setSummary] = useState(MOCK_SUMMARY);
     const [topAuthors, setTopAuthors] = useState(MOCK_TOP_AUTHORS);
@@ -132,64 +109,42 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
 
     const maxIncome = useMemo(() => Math.max(...dailyIncome.map((d) => d.income), 1), [dailyIncome]);
 
-    // Lọc lịch sử giao dịch (mock)
     const filteredTransactions = useMemo(() => {
         let list = [...transactions];
-        // Chỉ hiển thị phần phí nền tảng (30%) vì đây là phần thay đổi trực tiếp vào “ví hệ thống”.
-        list = list.filter((t) => t.type === 'PLATFORM_FEE');
-        if (historyFeeSourceFilter && historyFeeSourceFilter !== 'ALL') {
-            list = list.filter((t) => (t.feeSource ?? null) === historyFeeSourceFilter);
-        }
         if (historySearch.trim()) {
             const q = historySearch.trim().toLowerCase();
             list = list.filter(
                 (t) =>
-                    (t.userDisplay && t.userDisplay.toLowerCase().includes(q)) ||
-                    (t.refId && t.refId.toLowerCase().includes(q)) ||
-                    (t.storyTitle && t.storyTitle.toLowerCase().includes(q))
+                    (t.eventType && t.eventType.toLowerCase().includes(q)) ||
+                    (t.note && t.note.toLowerCase().includes(q)) ||
+                    (t.storyTitle && t.storyTitle.toLowerCase().includes(q)) ||
+                    (t.chapterTitle && t.chapterTitle.toLowerCase().includes(q)) ||
+                    String(t.authorUserId || '').toLowerCase().includes(q) ||
+                    String(t.buyerUserId || '').toLowerCase().includes(q) ||
+                    String(t.adminId || '').toLowerCase().includes(q)
             );
         }
-        if (historyDateFrom) {
-            list = list.filter((t) => t.createdAt >= historyDateFrom + 'T00:00:00Z');
-        }
-        if (historyDateTo) {
-            list = list.filter((t) => t.createdAt <= historyDateTo + 'T23:59:59Z');
-        }
-        return list.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
-    }, [historyFeeSourceFilter, historySearch, historyDateFrom, historyDateTo, transactions]);
+        return list;
+    }, [historySearch, transactions]);
 
-    const totalHistoryPages = Math.max(1, Math.ceil(filteredTransactions.length / historyPageSize));
-    const paginatedTransactions = useMemo(() => {
-        const start = (historyPage - 1) * historyPageSize;
-        return filteredTransactions.slice(start, start + historyPageSize);
-    }, [filteredTransactions, historyPage, historyPageSize]);
+    const totalHistoryPages = Math.max(1, historyTotalPages);
+    const paginatedTransactions = filteredTransactions;
 
     const formatVnd = (value) => `${Number(value).toLocaleString('vi-VN')} đ`;
     const formatCoins = (value) =>
         `${Number(value).toLocaleString('vi-VN', { maximumFractionDigits: 0 })} Coins`;
 
     const getTypeLabel = (tx) => {
-        if (tx?.type === 'PLATFORM_FEE' && tx?.feeSource) {
-            if (tx.feeSource === 'DONATE') return 'Donate';
-            if (tx.feeSource === 'UNLOCK') return 'Mở khóa chương';
-        }
-        if (tx?.type === 'AUTHOR_INCOME' && tx?.feeSource) {
-            // Hiện tại màn lịch sử ví hệ thống đang chỉ hiển thị PLATFORM_FEE,
-            // nhưng giữ label cho trường hợp API/mock trả về AUTHOR_INCOME.
-            if (tx.feeSource === 'DONATE') return 'Donate';
-            if (tx.feeSource === 'UNLOCK') return 'Mở khóa chương';
-        }
-        return TRANSACTION_TYPES.find((t) => t.value === tx?.type)?.label || tx?.type || '-';
+        const map = {
+            UNLOCK: 'Mở khóa chương',
+            DONATE: 'Ủng hộ (donate)',
+        };
+        return map[tx?.eventType] || tx?.eventType || '-';
     };
     const getTypeBadgeClass = (type) => {
         const map = {
-            DEPOSIT: 'bg-emerald-100 text-emerald-700',
-            PURCHASE_CHAPTER: 'bg-blue-100 text-blue-700',
-            AUTHOR_INCOME: 'bg-amber-100 text-amber-700',
-            PLATFORM_FEE: 'bg-emerald-100 text-emerald-800',
-            WITHDRAW: 'bg-purple-100 text-purple-700',
-            REFUND: 'bg-slate-100 text-slate-700',
-            PROMOTION: 'bg-pink-100 text-pink-700',
+            UNLOCK: 'bg-blue-100 text-blue-700',
+            DONATE: 'bg-fuchsia-100 text-fuchsia-800',
         };
         return map[type] || 'bg-slate-100 text-slate-600';
     };
@@ -202,15 +157,20 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
             return `"${s.replace(/"/g, '""')}"`;
         };
 
-        const headers = ['Thời gian', 'Loại', 'User / Tác giả', 'Coin', 'VND', 'Trạng thái', 'Tham chiếu'];
+        const headers = ['Thời gian', 'Loại sự kiện', 'Delta ví hệ thống', 'Delta độc giả', 'Delta thu nhập tác giả', 'Delta coin khóa tác giả', 'Story', 'Chapter', 'AdminId', 'BuyerId', 'AuthorId', 'Ghi chú'];
         const csvRows = filteredTransactions.map((tx) => [
-            csvEscape(formatDate(tx.createdAt)),
+            csvEscape(formatDate(tx.eventTime)),
             csvEscape(getTypeLabel(tx)),
-            csvEscape(tx.userDisplay || tx.userId || ''),
-            csvEscape(tx.amountCoins !== 0 ? String(tx.amountCoins) : ''),
-            csvEscape(tx.amountVnd ? String(tx.amountVnd) : ''),
-            csvEscape(tx.status === 'PENDING' ? 'Chờ xử lý' : 'Thành công'),
-            csvEscape(tx.refId || ''),
+            csvEscape(tx.platformDeltaCoins ?? ''),
+            csvEscape(tx.buyerDeltaCoins ?? ''),
+            csvEscape(tx.authorIncomeDeltaCoins ?? ''),
+            csvEscape(tx.authorFrozenDeltaCoins ?? ''),
+            csvEscape(tx.storyTitle || ''),
+            csvEscape(tx.chapterTitle || ''),
+            csvEscape(tx.adminId || ''),
+            csvEscape(tx.buyerUserId || ''),
+            csvEscape(tx.authorUserId || ''),
+            csvEscape(tx.note || ''),
         ]);
 
         const csv = [headers.map(csvEscape).join(','), ...csvRows.map((r) => r.join(','))].join('\n');
@@ -228,6 +188,12 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
     const formatDate = (iso) => {
         const d = new Date(iso);
         return d.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' });
+    };
+
+    const formatSignedCoins = (value) => {
+        const n = Number(value ?? 0);
+        if (!Number.isFinite(n) || n === 0) return '0';
+        return `${n > 0 ? '+' : ''}${n.toLocaleString('vi-VN', { maximumFractionDigits: 2 })}`;
     };
 
     const handleRefreshOverview = async () => {
@@ -263,94 +229,37 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const isRefundable = (tx) => {
-        if (!tx) return false;
-        if (tx.type !== 'PURCHASE_CHAPTER') return false;
-        if (tx.status !== 'SUCCESS') return false;
-        const hasRefund = transactions.some((t) => t.type === 'REFUND' && t.refId === tx.refId);
-        return !hasRefund;
-    };
-
-    const handleRefundCoinsForPurchase = async (purchaseTx) => {
-        if (!isRefundable(purchaseTx)) return;
-        const ok = window.confirm(
-            `Hoàn lại coin cho giao dịch mở khóa chương?\n\nUser: ${purchaseTx.userDisplay}\nSố coin hoàn: ${Math.abs(purchaseTx.amountCoins)}`
-        );
-        if (!ok) return;
-
-        try {
-            setRefundLoadingRef(purchaseTx.refId);
-            // FE mock delay
-            await new Promise((r) => setTimeout(r, 450));
-
-            const now = new Date().toISOString();
-            const purchaseCoins = Math.abs(Number(purchaseTx.amountCoins || 0));
-            const authorIncomeTx = transactions.find((t) => t.type === 'AUTHOR_INCOME' && t.refId === purchaseTx.refId);
-            const feeTx = transactions.find((t) => t.type === 'PLATFORM_FEE' && t.refId === purchaseTx.refId);
-
-            const next = [
-                // Hoàn coin cho user
-                {
-                    id: `rf-${purchaseTx.refId}-${Date.now()}`,
-                    type: 'REFUND',
-                    userId: purchaseTx.userId,
-                    userDisplay: purchaseTx.userDisplay,
-                    amountCoins: purchaseCoins,
-                    amountVnd: 0,
-                    status: 'SUCCESS',
-                    refId: purchaseTx.refId,
-                    storyTitle: purchaseTx.storyTitle,
-                    createdAt: now,
-                },
-                // Đảo thu nhập tác giả (nếu có)
-                ...(authorIncomeTx
-                    ? [
-                          {
-                              id: `rv-ai-${purchaseTx.refId}-${Date.now()}`,
-                              type: 'AUTHOR_INCOME',
-                              userId: authorIncomeTx.userId,
-                              userDisplay: authorIncomeTx.userDisplay,
-                              amountCoins: -Math.abs(Number(authorIncomeTx.amountCoins || 0)),
-                              amountVnd: 0,
-                              status: 'SUCCESS',
-                              refId: purchaseTx.refId,
-                              storyTitle: purchaseTx.storyTitle,
-                              createdAt: now,
-                          },
-                      ]
-                    : []),
-                // Đảo phí nền tảng 30% (nếu có)
-                ...(feeTx
-                    ? [
-                          {
-                              id: `rv-fee-${purchaseTx.refId}-${Date.now()}`,
-                              type: 'PLATFORM_FEE',
-                              userId: 'SYSTEM',
-                              userDisplay: 'Nền tảng',
-                              amountCoins: -Math.abs(Number(feeTx.amountCoins || 0)),
-                              amountVnd: 0,
-                              status: 'SUCCESS',
-                              refId: purchaseTx.refId,
-                              storyTitle: purchaseTx.storyTitle,
-                              createdAt: now,
-                          },
-                      ]
-                    : []),
-            ];
-
-            setTransactions((prev) => [...next, ...prev]);
-
-            // Mock update số dư ví hệ thống: giảm phần fee đã ăn (nếu có)
-            const feeCoins = feeTx ? Math.abs(Number(feeTx.amountCoins || 0)) : Math.round(purchaseCoins * 0.3);
-            if (typeof systemWalletBalanceCoins === 'number') {
-                const newBalance = Math.max(0, systemWalletBalanceCoins - feeCoins);
-                setSystemWalletBalanceCoins(newBalance);
-                window.dispatchEvent(new CustomEvent('system-wallet:balance', { detail: { balance: newBalance } }));
+    useEffect(() => {
+        if (activeTab !== 'history') return;
+        let cancelled = false;
+        const loadHistory = async () => {
+            try {
+                setHistoryLoading(true);
+                const res = await getSystemCoinLedger({
+                    page: historyPage,
+                    pageSize: historyPageSize,
+                    dateFrom: historyDateFrom || undefined,
+                    dateTo: historyDateTo || undefined,
+                    type: historyTypeFilter || 'UNLOCK_AND_DONATE',
+                });
+                if (cancelled) return;
+                setTransactions(Array.isArray(res?.items) ? res.items : []);
+                setHistoryTotalCount(Number(res?.totalCount ?? 0) || 0);
+                setHistoryTotalPages(Math.max(1, Math.ceil((Number(res?.totalCount ?? 0) || 0) / historyPageSize)));
+            } catch {
+                if (cancelled) return;
+                setTransactions([]);
+                setHistoryTotalCount(0);
+                setHistoryTotalPages(1);
+            } finally {
+                if (!cancelled) setHistoryLoading(false);
             }
-        } finally {
-            setRefundLoadingRef('');
-        }
-    };
+        };
+        loadHistory();
+        return () => {
+            cancelled = true;
+        };
+    }, [activeTab, historyPage, historyPageSize, historyDateFrom, historyDateTo, historyTypeFilter]);
 
     return (
         <div className="space-y-6">
@@ -645,6 +554,9 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
 
             {activeTab === 'history' && (
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                    <p className="px-4 pt-4 text-xs text-slate-500">
+                        Phần này chỉ hiển thị <strong>ủng hộ (donate)</strong> và <strong>mở khóa chương</strong> (chia phí nền tảng 30% / thu nhập tác giả như luồng nghiệp vụ). Nạp coin / rút tiền xem ở khối &quot;Lịch sử giao dịch (Nạp / Rút)&quot; phía dưới.
+                    </p>
                     {/* Filters */}
                     <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex flex-wrap items-end gap-3">
                         <div className="flex items-center gap-2 min-w-[200px] flex-1">
@@ -661,18 +573,18 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                             />
                         </div>
                         <div className="flex items-center gap-2">
-                            <span className="text-xs text-slate-500 whitespace-nowrap">Nguồn phí nền tảng</span>
+                            <span className="text-xs text-slate-500 whitespace-nowrap">Loại sự kiện</span>
                             <select
-                                value={historyFeeSourceFilter}
+                                value={historyTypeFilter}
                                 onChange={(e) => {
-                                    setHistoryFeeSourceFilter(e.target.value);
+                                    setHistoryTypeFilter(e.target.value);
                                     setHistoryPage(1);
                                 }}
                                 className="px-3 py-2 text-sm border border-slate-200 rounded-lg text-slate-700"
                             >
-                                <option value="ALL">Tất cả</option>
-                                <option value="DONATE">Donate</option>
-                                <option value="UNLOCK">Mở khóa chương</option>
+                                {LEDGER_EVENT_TYPES.map((x) => (
+                                    <option key={x.value} value={x.value}>{x.label}</option>
+                                ))}
                             </select>
                         </div>
                         <input
@@ -714,82 +626,49 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                             <thead className="bg-slate-50 text-slate-600 uppercase tracking-wider">
                                 <tr>
                                     <th className="px-4 py-3">Thời gian</th>
-                                    <th className="px-4 py-3">Loại</th>
-                                    <th className="px-4 py-3">User / Tác giả</th>
-                                    <th className="px-4 py-3">Coin</th>
-                                    <th className="px-4 py-3">VND</th>
-                                    <th className="px-4 py-3">Trạng thái</th>
-                                    <th className="px-4 py-3">Tham chiếu</th>
-                                    <th className="px-4 py-3 text-right">Thao tác</th>
+                                    <th className="px-4 py-3">Loại sự kiện</th>
+                                    <th className="px-4 py-3">Delta ví hệ thống</th>
+                                    <th className="px-4 py-3">Delta độc giả</th>
+                                    <th className="px-4 py-3">Delta thu nhập tác giả</th>
+                                    <th className="px-4 py-3">Delta coin khóa</th>
+                                    <th className="px-4 py-3">Ngữ cảnh</th>
+                                    <th className="px-4 py-3">Ghi chú</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {paginatedTransactions.length === 0 ? (
                                     <tr>
                                         <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
-                                            Không có giao dịch nào thỏa bộ lọc.
+                                            {historyLoading ? 'Đang tải lịch sử...' : 'Không có giao dịch nào thỏa bộ lọc.'}
                                         </td>
                                     </tr>
                                 ) : (
                                     paginatedTransactions.map((tx) => (
-                                        <tr key={tx.id} className="border-b border-slate-100 hover:bg-slate-50/50">
+                                        <tr key={`${tx.eventType}-${tx.eventTime}-${tx.adminId || ''}-${tx.authorUserId || ''}-${tx.buyerUserId || ''}`} className="border-b border-slate-100 hover:bg-slate-50/50">
                                             <td className="px-4 py-3 whitespace-nowrap text-slate-600">
-                                                {formatDate(tx.createdAt)}
+                                                {formatDate(tx.eventTime)}
                                             </td>
                                             <td className="px-4 py-3">
-                                                <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getTypeBadgeClass(tx.type)}`}>
+                                                <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getTypeBadgeClass(tx.eventType)}`}>
                                                     {getTypeLabel(tx)}
                                                 </span>
                                             </td>
-                                            <td className="px-4 py-3">{tx.userDisplay || tx.userId || '—'}</td>
+                                            <td className="px-4 py-3 font-medium text-slate-700">{formatSignedCoins(tx.platformDeltaCoins)}</td>
+                                            <td className="px-4 py-3 text-slate-700">{formatSignedCoins(tx.buyerDeltaCoins)}</td>
+                                            <td className="px-4 py-3 text-slate-700">{formatSignedCoins(tx.authorIncomeDeltaCoins)}</td>
+                                            <td className="px-4 py-3 text-slate-700">{formatSignedCoins(tx.authorFrozenDeltaCoins)}</td>
                                             <td className="px-4 py-3">
-                                                {tx.amountCoins !== 0 ? (
-                                                    <span className={tx.amountCoins > 0 ? 'text-emerald-600' : 'text-slate-700'}>
-                                                        {tx.amountCoins > 0 ? '+' : ''}{formatCoins(tx.amountCoins)}
-                                                    </span>
-                                                ) : (
-                                                    '—'
-                                                )}
+                                                <div className="text-xs text-slate-700">
+                                                    {tx.storyTitle ? <div>Truyện: {tx.storyTitle}</div> : null}
+                                                    {tx.chapterTitle ? <div>Chương: {tx.chapterTitle}</div> : null}
+                                                    {tx.adminId ? <div>Admin: {tx.adminId}</div> : null}
+                                                    {tx.buyerUserId ? <div>Buyer: {tx.buyerUserId}</div> : null}
+                                                    {tx.authorUserId ? <div>Author: {tx.authorUserId}</div> : null}
+                                                    {!tx.storyTitle && !tx.chapterTitle && !tx.adminId && !tx.buyerUserId && !tx.authorUserId ? '—' : null}
+                                                </div>
                                             </td>
-                                            <td className="px-4 py-3">
-                                                {tx.amountVnd ? formatVnd(tx.amountVnd) : '—'}
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                <span
-                                                    className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                                                        tx.status === 'SUCCESS' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                                                    }`}
-                                                >
-                                                    {tx.status === 'PENDING' ? 'Chờ xử lý' : 'Thành công'}
-                                                </span>
-                                            </td>
-                                            <td className="px-4 py-3">
-                                                {tx.refId}
-                                                {tx.storyTitle && (
-                                                    <span className="block text-xs text-slate-500 truncate max-w-[120px]" title={tx.storyTitle}>
-                                                        {tx.storyTitle}
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3 text-right">
-                                                {isRefundable(tx) ? (
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleRefundCoinsForPurchase(tx)}
-                                                        disabled={refundLoadingRef === tx.refId}
-                                                        className={`inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold border ${
-                                                            refundLoadingRef === tx.refId
-                                                                ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
-                                                                : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                                                        }`}
-                                                    >
-                                                        {refundLoadingRef === tx.refId ? 'Đang hoàn…' : 'Hoàn coin'}
-                                                    </button>
-                                                ) : tx.type === 'PURCHASE_CHAPTER' && transactions.some((t) => t.type === 'REFUND' && t.refId === tx.refId) ? (
-                                                    <span className="text-xs font-semibold text-slate-400">Đã hoàn</span>
-                                                ) : (
-                                                    <span className="text-xs text-slate-300">—</span>
-                                                )}
+                                            <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate" title={tx.note || ''}>
+                                                {tx.note || '—'}
                                             </td>
                                         </tr>
                                     ))
@@ -802,7 +681,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                     {filteredTransactions.length > 0 && (
                         <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-between">
                             <p className="text-xs text-slate-500">
-                                Hiển thị {(historyPage - 1) * historyPageSize + 1}–{Math.min(historyPage * historyPageSize, filteredTransactions.length)} / {filteredTransactions.length}
+                                Hiển thị {(historyPage - 1) * historyPageSize + 1}–{Math.min(historyPage * historyPageSize, historyTotalCount)} / {historyTotalCount}
                             </p>
                             <div className="flex items-center gap-1">
                                 <button
