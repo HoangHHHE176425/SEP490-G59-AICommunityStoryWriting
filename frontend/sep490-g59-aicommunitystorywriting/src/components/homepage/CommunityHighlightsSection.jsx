@@ -1,5 +1,5 @@
 import { ImageWithFallback } from '../figma/ImageWithFallback';
-import { Sparkles, Trophy, BookOpen, Users, Award } from 'lucide-react';
+import { Sparkles, Trophy, BookOpen, Award } from 'lucide-react';
 
 export function CommunityHighlightsSection() {
   const highlights = [
@@ -25,12 +25,12 @@ export function CommunityHighlightsSection() {
     },
     {
       id: 3,
-      type: 'collaboration',
-      author: 'Vũ Phong & 12 tác giả',
-      content: 'Mở dự án collaborative mới "Liên Minh Thần Thoại"',
+      type: 'ai_co_writing',
+      author: 'AI Co-writing',
+      content: 'Mở dự án AI co-writing mới "Liên Minh Thần Thoại"',
       time: '3 giờ trước',
-      icon: Users,
-      color: '#2B7FFF',
+      icon: Sparkles,
+      color: '#13EC5B',
       avatar: 'https://images.unsplash.com/photo-1754954865833-c6ee8cb8726d?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxhc2lhbiUyMHlvdW5nJTIwbWFuJTIwY3JlYXRpdmV8ZW58MXx8fHwxNzcwMjg1MTU2fDA&ixlib=rb-4.1.0&q=80&w=1080'
     },
     {

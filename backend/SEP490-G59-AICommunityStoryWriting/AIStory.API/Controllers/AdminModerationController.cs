@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Admin.Moderation;
 using Services.DTOs.Chapters;
+using Services.DTOs.Moderation;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 
@@ -18,15 +19,17 @@ namespace AIStory.API.Controllers
     [Authorize(Roles = "ADMIN")]
     public class AdminModerationController : ControllerBase
     {
-        public const int DefaultDeadlineDays = 7;
-        public const int WarningDaysThreshold = 2; // Còn <= 2 ngày thì Warning (vàng)
-
         private readonly IModerationService _moderationService;
+        private readonly IReviewEscalationService _reviewEscalationService;
         private readonly ILogger<AdminModerationController> _logger;
 
-        public AdminModerationController(IModerationService moderationService, ILogger<AdminModerationController> logger)
+        public AdminModerationController(
+            IModerationService moderationService,
+            IReviewEscalationService reviewEscalationService,
+            ILogger<AdminModerationController> logger)
         {
             _moderationService = moderationService;
+            _reviewEscalationService = reviewEscalationService;
             _logger = logger;
         }
 
@@ -36,22 +39,7 @@ namespace AIStory.API.Controllers
             return claim != null && Guid.TryParse(claim.Value, out var userId) ? userId : null;
         }
 
-        private static string ComputeTimeStatus(DateTime? pendingSince, int deadlineDays = DefaultDeadlineDays)
-        {
-            if (!pendingSince.HasValue) return "OnTime";
-            var deadline = pendingSince.Value.AddDays(deadlineDays);
-            var now = DateTime.UtcNow;
-            if (now > deadline) return "Overdue";
-            var daysLeft = (deadline - now).TotalDays;
-            return daysLeft <= WarningDaysThreshold ? "Warning" : "OnTime";
-        }
-
-        private static DateTime? ComputeDeadline(DateTime? pendingSince, int deadlineDays = DefaultDeadlineDays)
-        {
-            return pendingSince.HasValue ? pendingSince.Value.AddDays(deadlineDays) : null;
-        }
-
-        /// <summary>Pending Stories (chờ duyệt) — có gắn cờ thời hạn duyệt (7 ngày). Admin thấy tất cả (kể cả đã được moderator claim/lock).</summary>
+        /// <summary>Pending Stories (chờ duyệt) — hạn/cờ thời gian: hạn moderator chọn khi đã nhận; chưa nhận thì gợi ý +7 ngày từ lúc gửi. Admin thấy tất cả (kể cả đã claim).</summary>
         [HttpGet("pending-stories")]
         public IActionResult GetPendingStories(
             [FromQuery] int page = 1,
@@ -67,12 +55,6 @@ namespace AIStory.API.Controllers
                     return Unauthorized(new { message = "Không xác định user." });
                 // moderatorId = null: không loại trừ mục đã claim bởi moderator khác → Admin thấy hết (kể cả đang bị lock).
                 var result = _moderationService.GetPendingStories(page, pageSize, search, sortBy, sortOrder, categoryIdsFilter: null, moderatorId: null, claimFilter ?? "all");
-                foreach (var item in result.Items)
-                {
-                    item.PendingSince = item.UpdatedAt;
-                    item.DeadlineAt = ComputeDeadline(item.UpdatedAt);
-                    item.TimeStatus = ComputeTimeStatus(item.UpdatedAt);
-                }
                 return Ok(result);
             }
             catch (Exception ex)
@@ -82,7 +64,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Pending Chapters (chờ duyệt) — có gắn cờ thời hạn duyệt (7 ngày). Admin thấy tất cả (kể cả đã được moderator claim/lock).</summary>
+        /// <summary>Pending Chapters (chờ duyệt) — hạn/cờ thời gian như truyện. Admin thấy tất cả (kể cả đã claim).</summary>
         [HttpGet("pending-chapters")]
         public IActionResult GetPendingChapters(
             [FromQuery] int page = 1,
@@ -99,13 +81,6 @@ namespace AIStory.API.Controllers
                     return Unauthorized(new { message = "Không xác định user." });
                 // moderatorId = null: không loại trừ mục đã claim bởi moderator khác → Admin thấy hết (kể cả đang bị lock).
                 var result = _moderationService.GetPendingChapters(page, pageSize, storyId, search, sortBy, sortOrder, categoryIdsFilter: null, moderatorId: null, claimFilter ?? "all");
-                foreach (var item in result.Items)
-                {
-                    var since = item.UpdatedAt ?? item.CreatedAt;
-                    item.PendingSince = since;
-                    item.DeadlineAt = ComputeDeadline(since);
-                    item.TimeStatus = ComputeTimeStatus(since);
-                }
                 return Ok(result);
             }
             catch (Exception ex)
@@ -215,20 +190,44 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Moderation Logs — lọc theo Moderator, Date, Action, TargetType.</summary>
+        /// <summary>Moderation Logs — theo dõi hoạt động moderator: lọc đầy đủ, tìm kiếm, sắp xếp, phân trang.</summary>
         [HttpGet("logs")]
-        public IActionResult GetModerationLogs(
-            [FromQuery] int page = 1,
-            [FromQuery] int pageSize = 20,
-            [FromQuery] Guid? moderatorId = null,
-            [FromQuery] DateTime? dateFrom = null,
-            [FromQuery] DateTime? dateTo = null,
-            [FromQuery] string? action = null,
-            [FromQuery] string? targetType = null)
+        public IActionResult GetModerationLogs([FromQuery] ModerationLogQueryDto? query)
         {
             try
             {
-                var (logs, total) = ModerationLogDAO.GetModerationLogsPage(moderatorId, dateFrom, dateTo, action, targetType, page, pageSize);
+                if (!GetCurrentUserId().HasValue)
+                    return Unauthorized(new { message = "Không xác định user." });
+
+                query ??= new ModerationLogQueryDto();
+                var page = query.Page < 1 ? 1 : query.Page;
+                var pageSize = query.PageSize is < 1 or > 100 ? 20 : query.PageSize;
+
+                static DateTime? EndOfDayIfMidnight(DateTime? dt)
+                {
+                    if (!dt.HasValue) return null;
+                    var d = dt.Value;
+                    if (d.TimeOfDay != TimeSpan.Zero) return d;
+                    return d.Date.AddDays(1).AddTicks(-1);
+                }
+
+                var dateTo = EndOfDayIfMidnight(query.DateTo);
+
+                var (logs, total) = ModerationLogDAO.SearchModerationLogsPage(
+                    query.Search,
+                    query.ModeratorId,
+                    query.DateFrom,
+                    dateTo,
+                    query.Action,
+                    query.TargetType,
+                    query.TargetId,
+                    query.ProcessingTimeMinMs,
+                    query.ProcessingTimeMaxMs,
+                    query.SortBy,
+                    query.SortOrder,
+                    page,
+                    pageSize);
+
                 var items = new List<ModerationLogEntryDto>();
                 foreach (var log in logs)
                 {
@@ -254,7 +253,14 @@ namespace AIStory.API.Controllers
                         ProcessingTimeMs = log.processing_time_ms
                     });
                 }
-                return Ok(new { items, totalCount = total, page, pageSize });
+
+                return Ok(new global::Services.DTOs.Admin.PagedResultDto<ModerationLogEntryDto>
+                {
+                    Items = items,
+                    TotalCount = total,
+                    Page = page,
+                    PageSize = pageSize
+                });
             }
             catch (Exception ex)
             {
@@ -263,23 +269,206 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Moderator Performance — Approved, Rejected, Total (để phát hiện moderator làm sai nhiều).</summary>
-        [HttpGet("moderator-performance")]
-        public IActionResult GetModeratorPerformance(
-            [FromQuery] DateTime? dateFrom = null,
-            [FromQuery] DateTime? dateTo = null)
+        /// <summary>Moderator đang hoạt động — chọn khi duyệt đơn RELEASE và giao lại lock duyệt (không gồm admin).</summary>
+        [HttpGet("moderators-for-assignment")]
+        public IActionResult GetModeratorsForAssignment()
         {
             try
             {
-                var rows = ModerationLogDAO.GetModeratorPerformance(dateFrom, dateTo);
+                var rows = UserDAO.ListActiveModeratorsForAssignment();
+                var items = rows.Select(x => new { id = x.Id, displayName = x.DisplayName, claimedAssignmentCount = x.ClaimedAssignmentCount }).ToList();
+                return Ok(new { items });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetModeratorsForAssignment failed");
+                return StatusCode(500, new { message = "Lỗi danh sách người nhận duyệt", error = ex.Message });
+            }
+        }
+
+        /// <summary>Đơn báo cáo hạn duyệt từ moderator — chỉ PENDING. Lọc urgencyTier: CRITICAL | HIGH | STANDARD.</summary>
+        [HttpGet("review-escalations/pending")]
+        public IActionResult GetPendingReviewEscalations([FromQuery] string? urgencyTier = null)
+        {
+            try
+            {
+                if (!GetCurrentUserId().HasValue)
+                    return Unauthorized(new { message = "Không xác định user." });
+                var items = _reviewEscalationService.ListPendingForAdmin(urgencyTier);
+                var counts = _reviewEscalationService.CountPendingUrgencyBuckets();
+                return Ok(new
+                {
+                    items,
+                    counts = new { critical = counts.critical, high = counts.high, standard = counts.standard }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetPendingReviewEscalations failed");
+                return StatusCode(500, new { message = "Lỗi lấy danh sách đơn báo cáo", error = ex.Message });
+            }
+        }
+
+        /// <summary>Lịch sử đơn đã xử lý (APPROVED / REJECTED) — xem lại sau khi admin xử lý.</summary>
+        [HttpGet("review-escalations/history")]
+        public IActionResult GetReviewEscalationHistory([FromQuery] int skip = 0, [FromQuery] int take = 200)
+        {
+            try
+            {
+                if (!GetCurrentUserId().HasValue)
+                    return Unauthorized(new { message = "Không xác định user." });
+                var items = _reviewEscalationService.ListResolvedHistoryForAdmin(skip, take);
+                var total = _reviewEscalationService.CountResolvedHistory();
+                return Ok(new { items, totalCount = total, skip, take });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetReviewEscalationHistory failed");
+                return StatusCode(500, new { message = "Lỗi lấy lịch sử đơn", error = ex.Message });
+            }
+        }
+
+        /// <summary>Log đầy đủ đơn escalation: lọc, tìm kiếm, phân trang (theo dõi review_escalation_requests).</summary>
+        [HttpGet("review-escalations/log")]
+        public IActionResult GetReviewEscalationLog([FromQuery] ReviewEscalationLogQueryDto query)
+        {
+            try
+            {
+                if (!GetCurrentUserId().HasValue)
+                    return Unauthorized(new { message = "Không xác định user." });
+                var result = _reviewEscalationService.SearchEscalationLogForAdmin(query ?? new ReviewEscalationLogQueryDto());
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetReviewEscalationLog failed");
+                return StatusCode(500, new { message = "Lỗi lấy log đơn escalation", error = ex.Message });
+            }
+        }
+
+        /// <summary>Admin xử lý đơn: duyệt (gia hạn / hủy lock) hoặc từ chối.</summary>
+        [HttpPost("review-escalations/{id:guid}/resolve")]
+        public IActionResult ResolveReviewEscalation(Guid id, [FromBody] AdminResolveReviewEscalationDto? body)
+        {
+            var adminId = GetCurrentUserId();
+            if (!adminId.HasValue)
+                return Unauthorized(new { message = "Không xác định user." });
+            if (body == null)
+                return BadRequest(new { message = "Body không hợp lệ." });
+            try
+            {
+                _reviewEscalationService.Resolve(adminId.Value, id, body);
+                return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ResolveReviewEscalation {RequestId} failed", id);
+                return StatusCode(500, new { message = "Lỗi xử lý đơn", error = ex.Message });
+            }
+        }
+
+        /// <summary>Moderator Performance — thống kê theo moderator: lọc, tìm kiếm, sắp xếp, phân trang.</summary>
+        [HttpGet("moderator-performance")]
+        public IActionResult GetModeratorPerformance([FromQuery] ModeratorPerformanceQueryDto? query)
+        {
+            try
+            {
+                query ??= new ModeratorPerformanceQueryDto();
+                var page = query.Page < 1 ? 1 : query.Page;
+                var pageSize = query.PageSize is < 1 or > 100 ? 20 : query.PageSize;
+
+                static DateTime? EndOfDayIfMidnight(DateTime? dt)
+                {
+                    if (!dt.HasValue) return null;
+                    var d = dt.Value;
+                    if (d.TimeOfDay != TimeSpan.Zero) return d;
+                    return d.Date.AddDays(1).AddTicks(-1);
+                }
+
+                var dateTo = EndOfDayIfMidnight(query.DateTo);
+
+                var rows = ModerationLogDAO.GetModeratorPerformanceAggregates(query.DateFrom, dateTo, query.TargetType);
                 var list = rows.Select(r => new ModeratorPerformanceDto
                 {
                     ModeratorId = r.ModeratorId,
                     ModeratorName = NotificationDAO.GetUserDisplayName(r.ModeratorId),
                     ApprovedCount = r.ApprovedCount,
-                    RejectedCount = r.RejectedCount
+                    RejectedCount = r.RejectedCount,
+                    StoryApprovedCount = r.StoryApprovedCount,
+                    StoryRejectedCount = r.StoryRejectedCount,
+                    ChapterApprovedCount = r.ChapterApprovedCount,
+                    ChapterRejectedCount = r.ChapterRejectedCount
                 }).ToList();
-                return Ok(list);
+
+                if (query.ModeratorId.HasValue)
+                    list = list.Where(x => x.ModeratorId == query.ModeratorId.Value).ToList();
+
+                if (!string.IsNullOrWhiteSpace(query.Search))
+                {
+                    var s = query.Search.Trim();
+                    if (Guid.TryParse(s, out var g))
+                    {
+                        list = list.Where(x => x.ModeratorId == g).ToList();
+                    }
+                    else
+                    {
+                        var idMatches = UserDAO.SearchUserIdsByEmailOrNickname(s);
+                        var idSet = new HashSet<Guid>(idMatches);
+                        list = list.Where(x =>
+                            idSet.Contains(x.ModeratorId) ||
+                            (!string.IsNullOrEmpty(x.ModeratorName) &&
+                             x.ModeratorName.Contains(s, StringComparison.OrdinalIgnoreCase))).ToList();
+                    }
+                }
+
+                if (query.MinTotalActions.HasValue && query.MinTotalActions.Value > 0)
+                    list = list.Where(x => x.Total >= query.MinTotalActions.Value).ToList();
+
+                var sortAsc = string.Equals(query.SortOrder, "asc", StringComparison.OrdinalIgnoreCase);
+                var sortBy = (query.SortBy ?? "total").Trim().ToLowerInvariant();
+                list = sortBy switch
+                {
+                    "approved" => sortAsc
+                        ? list.OrderBy(x => x.ApprovedCount).ThenBy(x => x.ModeratorName).ToList()
+                        : list.OrderByDescending(x => x.ApprovedCount).ThenBy(x => x.ModeratorName).ToList(),
+                    "rejected" => sortAsc
+                        ? list.OrderBy(x => x.RejectedCount).ThenBy(x => x.ModeratorName).ToList()
+                        : list.OrderByDescending(x => x.RejectedCount).ThenBy(x => x.ModeratorName).ToList(),
+                    "reject_ratio" => sortAsc
+                        ? list.OrderBy(x => x.RejectRatio ?? 0).ThenBy(x => x.ModeratorName).ToList()
+                        : list.OrderByDescending(x => x.RejectRatio ?? 0).ThenBy(x => x.ModeratorName).ToList(),
+                    "story_approved" => sortAsc
+                        ? list.OrderBy(x => x.StoryApprovedCount).ThenBy(x => x.ModeratorName).ToList()
+                        : list.OrderByDescending(x => x.StoryApprovedCount).ThenBy(x => x.ModeratorName).ToList(),
+                    "chapter_approved" => sortAsc
+                        ? list.OrderBy(x => x.ChapterApprovedCount).ThenBy(x => x.ModeratorName).ToList()
+                        : list.OrderByDescending(x => x.ChapterApprovedCount).ThenBy(x => x.ModeratorName).ToList(),
+                    "name" => sortAsc
+                        ? list.OrderBy(x => x.ModeratorName ?? "", StringComparer.OrdinalIgnoreCase).ToList()
+                        : list.OrderByDescending(x => x.ModeratorName ?? "", StringComparer.OrdinalIgnoreCase).ToList(),
+                    _ => sortAsc
+                        ? list.OrderBy(x => x.Total).ThenBy(x => x.ModeratorName).ToList()
+                        : list.OrderByDescending(x => x.Total).ThenBy(x => x.ModeratorName).ToList()
+                };
+
+                var totalCount = list.Count;
+                var items = list.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+                return Ok(new global::Services.DTOs.Admin.PagedResultDto<ModeratorPerformanceDto>
+                {
+                    Items = items,
+                    TotalCount = totalCount,
+                    Page = page,
+                    PageSize = pageSize
+                });
             }
             catch (Exception ex)
             {

@@ -124,6 +124,10 @@ namespace Services.Implementations
             user.role = (role ?? "").Trim().ToUpperInvariant();
             user.updated_at = DateTime.UtcNow;
             await _userRepo.UpdateUser(user);
+
+            // Không còn gán moderator theo thể loại: xóa mọi bản ghi moderator_category_assignments khi đổi role.
+            await _modCatRepo.ReplaceAssignmentsAsync(id, Array.Empty<Guid>());
+
             return true;
         }
 
@@ -153,26 +157,7 @@ namespace Services.Implementations
             var ids = (categoryIds ?? Array.Empty<Guid>()).Distinct().ToList();
             await _modCatRepo.ReplaceAssignmentsAsync(userId, ids);
 
-            // Keep user.role in sync for admin UX.
-            var role = (user.role ?? "").Trim().ToUpperInvariant();
-            if (ids.Count > 0)
-            {
-                if (role != "ADMIN" && role != "MODERATOR")
-                {
-                    user.role = "MODERATOR";
-                    user.updated_at = DateTime.UtcNow;
-                    await _userRepo.UpdateUser(user);
-                }
-            }
-            else
-            {
-                if (role == "MODERATOR")
-                {
-                    user.role = "USER";
-                    user.updated_at = DateTime.UtcNow;
-                    await _userRepo.UpdateUser(user);
-                }
-            }
+            // Vai trò chỉ đổi qua SetRoleAsync; không đồng bộ role từ danh sách thể loại nữa.
 
             return true;
         }

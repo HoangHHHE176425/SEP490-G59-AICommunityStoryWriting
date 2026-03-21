@@ -100,6 +100,60 @@ namespace DataAccessObjects.DAOs
             return context.users.Any(u => u.id == id);
         }
 
+        /// <summary>Tìm user id theo email hoặc nickname (chứa chuỗi) — dùng lọc moderator performance.</summary>
+        public static List<Guid> SearchUserIdsByEmailOrNickname(string search)
+        {
+            if (string.IsNullOrWhiteSpace(search))
+                return new List<Guid>();
+            using var context = new StoryPlatformDbContext();
+            var s = search.Trim().ToLowerInvariant();
+            return context.users
+                .AsNoTracking()
+                .Include(u => u.user_profiles)
+                .Where(u => u.email.ToLower().Contains(s) ||
+                    (u.user_profiles != null && u.user_profiles.nickname != null && u.user_profiles.nickname.ToLower().Contains(s)))
+                .Select(u => u.id)
+                .ToList();
+        }
+
+        /// <summary>Moderator đang ACTIVE — dùng khi admin giao lại lock duyệt (chỉ role MODERATOR).</summary>
+        public static bool IsActiveModerator(Guid id)
+        {
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.AsNoTracking().FirstOrDefault(x => x.id == id);
+            if (u == null)
+                return false;
+            if (string.Equals(u.status, "ACTIVE", StringComparison.OrdinalIgnoreCase) != true)
+                return false;
+            return string.Equals(u.role, "MODERATOR", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Danh sách moderator ACTIVE — giao lại lock story/chapter (không gồm admin).</summary>
+        public static List<(Guid Id, string DisplayName, int ClaimedAssignmentCount)> ListActiveModeratorsForAssignment()
+        {
+            var counts = ReviewAssignmentDAO.GetClaimedAssignmentCountsByAssignee();
+            using var context = new StoryPlatformDbContext();
+            var list = context.users
+                .AsNoTracking()
+                .Include(u => u.user_profiles)
+                .Where(u => (u.status ?? "").ToUpper() == "ACTIVE" &&
+                    (u.role ?? "").ToUpper() == "MODERATOR")
+                .OrderBy(u => u.email)
+                .ToList();
+            var rows = list.Select(u =>
+            {
+                var name = u.user_profiles?.nickname?.Trim();
+                if (string.IsNullOrEmpty(name))
+                    name = u.email;
+                var n = counts.TryGetValue(u.id, out var c) ? c : 0;
+                return (Id: u.id, DisplayName: name ?? "–", ClaimedAssignmentCount: n);
+            }).ToList();
+            return rows
+                .OrderBy(x => x.ClaimedAssignmentCount)
+                .ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         public async Task<(IEnumerable<users> Items, int TotalCount)> GetUsersAsync(
             StoryPlatformDbContext context,
             AdminUserQuery query)

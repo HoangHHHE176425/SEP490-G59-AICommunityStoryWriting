@@ -27,8 +27,15 @@ export function Header() {
     const isAuthor = roleUpper === 'AUTHOR';
 
     const userCoinsFallback = user?.stats?.currentCoins ?? 0;
-    const [walletCoins, setWalletCoins] = useState(null);
-    const displayedCoins = walletCoins ?? userCoinsFallback;
+    const [walletBalanceCoin, setWalletBalanceCoin] = useState(null);
+    const [walletIncomeBalance, setWalletIncomeBalance] = useState(null);
+
+    const displayedCoins =
+        walletBalanceCoin !== null
+            ? isAuthor
+                ? (walletBalanceCoin ?? 0) + (walletIncomeBalance ?? 0)
+                : walletBalanceCoin
+            : userCoinsFallback;
 
     const [searchKeyword, setSearchKeyword] = useState('');
 
@@ -93,12 +100,14 @@ export function Header() {
 
     const fetchWallet = useCallback(async () => {
         if (!isAuthenticated) {
-            setWalletCoins(null);
+            setWalletBalanceCoin(null);
+            setWalletIncomeBalance(null);
             return;
         }
         const res = await coinApi.getMyWallet();
         if (res?.success) {
-            setWalletCoins(res?.data?.balanceCoin ?? 0);
+            setWalletBalanceCoin(res?.data?.balanceCoin ?? 0);
+            setWalletIncomeBalance(Number(res?.data?.incomeBalance ?? 0) || 0);
         }
     }, [isAuthenticated]);
 
@@ -118,7 +127,7 @@ export function Header() {
     const handleLogout = async () => {
         await logout();
         setIsUserMenuOpen(false);
-        navigate('/');
+        navigate('/home');
     };
 
     const handleBecomeAuthor = () => {

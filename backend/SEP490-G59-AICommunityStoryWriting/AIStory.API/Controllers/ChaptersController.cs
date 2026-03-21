@@ -21,13 +21,15 @@ namespace AIStory.API.Controllers
         private readonly IChapterVersionService _chapterVersionService;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IStoryService _storyService;
+        private readonly IContentGuardrailService _contentGuardrail;
 
-        public ChaptersController(IChapterService chapterService, IChapterVersionService chapterVersionService, IServiceScopeFactory scopeFactory, IStoryService storyService)
+        public ChaptersController(IChapterService chapterService, IChapterVersionService chapterVersionService, IServiceScopeFactory scopeFactory, IStoryService storyService, IContentGuardrailService contentGuardrail)
         {
             _chapterService = chapterService;
             _chapterVersionService = chapterVersionService;
             _scopeFactory = scopeFactory;
             _storyService = storyService;
+            _contentGuardrail = contentGuardrail;
         }
 
         private Guid? GetCurrentUserId()
@@ -351,9 +353,15 @@ namespace AIStory.API.Controllers
                 var chapter = _chapterService.GetById(id);
                 if (chapter == null)
                     return NotFound(new { message = "Chapter not found." });
+                Guid? storyAuthorId = null;
+                if (chapter.StoryId.HasValue)
+                {
+                    var st = StoryDAO.GetById(chapter.StoryId.Value);
+                    storyAuthorId = st?.author_id;
+                }
                 var entities = CommentDAO.GetChapterComments(id);
                 var currentUserId = GetCurrentUserId();
-                var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId)).ToList();
+                var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId, storyAuthorId)).ToList();
                 return Ok(dtos);
             }
             catch (Exception ex)
@@ -365,7 +373,7 @@ namespace AIStory.API.Controllers
         /// <summary>Comment chapter. Bắt buộc đăng nhập và đã đọc ít nhất 1 chapter của truyện.</summary>
         [HttpPost("{id:guid}/comments")]
         [Authorize]
-        public IActionResult AddChapterComment(Guid id, [FromBody] CreateStoryCommentRequestDto request)
+        public async Task<IActionResult> AddChapterComment(Guid id, [FromBody] CreateStoryCommentRequestDto request)
         {
             try
             {
@@ -377,6 +385,14 @@ namespace AIStory.API.Controllers
                 var content = request.Content.Trim();
                 if (content.Length > 2000)
                     return BadRequest(new { message = "Nội dung comment tối đa 2000 ký tự." });
+
+                var guardrailResult = await _contentGuardrail.CheckAsync(Guid.Empty, content, HttpContext.RequestAborted);
+                if (!guardrailResult.Passed)
+                    return BadRequest(new
+                    {
+                        message = "Nội dung comment chứa từ không được phép.",
+                        violations = guardrailResult.Violations.Select(v => new { v.Type, v.Quote })
+                    });
 
                 var chapter = _chapterService.GetById(id);
                 if (chapter == null || !chapter.StoryId.HasValue)
@@ -407,7 +423,7 @@ namespace AIStory.API.Controllers
                     }
                     catch { /* best effort */ }
                 }
-                var dto = MapToStoryCommentDto(entity, userId);
+                var dto = MapToStoryCommentDto(entity, userId, story.author_id);
                 return Created($"/api/chapters/{id}/comments/{dto.Id}", dto);
             }
             catch (Exception ex)
@@ -476,7 +492,19 @@ namespace AIStory.API.Controllers
             }
         }
 
-        private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null)
+        private static string? ResolveCommentDisplayUserRole(string? accountRole, Guid? commentUserId, Guid? storyAuthorId)
+        {
+            var r = accountRole?.Trim();
+            if (string.IsNullOrEmpty(r)) return null;
+            if (string.Equals(r, "AUTHOR", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!storyAuthorId.HasValue || !commentUserId.HasValue || commentUserId.Value != storyAuthorId.Value)
+                    return "USER";
+            }
+            return r;
+        }
+
+        private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null, Guid? storyAuthorId = null)
         {
             var nickname = c.userNavigation?.user_profiles?.nickname;
             var email = c.userNavigation?.email;
@@ -504,6 +532,8 @@ namespace AIStory.API.Controllers
                 ParentId = c.parent_id,
                 UserId = c.user_id ?? Guid.Empty,
                 UserDisplayName = display,
+                UserRole = ResolveCommentDisplayUserRole(c.userNavigation?.role, c.user_id, storyAuthorId),
+                UserCreatedAt = c.userNavigation?.created_at,
                 Content = c.content ?? "",
                 LikesCount = c.likes_count ?? 0,
                 UserHasLiked = userHasLiked,

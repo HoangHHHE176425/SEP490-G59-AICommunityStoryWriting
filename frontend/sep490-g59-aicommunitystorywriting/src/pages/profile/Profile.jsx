@@ -1,31 +1,38 @@
 import { useEffect, useState } from 'react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { User, Edit, Coins, History, Ticket, Trash2, BookOpen } from 'lucide-react';
+import { User, Edit, Coins, Trash2, BookOpen } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import ViewProfile from '../../components/profile/ViewProfile';
 import EditProfile from '../../components/profile/EditProfile';
-import ActivityHistory from '../../components/profile/ActivityHistory';
 import DeleteAccount from '../../components/profile/DeleteAccount';
 import { Link, useLocation } from 'react-router-dom';
 import * as coinApi from '../../api/coins/coinApi';
 
 export default function Profile() {
-    const { user } = useAuth();
+    const { user, role } = useAuth();
     const location = useLocation();
     const [activeTab, setActiveTab] = useState('info');
-    const [walletCoins, setWalletCoins] = useState(null);
+    const [walletBalanceCoin, setWalletBalanceCoin] = useState(null);
+    const [walletIncomeBalance, setWalletIncomeBalance] = useState(null);
 
     const profileData = user;
     const coinsFallback = profileData?.stats?.currentCoins ?? 0;
-    const displayedCoins = walletCoins ?? coinsFallback;
+
+    const roleUpper = (role ?? '').toString().toUpperCase();
+    const isAuthor = roleUpper === 'AUTHOR' || user?.isAuthor === true;
+
+    const displayedCoins =
+        walletBalanceCoin !== null
+            ? isAuthor
+                ? (walletBalanceCoin ?? 0) + (walletIncomeBalance ?? 0)
+                : walletBalanceCoin
+            : coinsFallback;
 
     const tabs = [
         { id: 'info', label: 'Thông tin', icon: User },
         { id: 'edit', label: 'Chỉnh sửa', icon: Edit },
-        { id: 'history', label: 'Lịch sử', icon: History },
-        { id: 'voucher', label: 'Voucher', icon: Ticket },
         { id: 'delete', label: 'Xóa tài khoản', icon: Trash2 },
     ];
 
@@ -43,12 +50,16 @@ export default function Profile() {
 
         const loadWallet = async () => {
             if (!profileData?.id) {
-                setWalletCoins(null);
+                    setWalletBalanceCoin(null);
+                    setWalletIncomeBalance(null);
                 return;
             }
             const res = await coinApi.getMyWallet();
             if (cancelled) return;
-            if (res?.success) setWalletCoins(res?.data?.balanceCoin ?? 0);
+                if (res?.success) {
+                    setWalletBalanceCoin(res?.data?.balanceCoin ?? 0);
+                    setWalletIncomeBalance(Number(res?.data?.incomeBalance ?? 0) || 0);
+                }
         };
 
         loadWallet().catch(() => {
@@ -70,10 +81,6 @@ export default function Profile() {
                 return <ViewProfile />;
             case 'edit':
                 return <EditProfile />;
-            case 'history':
-                return <ActivityHistory />;
-            case 'voucher':
-                return <div className="p-8 text-center text-slate-500">Tính năng Voucher đang được phát triển...</div>;
             case 'delete':
                 return <DeleteAccount />;
             default:

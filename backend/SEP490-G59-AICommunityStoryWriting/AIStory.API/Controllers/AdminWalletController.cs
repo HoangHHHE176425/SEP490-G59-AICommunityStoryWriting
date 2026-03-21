@@ -535,8 +535,10 @@ namespace AIStory.API.Controllers
         /// <summary>
         /// Ledger hoạt động tiền (admin):
         /// - CHAPTER_UNLOCK: platform nhận 30%, buyer trả tiền, author nhận net vào income_balance
+        /// - DONATE: ủng hộ tác giả — cùng cách chia 30% phí nền tảng / 70% thu nhập tác giả (CoinPaymentService.DonateAsync)
         /// - PLATFORM_WALLET_ADJ: điều chỉnh ví hệ thống
         /// - withdraw_requests: create/approve/reject (income_balance & frozen_balance)
+        /// type=UNLOCK_AND_DONATE: chỉ mở khóa chương + donate (dùng cho tab lịch sử ví hệ thống).
         /// </summary>
         [HttpGet("system-coin-ledger")]
         public async Task<IActionResult> GetSystemCoinLedger(
@@ -544,7 +546,7 @@ namespace AIStory.API.Controllers
             [FromQuery] int pageSize = 20,
             [FromQuery] DateTime? dateFrom = null,
             [FromQuery] DateTime? dateTo = null, // inclusive date
-            [FromQuery] string? type = null, // ALL | UNLOCK | PLATFORM_ADJ | WITHDRAW_REQUESTED | WITHDRAW_APPROVED | WITHDRAW_REJECTED
+            [FromQuery] string? type = null, // ALL | UNLOCK | DONATE | UNLOCK_AND_DONATE | PLATFORM_ADJ | WITHDRAW_REQUESTED | WITHDRAW_APPROVED | WITHDRAW_REJECTED
             CancellationToken cancellationToken = default)
         {
             page = Math.Max(1, page);
@@ -557,9 +559,16 @@ namespace AIStory.API.Controllers
             var t = type.ToUpperInvariant();
             bool acceptAll = t == "ALL";
 
+            // Phân nhánh rõ: UNLOCK_AND_DONATE không gồm điều chỉnh ví / rút tiền.
+            var includeUnlock = acceptAll || t == "UNLOCK" || t == "UNLOCK_AND_DONATE";
+            var includeDonate = acceptAll || t == "DONATE" || t == "UNLOCK_AND_DONATE";
+            var includePlatformAdj = acceptAll || t == "PLATFORM_ADJ";
+            var includeWithdrawReq = acceptAll || t == "WITHDRAW_REQUESTED";
+            var includeWithdrawProcessed = acceptAll || t == "WITHDRAW_APPROVED" || t == "WITHDRAW_REJECTED";
+
             var parts = new List<IQueryable<SystemCoinLedgerItemDto>>();
 
-            if (acceptAll || t == "UNLOCK")
+            if (includeUnlock)
             {
                 var unlockQ =
                     from p in _db.purchases.AsNoTracking()
@@ -592,7 +601,38 @@ namespace AIStory.API.Controllers
                 parts.Add(unlockQ);
             }
 
-            if (acceptAll || t == "PLATFORM_ADJ")
+            if (includeDonate)
+            {
+                // Nguồn sự thật: author_income_logs (DONATE) + donations (tin nhắn, story). Khớp DonateAsync.
+                var donateQ =
+                    from log in _db.author_income_logs.AsNoTracking()
+                    where log.source_type == "DONATE" && log.source_id != null
+                    join d in _db.donations.AsNoTracking() on log.source_id equals d.id
+                    join s in _db.stories.AsNoTracking() on d.story_id equals s.id into sj
+                    from s in sj.DefaultIfEmpty()
+                    where (fromDate == null || (log.created_at ?? DateTime.MinValue) >= fromDate.Value)
+                        && (toExclusive == null || (log.created_at ?? DateTime.MinValue) < toExclusive.Value)
+                    select new SystemCoinLedgerItemDto
+                    {
+                        EventType = "DONATE",
+                        EventTime = log.created_at ?? d.created_at ?? DateTime.MinValue,
+                        PlatformDeltaCoins = log.platform_fee ?? 0m,
+                        BuyerDeltaCoins = -(log.gross_amount ?? (decimal)d.amount),
+                        AuthorIncomeDeltaCoins = log.net_amount ?? 0m,
+                        AuthorFrozenDeltaCoins = 0m,
+                        StoryId = d.story_id,
+                        ChapterId = null,
+                        StoryTitle = s != null ? (s.title ?? string.Empty) : string.Empty,
+                        ChapterTitle = string.Empty,
+                        AdminId = null,
+                        BuyerUserId = d.sender_id,
+                        AuthorUserId = d.receiver_id,
+                        Note = d.message
+                    };
+                parts.Add(donateQ);
+            }
+
+            if (includePlatformAdj)
             {
                 var platformAdjQ =
                     from p in _db.purchases.AsNoTracking()
@@ -621,7 +661,7 @@ namespace AIStory.API.Controllers
                 parts.Add(platformAdjQ);
             }
 
-            if (acceptAll || t == "WITHDRAW_REQUESTED")
+            if (includeWithdrawReq)
             {
                 var withdrawReqQ =
                     from w in _db.withdraw_requests.AsNoTracking()
@@ -648,7 +688,7 @@ namespace AIStory.API.Controllers
                 parts.Add(withdrawReqQ);
             }
 
-            if (acceptAll || t == "WITHDRAW_APPROVED" || t == "WITHDRAW_REJECTED")
+            if (includeWithdrawProcessed)
             {
                 var withdrawProcessedQ =
                     from w in _db.withdraw_requests.AsNoTracking()
@@ -657,11 +697,11 @@ namespace AIStory.API.Controllers
                         && (toExclusive == null || w.processed_at < toExclusive.Value)
                     select new SystemCoinLedgerItemDto
                     {
-                        EventType = w.status == "SUCCESS" ? "WITHDRAW_APPROVED" : "WITHDRAW_REJECTED",
+                        EventType = (w.status == "SUCCESS" || w.status == "COMPLETED") ? "WITHDRAW_APPROVED" : "WITHDRAW_REJECTED",
                         EventTime = w.processed_at!.Value,
                         PlatformDeltaCoins = 0m,
                         BuyerDeltaCoins = 0m,
-                        AuthorIncomeDeltaCoins = w.status == "SUCCESS" ? 0m : w.amount_requested,
+                        AuthorIncomeDeltaCoins = (w.status == "SUCCESS" || w.status == "COMPLETED") ? 0m : w.amount_requested,
                         AuthorFrozenDeltaCoins = -w.amount_requested,
                         StoryId = null,
                         ChapterId = null,

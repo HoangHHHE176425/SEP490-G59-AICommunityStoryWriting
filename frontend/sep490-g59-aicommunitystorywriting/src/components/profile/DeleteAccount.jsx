@@ -24,7 +24,7 @@ export default function DeleteAccount() {
         try {
             const res = await deleteMyAccount();
             if (res.success) {
-                navigate('/');
+                navigate('/home');
             } else {
                 setError(res.message || 'Đã xảy ra lỗi. Vui lòng thử lại.');
             }

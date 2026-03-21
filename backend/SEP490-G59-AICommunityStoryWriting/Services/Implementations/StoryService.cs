@@ -260,6 +260,8 @@ namespace Services.Implementations
             if (story == null)
                 return false;
 
+            var prevStatus = (story.status ?? "").Trim().ToUpperInvariant();
+
             // Lưu version (vết tích) trước khi sửa nếu story đã public
             if (string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
             {
@@ -331,6 +333,12 @@ namespace Services.Implementations
             if (!string.IsNullOrWhiteSpace(request.Status))
                 story.status = request.Status.ToUpper();
 
+            var newStatus = (story.status ?? "").Trim().ToUpperInvariant();
+            if (newStatus == "PENDING_REVIEW" && prevStatus != "PENDING_REVIEW")
+                story.submitted_for_review_at = DateTime.UtcNow;
+            else if (prevStatus == "PENDING_REVIEW" && newStatus != "PENDING_REVIEW")
+                story.submitted_for_review_at = null;
+
             if (!string.IsNullOrWhiteSpace(request.StoryProgressStatus))
                 story.story_progress_status = request.StoryProgressStatus.ToUpper();
 
@@ -388,6 +396,7 @@ namespace Services.Implementations
                 // Author "Publish" = gửi chờ duyệt. Chỉ moderator approve mới chuyển sang PUBLISHED.
                 story.status = "PENDING_REVIEW";
                 story.updated_at = DateTime.Now;
+                story.submitted_for_review_at = DateTime.UtcNow;
                 // published_at, last_published_at chỉ set khi moderator approve (ModerationService.ApproveStory)
 
                 _logger?.LogInformation("StoryService.Publish: Updating story status to PENDING_REVIEW for ID: {StoryId}", id);
@@ -419,6 +428,7 @@ namespace Services.Implementations
 
             story.status = "DRAFT";
             story.updated_at = DateTime.Now;
+            story.submitted_for_review_at = null;
 
             _storyRepository.Update(story);
             return true;
