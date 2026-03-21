@@ -16,12 +16,18 @@ namespace AIStory.API.Controllers
     {
         private readonly IModerationService _moderationService;
         private readonly IChapterVersionService _chapterVersionService;
+        private readonly IReviewEscalationService _reviewEscalationService;
         private readonly ILogger<ModeratorController> _logger;
 
-        public ModeratorController(IModerationService moderationService, IChapterVersionService chapterVersionService, ILogger<ModeratorController> logger)
+        public ModeratorController(
+            IModerationService moderationService,
+            IChapterVersionService chapterVersionService,
+            IReviewEscalationService reviewEscalationService,
+            ILogger<ModeratorController> logger)
         {
             _moderationService = moderationService;
             _chapterVersionService = chapterVersionService;
+            _reviewEscalationService = reviewEscalationService;
             _logger = logger;
         }
 
@@ -43,14 +49,15 @@ namespace AIStory.API.Controllers
             [FromQuery] string? search = null,
             [FromQuery] string? sortBy = null,
             [FromQuery] string? sortOrder = null,
-            [FromQuery] string? claimFilter = null)
+            [FromQuery] string? claimFilter = null,
+            [FromQuery] string? timeStatus = null)
         {
             try
             {
                 var moderatorId = GetCurrentUserId();
                 if (!moderatorId.HasValue)
                     return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
-                var result = _moderationService.GetPendingStories(page, pageSize, search, sortBy, sortOrder, categoryIdsFilter: null, moderatorId, claimFilter);
+                var result = _moderationService.GetPendingStories(page, pageSize, search, sortBy, sortOrder, categoryIdsFilter: null, moderatorId, claimFilter, timeStatus);
                 return Ok(result);
             }
             catch (Exception ex)
@@ -69,14 +76,15 @@ namespace AIStory.API.Controllers
             [FromQuery] string? search = null,
             [FromQuery] string? sortBy = null,
             [FromQuery] string? sortOrder = null,
-            [FromQuery] string? claimFilter = null)
+            [FromQuery] string? claimFilter = null,
+            [FromQuery] string? timeStatus = null)
         {
             try
             {
                 var moderatorId = GetCurrentUserId();
                 if (!moderatorId.HasValue)
                     return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
-                var result = _moderationService.GetPendingChapters(page, pageSize, storyId, search, sortBy, sortOrder, categoryIdsFilter: null, moderatorId, claimFilter);
+                var result = _moderationService.GetPendingChapters(page, pageSize, storyId, search, sortBy, sortOrder, categoryIdsFilter: null, moderatorId, claimFilter, timeStatus);
                 return Ok(result);
             }
             catch (Exception ex)
@@ -177,20 +185,26 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Moderator "nhận duyệt" truyện → lock, người khác không thấy trong queue. Queue: ai gửi trước duyệt trước (FIFO).</summary>
+        /// <summary>Moderator "nhận duyệt" truyện → lock, người khác không thấy trong queue. Body bắt buộc: <c>reviewDeadlineAt</c> (UTC, ISO 8601) — hạn hoàn thành duyệt.</summary>
         [HttpPost("stories/{id:guid}/claim")]
-        public async Task<IActionResult> ClaimStory(Guid id)
+        public async Task<IActionResult> ClaimStory(Guid id, [FromBody] ModeratorClaimRequestDto? request)
         {
             var moderatorId = GetCurrentUserId();
             if (!moderatorId.HasValue)
                 return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+            if (request == null || request.ReviewDeadlineAt == default)
+                return BadRequest(new { message = "Vui lòng chọn hạn duyệt (reviewDeadlineAt) trong body." });
 
             try
             {
-                var ok = _moderationService.ClaimStory(id, moderatorId.Value, allowedCategoryIds: null);
+                var ok = _moderationService.ClaimStory(id, moderatorId.Value, request.ReviewDeadlineAt, allowedCategoryIds: null);
                 if (!ok)
                     return NotFound(new { message = "Truyện không tồn tại, không ở trạng thái chờ duyệt, hoặc đã được moderator khác nhận duyệt." });
                 return NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)
             {
@@ -213,6 +227,10 @@ namespace AIStory.API.Controllers
                 if (!ok)
                     return NotFound(new { message = "Truyện không tồn tại hoặc không ở trạng thái chờ duyệt (PENDING_REVIEW)." });
                 return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)
             {
@@ -242,6 +260,10 @@ namespace AIStory.API.Controllers
             {
                 return BadRequest(new { message = ex.Message });
             }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "RejectStory {StoryId} failed", id);
@@ -249,20 +271,26 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Moderator "nhận duyệt" chapter → lock. Queue: ai gửi trước duyệt trước (FIFO).</summary>
+        /// <summary>Moderator "nhận duyệt" chapter → lock. Body bắt buộc: <c>reviewDeadlineAt</c> (UTC) — hạn hoàn thành duyệt.</summary>
         [HttpPost("chapters/{id:guid}/claim")]
-        public async Task<IActionResult> ClaimChapter(Guid id)
+        public async Task<IActionResult> ClaimChapter(Guid id, [FromBody] ModeratorClaimRequestDto? request)
         {
             var moderatorId = GetCurrentUserId();
             if (!moderatorId.HasValue)
                 return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+            if (request == null || request.ReviewDeadlineAt == default)
+                return BadRequest(new { message = "Vui lòng chọn hạn duyệt (reviewDeadlineAt) trong body." });
 
             try
             {
-                var ok = _moderationService.ClaimChapter(id, moderatorId.Value, allowedCategoryIds: null);
+                var ok = _moderationService.ClaimChapter(id, moderatorId.Value, request.ReviewDeadlineAt, allowedCategoryIds: null);
                 if (!ok)
                     return NotFound(new { message = "Chapter không tồn tại, không ở trạng thái chờ duyệt, hoặc đã được moderator khác nhận duyệt." });
                 return NoContent();
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)
             {
@@ -372,6 +400,53 @@ namespace AIStory.API.Controllers
             if (content == null)
                 return NotFound(new { message = "Chapter không tồn tại." });
             return Ok(content);
+        }
+
+        /// <summary>Moderator đang nhận duyệt mục này không, hạn hiện tại, đã có đơn báo cáo chờ admin chưa.</summary>
+        [HttpGet("review-assignment/self")]
+        public IActionResult GetSelfReviewAssignment([FromQuery] string targetType, [FromQuery] Guid targetId)
+        {
+            var moderatorId = GetCurrentUserId();
+            if (!moderatorId.HasValue)
+                return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+            try
+            {
+                var dto = _reviewEscalationService.GetSelfAssignment(targetType, targetId, moderatorId.Value);
+                return Ok(dto);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>Gửi báo cáo lên admin: gia hạn hạn duyệt hoặc hủy nhận (chuyển cho người khác).</summary>
+        [HttpPost("review-escalations")]
+        public IActionResult SubmitReviewEscalation([FromBody] ModeratorSubmitReviewEscalationDto? request)
+        {
+            var moderatorId = GetCurrentUserId();
+            if (!moderatorId.HasValue)
+                return Unauthorized(new { message = "Không xác định được moderator (JWT)." });
+            if (request == null)
+                return BadRequest(new { message = "Body không hợp lệ." });
+            try
+            {
+                var id = _reviewEscalationService.Submit(moderatorId.Value, request);
+                return Ok(new { id });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "SubmitReviewEscalation failed");
+                return StatusCode(500, new { message = "Lỗi gửi báo cáo", error = ex.Message });
+            }
         }
     }
 }

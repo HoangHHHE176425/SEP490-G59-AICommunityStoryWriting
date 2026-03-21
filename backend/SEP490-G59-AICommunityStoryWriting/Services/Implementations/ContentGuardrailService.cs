@@ -2,6 +2,8 @@ using Microsoft.Extensions.Configuration;
 using Repositories;
 using Services.DTOs.AI;
 using Services.Interfaces;
+using System.Globalization;
+using System.Text;
 
 namespace Services.Implementations;
 
@@ -27,13 +29,18 @@ public class ContentGuardrailService : IContentGuardrailService
         if (draft.Length == 0)
             return Task.FromResult(new GuardrailResult { Passed = true, Violations = violations });
 
+        // Normalize for better match on Vietnamese (ignore diacritics, but still do case-insensitive).
+        // Ví dụ: "cấm" sẽ match "cam".
+        var draftNorm = NormalizeForMatch(draft);
         var bannedWords = GetBannedWords();
 
         foreach (var word in bannedWords)
         {
             if (string.IsNullOrWhiteSpace(word)) continue;
             var w = word.Trim();
-            if (draft.IndexOf(w, StringComparison.OrdinalIgnoreCase) >= 0)
+            var wNorm = NormalizeForMatch(w);
+            if (wNorm.Length == 0) continue;
+            if (draftNorm.IndexOf(wNorm, StringComparison.OrdinalIgnoreCase) >= 0)
                 violations.Add(new GuardrailViolation
                 {
                     Type = "BannedWord",
@@ -52,12 +59,22 @@ public class ContentGuardrailService : IContentGuardrailService
     /// <summary>Lấy danh sách từ cấm: ưu tiên DB (ai_sensitive_words, category BannedWord), không có thì dùng config.</summary>
     private string[] GetBannedWords()
     {
-        var fromDb = _bannedWordsRepository.GetAll(BannedWordCategory)
+        var fromDbBannedCategory = _bannedWordsRepository.GetAll(BannedWordCategory)
             .Select(w => w.word?.Trim())
             .Where(w => !string.IsNullOrEmpty(w))
             .Select(w => w!)
             .ToArray();
-        if (fromDb.Length > 0) return fromDb;
+
+        // Backward/compat: nếu DB không có category "BannedWord" (ví dụ người ta dùng "violence"),
+        // thì fallback lấy toàn bộ từ nhạy cảm trong bảng để đảm bảo vẫn chặn comment.
+        if (fromDbBannedCategory.Length > 0) return fromDbBannedCategory;
+
+        var fromDbAllCategories = _bannedWordsRepository.GetAll(null)
+            .Select(w => w.word?.Trim())
+            .Where(w => !string.IsNullOrEmpty(w))
+            .Select(w => w!)
+            .ToArray();
+        if (fromDbAllCategories.Length > 0) return fromDbAllCategories;
 
         var fromConfig = ParseCommaSeparated(_configuration["ContentGuardrail:BannedWords"] ?? _configuration["AI:CoCreateBannedWords"]);
         return fromConfig;
@@ -67,5 +84,23 @@ public class ContentGuardrailService : IContentGuardrailService
     {
         if (string.IsNullOrWhiteSpace(value)) return Array.Empty<string>();
         return value.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()).Where(s => s.Length > 0).ToArray();
+    }
+
+    private static string NormalizeForMatch(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return string.Empty;
+
+        // Remove diacritics by decomposing to FormD and stripping non-spacing marks.
+        var formD = input.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(formD.Length);
+        foreach (var ch in formD)
+        {
+            var uc = CharUnicodeInfo.GetUnicodeCategory(ch);
+            if (uc == UnicodeCategory.NonSpacingMark) continue;
+            sb.Append(ch);
+        }
+
+        // Normalize back to FormC (mainly for consistency).
+        return sb.ToString().Normalize(NormalizationForm.FormC);
     }
 }

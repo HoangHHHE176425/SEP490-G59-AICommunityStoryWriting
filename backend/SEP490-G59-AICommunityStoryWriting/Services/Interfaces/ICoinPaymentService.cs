@@ -19,6 +19,9 @@ namespace Services.Interfaces
 
         /// <summary>Tạo yêu cầu rút tiền (author). Trừ balance_coin khi tạo; admin xử lý sau.</summary>
         Task<WithdrawRequestItemDto> CreateWithdrawRequestAsync(Guid authorUserId, int amountCoins, string? bankInfo, CancellationToken cancellationToken = default);
+
+        /// <summary>Author hủy yêu cầu rút trước khi admin xử lý.</summary>
+        Task CancelWithdrawRequestAsync(Guid authorUserId, Guid withdrawRequestId, CancellationToken cancellationToken = default);
     }
 }
 

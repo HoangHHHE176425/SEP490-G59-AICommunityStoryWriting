@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Services.DTOs.AI;
 using Services.DTOs.Comments;
 using Services.DTOs.Chapters;
 using Services.DTOs.Stories;
@@ -16,7 +17,7 @@ public class UC12_PostCommentReplyTests
 {
     private static StoriesController CreateStoriesController(Guid? userId)
     {
-        var ctrl = new StoriesController(new FakeStoryService(), NullLogger<StoriesController>.Instance);
+        var ctrl = new StoriesController(new FakeStoryService(), new FakeContentGuardrailService(), NullLogger<StoriesController>.Instance);
         ctrl.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -33,7 +34,8 @@ public class UC12_PostCommentReplyTests
             chapterService: new FakeChapterService(chapter),
             chapterVersionService: new FakeChapterVersionService(),
             scopeFactory: new FakeServiceScopeFactory(),
-            storyService: new FakeStoryService());
+            storyService: new FakeStoryService(),
+            contentGuardrail: new FakeContentGuardrailService());
 
         ctrl.ControllerContext = new ControllerContext
         {
@@ -56,65 +58,87 @@ public class UC12_PostCommentReplyTests
     }
 
     [Fact]
-    public void PostStoryComment_Unauthorized_WhenNoUserIdInToken()
+    public async Task PostStoryComment_Unauthorized_WhenNoUserIdInToken()
     {
         var ctrl = CreateStoriesController(userId: null);
-        var result = ctrl.AddStoryComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = "hi" });
+        var result = await ctrl.AddStoryComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = "hi" });
         Assert.IsType<UnauthorizedObjectResult>(result);
     }
 
     [Fact]
-    public void PostStoryComment_EmptyContent_ReturnsBadRequest()
+    public async Task PostStoryComment_EmptyContent_ReturnsBadRequest()
     {
         var ctrl = CreateStoriesController(userId: Guid.NewGuid());
-        var result = ctrl.AddStoryComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = "   " });
+        var result = await ctrl.AddStoryComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = "   " });
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Contains("không được để trống", bad.Value?.ToString() ?? "");
     }
 
     [Fact]
-    public void PostStoryComment_ContentTooLong_ReturnsBadRequest()
+    public async Task PostStoryComment_ContentTooLong_ReturnsBadRequest()
     {
         var ctrl = CreateStoriesController(userId: Guid.NewGuid());
         var longContent = new string('a', 2001);
-        var result = ctrl.AddStoryComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = longContent });
+        var result = await ctrl.AddStoryComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = longContent });
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Contains("2000", bad.Value?.ToString() ?? "");
     }
 
     [Fact]
-    public void PostChapterComment_Unauthorized_WhenNoUserIdInToken()
+    public async Task PostChapterComment_Unauthorized_WhenNoUserIdInToken()
     {
         var ctrl = CreateChaptersController(userId: null, chapter: null);
-        var result = ctrl.AddChapterComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = "hi" });
+        var result = await ctrl.AddChapterComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = "hi" });
         Assert.IsType<UnauthorizedObjectResult>(result);
     }
 
     [Fact]
-    public void PostChapterComment_EmptyContent_ReturnsBadRequest()
+    public async Task PostChapterComment_EmptyContent_ReturnsBadRequest()
     {
         var ctrl = CreateChaptersController(userId: Guid.NewGuid(), chapter: null);
-        var result = ctrl.AddChapterComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = "  " });
+        var result = await ctrl.AddChapterComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = "  " });
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Contains("không được để trống", bad.Value?.ToString() ?? "");
     }
 
     [Fact]
-    public void PostChapterComment_ContentTooLong_ReturnsBadRequest()
+    public async Task PostChapterComment_ContentTooLong_ReturnsBadRequest()
     {
         var ctrl = CreateChaptersController(userId: Guid.NewGuid(), chapter: null);
         var longContent = new string('a', 2001);
-        var result = ctrl.AddChapterComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = longContent });
+        var result = await ctrl.AddChapterComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = longContent });
         var bad = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Contains("2000", bad.Value?.ToString() ?? "");
     }
 
     [Fact]
-    public void PostChapterComment_ChapterNotFound_ReturnsNotFound()
+    public async Task PostChapterComment_ChapterNotFound_ReturnsNotFound()
     {
         var ctrl = CreateChaptersController(userId: Guid.NewGuid(), chapter: null);
-        var result = ctrl.AddChapterComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = "hello" });
+        var result = await ctrl.AddChapterComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = "hello" });
         Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Theory]
+    [InlineData("this contains bannedword")]
+    [InlineData("có từ cấm trong câu")]
+    public async Task PostStoryComment_BannedWord_ReturnsBadRequest(string content)
+    {
+        var ctrl = CreateStoriesController(userId: Guid.NewGuid());
+        var result = await ctrl.AddStoryComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = content });
+        var bad = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Contains("không được phép", bad.Value?.ToString() ?? "");
+    }
+
+    [Theory]
+    [InlineData("bannedword in comment")]
+    [InlineData("từ cấm trong comment")]
+    public async Task PostChapterComment_BannedWord_ReturnsBadRequest(string content)
+    {
+        var ctrl = CreateChaptersController(userId: Guid.NewGuid(), chapter: null);
+        var result = await ctrl.AddChapterComment(Guid.NewGuid(), new CreateStoryCommentRequestDto { Content = content });
+        var bad = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Contains("không được phép", bad.Value?.ToString() ?? "");
     }
 
     [Fact]
@@ -123,6 +147,32 @@ public class UC12_PostCommentReplyTests
         var ctrl = CreateChaptersController(userId: null, chapter: null);
         var result = ctrl.GetChapterComments(Guid.NewGuid());
         Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    private sealed class FakeContentGuardrailService : IContentGuardrailService
+    {
+        public Task<GuardrailResult> CheckAsync(Guid storyId, string draftContent, System.Threading.CancellationToken cancellationToken = default)
+        {
+            var s = draftContent ?? string.Empty;
+            var isBanned = s.Contains("bannedword", StringComparison.OrdinalIgnoreCase)
+                           || s.Contains("cấm", StringComparison.OrdinalIgnoreCase);
+
+            return Task.FromResult(isBanned
+                ? new GuardrailResult
+                {
+                    Passed = false,
+                    Violations = new()
+                    {
+                        new GuardrailViolation
+                        {
+                            Type = "BannedWord",
+                            Message = "Nội dung chứa từ không được phép.",
+                            Quote = isBanned ? "bannedword/cấm" : null
+                        }
+                    }
+                }
+                : new GuardrailResult { Passed = true, Violations = new() });
+        }
     }
 
     private sealed class FakeStoryService : IStoryService

@@ -104,6 +104,7 @@ export function AuthorStoryManagement({ onBack }) {
     const [authorActivityItems, setAuthorActivityItems] = useState([]);
     const [authorActivityLoading, setAuthorActivityLoading] = useState(false);
     const [authorActivityError, setAuthorActivityError] = useState(null);
+    const [cancelWithdrawConfirm, setCancelWithdrawConfirm] = useState({ open: false, withdrawId: null });
     // Rút tiền: số dư ví, số coin nhập, trạng thái gửi
     const [withdrawBalance, setWithdrawBalance] = useState(null);
     const [withdrawAmount, setWithdrawAmount] = useState('');
@@ -113,6 +114,27 @@ export function AuthorStoryManagement({ onBack }) {
     const [selectedBankAccountIdx, setSelectedBankAccountIdx] = useState(-1);
 
     // Danh sách ngân hàng (dùng cho form thêm tài khoản ngân hàng)
+    // PayOS payout batch yêu cầu `toBin` (Bank BIN). Ở dự án này ta ánh xạ theo BIN 6 chữ số theo ngân hàng.
+    // Nếu BIN không có trong map thì bạn vẫn có thể nhập thủ công ở ô Bank BIN/toBin.
+    const BANK_BIN_MAP = {
+        Vietcombank: '970436',
+        VietinBank: '970415',
+        BIDV: '970418',
+        Agribank: '970405',
+        'Techcombank': '970407',
+        'MB Bank': '970422',
+        ACB: '970416',
+        Sacombank: '970403',
+        VPBank: '970432',
+        TPBank: '970423',
+        SHB: '970443',
+        HDBank: '970437',
+        OCB: '970448',
+        VIB: '970441',
+        Eximbank: '970431',
+        // MSB: chưa map mặc định (cần nhập thủ công nếu PayOS yêu cầu).
+    };
+
     const BANK_OPTIONS = [
         'Vietcombank',
         'VietinBank',
@@ -132,25 +154,36 @@ export function AuthorStoryManagement({ onBack }) {
         'MSB',
     ];
 
+    // UC-60: 100 coin = 10,000 VND => 1 coin = 100 VND
+    const COIN_RATE_VND = 100;
+    const MIN_WITHDRAW_VND = 50_000;
+    const MIN_WITHDRAW_COINS = Math.floor(MIN_WITHDRAW_VND / COIN_RATE_VND); // 500
+
+    const formatVnd = (vnd) => {
+        try {
+            return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(vnd || 0);
+        } catch {
+            return `${vnd || 0} VND`;
+        }
+    };
+
     // Form "Thêm tài khoản ngân hàng" (tách khỏi phần rút tiền)
     const [bankName, setBankName] = useState('');
+    const [bankBin, setBankBin] = useState(''); // PayOS toBin (BIN ngân hàng đích)
     const [accountNumber, setAccountNumber] = useState('');
     const [accountHolderName, setAccountHolderName] = useState('');
     const [branchName, setBranchName] = useState('');
-    const [isBankVerified, setIsBankVerified] = useState(true); // demo UI
+    const [isBankVerified, setIsBankVerified] = useState(true);
 
-    // Danh sách tài khoản ngân hàng (demo)
-    const [bankAccounts, setBankAccounts] = useState([
-        {
-            user_id: authorId || 'me',
-            bank_name: 'Vietcombank',
-            account_number: '0123456789',
-            account_holder_name: userDisplayName?.toUpperCase?.() ? userDisplayName.toUpperCase() : userDisplayName,
-            branch_name: 'CN TP.HCM',
-            is_verified: true,
-            updated_at: new Date().toISOString(),
-        },
-    ]);
+    // Auto-fill toBin when bank changes (if mapping exists).
+    useEffect(() => {
+        const mapped = BANK_BIN_MAP[bankName];
+        if (mapped) setBankBin(mapped);
+        else setBankBin((prev) => prev || '');
+    }, [bankName]);
+
+    // Danh sách tài khoản ngân hàng (load từ backend)
+    const [bankAccounts, setBankAccounts] = useState([]);
 
     const maskAccountNumber = (value) => {
         const s = String(value || '').replace(/\s+/g, '');
@@ -171,13 +204,16 @@ export function AuthorStoryManagement({ onBack }) {
     const buildBankInfoStringFromAccount = (acc) => {
         if (!acc) return null;
         const bn = String(acc.bank_name || '').trim();
-        const an = String(acc.account_number || '').trim();
+        const bb = String(acc.bank_bin || '').trim();
+        // PayOS toAccountNumber should be digits only; remove whitespace safely.
+        const an = String(acc.account_number || '').replace(/[^\d]/g, '').trim();
         const ah = String(acc.account_holder_name || '').trim();
         const br = String(acc.branch_name || '').trim();
         const verified = !!acc.is_verified;
         if (!bn || !an || !ah) return null;
         return [
             `bank_name=${bn}`,
+            `bank_bin=${bb || ''}`,
             `account_number=${an}`,
             `account_holder_name=${ah}`,
             `branch_name=${br || '-'}`,
@@ -288,24 +324,97 @@ export function AuthorStoryManagement({ onBack }) {
     }, [loadStories]);
 
     useEffect(() => {
-        if (activeView !== 'history' || !authorId) return;
-        setAuthorActivityLoading(true);
-        setAuthorActivityError(null);
-        coinApi.getAuthorActivity({ page: 1, pageSize: 100 })
-            .then((res) => {
+        const shouldPoll = activeView === 'history' || activeView === 'withdraw';
+        if (!shouldPoll || !authorId) return;
+
+        let cancelled = false;
+        let inFlight = false;
+        let didInitialLoad = false;
+
+        const fetchActivity = async ({ silent } = { silent: false }) => {
+            if (inFlight) return;
+            inFlight = true;
+            try {
+                if (!silent) {
+                    setAuthorActivityLoading(true);
+                    setAuthorActivityError(null);
+                }
+
+                const res = await coinApi.getAuthorActivity({ page: 1, pageSize: 100 });
+                if (cancelled) return;
+
                 if (res?.success && res?.data?.items) {
                     setAuthorActivityItems(res.data.items);
                 } else {
-                    setAuthorActivityItems([]);
-                    if (!res?.success) setAuthorActivityError(res?.message ?? 'Không tải được lịch sử.');
+                    if (!silent) {
+                        setAuthorActivityItems([]);
+                        if (!res?.success) setAuthorActivityError(res?.message ?? 'Không tải được lịch sử.');
+                    }
                 }
-            })
-            .catch(() => {
-                setAuthorActivityItems([]);
-                setAuthorActivityError('Không tải được lịch sử donate và rút tiền.');
-            })
-            .finally(() => setAuthorActivityLoading(false));
+            } catch (e) {
+                if (!cancelled && !silent) {
+                    setAuthorActivityItems([]);
+                    setAuthorActivityError('Không tải được lịch sử donate và rút tiền.');
+                }
+            } finally {
+                if (!cancelled) {
+                    inFlight = false;
+                    if (!silent) setAuthorActivityLoading(false);
+                    didInitialLoad = true;
+                }
+            }
+        };
+
+        // Initial load
+        fetchActivity({ silent: false });
+
+        // Poll while user is viewing history/withdraw, so PROCESSING -> COMPLETED/FAILED updates automatically.
+        const intervalMs = 10000; // 10s
+        const id = setInterval(() => {
+            if (cancelled) return;
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+            // After first load, poll silently to avoid loading spinner flicker.
+            fetchActivity({ silent: didInitialLoad });
+        }, intervalMs);
+
+        return () => {
+            cancelled = true;
+            clearInterval(id);
+        };
     }, [activeView, authorId]);
+
+    const handleCancelWithdraw = (withdrawId) => {
+        if (!withdrawId) return;
+        setCancelWithdrawConfirm({ open: true, withdrawId });
+    };
+
+    const handleConfirmCancelWithdraw = async () => {
+        const withdrawId = cancelWithdrawConfirm.withdrawId;
+        setCancelWithdrawConfirm({ open: false, withdrawId: null });
+        if (!withdrawId) return;
+
+        setAuthorActivityLoading(true);
+        setAuthorActivityError(null);
+        try {
+            const res = await coinApi.cancelWithdrawRequest(withdrawId);
+            if (!res?.success) {
+                setAuthorActivityError(res?.message ?? 'Không thể hủy yêu cầu rút tiền.');
+                return;
+            }
+
+            showToast('Đã hủy yêu cầu rút tiền.', 'success');
+
+            // Refresh wallet + history for current screen.
+            const w = await coinApi.getMyWallet();
+            if (w?.success && w?.data) {
+                setWithdrawBalance(w.data.incomeBalance ?? w.data.income_balance ?? 0);
+            }
+            const ar = await coinApi.getAuthorActivity({ page: 1, pageSize: 100 });
+            if (ar?.success && ar?.data?.items) setAuthorActivityItems(ar.data.items);
+        } finally {
+            setAuthorActivityLoading(false);
+        }
+    };
 
     useEffect(() => {
         if (activeView !== 'withdraw' || !authorId) return;
@@ -321,6 +430,37 @@ export function AuthorStoryManagement({ onBack }) {
                 }
             })
             .catch(() => setWithdrawBalance(0));
+    }, [activeView, authorId]);
+
+    // Load author bank accounts from backend (remove demo data)
+    useEffect(() => {
+        if ((activeView !== 'bank-accounts' && activeView !== 'withdraw') || !authorId) return;
+
+        coinApi.getAuthorBankAccounts()
+            .then((res) => {
+                if (!res?.success) throw new Error(res?.message ?? 'Không tải được tài khoản ngân hàng.');
+
+                const items = res?.data ?? [];
+                const normalized = Array.isArray(items)
+                    ? items.map((acc) => ({
+                        ...acc,
+                        bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
+                        account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
+                        account_holder_name: acc.account_holder_name ?? '',
+                        branch_name: acc.branch_name ?? '',
+                        is_verified: !!acc.is_verified,
+                    }))
+                    : [];
+
+                setBankAccounts(normalized);
+
+                const verified = normalized.filter((a) => !!a.is_verified);
+                setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
+            })
+            .catch((err) => {
+                setBankAccounts([]);
+                setSelectedBankAccountIdx(-1);
+            });
     }, [activeView, authorId]);
 
     /** Real-time: refetch danh sách truyện khi tab đang hiển thị (moderator duyệt/từ chối → trạng thái truyện thay đổi). */
@@ -1182,6 +1322,9 @@ export function AuthorStoryManagement({ onBack }) {
                                     <span style={{ fontSize: '1.75rem', fontWeight: 700, color: '#15803d', letterSpacing: '-0.02em' }}>{withdrawBalance != null ? Number(withdrawBalance).toLocaleString() : '—'}</span>
                                     <span style={{ fontSize: '0.875rem', color: '#166534', fontWeight: 500 }}>coin</span>
                                 </div>
+                                <div style={{ fontSize: '0.8125rem', color: '#166534', marginTop: '0.5rem' }}>
+                                    ≈ {withdrawBalance != null ? formatVnd(Number(withdrawBalance) * COIN_RATE_VND) : '—'}
+                                </div>
                             </div>
 
                             <div style={{
@@ -1208,21 +1351,21 @@ export function AuthorStoryManagement({ onBack }) {
                                     </div>
                                     <div style={{ flex: 1 }}>
                                         <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#9a3412', marginBottom: '0.25rem' }}>
-                                            Phí nền tảng 30% - Bạn nhận 70%
+                                            Phí nền tảng 0% - Bạn nhận 100%
                                         </div>
                                         <div style={{ fontSize: '0.8125rem', color: '#7c2d12', lineHeight: 1.5 }}>
-                                            Mỗi lần donate, nền tảng giữ <b>30%</b> phí. Phần <b>70%</b> còn lại được cộng vào <b>income balance</b> và là số coin bạn có thể rút ở đây.
+                                            Khi rút tiền, hệ thống không tính thêm phí. Toàn bộ <b>income balance</b> sẽ được chuyển cho bạn.
                                         </div>
                                         <div style={{ marginTop: '0.75rem' }}>
                                             <div style={{
                                                 height: '10px',
                                                 borderRadius: '9999px',
-                                                background: 'linear-gradient(90deg, #13ec5b 0%, #13ec5b 70%, #f59e0b 70%, #f59e0b 100%)',
-                                                border: '1px solid #fde68a'
+                                                background: 'linear-gradient(90deg, #13ec5b 0%, #13ec5b 100%)',
+                                                border: '1px solid #bbf7d0'
                                             }} />
                                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#7c2d12', marginTop: '0.4rem' }}>
-                                                <span>70% bạn nhận</span>
-                                                <span>30% nền tảng</span>
+                                                <span>100% bạn nhận</span>
+                                                <span>0% nền tảng</span>
                                             </div>
                                         </div>
                                     </div>
@@ -1302,7 +1445,7 @@ export function AuthorStoryManagement({ onBack }) {
                                     <input
                                         type="number"
                                         placeholder="0"
-                                        min={1}
+                                        min={MIN_WITHDRAW_COINS}
                                         max={withdrawBalance != null ? withdrawBalance : undefined}
                                         value={withdrawAmount}
                                         onChange={(e) => setWithdrawAmount(e.target.value.replace(/[^0-9]/g, '') || '')}
@@ -1328,10 +1471,12 @@ export function AuthorStoryManagement({ onBack }) {
                                     type="button"
                                     disabled={
                                         withdrawSubmitting ||
+                                        withdrawBalance == null ||
                                         !withdrawAmount ||
                                         !selectedBankAccount ||
+                                        !selectedBankAccount?.bank_bin ||
                                         (withdrawBalance != null && Number(withdrawAmount) > withdrawBalance) ||
-                                        Number(withdrawAmount) < 1
+                                        Number(withdrawAmount) < MIN_WITHDRAW_COINS
                                     }
                                     style={{
                                         padding: '0.625rem 1.5rem',
@@ -1342,7 +1487,7 @@ export function AuthorStoryManagement({ onBack }) {
                                         fontWeight: 600,
                                         color: '#ffffff',
                                         cursor: withdrawSubmitting ? 'not-allowed' : 'pointer',
-                                        opacity: (withdrawSubmitting || !withdrawAmount || (withdrawBalance != null && Number(withdrawAmount) > withdrawBalance)) ? 0.6 : 1,
+                                        opacity: (withdrawSubmitting || !withdrawAmount || withdrawBalance == null || (withdrawBalance != null && Number(withdrawAmount) > withdrawBalance) || Number(withdrawAmount) < MIN_WITHDRAW_COINS) ? 0.6 : 1,
                                         boxShadow: '0 2px 8px rgba(19, 236, 91, 0.35)',
                                         transition: 'all 0.2s ease'
                                     }}
@@ -1350,7 +1495,14 @@ export function AuthorStoryManagement({ onBack }) {
                                     onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#13ec5b'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(19, 236, 91, 0.35)'; }}
                                     onClick={async () => {
                                         const amount = Number(withdrawAmount);
-                                        if (!amount || amount < 1) return;
+                                        if (!amount || amount < MIN_WITHDRAW_COINS) {
+                                            setWithdrawError('Minimum withdrawal amount is 50,000 VND.');
+                                            return;
+                                        }
+                                        if (!selectedBankAccount?.bank_bin) {
+                                            setWithdrawError('Vui lòng nhập Bank BIN/toBin cho tài khoản rút tiền.');
+                                            return;
+                                        }
                                         const bankInfo = buildBankInfoStringFromAccount(selectedBankAccount);
                                         if (!bankInfo) {
                                             setWithdrawError('Vui lòng chọn tài khoản ngân hàng hợp lệ.');
@@ -1406,7 +1558,7 @@ export function AuthorStoryManagement({ onBack }) {
                                         Danh sách tài khoản ngân hàng
                                     </h2>
                                     <p style={{ fontSize: '0.875rem', color: '#90A1B9', margin: '6px 0 0 0' }}>
-                                        Quản lý tài khoản nhận tiền và trạng thái xác thực (demo UI)
+                                        Quản lý tài khoản nhận tiền và trạng thái xác thực
                                     </p>
                                 </div>
                             </div>
@@ -1439,12 +1591,26 @@ export function AuthorStoryManagement({ onBack }) {
                                     </div>
                                     <div>
                                         <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                            Bank BIN (toBin)
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={bankBin}
+                                            onChange={(e) => setBankBin(e.target.value.replace(/[^\d]/g, ''))}
+                                            placeholder="Ví dụ: 970422"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
                                             Số tài khoản
                                         </label>
                                         <input
                                             type="text"
                                             value={accountNumber}
-                                            onChange={(e) => setAccountNumber(e.target.value.replace(/[^\d\s]/g, ''))}
+                                            onChange={(e) => setAccountNumber(e.target.value.replace(/[^\d]/g, ''))}
                                             placeholder="Nhập số tài khoản"
                                             style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
                                             onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
@@ -1482,7 +1648,7 @@ export function AuthorStoryManagement({ onBack }) {
                                     <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                         <input id="bank-verified-list" type="checkbox" checked={isBankVerified} onChange={(e) => setIsBankVerified(e.target.checked)} />
                                         <label htmlFor="bank-verified-list" style={{ fontSize: '0.8125rem', color: '#64748b' }}>
-                                            Đã xác thực (demo)
+                                            Đã xác thực
                                         </label>
                                     </div>
                                 </div>
@@ -1490,32 +1656,56 @@ export function AuthorStoryManagement({ onBack }) {
                                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
                                     <button
                                         type="button"
-                                        onClick={() => {
+                                        onClick={async () => {
                                             const bn = bankName.trim();
+                                            const bb = bankBin.trim();
                                             const an = accountNumber.trim();
                                             const ah = accountHolderName.trim();
-                                            if (!bn || !an || !ah) {
-                                                showToast('Vui lòng nhập đủ: Ngân hàng, Số tài khoản, Chủ tài khoản.', 'error');
+                                            if (!bn || !bb || !an || !ah) {
+                                                showToast('Vui lòng nhập đủ: Ngân hàng, Bank BIN/toBin, Số tài khoản, Chủ tài khoản.', 'error');
                                                 return;
                                             }
-                                            setBankAccounts((list) => [
-                                                {
-                                                    user_id: authorId || 'me',
-                                                    bank_name: bn,
-                                                    account_number: an,
-                                                    account_holder_name: ah,
-                                                    branch_name: branchName.trim(),
-                                                    is_verified: isBankVerified,
-                                                    updated_at: new Date().toISOString(),
-                                                },
-                                                ...list,
-                                            ]);
+
+                                            const res = await coinApi.upsertAuthorBankAccount({
+                                                bankName: bn,
+                                                bankBin: bb,
+                                                accountNumber: an,
+                                                accountHolderName: ah,
+                                                branchName: branchName.trim(),
+                                                isVerified: isBankVerified,
+                                            });
+
+                                            if (!res?.success) {
+                                                showToast(res?.message ?? 'Không thể thêm tài khoản ngân hàng.', 'error');
+                                                return;
+                                            }
+
                                             setBankName('');
+                                            setBankBin('');
                                             setAccountNumber('');
                                             setAccountHolderName('');
                                             setBranchName('');
                                             setIsBankVerified(true);
-                                            showToast('Đã thêm tài khoản ngân hàng (demo).', 'success');
+                                            showToast('Đã thêm tài khoản ngân hàng.', 'success');
+
+                                            // Refresh list
+                                            const r = await coinApi.getAuthorBankAccounts();
+                                            if (r?.success) {
+                                                const items = r?.data ?? [];
+                                                const normalized = Array.isArray(items)
+                                                    ? items.map((acc) => ({
+                                                        ...acc,
+                                                        bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
+                                                        account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
+                                                        account_holder_name: acc.account_holder_name ?? '',
+                                                        branch_name: acc.branch_name ?? '',
+                                                        is_verified: !!acc.is_verified,
+                                                    }))
+                                                    : [];
+                                                setBankAccounts(normalized);
+                                                const verified = normalized.filter((a) => !!a.is_verified);
+                                                setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
+                                            }
                                         }}
                                         style={{
                                             padding: '0.625rem 1.25rem',
@@ -1586,15 +1776,33 @@ export function AuthorStoryManagement({ onBack }) {
                                                         <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
                                                             <button
                                                                 type="button"
-                                                                onClick={() => {
-                                                                    setBankAccounts((list) =>
-                                                                        list.map((x, i) =>
-                                                                            i === idx
-                                                                                ? { ...x, is_verified: !x.is_verified, updated_at: new Date().toISOString() }
-                                                                                : x
-                                                                        )
-                                                                    );
-                                                                    showToast(acc.is_verified ? 'Đã huỷ xác thực (demo).' : 'Đã xác thực (demo).', 'success');
+                                                                onClick={async () => {
+                                                                    const nextVerified = !acc.is_verified;
+                                                                    const res = await coinApi.verifyAuthorBankAccount({ isVerified: nextVerified });
+                                                                    if (!res?.success) {
+                                                                        showToast(res?.message ?? 'Không thể cập nhật trạng thái xác thực.', 'error');
+                                                                        return;
+                                                                    }
+
+                                                                    showToast(nextVerified ? 'Đã xác thực.' : 'Đã huỷ xác thực.', 'success');
+
+                                                                    const r = await coinApi.getAuthorBankAccounts();
+                                                                    if (r?.success) {
+                                                                        const items = r?.data ?? [];
+                                                                        const normalized = Array.isArray(items)
+                                                                            ? items.map((acc) => ({
+                                                                                ...acc,
+                                                                                bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
+                                                                                account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
+                                                                                account_holder_name: acc.account_holder_name ?? '',
+                                                                                branch_name: acc.branch_name ?? '',
+                                                                                is_verified: !!acc.is_verified,
+                                                                            }))
+                                                                            : [];
+                                                                        setBankAccounts(normalized);
+                                                                        const verified = normalized.filter((a) => !!a.is_verified);
+                                                                        setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
+                                                                    }
                                                                 }}
                                                                 style={{
                                                                     padding: '0.45rem 0.75rem',
@@ -1611,10 +1819,31 @@ export function AuthorStoryManagement({ onBack }) {
                                                             </button>
                                                             <button
                                                                 type="button"
-                                                                onClick={() => {
+                                                                onClick={async () => {
                                                                     if (!window.confirm('Xoá tài khoản ngân hàng này?')) return;
-                                                                    setBankAccounts((list) => list.filter((_, i) => i !== idx));
-                                                                    showToast('Đã xoá tài khoản (demo).', 'success');
+                                                                    const res = await coinApi.deleteAuthorBankAccount();
+                                                                    if (!res?.success) {
+                                                                        showToast(res?.message ?? 'Không thể xoá tài khoản ngân hàng.', 'error');
+                                                                        return;
+                                                                    }
+                                                                    showToast('Đã xoá tài khoản ngân hàng.', 'success');
+                                                                    const r = await coinApi.getAuthorBankAccounts();
+                                                                    if (r?.success) {
+                                                                        const items = r?.data ?? [];
+                                                                        const normalized = Array.isArray(items)
+                                                                            ? items.map((acc) => ({
+                                                                                ...acc,
+                                                                                bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
+                                                                                account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
+                                                                                account_holder_name: acc.account_holder_name ?? '',
+                                                                                branch_name: acc.branch_name ?? '',
+                                                                                is_verified: !!acc.is_verified,
+                                                                            }))
+                                                                            : [];
+                                                                        setBankAccounts(normalized);
+                                                                        const verified = normalized.filter((a) => !!a.is_verified);
+                                                                        setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
+                                                                    }
                                                                 }}
                                                                 style={{
                                                                     padding: '0.45rem 0.75rem',
@@ -1745,25 +1974,78 @@ export function AuthorStoryManagement({ onBack }) {
                                                 const timeStr = createdAt ? new Date(createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
                                                 const typeLabel = (item.type || item.Type) === 'WITHDRAW' ? 'Rút tiền' : 'Donate';
                                                 const amount = item.amount ?? item.Amount ?? 0;
-                                                // DONATE: nền tảng giữ 30% phí => author nhận net = amount - floor(amount * 0.3)
-                                                // WITHDRAW: lượng coin rút thực tế chính là amount (đã là phần author nhận từ trước).
-                                                const netReceived = (item.type || item.Type) === 'WITHDRAW'
-                                                    ? Number(amount)
+                                                const isWithdraw = (item.type || item.Type) === 'WITHDRAW';
+                                                const withdrawStatusRaw = item.withdrawStatus ?? item.WithdrawStatus;
+                                                const statusUpper = String(withdrawStatusRaw ?? '').toUpperCase();
+
+                                                // DONATE: author nhận net = amount - floor(amount * 0.3)
+                                                const netReceived = isWithdraw
+                                                    ? (statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? Number(amount) : 0)
                                                     : Math.max(0, Number(amount) - Math.floor(Number(amount) * 0.3));
-                                                const note = (item.type || item.Type) === 'DONATE'
-                                                    ? (item.senderDisplayName ?? item.SenderDisplayName ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}` : (item.note ?? item.Note) || '—')
-                                                    : (item.withdrawStatus ?? item.WithdrawStatus) === 'PENDING' ? 'Chờ xử lý' : (item.note ?? item.Note) || (item.withdrawStatus ?? item.WithdrawStatus) || '—';
+
+                                                const statusLabel =
+                                                    statusUpper === 'PENDING' ? 'Chờ xử lý' :
+                                                        statusUpper === 'PENDING_REVIEW' ? 'Chờ xét duyệt' :
+                                                            statusUpper === 'PROCESSING' ? 'Đang xử lý' :
+                                                                statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? 'Hoàn thành' :
+                                                                    statusUpper === 'FAILED' ? 'Thất bại' :
+                                                                        statusUpper === 'CANCELLED' ? 'Đã hủy' :
+                                                                            statusUpper || '—';
+
+                                                const note = isWithdraw
+                                                    ? (['PENDING', 'PENDING_REVIEW', 'PROCESSING'].includes(statusUpper)
+                                                        ? statusLabel
+                                                        : (item.note ?? item.Note) || statusLabel)
+                                                    : (item.senderDisplayName ?? item.SenderDisplayName
+                                                        ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}`
+                                                        : (item.note ?? item.Note) || '—');
+
+                                                const canCancelWithdraw = isWithdraw && (statusUpper === 'PENDING' || statusUpper === 'PENDING_REVIEW');
+
+                                                const vndAmount = Number(amount) * COIN_RATE_VND;
+                                                const vndNet = netReceived * COIN_RATE_VND;
                                                 return (
                                                     <tr key={item.id ?? item.Id} style={{ borderBottom: '1px solid #e5e7eb' }}>
                                                         <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{timeStr}</td>
                                                         <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{typeLabel}</td>
                                                         <td style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: (item.type || item.Type) === 'WITHDRAW' ? '#dc2626' : '#15803d' }}>
-                                                            {(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin
+                                                            <div>
+                                                                {(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin
+                                                            </div>
+                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndAmount)}</div>
                                                         </td>
                                                         <td style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 700, color: (item.type || item.Type) === 'WITHDRAW' ? '#b91c1c' : '#16a34a' }}>
-                                                            {(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(netReceived).toLocaleString()} coin
+                                                            <div>
+                                                                {isWithdraw ? (netReceived > 0 ? `+${Number(netReceived).toLocaleString()}` : '—') : `+${Number(netReceived).toLocaleString()}`} coin
+                                                            </div>
+                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                                                {isWithdraw ? (netReceived > 0 ? `≈ ${formatVnd(vndNet)}` : '—') : `≈ ${formatVnd(vndNet)}`}
+                                                            </div>
                                                         </td>
-                                                        <td style={{ padding: '1rem 1.25rem', color: '#64748b', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</td>
+                                                        <td style={{ padding: '1rem 1.25rem', color: '#64748b', maxWidth: '280px' }}>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</div>
+                                                                {canCancelWithdraw && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleCancelWithdraw(item.id ?? item.Id)}
+                                                                        style={{
+                                                                            alignSelf: 'flex-start',
+                                                                            padding: '0.35rem 0.75rem',
+                                                                            borderRadius: '10px',
+                                                                            border: '1px solid #fecaca',
+                                                                            backgroundColor: '#fef2f2',
+                                                                            color: '#b91c1c',
+                                                                            fontSize: '0.75rem',
+                                                                            fontWeight: 700,
+                                                                            cursor: 'pointer'
+                                                                        }}
+                                                                    >
+                                                                        Hủy
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </td>
                                                     </tr>
                                                 );
                                             })
@@ -2374,6 +2656,76 @@ export function AuthorStoryManagement({ onBack }) {
                                 }}
                             >
                                 Xóa
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Popup xác nhận hủy yêu cầu rút tiền */}
+            {cancelWithdrawConfirm.open && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10000
+                    }}
+                    onClick={() => setCancelWithdrawConfirm({ open: false, withdrawId: null })}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '420px',
+                            width: '90%',
+                            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#1e293b', margin: '0 0 1rem 0' }}>
+                            Xác nhận hủy yêu cầu rút tiền
+                        </h3>
+                        <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
+                            Bạn có chắc chắn muốn hủy yêu cầu rút tiền này không?
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => setCancelWithdrawConfirm({ open: false, withdrawId: null })}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#64748b',
+                                    backgroundColor: '#f1f5f9',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Không, giữ nguyên
+                            </button>
+                            <button
+                                onClick={handleConfirmCancelWithdraw}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#ffffff',
+                                    backgroundColor: '#dc2626',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Có, hủy yêu cầu
                             </button>
                         </div>
                     </div>

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
@@ -26,6 +26,18 @@ public partial class withdraw_requests
     public DateTime? processed_at { get; set; }
 
     public Guid? processed_by { get; set; }
+
+    public bool? is_suspected_fraud { get; set; }
+
+    public decimal? risk_score { get; set; }
+
+    public string? risk_flags { get; set; }
+
+    public string? risk_reason { get; set; }
+
+    public Guid? reviewed_by { get; set; }
+
+    public DateTime? reviewed_at { get; set; }
 
     public virtual users? author { get; set; }
 

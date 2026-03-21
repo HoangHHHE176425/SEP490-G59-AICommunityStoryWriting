@@ -82,6 +82,8 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<review_assignments> review_assignments { get; set; }
 
+    public virtual DbSet<review_escalation_requests> review_escalation_requests { get; set; }
+
     public virtual DbSet<stories> stories { get; set; }
 
     public virtual DbSet<story_character_memory> story_character_memory { get; set; }
@@ -121,7 +123,7 @@ public partial class StoryPlatformDbContext : DbContext
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer(
-                "Server= localhost;uid=sa;password=a123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                     maxRetryCount: 5,
                     maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -346,6 +348,7 @@ public partial class StoryPlatformDbContext : DbContext
                 .HasDefaultValue("DRAFT");
             entity.Property(e => e.title).HasMaxLength(255);
             entity.Property(e => e.updated_at).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.submitted_for_review_at).HasColumnType("datetime2");
             entity.Property(e => e.word_count).HasDefaultValue(0);
 
             entity.HasOne(d => d.story).WithMany(p => p.chapters)
@@ -702,6 +705,31 @@ public partial class StoryPlatformDbContext : DbContext
                 .HasConstraintName("FK_reviewassign_user");
         });
 
+        modelBuilder.Entity<review_escalation_requests>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("PK_review_escalation_requests");
+
+            entity.HasIndex(e => new { e.target_type, e.target_id, e.status }, "IX_review_escalation_target_status");
+
+            entity.Property(e => e.id).HasDefaultValueSql("(newid())");
+            entity.Property(e => e.target_type).HasMaxLength(30);
+            entity.Property(e => e.request_kind).HasMaxLength(40);
+            entity.Property(e => e.reason).HasMaxLength(4000);
+            entity.Property(e => e.status).HasMaxLength(20);
+            entity.Property(e => e.resolver_note).HasMaxLength(2000);
+            entity.Property(e => e.created_at).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne<users>().WithMany()
+                .HasForeignKey(d => d.sender_id)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_review_sender");
+
+            entity.HasOne<users>().WithMany()
+                .HasForeignKey(d => d.resolver_id)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_review_resolver");
+        });
+
         modelBuilder.Entity<stories>(entity =>
         {
             entity.HasKey(e => e.id).HasName("PK__stories__3213E83F02458C4B");
@@ -728,6 +756,7 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.total_favorites).HasDefaultValue(0);
             entity.Property(e => e.total_views).HasDefaultValue(0L);
             entity.Property(e => e.updated_at).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.submitted_for_review_at).HasColumnType("datetime2");
             entity.Property(e => e.word_count).HasDefaultValue(0);
 
             entity.HasOne(d => d.author).WithMany(p => p.stories)

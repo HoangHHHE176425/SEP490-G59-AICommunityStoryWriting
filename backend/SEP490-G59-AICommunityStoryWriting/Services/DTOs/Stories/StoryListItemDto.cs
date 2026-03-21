@@ -38,16 +38,19 @@ namespace Services.DTOs.Stories
         /// <summary>Trong queue moderator: thời điểm nhận duyệt.</summary>
         public DateTime? ClaimedAt { get; set; }
 
+        /// <summary>Có đơn báo cáo lên admin đang chờ xử lý — moderator đang nhận duyệt không được duyệt/từ chối đến khi admin xử lý.</summary>
+        public bool HasPendingEscalation { get; set; }
+
         /// <summary>Lý do từ chối (lịch sử từ chối; có thể có ngay cả khi story hiện đã PUBLISHED).</summary>
         public string? RejectionReason { get; set; }
         /// <summary>Thời điểm moderator từ chối (lịch sử từ chối).</summary>
         public DateTime? RejectedAt { get; set; }
 
-        /// <summary>Admin: thời điểm gửi duyệt (dùng updated_at khi PENDING_REVIEW).</summary>
+        /// <summary>Mốc tác giả gửi duyệt (submitted_for_review_at; fallback ước lượng nếu dữ liệu cũ).</summary>
         public DateTime? PendingSince { get; set; }
-        /// <summary>Admin: hạn duyệt (PendingSince + 7 ngày, có thể gia hạn).</summary>
+        /// <summary>Moderator queue: không dùng (null). Mức SLA theo <see cref="PendingSince"/> + <see cref="TimeStatus"/>.</summary>
         public DateTime? DeadlineAt { get; set; }
-        /// <summary>Admin: trạng thái thời hạn duyệt — OnTime, Warning, Overdue.</summary>
+        /// <summary>Mức ưu tiên theo thời gian đã chờ kể từ mốc gửi: OnTime (&lt;2 ngày), Warning (≥2), Critical (≥4), Overdue (≥7).</summary>
         public string? TimeStatus { get; set; }
         /// <summary>Admin: thời điểm moderator duyệt/từ chối.</summary>
         public DateTime? ReviewedAt { get; set; }

@@ -1,3 +1,4 @@
+using System.Linq;
 using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -105,37 +106,114 @@ namespace DataAccessObjects.DAOs
             return result;
         }
 
-        /// <summary>Lấy trang log kiểm duyệt (Admin) với bộ lọc. Trả về danh sách entity để controller map sang DTO và điền title/moderator name.</summary>
-        public static (List<moderation_logs> Logs, int TotalCount) GetModerationLogsPage(Guid? moderatorId, DateTime? dateFrom, DateTime? dateTo, string? action, string? targetType, int page, int pageSize)
+        /// <summary>Log kiểm duyệt (Admin): lọc, tìm kiếm, sắp xếp, phân trang — theo dõi hoạt động moderator.</summary>
+        public static (List<moderation_logs> Logs, int TotalCount) SearchModerationLogsPage(
+            string? search,
+            Guid? moderatorId,
+            DateTime? dateFrom,
+            DateTime? dateTo,
+            string? action,
+            string? targetType,
+            Guid? targetId,
+            int? processingTimeMinMs,
+            int? processingTimeMaxMs,
+            string? sortBy,
+            string? sortOrder,
+            int page,
+            int pageSize)
         {
             using var context = new StoryPlatformDbContext();
-            var query = context.moderation_logs.AsNoTracking().Where(m => true);
+            var query = context.moderation_logs.AsNoTracking().AsQueryable();
+
             if (moderatorId.HasValue)
                 query = query.Where(m => m.moderator_id == moderatorId.Value);
+
             if (dateFrom.HasValue)
                 query = query.Where(m => m.created_at >= dateFrom.Value);
+
             if (dateTo.HasValue)
                 query = query.Where(m => m.created_at <= dateTo.Value);
+
             var actionUpper = (action ?? "").Trim().ToUpperInvariant();
-            var targetTypeUpper = (targetType ?? "").Trim().ToUpperInvariant();
             if (!string.IsNullOrEmpty(actionUpper))
                 query = query.Where(m => m.action != null && m.action.ToUpper() == actionUpper);
+
+            var targetTypeUpper = (targetType ?? "").Trim().ToUpperInvariant();
             if (!string.IsNullOrEmpty(targetTypeUpper))
                 query = query.Where(m => m.target_type != null && m.target_type.ToUpper() == targetTypeUpper);
 
+            if (targetId.HasValue)
+                query = query.Where(m => m.target_id == targetId.Value);
+
+            if (processingTimeMinMs.HasValue)
+                query = query.Where(m => m.processing_time_ms != null && m.processing_time_ms >= processingTimeMinMs.Value);
+
+            if (processingTimeMaxMs.HasValue)
+                query = query.Where(m => m.processing_time_ms != null && m.processing_time_ms <= processingTimeMaxMs.Value);
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var s = search.Trim();
+                if (long.TryParse(s, out var logId))
+                {
+                    query = query.Where(m => m.id == logId);
+                }
+                else if (Guid.TryParse(s, out var g))
+                {
+                    query = query.Where(m => m.moderator_id == g || m.target_id == g);
+                }
+                else
+                {
+                    var ttStory = ReviewAssignmentDAO.TargetTypeStory;
+                    var ttChapter = ReviewAssignmentDAO.TargetTypeChapter;
+                    query = query.Where(m =>
+                        (m.rejection_reason != null && m.rejection_reason.Contains(s)) ||
+                        (m.target_type == ttStory && m.target_id.HasValue &&
+                         context.stories.Any(st => st.id == m.target_id && st.title.Contains(s))) ||
+                        (m.target_type == ttChapter && m.target_id.HasValue &&
+                         context.chapters.Any(ch => ch.id == m.target_id && ch.title.Contains(s))));
+                }
+            }
+
             var total = query.Count();
-            var list = query
-                .OrderByDescending(m => m.created_at)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToList();
+
+            var sortAsc = string.Equals(sortOrder, "asc", StringComparison.OrdinalIgnoreCase);
+            IQueryable<moderation_logs> ordered;
+            if (string.Equals(sortBy, "id", StringComparison.OrdinalIgnoreCase))
+            {
+                ordered = sortAsc
+                    ? query.OrderBy(m => m.id)
+                    : query.OrderByDescending(m => m.id);
+            }
+            else if (string.Equals(sortBy, "processing_time_ms", StringComparison.OrdinalIgnoreCase))
+            {
+                ordered = sortAsc
+                    ? query.OrderBy(m => m.processing_time_ms ?? int.MaxValue).ThenBy(m => m.id)
+                    : query.OrderByDescending(m => m.processing_time_ms ?? -1).ThenByDescending(m => m.id);
+            }
+            else
+            {
+                ordered = sortAsc
+                    ? query.OrderBy(m => m.created_at).ThenBy(m => m.id)
+                    : query.OrderByDescending(m => m.created_at).ThenByDescending(m => m.id);
+            }
+
+            page = page < 1 ? 1 : page;
+            pageSize = pageSize is < 1 or > 100 ? 20 : pageSize;
+            var list = ordered.Skip((page - 1) * pageSize).Take(pageSize).ToList();
             return (list, total);
         }
 
-        /// <summary>Thống kê theo moderator: số APPROVED, REJECTED (Admin).</summary>
-        public static List<(Guid ModeratorId, int ApprovedCount, int RejectedCount)> GetModeratorPerformance(DateTime? dateFrom, DateTime? dateTo)
+        /// <summary>Thống kê theo moderator (APPROVED/REJECTED + breakdown STORY/CHAPTER) — dùng cho Moderator Performance (admin).</summary>
+        public static List<ModeratorPerformanceStatsRow> GetModeratorPerformanceAggregates(
+            DateTime? dateFrom,
+            DateTime? dateTo,
+            string? targetTypeFilter)
         {
             using var context = new StoryPlatformDbContext();
+            var ttStory = ReviewAssignmentDAO.TargetTypeStory;
+            var ttChapter = ReviewAssignmentDAO.TargetTypeChapter;
+
             var query = context.moderation_logs
                 .AsNoTracking()
                 .Where(m => m.moderator_id.HasValue && m.action != null &&
@@ -144,12 +222,47 @@ namespace DataAccessObjects.DAOs
                 query = query.Where(m => m.created_at >= dateFrom.Value);
             if (dateTo.HasValue)
                 query = query.Where(m => m.created_at <= dateTo.Value);
+            if (!string.IsNullOrWhiteSpace(targetTypeFilter))
+            {
+                var tt = targetTypeFilter.Trim().ToUpperInvariant();
+                query = query.Where(m => m.target_type != null && m.target_type.ToUpper() == tt);
+            }
 
             var grouped = query
                 .GroupBy(m => m.moderator_id!.Value)
-                .Select(g => new { ModeratorId = g.Key, Approved = g.Count(m => m.action != null && m.action.ToUpper() == "APPROVED"), Rejected = g.Count(m => m.action != null && m.action.ToUpper() == "REJECTED") })
+                .Select(g => new
+                {
+                    ModeratorId = g.Key,
+                    ApprovedCount = g.Count(m => m.action != null && m.action.ToUpper() == "APPROVED"),
+                    RejectedCount = g.Count(m => m.action != null && m.action.ToUpper() == "REJECTED"),
+                    StoryApprovedCount = g.Count(m => m.action != null && m.action.ToUpper() == "APPROVED" && m.target_type == ttStory),
+                    StoryRejectedCount = g.Count(m => m.action != null && m.action.ToUpper() == "REJECTED" && m.target_type == ttStory),
+                    ChapterApprovedCount = g.Count(m => m.action != null && m.action.ToUpper() == "APPROVED" && m.target_type == ttChapter),
+                    ChapterRejectedCount = g.Count(m => m.action != null && m.action.ToUpper() == "REJECTED" && m.target_type == ttChapter)
+                })
                 .ToList();
-            return grouped.Select(x => (x.ModeratorId, x.Approved, x.Rejected)).ToList();
+
+            return grouped.Select(x => new ModeratorPerformanceStatsRow
+            {
+                ModeratorId = x.ModeratorId,
+                ApprovedCount = x.ApprovedCount,
+                RejectedCount = x.RejectedCount,
+                StoryApprovedCount = x.StoryApprovedCount,
+                StoryRejectedCount = x.StoryRejectedCount,
+                ChapterApprovedCount = x.ChapterApprovedCount,
+                ChapterRejectedCount = x.ChapterRejectedCount
+            }).ToList();
         }
+    }
+
+    public sealed class ModeratorPerformanceStatsRow
+    {
+        public Guid ModeratorId { get; set; }
+        public int ApprovedCount { get; set; }
+        public int RejectedCount { get; set; }
+        public int StoryApprovedCount { get; set; }
+        public int StoryRejectedCount { get; set; }
+        public int ChapterApprovedCount { get; set; }
+        public int ChapterRejectedCount { get; set; }
     }
 }

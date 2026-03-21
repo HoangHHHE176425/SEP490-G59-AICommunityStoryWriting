@@ -569,50 +569,197 @@ namespace Services.Implementations
 
         public async Task<WithdrawRequestItemDto> CreateWithdrawRequestAsync(Guid authorUserId, int amountCoins, string? bankInfo, CancellationToken cancellationToken = default)
         {
+            const decimal CoinRateVnd = 100m; // 1 coin = 100 VND
+            const decimal MinWithdrawVnd = 50_000m;
+
             if (amountCoins <= 0)
                 throw new ArgumentOutOfRangeException(nameof(amountCoins), "Số coin rút phải lớn hơn 0.");
 
-            var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == authorUserId, cancellationToken);
-            if (wallet == null)
-                throw new InvalidOperationException("Ví không tồn tại. Vui lòng thử lại sau.");
+            if (string.IsNullOrWhiteSpace(bankInfo))
+                throw new InvalidOperationException("Vui lòng chọn tài khoản ngân hàng để rút tiền.");
 
-            var income = wallet.income_balance ?? 0m;
-            if (income < amountCoins)
-                throw new InvalidOperationException($"Thu nhập khả dụng không đủ. Hiện có {income} coin, yêu cầu {amountCoins} coin.");
+            var user = await _db.users.FirstOrDefaultAsync(u => u.id == authorUserId, cancellationToken);
+            if (user == null)
+                throw new InvalidOperationException("Không tìm thấy tài khoản tác giả.");
+            if (!string.Equals(user.status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Tài khoản tác giả không ở trạng thái ACTIVE.");
 
-            // Move from withdrawable income -> frozen while admin processes.
-            wallet.income_balance = income - amountCoins;
-            wallet.frozen_balance = (wallet.frozen_balance ?? 0m) + amountCoins;
-            wallet.updated_at = DateTime.UtcNow;
-
-            var req = new withdraw_requests
+            // Expected FE payload example:
+            // bank_name=Vietcombank | account_number=0123456789 | account_holder_name=... | branch_name=... | is_verified=1
+            string? Extract(string key)
             {
-                id = Guid.NewGuid(),
-                author_id = authorUserId,
-                amount_requested = amountCoins,
-                fee_amount = null,
-                bank_info_snapshot = string.IsNullOrWhiteSpace(bankInfo) ? "{}" : bankInfo.Trim(),
-                status = "PENDING",
-                admin_note = null,
-                transaction_proof_url = null,
-                created_at = DateTime.UtcNow,
-                processed_at = null,
-                processed_by = null
-            };
+                foreach (var rawPart in bankInfo.Split('|', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var part = rawPart.Trim();
+                    var kv = part.Split('=', 2, StringSplitOptions.RemoveEmptyEntries);
+                    if (kv.Length != 2) continue;
+                    if (string.Equals(kv[0].Trim(), key, StringComparison.OrdinalIgnoreCase))
+                        return kv[1].Trim();
+                }
+                return null;
+            }
 
-            _db.withdraw_requests.Add(req);
-            await _db.SaveChangesAsync(cancellationToken);
-
-            return new WithdrawRequestItemDto
+            string DigitsOnly(string? s)
             {
-                Id = req.id,
-                AmountRequested = req.amount_requested,
-                FeeAmount = req.fee_amount,
-                Status = req.status,
-                CreatedAt = req.created_at,
-                ProcessedAt = req.processed_at,
-                AdminNote = req.admin_note
-            };
+                if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+                var sb = new System.Text.StringBuilder(s.Length);
+                foreach (var ch in s)
+                {
+                    if (char.IsDigit(ch)) sb.Append(ch);
+                }
+                return sb.ToString();
+            }
+
+            var accountNumber = DigitsOnly(Extract("account_number"));
+            if (string.IsNullOrWhiteSpace(accountNumber))
+                throw new InvalidOperationException("Thông tin tài khoản ngân hàng không hợp lệ.");
+
+            var bankBin = DigitsOnly(Extract("bank_bin"));
+            if (string.IsNullOrWhiteSpace(bankBin))
+                throw new InvalidOperationException("Missing Bank BIN/toBin for PayOS payout.");
+
+            var isVerifiedRaw = Extract("is_verified");
+            var isVerified = string.Equals(isVerifiedRaw?.Trim(), "1", StringComparison.OrdinalIgnoreCase)
+                              || string.Equals(isVerifiedRaw?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+            if (!isVerified)
+                throw new InvalidOperationException("Bạn chưa có tài khoản ngân hàng đã xác thực.");
+
+            var amountVnd = amountCoins * CoinRateVnd;
+            if (amountVnd < MinWithdrawVnd)
+                throw new InvalidOperationException("Minimum withdrawal amount is 50,000 VND.");
+
+            var now = DateTime.UtcNow;
+
+            // Fraud detection (BR-55)
+            var threeMonthsAgo = now.AddMonths(-3);
+            var totalNetIncomeLast3Months = await _db.author_income_logs
+                .AsNoTracking()
+                .Where(l =>
+                    l.author_id == authorUserId &&
+                    l.created_at != null &&
+                    l.created_at >= threeMonthsAgo &&
+                    l.status != null && l.status.ToUpper() == "AVAILABLE")
+                .SumAsync(l => l.net_amount ?? 0m, cancellationToken);
+
+            var avgMonthlyIncomeCoins = totalNetIncomeLast3Months / 3m;
+            var isFraudA = avgMonthlyIncomeCoins > 0 && amountCoins > avgMonthlyIncomeCoins * 3m;
+
+            var sevenDaysAgo = now.AddDays(-7);
+            var requestCountLast7Days = await _db.withdraw_requests
+                .AsNoTracking()
+                .CountAsync(w =>
+                    w.author_id == authorUserId &&
+                    w.created_at != null &&
+                    w.created_at >= sevenDaysAgo, cancellationToken);
+            var isFraudB = requestCountLast7Days > 3;
+
+            var priorWithdrawCount = await _db.withdraw_requests
+                .AsNoTracking()
+                .CountAsync(w => w.author_id == authorUserId, cancellationToken);
+            var isFraudC = user.created_at != null
+                            && user.created_at >= now.AddDays(-30)
+                            && priorWithdrawCount == 0;
+
+            var isFraud = isFraudA || isFraudB || isFraudC;
+            var initialStatus = isFraud ? "PENDING_REVIEW" : "PENDING";
+
+            var riskFlags = new List<string>();
+            if (isFraudA) riskFlags.Add("AMOUNT_ANOMALY");
+            if (isFraudB) riskFlags.Add("HIGH_FREQUENCY");
+            if (isFraudC) riskFlags.Add("NEW_ACCOUNT_FIRST_WITHDRAW");
+            var riskFlagsText = riskFlags.Count == 0 ? null : string.Join(",", riskFlags);
+            var riskReason = riskFlags.Count == 0
+                ? null
+                : $"Fraud signals detected: {string.Join("; ", riskFlags)}";
+            var riskScore = riskFlags.Count == 0 ? 0m : Math.Min(100m, riskFlags.Count * 35m);
+
+            var strategy = _db.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+                var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == authorUserId, cancellationToken);
+                if (wallet == null)
+                    throw new InvalidOperationException("Ví không tồn tại. Vui lòng thử lại sau.");
+
+                var income = wallet.income_balance ?? 0m;
+                if (income < amountCoins)
+                    throw new InvalidOperationException($"Thu nhập khả dụng không đủ. Hiện có {income} coin, yêu cầu {amountCoins} coin.");
+
+                // Move from withdrawable income -> frozen while admin processes.
+                wallet.income_balance = income - amountCoins;
+                wallet.frozen_balance = (wallet.frozen_balance ?? 0m) + amountCoins;
+                wallet.updated_at = now;
+
+                var req = new withdraw_requests
+                {
+                    id = Guid.NewGuid(),
+                    author_id = authorUserId,
+                    amount_requested = amountCoins,
+                    fee_amount = null,
+                    bank_info_snapshot = bankInfo.Trim(),
+                    status = initialStatus,
+                    admin_note = null,
+                    transaction_proof_url = null,
+                    created_at = now,
+                    processed_at = null,
+                    processed_by = null,
+                    is_suspected_fraud = isFraud,
+                    risk_score = riskScore,
+                    risk_flags = riskFlagsText,
+                    risk_reason = riskReason,
+                    reviewed_by = null,
+                    reviewed_at = null
+                };
+
+                _db.withdraw_requests.Add(req);
+                await _db.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+
+                return new WithdrawRequestItemDto
+                {
+                    Id = req.id,
+                    AmountRequested = req.amount_requested,
+                    FeeAmount = req.fee_amount,
+                    Status = req.status,
+                    CreatedAt = req.created_at,
+                    ProcessedAt = req.processed_at,
+                    AdminNote = req.admin_note
+                };
+            });
+        }
+
+        public async Task CancelWithdrawRequestAsync(Guid authorUserId, Guid withdrawRequestId, CancellationToken cancellationToken = default)
+        {
+            var strategy = _db.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+                var req = await _db.withdraw_requests
+                    .FirstOrDefaultAsync(x => x.id == withdrawRequestId && x.author_id == authorUserId, cancellationToken);
+                if (req == null)
+                    throw new InvalidOperationException("Yêu cầu rút tiền không tồn tại.");
+
+                var s = (req.status ?? "PENDING").ToUpperInvariant();
+                if (s != "PENDING" && s != "PENDING_REVIEW")
+                    throw new InvalidOperationException("Chỉ có thể hủy yêu cầu rút tiền khi đang chờ xử lý.");
+
+                req.status = "CANCELLED";
+                req.processed_at = DateTime.UtcNow;
+                req.processed_by = authorUserId;
+
+                var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == authorUserId, cancellationToken);
+                if (wallet != null)
+                {
+                    wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - req.amount_requested);
+                    wallet.income_balance = (wallet.income_balance ?? 0m) + req.amount_requested;
+                    wallet.updated_at = DateTime.UtcNow;
+                }
+
+                await _db.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+            });
         }
 
         /// <summary>Gửi real-time (SignalR) thông báo donate tới tác giả. Gọi fire-and-forget sau DonateAsync.</summary>

@@ -218,7 +218,13 @@ export function UserManagement() {
                     onClose={handleCloseDetail}
                     onBlock={handleBlock}
                     onUnblock={handleUnblock}
-                    onAssignModerator={() => { loadUsers(currentPage); loadStats(); }}
+                    onAssignModerator={(newRole) => {
+                        if (newRole) {
+                            setSelectedUser((prev) => (prev ? { ...prev, role: newRole } : null));
+                        }
+                        loadUsers(currentPage);
+                        loadStats();
+                    }}
                 />
             )}
         </div>

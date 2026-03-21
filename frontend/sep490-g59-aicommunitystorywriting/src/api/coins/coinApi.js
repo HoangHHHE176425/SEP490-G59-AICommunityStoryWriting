@@ -117,3 +117,61 @@ export async function createWithdrawRequest({ amountCoins, bankInfo } = {}) {
   }
 }
 
+// ===== Author bank accounts (for payout to author) =====
+export async function getAuthorBankAccounts() {
+  try {
+    const res = await axiosInstance.get('/coins/author/bank-accounts');
+    return { success: true, data: res.data?.items ?? [] };
+  } catch (err) {
+    return { success: false, message: getErrorMessage(err) };
+  }
+}
+
+export async function upsertAuthorBankAccount({ bankName, bankBin, accountNumber, accountHolderName, branchName, isVerified } = {}) {
+  try {
+    const res = await axiosInstance.post('/coins/author/bank-accounts', {
+      bankName,
+      bankBin: bankBin ?? null,
+      accountNumber,
+      accountHolderName,
+      branchName: branchName ?? null,
+      isVerified: !!isVerified,
+    });
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, message: getErrorMessage(err) };
+  }
+}
+
+export async function verifyAuthorBankAccount({ isVerified } = {}) {
+  try {
+    const res = await axiosInstance.post('/coins/author/bank-accounts/verify', { isVerified: !!isVerified });
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, message: getErrorMessage(err) };
+  }
+}
+
+export async function deleteAuthorBankAccount() {
+  try {
+    const res = await axiosInstance.delete('/coins/author/bank-accounts');
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, message: getErrorMessage(err) };
+  }
+}
+
+/**
+ * Tác giả hủy yêu cầu rút (khi đang chờ admin xử lý).
+ * @param {string} withdrawId
+ */
+export async function cancelWithdrawRequest(withdrawId) {
+  if (!withdrawId) return { success: false, message: 'Thiếu withdrawId.' };
+  try {
+    const res = await axiosInstance.post(`/coins/author/withdraw/${withdrawId}/cancel`);
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, message: getErrorMessage(err) };
+  }
+}
+

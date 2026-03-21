@@ -20,11 +20,12 @@ namespace AIStory.API.Controllers
 
         /// <summary>Kiểm tra user hiện tại đã theo dõi tác giả (authorId) chưa.</summary>
         [HttpGet("{authorId:guid}/following")]
+        [AllowAnonymous]
         public IActionResult GetFollowing(Guid authorId)
         {
             var userId = GetCurrentUserId();
             if (!userId.HasValue)
-                return Unauthorized(new { message = "User ID not found in token." });
+                return Ok(new { following = false });
             var following = FollowDAO.IsFollowingAuthor(userId.Value, authorId);
             return Ok(new { following });
         }
