@@ -2,6 +2,7 @@
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Repositories;
+using Services;
 using Services.DTOs.Admin;
 using Services.DTOs.Moderation;
 using Services.Interfaces;
@@ -52,9 +53,9 @@ namespace Services.Implementations
             return new ReviewAssignmentSelfDto
             {
                 IsAssignedToMe = assigned,
-                ReviewDeadlineAt = deadline,
-                AuthorSubmittedAtUtc = authorSubmitted,
-                PolicySuggestedDeadlineAt = policySuggested,
+                ReviewDeadlineAt = ApiDateTime.AsUtcForJson(deadline),
+                AuthorSubmittedAtUtc = ApiDateTime.AsUtcForJson(authorSubmitted),
+                PolicySuggestedDeadlineAt = ApiDateTime.AsUtcForJson(policySuggested),
                 TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, effectiveFallback),
                 HasPendingEscalation = ReviewEscalationDAO.HasPendingForTarget(tt, targetId)
             };
@@ -98,7 +99,8 @@ namespace Services.Implementations
                 reason = reason,
                 proposed_deadline_at = proposed,
                 status = ReviewEscalationDAO.StatusPending,
-                created_at = DateTime.UtcNow
+                created_at = DateTime.UtcNow,
+                sender_urgency_tier = EscalationUrgencyHelper.TierForModeratorRequestKind(kind)
             };
             ReviewEscalationDAO.Insert(row);
             return row.id;
@@ -278,6 +280,7 @@ namespace Services.Implementations
             var created = r.created_at.Kind == DateTimeKind.Utc ? r.created_at : r.created_at.ToUniversalTime();
             var authorSubmitted = GetAuthorSubmissionUtcForReviewTarget(r.target_type, r.target_id);
 
+            var computedTier = ComputeUrgencyTier(now, assignmentDeadline, created, r.status, r.request_kind);
             return new ReviewEscalationListItemDto
             {
                 Id = r.id,
@@ -286,19 +289,19 @@ namespace Services.Implementations
                 TargetTitle = title,
                 RequestKind = r.request_kind,
                 Reason = r.reason,
-                ProposedDeadlineAt = r.proposed_deadline_at,
+                ProposedDeadlineAt = ApiDateTime.AsUtcForJson(r.proposed_deadline_at),
                 Status = r.status,
-                CreatedAt = r.created_at,
+                CreatedAt = ApiDateTime.AsUtcForJson(r.created_at),
                 SenderId = r.sender_id,
                 SenderName = NotificationDAO.GetUserDisplayName(r.sender_id),
-                CurrentAssignmentDeadlineAt = assignmentDeadline,
-                AuthorSubmittedAtUtc = authorSubmitted,
-                UrgencyTier = ComputeUrgencyTier(now, assignmentDeadline, created, r.status, r.request_kind),
+                CurrentAssignmentDeadlineAt = ApiDateTime.AsUtcForJson(assignmentDeadline),
+                AuthorSubmittedAtUtc = ApiDateTime.AsUtcForJson(authorSubmitted),
+                UrgencyTier = EscalationUrgencyHelper.Merge(computedTier, r.sender_urgency_tier),
                 ResolverId = r.resolver_id,
                 ResolverName = r.resolver_id.HasValue ? NotificationDAO.GetUserDisplayName(r.resolver_id.Value) : null,
                 ResolverNote = r.resolver_note,
-                ResolvedAt = r.resolved_at,
-                ConfirmedDeadlineAt = r.confirmed_deadline_at
+                ResolvedAt = ApiDateTime.AsUtcForJson(r.resolved_at),
+                ConfirmedDeadlineAt = ApiDateTime.AsUtcForJson(r.confirmed_deadline_at)
             };
         }
 

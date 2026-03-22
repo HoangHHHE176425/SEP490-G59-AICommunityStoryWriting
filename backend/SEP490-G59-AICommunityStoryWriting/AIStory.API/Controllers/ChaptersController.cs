@@ -9,6 +9,7 @@ using DataAccessObjects.DAOs;
 using BusinessObjects;
 using Services.DTOs.Chapters;
 using Services.DTOs.Comments;
+using Services.DTOs.Stories;
 using Services.Interfaces;
 
 namespace AIStory.API.Controllers
@@ -37,6 +38,14 @@ namespace AIStory.API.Controllers
             var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
                       ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             return Guid.TryParse(sub, out var id) ? id : null;
+        }
+
+        private bool CanBypassStoryComplianceHidden(StoryResponseDto? story, Guid? userId)
+        {
+            if (story == null || story.ComplianceHidden != true) return true;
+            if (User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE")) return true;
+            if (userId.HasValue && story.AuthorId.HasValue && story.AuthorId.Value == userId.Value) return true;
+            return false;
         }
 
         private bool HasUnlockedPaidChapter(Guid userId, Guid chapterId)
@@ -104,9 +113,18 @@ namespace AIStory.API.Controllers
                     return NotFound(new { message = $"Chapter with ID {id} not found" });
 
                 var userId = GetCurrentUserId();
+                if (chapter.StoryId.HasValue)
+                {
+                    var stMeta = _storyService.GetById(chapter.StoryId.Value, userId);
+                    if (stMeta == null)
+                        return NotFound(new { message = $"Chapter with ID {id} not found" });
+                    if (!CanBypassStoryComplianceHidden(stMeta, userId))
+                        return NotFound(new { message = $"Chapter with ID {id} not found" });
+                }
+
                 if (chapter.StoryId.HasValue && userId.HasValue && userId.Value != Guid.Empty)
                 {
-                    var story = _storyService.GetById(chapter.StoryId.Value);
+                    var story = _storyService.GetById(chapter.StoryId.Value, userId);
                     var isAuthor = story?.AuthorId.HasValue == true && story.AuthorId.Value == userId.Value;
                     var accessType = chapter.AccessType?.ToUpper() ?? "FREE";
                     var coinPrice = chapter.CoinPrice ?? 0;
@@ -165,9 +183,11 @@ namespace AIStory.API.Controllers
             if (!chapter.StoryId.HasValue)
                 return BadRequest(new { message = "Chapter thiếu StoryId." });
 
-            var story = _storyService.GetById(chapter.StoryId.Value);
+            var story = _storyService.GetById(chapter.StoryId.Value, userId);
             if (story?.AuthorId == null)
                 return BadRequest(new { message = "Không xác định được author của truyện." });
+            if (!CanBypassStoryComplianceHidden(story, userId))
+                return NotFound(new { message = "Chapter không tồn tại." });
 
             var authorId = story.AuthorId.Value;
             var isAuthor = authorId == userId.Value;

@@ -24,7 +24,7 @@ namespace DataAccessObjects.DAOs
             return context.stories.FirstOrDefault(s => s.slug == slug);
         }
 
-        /// <summary>L?y danh sùch story id cù ùt nh?t m?t category n?m trong categoryIds (dùng cho moderator).</summary>
+        /// <summary>L?y danh s?ch story id c? ?t nh?t m?t category n?m trong categoryIds (d?ng cho moderator).</summary>
         public static List<Guid> GetIdsByCategoryIds(IReadOnlyCollection<Guid> categoryIds)
         {
             if (categoryIds == null || categoryIds.Count == 0)
@@ -123,7 +123,7 @@ namespace DataAccessObjects.DAOs
             }
         }
 
-        /// <summary>Tùng total_views c?a story lùn 1 (dùng khi ghi nh?n lù?t xem h?p l?, ch?ng spam ? t?ng service).</summary>
+        /// <summary>T?ng total_views c?a story l?n 1 (d?ng khi ghi nh?n l??t xem h?p l?, ch?ng spam ? t?ng service).</summary>
         public static void IncrementViewCount(Guid storyId)
         {
             using var context = new StoryPlatformDbContext();
@@ -145,6 +145,48 @@ namespace DataAccessObjects.DAOs
                 story.avg_rating = avgRating;
                 context.SaveChanges();
             }
+        }
+
+        public static void SetCommentsDisabled(Guid storyId, bool disabled)
+        {
+            using var context = new StoryPlatformDbContext();
+            var story = context.stories.FirstOrDefault(s => s.id == storyId)
+                ?? throw new InvalidOperationException("Story not found.");
+            story.comments_disabled = disabled;
+            story.updated_at = DateTime.UtcNow;
+            context.SaveChanges();
+        }
+
+        public static void SetComplianceHidden(Guid storyId, bool hidden)
+        {
+            using var context = new StoryPlatformDbContext();
+            var story = context.stories.FirstOrDefault(s => s.id == storyId)
+                ?? throw new InvalidOperationException("Story not found.");
+            story.compliance_hidden = hidden;
+            story.updated_at = DateTime.UtcNow;
+            context.SaveChanges();
+        }
+
+        public static void SetComplianceFlag(Guid storyId, bool flagged, string? note, Guid? flaggedByUserId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var story = context.stories.FirstOrDefault(s => s.id == storyId)
+                ?? throw new InvalidOperationException("Story not found.");
+            story.compliance_flagged = flagged;
+            story.compliance_flag_note = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+            if (flagged)
+            {
+                story.compliance_flagged_at = DateTime.UtcNow;
+                story.compliance_flagged_by = flaggedByUserId;
+            }
+            else
+            {
+                story.compliance_flagged_at = null;
+                story.compliance_flagged_by = null;
+                story.compliance_flag_note = null;
+            }
+            story.updated_at = DateTime.UtcNow;
+            context.SaveChanges();
         }
     }
 }

@@ -9,5 +9,11 @@ namespace AIStory.Client.Controllers
         {
             return View();
         }
+
+        /// <summary>Đã gộp vào Admin/Index — tab Đơn gửi admin → Compliance.</summary>
+        public IActionResult ComplianceLocks()
+        {
+            return RedirectToAction(nameof(Index), new { esc = "compliance" });
+        }
     }
 }

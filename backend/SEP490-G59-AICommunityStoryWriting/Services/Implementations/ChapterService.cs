@@ -53,6 +53,9 @@ namespace Services.Implementations
                 throw new InvalidOperationException($"Story with ID {request.StoryId} not found.");
             }
 
+            if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
+                throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin).");
+
             var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(request.StoryId, request.OrderIndex);
             if (existingChapter != null)
             {

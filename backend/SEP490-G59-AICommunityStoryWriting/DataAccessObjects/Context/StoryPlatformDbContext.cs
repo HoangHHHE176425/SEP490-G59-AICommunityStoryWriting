@@ -78,6 +78,12 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<report_evidences> report_evidences { get; set; }
 
+    public virtual DbSet<story_report_contributors> story_report_contributors { get; set; }
+
+    public virtual DbSet<compliance_story_report_lock_requests> compliance_story_report_lock_requests { get; set; }
+
+    public virtual DbSet<compliance_admin_action_requests> compliance_admin_action_requests { get; set; }
+
     public virtual DbSet<reports> reports { get; set; }
 
     public virtual DbSet<review_assignments> review_assignments { get; set; }
@@ -123,7 +129,7 @@ public partial class StoryPlatformDbContext : DbContext
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer(
-                "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                "Server= localhost;uid=sa;password=a123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                     maxRetryCount: 5,
                     maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -660,6 +666,85 @@ public partial class StoryPlatformDbContext : DbContext
                 .HasConstraintName("fk_evid_rep");
         });
 
+        modelBuilder.Entity<story_report_contributors>(entity =>
+        {
+            entity.HasKey(e => new { e.story_id, e.user_id }).HasName("PK_story_report_contributors");
+
+            entity.Property(e => e.reason_category).HasMaxLength(50);
+            entity.Property(e => e.description).HasMaxLength(4000);
+            entity.Property(e => e.created_at).HasDefaultValueSql("(sysutcdatetime())");
+
+            entity.HasOne<stories>().WithMany()
+                .HasForeignKey(e => e.story_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_story_report_contributors_story");
+
+            entity.HasOne<users>().WithMany()
+                .HasForeignKey(e => e.user_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_story_report_contributors_user");
+        });
+
+        modelBuilder.Entity<compliance_story_report_lock_requests>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("PK_compliance_story_report_lock_requests");
+
+            entity.Property(e => e.message).HasMaxLength(2000);
+            entity.Property(e => e.status).HasMaxLength(20);
+            entity.Property(e => e.resolution_note).HasMaxLength(2000);
+            entity.Property(e => e.resolution_action).HasMaxLength(30);
+            entity.Property(e => e.created_at).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.urgency_tier).HasMaxLength(20).HasDefaultValue("STANDARD");
+
+            entity.HasOne(d => d.story).WithMany()
+                .HasForeignKey(d => d.story_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_csr_lock_req_story");
+
+            entity.HasOne(d => d.requester).WithMany()
+                .HasForeignKey(d => d.requester_id)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_csr_lock_req_requester");
+
+            entity.HasOne(d => d.resolved_byNavigation).WithMany()
+                .HasForeignKey(d => d.resolved_by_id)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_csr_lock_req_resolver");
+        });
+
+        modelBuilder.Entity<compliance_admin_action_requests>(entity =>
+        {
+            entity.HasKey(e => e.id).HasName("PK_compliance_admin_action_requests");
+
+            entity.Property(e => e.request_kind).HasMaxLength(40);
+            entity.Property(e => e.message).HasMaxLength(2000);
+            entity.Property(e => e.status).HasMaxLength(20);
+            entity.Property(e => e.resolution_note).HasMaxLength(2000);
+            entity.Property(e => e.resolution_action).HasMaxLength(40);
+            entity.Property(e => e.created_at).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.urgency_tier).HasMaxLength(20).HasDefaultValue("STANDARD");
+
+            entity.HasOne(d => d.story).WithMany()
+                .HasForeignKey(d => d.story_id)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("FK_caa_req_story");
+
+            entity.HasOne(d => d.target_user).WithMany()
+                .HasForeignKey(d => d.target_user_id)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_caa_req_target_user");
+
+            entity.HasOne(d => d.requester).WithMany()
+                .HasForeignKey(d => d.requester_id)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_caa_req_requester");
+
+            entity.HasOne(d => d.resolved_byNavigation).WithMany()
+                .HasForeignKey(d => d.resolved_by_id)
+                .OnDelete(DeleteBehavior.Restrict)
+                .HasConstraintName("FK_caa_req_resolver");
+        });
+
         modelBuilder.Entity<reports>(entity =>
         {
             entity.HasKey(e => e.id).HasName("PK__reports__3213E83F8FEA556C");
@@ -667,10 +752,13 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.reason_category).HasMaxLength(50);
+            entity.Property(e => e.contributor_count).HasDefaultValue(1);
             entity.Property(e => e.status)
                 .HasMaxLength(20)
                 .HasDefaultValue("NEW");
             entity.Property(e => e.target_type).HasMaxLength(20);
+
+            entity.Property(e => e.compliance_resolved_by);
 
             entity.HasOne(d => d.assigned_toNavigation).WithMany(p => p.reportsassigned_toNavigation)
                 .HasForeignKey(d => d.assigned_to)
@@ -718,6 +806,7 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.status).HasMaxLength(20);
             entity.Property(e => e.resolver_note).HasMaxLength(2000);
             entity.Property(e => e.created_at).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.sender_urgency_tier).HasMaxLength(20);
 
             entity.HasOne<users>().WithMany()
                 .HasForeignKey(d => d.sender_id)
@@ -758,6 +847,11 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.updated_at).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.submitted_for_review_at).HasColumnType("datetime2");
             entity.Property(e => e.word_count).HasDefaultValue(0);
+            entity.Property(e => e.comments_disabled).HasDefaultValue(false);
+            entity.Property(e => e.compliance_hidden).HasDefaultValue(false);
+            entity.Property(e => e.compliance_flagged).HasDefaultValue(false);
+            entity.Property(e => e.compliance_flag_note).HasMaxLength(1000);
+            entity.Property(e => e.compliance_flagged_at).HasColumnType("datetime2");
 
             entity.HasOne(d => d.author).WithMany(p => p.stories)
                 .HasForeignKey(d => d.author_id)
@@ -986,6 +1080,7 @@ public partial class StoryPlatformDbContext : DbContext
                 .HasMaxLength(20)
                 .HasDefaultValue("PENDING");
             entity.Property(e => e.updated_at).HasDefaultValueSql("(getdate())");
+            entity.Property(e => e.author_writing_suspended_until).HasColumnType("datetime2");
 
             entity.HasMany(d => d.comment).WithMany(p => p.user)
                 .UsingEntity<Dictionary<string, object>>(

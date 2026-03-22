@@ -157,6 +157,10 @@ const AuthHelper = {
         return this.hasAnyRole('MODERATOR', 'ADMIN');
     },
 
+    isComplianceOfficer() {
+        return this.hasAnyRole('COMPLIANCE', 'ADMIN');
+    },
+
     // Kiểm tra token có hết hạn không
     isTokenExpired() {
         const token = this.getToken();
