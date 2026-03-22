@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar } from 'lucide-react';
+import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar, AlertTriangle } from 'lucide-react';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
-import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion } from '../../../api/moderator/moderatorApi';
+import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion, getReviewAssignmentSelf, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
+import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus, localDateTimeInputToIsoUtc, validateModeratorExtendProposedDeadline } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { useToast } from '../../author/story-editor/Toast';
 
@@ -77,6 +78,15 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const loadKeyRef = useRef({ storyId: null, pubId: null });
     /** Request id để bỏ qua kết quả prefetch cũ nếu đã mở publication khác. */
     const pendingPrefetchIdRef = useRef(0);
+
+    /** Assignment / SLA / escalation (moderator đang nhận duyệt). */
+    const [reviewAssignment, setReviewAssignment] = useState(null);
+    const [slaTick, setSlaTick] = useState(0);
+    const [escalateOpen, setEscalateOpen] = useState(false);
+    const [escalateKind, setEscalateKind] = useState('EXTEND_DEADLINE');
+    const [escalateReason, setEscalateReason] = useState('');
+    const [escalateProposedDeadline, setEscalateProposedDeadline] = useState('');
+    const [escalateSubmitting, setEscalateSubmitting] = useState(false);
 
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
@@ -248,6 +258,95 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     useEffect(() => {
         setContentTab('original');
     }, [selectedChapter?.id]);
+
+    useEffect(() => {
+        if (publication?.status !== 'pending') return undefined;
+        const id = setInterval(() => setSlaTick((t) => t + 1), 30000);
+        return () => clearInterval(id);
+    }, [publication?.status]);
+
+    useEffect(() => {
+        if (publication?.status !== 'pending') {
+            setReviewAssignment(null);
+            return;
+        }
+        if (chaptersLoading) return;
+
+        let cancelled = false;
+        (async () => {
+            try {
+                if (selectedChapter && !selectedChapter.isVersionHistory) {
+                    const dto = await getReviewAssignmentSelf('CHAPTER', selectedChapter.id);
+                    if (!cancelled) setReviewAssignment(dto);
+                    return;
+                }
+                if (chapters.length === 0 && storyId) {
+                    const dto = await getReviewAssignmentSelf('STORY', storyId);
+                    if (!cancelled) setReviewAssignment(dto);
+                    return;
+                }
+                if (!cancelled) setReviewAssignment(null);
+            } catch {
+                if (!cancelled) setReviewAssignment(null);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [publication?.status, chaptersLoading, selectedChapter, chapters.length, storyId]);
+
+    const escalationTarget = () => {
+        if (selectedChapter && !selectedChapter.isVersionHistory) {
+            return { targetType: 'CHAPTER', targetId: selectedChapter.id };
+        }
+        if (storyId) return { targetType: 'STORY', targetId: storyId };
+        return null;
+    };
+
+    const handleSubmitEscalation = async () => {
+        const t = escalationTarget();
+        if (!t || !escalateReason.trim()) {
+            showToast('Vui lòng nhập lý do.', 'error');
+            return;
+        }
+        if (escalateReason.trim().length < 10) {
+            showToast('Lý do báo cáo cần ít nhất 10 ký tự (theo quy định hệ thống).', 'error');
+            return;
+        }
+        if (escalateKind === 'EXTEND_DEADLINE') {
+            const iso = localDateTimeInputToIsoUtc(escalateProposedDeadline);
+            if (!iso) {
+                showToast('Vui lòng chọn hạn đề xuất (gia hạn).', 'error');
+                return;
+            }
+            const currentDl = reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt ?? null;
+            const check = validateModeratorExtendProposedDeadline(iso, currentDl);
+            if (!check.ok) {
+                showToast(check.message, 'error');
+                return;
+            }
+        }
+        setEscalateSubmitting(true);
+        try {
+            await submitReviewEscalation({
+                targetType: t.targetType,
+                targetId: t.targetId,
+                requestKind: escalateKind,
+                reason: escalateReason.trim(),
+                proposedDeadlineAt: escalateKind === 'EXTEND_DEADLINE' ? localDateTimeInputToIsoUtc(escalateProposedDeadline) : null,
+            });
+            showToast('Đã gửi đơn lên quản trị.', 'success');
+            setEscalateOpen(false);
+            setEscalateReason('');
+            setEscalateProposedDeadline('');
+            const dto = await getReviewAssignmentSelf(t.targetType, t.targetId);
+            setReviewAssignment(dto);
+            onRefresh?.();
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Gửi đơn thất bại.';
+            showToast(msg, 'error');
+        } finally {
+            setEscalateSubmitting(false);
+        }
+    };
 
     const startResize = useCallback((e) => {
         e.preventDefault();
@@ -441,14 +540,23 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const selectedOrderIndex = Number(selectedChapter?.orderIndex ?? (selectedChapter?.chapterNumber != null ? selectedChapter.chapterNumber - 1 : -1));
     const minOrderInList = chapters.length > 0 ? Math.min(...chapters.map((c) => Number(c.orderIndex ?? (c.chapterNumber != null ? c.chapterNumber - 1 : 0)))) : -1;
     const isFirstInPendingQueue = selectedOrderIndex >= 0 && minOrderInList >= 0 && selectedOrderIndex === minOrderInList;
-    const canApproveReject = selectedChapter && !selectedChapter?.isVersionHistory && (
+    const ra = reviewAssignment ?? {};
+    const hasPendingEscalationBlock = Boolean(ra.hasPendingEscalation ?? ra.HasPendingEscalation);
+    const baseCanApproveReject = selectedChapter && !selectedChapter?.isVersionHistory && (
         selectedOrderIndex === 0
         || publishedOrderIndices.has(Number(selectedOrderIndex - 1))
         || (minOrderInList >= 1 && isFirstInPendingQueue)
     );
-    const orderHint = !canApproveReject && selectedChapter
+    const canApproveReject = baseCanApproveReject && !hasPendingEscalationBlock;
+    const orderHint = !baseCanApproveReject && selectedChapter
         ? `Phải duyệt hoặc từ chối chương ${selectedOrderIndex} trước khi xử lý chương ${selectedOrderIndex + 1}.`
-        : '';
+        : hasPendingEscalationBlock
+            ? 'Đã gửi đơn báo cáo lên quản trị viên — chờ quản trị viên xử lý trước khi duyệt/từ chối.'
+            : '';
+
+    const authorSubmittedForSla = ra.authorSubmittedAtUtc ?? ra.AuthorSubmittedAtUtc;
+    void slaTick;
+    const policySlaLine = authorSubmittedForSla ? formatPolicySlaCountdown(authorSubmittedForSla).line : null;
 
     return (
         <>
@@ -553,6 +661,84 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                             </button>
                         </div>
                     </div>
+
+                    {publication?.status === 'pending' && hasPendingEscalationBlock && (
+                        <div style={{
+                            padding: '0.75rem 1.5rem',
+                            backgroundColor: '#fef2f2',
+                            borderBottom: '1px solid #fecaca',
+                            fontSize: '0.875rem',
+                            color: '#991b1b',
+                            fontWeight: 600,
+                        }}>
+                            Bạn đã gửi đơn báo cáo lên quản trị (đang chờ xử lý). Thao tác duyệt / từ chối bị khóa cho đến khi quản trị viên xử lý xong đơn.
+                        </div>
+                    )}
+
+                    {publication?.status === 'pending' && reviewAssignment && (reviewAssignment.isAssignedToMe ?? reviewAssignment.IsAssignedToMe) && (() => {
+                        const rd = reviewAssignment.reviewDeadlineAt ?? reviewAssignment.ReviewDeadlineAt;
+                        const ts = normalizeTimeStatus(reviewAssignment.timeStatus ?? reviewAssignment.TimeStatus);
+                        const badge = ts ? getSlaBadgeStyle(ts) : null;
+                        return (
+                            <div style={{
+                                padding: '0.75rem 1.5rem',
+                                backgroundColor: '#f0f9ff',
+                                borderBottom: '1px solid #bae6fd',
+                                display: 'flex',
+                                flexWrap: 'wrap',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                justifyContent: 'space-between',
+                            }}
+                            >
+                                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
+                                    {badge && (
+                                        <span style={{
+                                            fontSize: '0.75rem',
+                                            fontWeight: 700,
+                                            padding: '0.25rem 0.5rem',
+                                            borderRadius: '9999px',
+                                            backgroundColor: badge.bg,
+                                            color: badge.color,
+                                        }}>
+                                            {badge.label}
+                                        </span>
+                                    )}
+                                    <span style={{ fontSize: '0.8125rem', color: '#0c4a6e' }}>
+                                        {policySlaLine ? <>{policySlaLine}</> : null}
+                                        {rd ? (
+                                            <> {' '}• Hạn duyệt (bạn đã chọn): {formatDate(rd)}</>
+                                        ) : null}
+                                    </span>
+                                </div>
+                                {!hasPendingEscalationBlock && escalationTarget() && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setEscalateKind('EXTEND_DEADLINE');
+                                            setEscalateOpen(true);
+                                        }}
+                                        style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.35rem',
+                                            padding: '0.45rem 0.85rem',
+                                            fontSize: '0.8125rem',
+                                            fontWeight: 600,
+                                            backgroundColor: '#fff',
+                                            color: '#0369a1',
+                                            border: '1px solid #7dd3fc',
+                                            borderRadius: '8px',
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        <AlertTriangle style={{ width: '14px', height: '14px' }} />
+                                        Báo cáo quản trị viên
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })()}
 
                     {/* Body — overflow: auto để khi kéo cao vùng đọc, có thể cuộn xem hết */}
                     <div style={{
@@ -1302,6 +1488,137 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 }}
                             >
                                 Xác nhận
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {escalateOpen && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10001,
+                        padding: '1rem',
+                    }}
+                    onClick={() => !escalateSubmitting && setEscalateOpen(false)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '480px',
+                            width: '100%',
+                            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ margin: '0 0 0.75rem', fontSize: '1.125rem', fontWeight: 700, color: '#0f172a' }}>
+                            Gửi báo cáo lên quản trị
+                        </h3>
+                        <p style={{ margin: '0 0 1rem', fontSize: '0.8125rem', color: '#64748b' }}>
+                            Chọn loại đơn. Sau khi gửi, bạn không thể duyệt/từ chối cho đến khi quản trị viên xử lý.
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                            {[
+                                { k: 'EXTEND_DEADLINE', label: 'Xin gia hạn hạn duyệt' },
+                                { k: 'RELEASE_ASSIGNMENT', label: 'Hủy nhận duyệt (Chuyển về hàng đợi)' },
+                            ].map((o) => (
+                                <button
+                                    key={o.k}
+                                    type="button"
+                                    onClick={() => setEscalateKind(o.k)}
+                                    style={{
+                                        padding: '0.4rem 0.65rem',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 600,
+                                        borderRadius: '8px',
+                                        border: escalateKind === o.k ? '2px solid #0ea5e9' : '1px solid #e2e8f0',
+                                        backgroundColor: escalateKind === o.k ? '#e0f2fe' : '#fff',
+                                        cursor: 'pointer',
+                                        textAlign: 'left',
+                                    }}
+                                >
+                                    {o.label}
+                                </button>
+                            ))}
+                        </div>
+                        {escalateKind === 'EXTEND_DEADLINE' && (
+                            <div style={{ marginBottom: '0.75rem' }}>
+                                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
+                                    Hạn đề xuất sau gia hạn (bắt buộc)
+                                    <input
+                                        type="datetime-local"
+                                        value={escalateProposedDeadline}
+                                        onChange={(e) => setEscalateProposedDeadline(e.target.value)}
+                                        style={{ display: 'block', width: '100%', marginTop: '0.35rem', padding: '0.5rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}
+                                    />
+                                </label>
+                                <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.5rem 0 0', lineHeight: 1.45 }}>
+                                    {(reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt) ? (
+                                        <>
+                                            <strong>Hạn duyệt hiện tại của bạn:</strong>{' '}
+                                            {formatDate(reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt)}.
+                                            {' '}Hạn đề xuất phải <strong>muộn hơn</strong> mốc này (gia hạn = kéo dài thêm, không được chọn ngày sớm hơn).
+                                            {' '}Ngoài ra phải cách <strong>thời điểm hiện tại ít nhất 24 giờ</strong>.
+                                        </>
+                                    ) : (
+                                        <>
+                                            Hạn đề xuất phải <strong>muộn hơn hạn duyệt</strong> bạn đã chọn khi nhận đơn, và cách <strong>hiện tại ít nhất 24 giờ</strong>.
+                                        </>
+                                    )}
+                                </p>
+                            </div>
+                        )}
+                        <label style={{ display: 'block', marginBottom: '1rem', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
+                            Lý do <span style={{ color: '#ef4444' }}>*</span>
+                            <textarea
+                                value={escalateReason}
+                                onChange={(e) => setEscalateReason(e.target.value)}
+                                rows={4}
+                                placeholder="Mô tả lý do (tối thiểu 10 ký tự)..."
+                                style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    marginTop: '0.35rem',
+                                    padding: '0.5rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid #cbd5e1',
+                                    fontFamily: 'inherit',
+                                    resize: 'vertical',
+                                }}
+                            />
+                        </label>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                            <button
+                                type="button"
+                                disabled={escalateSubmitting}
+                                onClick={() => setEscalateOpen(false)}
+                                style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer' }}
+                            >
+                                Đóng
+                            </button>
+                            <button
+                                type="button"
+                                disabled={escalateSubmitting}
+                                onClick={handleSubmitEscalation}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    background: '#0ea5e9',
+                                    color: '#fff',
+                                    fontWeight: 600,
+                                    cursor: escalateSubmitting ? 'wait' : 'pointer',
+                                }}
+                            >
+                                {escalateSubmitting ? 'Đang gửi...' : 'Gửi đơn'}
                             </button>
                         </div>
                     </div>

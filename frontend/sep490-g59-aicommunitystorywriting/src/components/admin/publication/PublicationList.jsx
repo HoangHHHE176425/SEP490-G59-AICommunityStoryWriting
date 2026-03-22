@@ -1,6 +1,7 @@
-import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen, UserCheck } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen, UserCheck, AlertCircle } from 'lucide-react';
+import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus } from '../../../utils/moderatorReviewSla';
 
-export function PublicationList({ publications, onViewDetail, onClaimStory, onClaimChapter, claimingId, showClaimButton }) {
+export function PublicationList({ publications, onViewDetail, onClaimStory, onClaimChapter, claimingId, showClaimButton, showModeratorSla = false }) {
     const getStatusBadge = (status) => {
         const configs = {
             pending: {
@@ -68,7 +69,9 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
     };
 
     const formatDate = (dateString) => {
+        if (!dateString) return '—';
         const date = new Date(dateString);
+        if (Number.isNaN(date.getTime())) return '—';
         const now = new Date();
         const diffMs = now - date;
         const diffMins = Math.floor(diffMs / 60000);
@@ -78,6 +81,23 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
         if (diffMins < 60) return `${diffMins} phút trước`;
         if (diffHours < 24) return `${diffHours} giờ trước`;
         return `${diffDays} ngày trước`;
+    };
+
+    const pendingSinceForPub = (pub) => {
+        if (pub.type === 'story_group') {
+            return pub.slaPendingSince
+                ?? pub.representativePublication?.pendingSince
+                ?? pub.representativePublication?.submittedAt
+                ?? null;
+        }
+        return pub.pendingSince ?? pub.submittedAt ?? null;
+    };
+
+    const timeStatusForPub = (pub) => {
+        if (pub.type === 'story_group') {
+            return normalizeTimeStatus(pub.slaTimeStatus) ?? normalizeTimeStatus(pub.representativePublication?.timeStatus);
+        }
+        return normalizeTimeStatus(pub.timeStatus);
     };
 
     if (publications.length === 0) {
@@ -166,6 +186,37 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
                                         {getTypeBadge(pub)}
                                         {getStatusBadge(pub.status)}
+                                        {showModeratorSla && pub.status === 'pending' && timeStatusForPub(pub) && (() => {
+                                            const sla = getSlaBadgeStyle(timeStatusForPub(pub));
+                                            return (
+                                                <span style={{
+                                                    fontSize: '0.75rem',
+                                                    fontWeight: 600,
+                                                    padding: '0.25rem 0.5rem',
+                                                    borderRadius: '9999px',
+                                                    backgroundColor: sla.bg,
+                                                    color: sla.color,
+                                                }}>
+                                                    SLA: {sla.label}
+                                                </span>
+                                            );
+                                        })()}
+                                        {showModeratorSla && pub.status === 'pending' && pub.hasPendingEscalation && (
+                                            <span style={{
+                                                fontSize: '0.75rem',
+                                                fontWeight: 600,
+                                                padding: '0.25rem 0.5rem',
+                                                borderRadius: '9999px',
+                                                backgroundColor: '#fef2f2',
+                                                color: '#b91c1c',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '0.25rem',
+                                            }}>
+                                                <AlertCircle style={{ width: '12px', height: '12px' }} />
+                                                Đơn báo cáo chờ admin
+                                            </span>
+                                        )}
                                         {showClaimButton && pub.claimedByDisplayName && (
                                             <span style={{
                                                 fontSize: '0.75rem',
@@ -316,10 +367,16 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
 
                                 <div>
                                     <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
-                                        Nộp lúc
+                                        {showModeratorSla && pub.status === 'pending' ? 'Chờ từ (mốc gửi)' : 'Nộp lúc'}
                                     </div>
                                     <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
-                                        {formatDate(pub.type === 'story_group' && pub.representativePublication ? pub.representativePublication.submittedAt : pub.submittedAt)}
+                                        {formatDate(
+                                            showModeratorSla && pub.status === 'pending'
+                                                ? pendingSinceForPub(pub)
+                                                : (pub.type === 'story_group' && pub.representativePublication
+                                                    ? pub.representativePublication.submittedAt
+                                                    : pub.submittedAt)
+                                        )}
                                     </div>
                                 </div>
 
@@ -334,6 +391,24 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                     </div>
                                 )}
                             </div>
+
+                            {showModeratorSla && pub.status === 'pending' && pendingSinceForPub(pub) && (() => {
+                                const { line } = formatPolicySlaCountdown(pendingSinceForPub(pub));
+                                if (!line) return null;
+                                return (
+                                    <div style={{
+                                        marginBottom: '0.75rem',
+                                        padding: '0.5rem 0.75rem',
+                                        backgroundColor: '#f8fafc',
+                                        borderRadius: '8px',
+                                        borderLeft: '3px solid #0ea5e9',
+                                        fontSize: '0.8125rem',
+                                        color: '#334155',
+                                    }}>
+                                        {line}
+                                    </div>
+                                );
+                            })()}
 
                             {/* Categories */}
                             {Array.isArray(pub.categories) && pub.categories.length > 0 && (

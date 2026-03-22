@@ -1205,21 +1205,21 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                             const normalized = mergeContentRemoveScenes(raw);
                                             const displayContent = normalized || raw.trim();
                                             return (
-                                        <div
-                                            style={{
-                                                fontSize: '0.875rem',
-                                                color: '#111827',
-                                                whiteSpace: 'pre-wrap',
-                                                maxHeight: '40vh',
-                                                overflowY: 'auto',
-                                                padding: '0.75rem',
-                                                border: '1px solid #e5e7eb',
-                                                borderRadius: '8px',
-                                                backgroundColor: '#f9fafb',
-                                            }}
-                                        >
-                                            {displayContent || 'AI chưa trả về nội dung chương. Bạn hãy thử lại với định hướng cụ thể hơn.'}
-                                        </div>
+                                                <div
+                                                    style={{
+                                                        fontSize: '0.875rem',
+                                                        color: '#111827',
+                                                        whiteSpace: 'pre-wrap',
+                                                        maxHeight: '40vh',
+                                                        overflowY: 'auto',
+                                                        padding: '0.75rem',
+                                                        border: '1px solid #e5e7eb',
+                                                        borderRadius: '8px',
+                                                        backgroundColor: '#f9fafb',
+                                                    }}
+                                                >
+                                                    {displayContent || 'AI chưa trả về nội dung chương. Bạn hãy thử lại với định hướng cụ thể hơn.'}
+                                                </div>
                                             );
                                         })()}
                                     </div>

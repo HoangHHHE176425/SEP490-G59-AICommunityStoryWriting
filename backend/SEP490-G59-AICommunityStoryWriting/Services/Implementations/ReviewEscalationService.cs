@@ -1,4 +1,4 @@
-﻿using System.Linq;
+using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Repositories;
@@ -86,6 +86,14 @@ namespace Services.Implementations
                     throw new ArgumentException("Gia hạn cần gửi proposedDeadlineAt.");
                 proposed = NormalizeToUtc(dto.ProposedDeadlineAt.Value);
                 ValidateNewDeadline(proposed.Value);
+                var claim = ReviewAssignmentDAO.GetClaimInfo(tt, dto.TargetId);
+                if (claim.HasValue)
+                {
+                    var currentDeadline = claim.Value.ReviewDeadlineAt ?? claim.Value.AssignedAt.AddDays(7);
+                    currentDeadline = NormalizeToUtc(currentDeadline);
+                    if (proposed.Value <= currentDeadline)
+                        throw new ArgumentException("Hạn đề xuất gia hạn phải muộn hơn hạn duyệt hiện tại của bạn (hạn đã chọn khi nhận duyệt).");
+                }
             }
 
             var row = new review_escalation_requests
@@ -286,21 +294,31 @@ namespace Services.Implementations
                 TargetTitle = title,
                 RequestKind = r.request_kind,
                 Reason = r.reason,
-                ProposedDeadlineAt = r.proposed_deadline_at,
+                ProposedDeadlineAt = AsUtcForJson(r.proposed_deadline_at),
                 Status = r.status,
-                CreatedAt = r.created_at,
+                // Kind=Utc → JSON có "Z"; tránh client parse chuỗi không offset như giờ local.
+                CreatedAt = AsUtcForJson(created),
                 SenderId = r.sender_id,
                 SenderName = NotificationDAO.GetUserDisplayName(r.sender_id),
-                CurrentAssignmentDeadlineAt = assignmentDeadline,
-                AuthorSubmittedAtUtc = authorSubmitted,
+                CurrentAssignmentDeadlineAt = AsUtcForJson(assignmentDeadline),
+                AuthorSubmittedAtUtc = AsUtcForJson(authorSubmitted),
                 UrgencyTier = ComputeUrgencyTier(now, assignmentDeadline, created, r.status, r.request_kind),
                 ResolverId = r.resolver_id,
                 ResolverName = r.resolver_id.HasValue ? NotificationDAO.GetUserDisplayName(r.resolver_id.Value) : null,
                 ResolverNote = r.resolver_note,
-                ResolvedAt = r.resolved_at,
-                ConfirmedDeadlineAt = r.confirmed_deadline_at
+                ResolvedAt = AsUtcForJson(r.resolved_at),
+                ConfirmedDeadlineAt = AsUtcForJson(r.confirmed_deadline_at)
             };
         }
+
+        /// <summary>Chuẩn hóa UTC + DateTimeKind.Utc để System.Text.Json ghi ISO kèm Z.</summary>
+        private static DateTime AsUtcForJson(DateTime dt)
+        {
+            var utc = dt.Kind == DateTimeKind.Utc ? dt : dt.ToUniversalTime();
+            return DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        }
+
+        private static DateTime? AsUtcForJson(DateTime? dt) => dt.HasValue ? AsUtcForJson(dt.Value) : null;
 
         /// <summary>Mốc gửi duyệt: submitted_for_review_at (fallback ước lượng nếu chưa có cột / dữ liệu cũ).</summary>
         private DateTime? GetAuthorSubmissionUtcForReviewTarget(string targetType, Guid targetId) =>
