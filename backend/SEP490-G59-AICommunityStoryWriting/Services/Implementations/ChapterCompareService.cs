@@ -6,7 +6,7 @@ using Services.Interfaces;
 
 namespace Services.Implementations;
 
-/// <summary>So sánh chương tác giả với bản AI: embedding (cosine) hoặc text similarity.</summary>
+/// <summary>So sánh <c>chapters.content</c> theo <c>ChapterId</c> (tự lấy story + order_index) với <c>ai_output</c> cùng <c>story_id</c> và <c>chapter_index</c>; lấy điểm cao nhất.</summary>
 public class ChapterCompareService : IChapterCompareService
 {
     private const double SimilarityThresholdPercent = 85.0;
@@ -34,12 +34,23 @@ public class ChapterCompareService : IChapterCompareService
         if (chapter == null)
             return new CompareChapterResponse { HasBothContents = false, Message = "Không tìm thấy chương." };
 
-        var story = chapter.story_id.HasValue ? _storyRepository.GetById(chapter.story_id.Value) : null;
-        if (story != null && userId.HasValue && story.author_id != userId.Value)
-            return new CompareChapterResponse { HasBothContents = false, Message = "Chỉ tác giả truyện được so sánh chương." };
+        if (!chapter.story_id.HasValue)
+            return new CompareChapterResponse { HasBothContents = false, Message = "Chương không gắn truyện." };
+
+        var storyId = chapter.story_id.Value;
+        var orderIndex = chapter.order_index;
+        if (orderIndex < 1)
+            return new CompareChapterResponse { HasBothContents = false, Message = "Chương có order_index không hợp lệ." };
+
+        var story = _storyRepository.GetById(storyId);
+        if (story == null)
+            return new CompareChapterResponse { HasBothContents = false, Message = "Truyện không tồn tại." };
+
+        if (userId.HasValue && story.author_id != userId.Value)
+            return new CompareChapterResponse { HasBothContents = false, Message = "Chỉ tác giả truyện được so sánh." };
 
         var authorContent = (chapter.content ?? "").Trim();
-        var aiRecords = _aiContentRepository.GetAllByChapterId(request.ChapterId);
+        var aiRecords = _aiContentRepository.GetAllByStoryIdAndChapterIndex(storyId, orderIndex);
 
         if (string.IsNullOrEmpty(authorContent))
             return new CompareChapterResponse
@@ -55,10 +66,9 @@ public class ChapterCompareService : IChapterCompareService
                 HasBothContents = false,
                 AuthorContentLength = authorContent.Length,
                 AiContentLength = 0,
-                Message = "Chưa có bản nội dung AI sinh ra cho chương này."
+                Message = "Chưa có bản nội dung AI (co-create) cho thứ tự chương này (chapter_index)."
             };
 
-        // So sánh với từng bản AI của chương, lấy điểm cao nhất (tác giả có thể đã chọn bản 1, bản 2 hay bản mới nhất).
         double bestScore = 0;
         int bestAiLength = 0;
         var config = EmbeddingHelper.GetEmbeddingConfig(_configuration);
@@ -103,7 +113,6 @@ public class ChapterCompareService : IChapterCompareService
         var threshold = _configuration.GetValue("ChapterCompare:SimilarityThresholdPercent", SimilarityThresholdPercent);
         var roundedScore = Math.Round(bestScore, 2);
 
-        // Lưu phần trăm giống nhau vào chapter khi chương đã PUBLISHED
         if (string.Equals(chapter.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
         {
             chapter.ai_similarity_percent = (decimal)roundedScore;

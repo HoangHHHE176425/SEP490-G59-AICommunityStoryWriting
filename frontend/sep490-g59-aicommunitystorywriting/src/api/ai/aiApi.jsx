@@ -56,10 +56,24 @@ export async function coCreate(storyId, authorIdea) {
 }
 
 /**
+ * So sánh nội dung chương với các bản AI (cùng chapter_index = order_index của chương). Chỉ cần chapterId — BE tự lấy story/order_index.
+ * @param {{ chapterId: string }} payload
+ */
+export async function compareChapter(payload) {
+    const chapterId = payload?.chapterId ?? payload?.ChapterId;
+    if (!chapterId || String(chapterId).trim() === "") throw new Error("chapterId là bắt buộc.");
+    const response = await axiosInstance.post("ai/compare-chapter", {
+        chapterId,
+    });
+    return response.data;
+}
+
+/**
  * Check chapter content: chính tả + từ cấm/chính sách.
  * @param {Object} payload - { content: string, storyId?: string|null, chapterTitle?: string|null }
  * @returns {Promise<{ passed: boolean, spellingIssues: Array<{ wordOrPhrase, suggestion, context? }>, policyViolations: Array<{ type, description, quote? }>, hasInappropriateContent: boolean, summary?: string|null }>}
  */
+
 export async function checkChapter(payload) {
     const content = (payload?.content ?? '').toString();
     if (!content.trim()) throw new Error("Content là bắt buộc.");

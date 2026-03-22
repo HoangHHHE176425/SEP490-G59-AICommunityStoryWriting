@@ -36,11 +36,14 @@ public class CoCreationResponse
     /// <summary>Feedback cuối từ Agent 3 nếu vẫn chưa đạt sau tất cả vòng sửa (để tác giả tham khảo). Khi Approved=true thì thường null.</summary>
     public string? ReviewFeedback { get; set; }
 
-    /// <summary>ID chương nháp (DRAFT) vừa tạo — mỗi lần co-create thành công tạo một chương + một bản ai_generated_content.</summary>
+    /// <summary>Luôn null: co-create không còn tạo chương DRAFT trong bảng chapters.</summary>
     public Guid? ChapterId { get; set; }
 
-    /// <summary>ID bản ghi ai_generated_content vừa lưu (gắn với ChapterId).</summary>
+    /// <summary>ID bản ghi ai_generated_content vừa lưu (chapter_id null cho đến khi tác giả tạo chương qua API chapters).</summary>
     public Guid? AiGeneratedContentId { get; set; }
+
+    /// <summary>Thứ tự chương dự kiến (khớp <c>chapter_index</c> và sẽ khớp <c>chapters.order_index</c> khi tạo chương).</summary>
+    public int? ChapterIndex { get; set; }
 
     /// <summary>Thời gian chạy từng bước (ms): Outline, Write, Guardrail, Review; khi song song là thời gian wall-clock của mỗi phase. Null nếu không đo.</summary>
     public List<AgentDuration>? AgentDurations { get; set; }

@@ -12,7 +12,7 @@ namespace Services.DTOs.Chapters
         public decimal? AiContributionRatio { get; set; } = 0;
         public bool IsAiClean { get; set; } = false;
 
-        /// <summary>Nếu tạo chương từ bản nháp AI (co-create): truyền id bản ghi ai_generated_content. Nội dung sẽ lấy từ ai_output (nếu Content trống) và sau khi tạo xong sẽ gán chapter_id vào bản ghi đó để API so sánh chương hoạt động.</summary>
+        /// <summary>Nếu tạo chương từ bản AI (co-create): truyền id bản ghi ai_generated_content. Nội dung sẽ lấy từ ai_output (nếu Content trống); sau khi tạo sẽ gán chapter_id và chapter_index = order_index. So sánh: POST compare-chapter với chapterId.</summary>
         public Guid? AiGeneratedContentId { get; set; }
     }
 }
