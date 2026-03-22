@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
 import { Activity, BookOpen, Users, Eye } from 'lucide-react';
-import { getCommunityStats } from '../../api/community/communityApi';
+import { useCommunityStats } from '../../hooks/useCommunityStats';
 
 function formatCompact(num) {
   if (num === null || num === undefined || Number.isNaN(Number(num))) return '0';
@@ -11,37 +10,22 @@ function formatCompact(num) {
   return n.toLocaleString('vi-VN');
 }
 
-export function CommunityStatsWidget() {
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+/**
+ * Thống kê sidebar — GET /api/community/stats (guest OK).
+ * @param {{ skipFetch?: boolean, stats?: object, loading?: boolean, error?: string | null }} props
+ *   Khi skipFetch=true: truyền stats/loading/error từ cha (một lần gọi API).
+ */
+export function CommunityStatsWidget({ skipFetch = false, stats: statsProp, loading: loadingProp, error: errorProp } = {}) {
+  const internal = useCommunityStats({ enabled: !skipFetch });
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await getCommunityStats();
-        if (!cancelled) setStats(data);
-      } catch (e) {
-        if (!cancelled) {
-          setError(e?.message ?? 'Không tải được');
-          setStats(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const stats = skipFetch ? statsProp : internal.stats;
+  const loading = skipFetch ? loadingProp : internal.loading;
+  const error = skipFetch ? errorProp : internal.error;
 
   const rows = stats
     ? [
         {
-          label: 'Truyện đã xuất bản',
+          label: 'Truyện công khai',
           value: formatCompact(stats.publishedStoriesCount),
           raw: stats.publishedStoriesCount,
           icon: BookOpen,
@@ -73,7 +57,7 @@ export function CommunityStatsWidget() {
         </h3>
       </div>
       <p className="text-[11px] text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] mb-4">
-        Cập nhật theo truyện trạng thái đã xuất bản
+        Truyện PUBLISHED, không <span className="lowercase">compliance_hidden</span> — cùng logic danh sách công khai
       </p>
 
       {loading ? (
@@ -113,12 +97,13 @@ export function CommunityStatsWidget() {
 
       {!loading && !error && stats ? (
         <p className="mt-3 text-[10px] text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] leading-snug">
-          * Tác giả: số người có ít nhất một truyện đã xuất bản.
+          * Tác giả: số <span className="font-medium text-[#64748b]">author_id</span> khác nhau có ít nhất một truyện thỏa điều
+          kiện trên.
           {stats?.statsSource === 'stories' ? (
             <>
               {' '}
               <span className="text-[#94a3b8]">
-                (Tính từ API truyện công khai khi /community/stats chưa khả dụng.)
+                (Ước tính từ GET /stories khi /community/stats chưa khả dụng.)
               </span>
             </>
           ) : null}
