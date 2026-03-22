@@ -105,6 +105,48 @@ const STATUS_PARAM_MAP = {
 };
 
 const PAGE_SIZE = 10;
+/** Backend: MinHoursUntilDeadline = 24, MaxDeadlineDaysAhead = 366 */
+const MIN_CLAIM_DEADLINE_HOURS = 25;
+const MAX_CLAIM_DEADLINE_DAYS = 366;
+
+/** Giá trị cho input datetime-local (giờ local). */
+function toDatetimeLocalValue(d) {
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function getDefaultDatetimeLocalForClaim() {
+    const d = new Date();
+    d.setTime(d.getTime() + 48 * 60 * 60 * 1000);
+    return toDatetimeLocalValue(d);
+}
+
+function getMinDatetimeLocalForClaim() {
+    const d = new Date();
+    d.setTime(d.getTime() + MIN_CLAIM_DEADLINE_HOURS * 60 * 60 * 1000);
+    return toDatetimeLocalValue(d);
+}
+
+function getMaxDatetimeLocalForClaim() {
+    const d = new Date();
+    d.setTime(d.getTime() + MAX_CLAIM_DEADLINE_DAYS * 24 * 60 * 60 * 1000);
+    return toDatetimeLocalValue(d);
+}
+
+/** @returns {string|null} lỗi tiếng Việt hoặc null */
+function validateClaimDeadlineLocal(datetimeLocalValue) {
+    if (!datetimeLocalValue) return 'Vui lòng chọn hạn hoàn thành duyệt.';
+    const picked = new Date(datetimeLocalValue);
+    if (Number.isNaN(picked.getTime())) return 'Thời gian không hợp lệ.';
+    const min = new Date();
+    min.setTime(min.getTime() + 24 * 60 * 60 * 1000);
+    const max = new Date();
+    max.setTime(max.getTime() + MAX_CLAIM_DEADLINE_DAYS * 24 * 60 * 60 * 1000);
+    if (picked <= min) return 'Hạn duyệt phải sau ít nhất 24 giờ kể từ bây giờ.';
+    if (picked > max) return `Hạn duyệt không được vượt quá ${MAX_CLAIM_DEADLINE_DAYS} ngày.`;
+    return null;
+}
+
 /** Backend khuyến nghị: load lại danh sách duyệt/từ chối mỗi 30 giây để cập nhật khi có thay đổi từ nơi khác */
 const REFRESH_INTERVAL_MS = 30 * 1000;
 
@@ -305,6 +347,8 @@ export function PublicationManagement() {
     const [releaseFormError, setReleaseFormError] = useState('');
     const [showClaimModal, setShowClaimModal] = useState(false); // modal "Chọn truyện để nhận duyệt"
     const [claimConfirmTarget, setClaimConfirmTarget] = useState(null); // { type: 'story', id, title } khi cần popup xác nhận
+    /** Hạn hoàn thành duyệt (datetime-local) khi xác nhận trong popup — gửi API reviewDeadlineAt (ISO UTC). */
+    const [claimReviewDeadlineLocal, setClaimReviewDeadlineLocal] = useState('');
     /** Modal "Nhận duyệt đơn": danh sách truyện + chương chưa nhận (type 'story' | 'chapter') */
     const [claimModalItems, setClaimModalItems] = useState([]);
     const [claimModalLoading, setClaimModalLoading] = useState(false);
@@ -1364,7 +1408,10 @@ export function PublicationManagement() {
                                                 </div>
                                                 <button
                                                     type="button"
-                                                    onClick={() => setClaimConfirmTarget(confirmPayload)}
+                                                    onClick={() => {
+                                                        setClaimReviewDeadlineLocal(getDefaultDatetimeLocalForClaim());
+                                                        setClaimConfirmTarget(confirmPayload);
+                                                    }}
                                                     disabled={claimingId === (item._claimId ?? item.storyId)}
                                                     style={{
                                                         padding: '0.5rem 0.875rem',

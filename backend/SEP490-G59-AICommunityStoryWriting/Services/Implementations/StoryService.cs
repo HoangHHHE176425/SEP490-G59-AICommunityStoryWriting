@@ -176,9 +176,17 @@ namespace Services.Implementations
                 .Take(query.PageSize)
                 .ToList();
 
+            var authorIdsForAvatars = stories
+                .Select(s => s.author_id)
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .Distinct()
+                .ToList();
+            var authorAvatarByUserId = UserProfileDAO.GetAvatarUrlsByUserIds(authorIdsForAvatars);
+
             return new PagedResultDto<StoryListItemDto>
             {
-                Items = stories.Select(MapToListItemDto),
+                Items = stories.Select(s => MapToListItemDto(s, authorAvatarByUserId)).ToList(),
                 TotalCount = totalCount,
                 Page = query.Page,
                 PageSize = query.PageSize
@@ -603,6 +611,7 @@ namespace Services.Implementations
                 latestUpdatedAt = latestChapterUpdatedAt;
 
             var authorName = story.author_id.HasValue ? NotificationDAO.GetUserDisplayName(story.author_id.Value) : null;
+            var authorAvatarUrl = story.author_id.HasValue ? UserProfileDAO.GetAvatarUrlForUser(story.author_id.Value) : null;
             return new StoryResponseDto
             {
                 Id = story.id,
@@ -613,6 +622,7 @@ namespace Services.Implementations
                 CategoryNames = categoryNames,
                 AuthorId = story.author_id,
                 AuthorName = authorName,
+                AuthorAvatarUrl = authorAvatarUrl,
                 CoverImage = story.cover_image,
                 Status = story.status,
                 StoryProgressStatus = story.story_progress_status,
@@ -635,7 +645,7 @@ namespace Services.Implementations
             };
         }
 
-        private StoryListItemDto MapToListItemDto(stories story)
+        private StoryListItemDto MapToListItemDto(stories story, IReadOnlyDictionary<Guid, string?>? authorAvatarByUserId = null)
         {
             var categories = story.category?.ToList() ?? new List<categories>();
             var categoryIds = categories.Select(c => c.id).ToList();
@@ -649,6 +659,13 @@ namespace Services.Implementations
             if (latestChapterUpdatedAt.HasValue && (!latestUpdatedAt.HasValue || latestChapterUpdatedAt > latestUpdatedAt))
                 latestUpdatedAt = latestChapterUpdatedAt;
 
+            // Tên hiển thị tác giả cho danh sách công khai (guest) — cùng nguồn với chi tiết truyện.
+            var authorName = story.author_id.HasValue ? NotificationDAO.GetUserDisplayName(story.author_id.Value) : null;
+            string? authorAvatarUrl = null;
+            if (story.author_id.HasValue && authorAvatarByUserId != null &&
+                authorAvatarByUserId.TryGetValue(story.author_id.Value, out var av))
+                authorAvatarUrl = av;
+
             return new StoryListItemDto
             {
                 Id = story.id,
@@ -661,6 +678,8 @@ namespace Services.Implementations
                 CategoryIds = categoryIds,
                 CategoryNames = categoryNames,
                 AuthorId = story.author_id,
+                AuthorName = authorName,
+                AuthorAvatarUrl = authorAvatarUrl,
                 AgeRating = story.age_rating,
                 TotalChapters = totalChapters,
                 PublishedChaptersCount = publishedChaptersCount,

@@ -1,12 +1,16 @@
 import axiosInstance from "../axiosInstance";
 
 function getErrorMessage(err) {
-    return (
+    const raw =
         err?.response?.data?.message ||
         err?.response?.data?.title ||
         err?.message ||
-        "Đã xảy ra lỗi. Vui lòng thử lại."
-    );
+        "Đã xảy ra lỗi. Vui lòng thử lại.";
+    // BR-02: email trùng (BE thường trả "Email already exists.")
+    if (typeof raw === "string" && /email\s+already\s+exists/i.test(raw)) {
+        return "Email này đã được đăng ký. Vui lòng dùng email khác hoặc đăng nhập.";
+    }
+    return raw;
 }
 
 export async function register({ email, password, fullName }) {
