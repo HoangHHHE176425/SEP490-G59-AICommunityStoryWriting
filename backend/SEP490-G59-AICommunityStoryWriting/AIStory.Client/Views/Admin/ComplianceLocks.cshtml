@@ -1,0 +1,257 @@
+﻿@{
+    ViewData["Title"] = "Admin – Yêu cầu compliance lock";
+}
+
+<div class="container-fluid mt-3 mb-5">
+    <h2 class="mb-2"><i class="bi bi-flag"></i> Yêu cầu gỡ / giao lại lock báo cáo truyện</h2>
+    <p class="text-muted small">
+        Compliance đã nhận lock không tự gỡ hay đổi trạng thái; họ gửi yêu cầu tại màn <strong>Báo cáo vi phạm</strong>.
+        Tại đây bạn <strong>duyệt</strong>: gỡ lock (đưa về hàng đợi), giao cho compliance khác (không được là người gửi), hoặc từ chối.
+        Danh sách compliance + số truyện đang giúp cân tải.
+    </p>
+
+    <div class="row g-3 mb-4">
+        <div class="col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-header fw-semibold">COMPLIANCE đang hoạt động (số lock báo cáo truyện)</div>
+                <div class="card-body p-0">
+                    <div id="aclOfficersHost" class="p-2 small text-muted">Đang tải…</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card shadow-sm">
+                <div class="card-header fw-semibold">Thao tác nhanh</div>
+                <div class="card-body small">
+                    <p class="mb-2">Gỡ lock trực tiếp (không cần yêu cầu): nhập Story ID (Guid).</p>
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control" id="aclQuickStoryId" placeholder="story_id" />
+                        <button type="button" class="btn btn-outline-danger" id="aclQuickRelease">Gỡ lock</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span class="fw-semibold">Yêu cầu chờ xử lý</span>
+            <button type="button" class="btn btn-sm btn-outline-primary" id="aclRefresh">Làm mới</button>
+        </div>
+        <div class="card-body p-0">
+            <div id="aclError" class="alert alert-danger m-2 py-2" style="display:none;"></div>
+            <div id="aclRequestsHost" class="table-responsive"></div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="aclResolveModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Xử lý yêu cầu</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="aclResolveRequestId" />
+                <div class="mb-2 small text-muted" id="aclResolveSummary"></div>
+                <div class="mb-3">
+                    <label class="form-label">Quyết định</label>
+                    <select class="form-select" id="aclDecision">
+                        <option value="APPROVE_UNLOCK">Duyệt: gỡ lock (về hàng đợi)</option>
+                        <option value="APPROVE_REASSIGN">Duyệt: giao cho compliance khác</option>
+                        <option value="REJECT">Từ chối yêu cầu</option>
+                    </select>
+                </div>
+                <div class="mb-3" id="aclReassignWrap" style="display:none;">
+                    <label class="form-label">Compliance nhận (không được là người gửi)</label>
+                    <select class="form-select" id="aclNewAssignee"></select>
+                    <label class="form-label mt-2">Hạn xử lý (UTC, datetime-local)</label>
+                    <input type="datetime-local" class="form-control" id="aclDeadline" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Ghi chú admin</label>
+                    <textarea class="form-control" id="aclAdminNote" rows="2" placeholder="Tùy chọn"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-primary" id="aclResolveSubmit">Xác nhận</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        let aclOfficersCache = [];
+
+        function aclEsc(t) {
+            if (t == null) return '';
+            const d = document.createElement('div');
+            d.textContent = t;
+            return d.innerHTML;
+        }
+
+        function aclToIsoUtcFromLocal(dtLocalVal) {
+            if (!dtLocalVal) return null;
+            const d = new Date(dtLocalVal);
+            if (isNaN(d.getTime())) return null;
+            return d.toISOString();
+        }
+
+        async function aclLoadOfficers() {
+            const host = document.getElementById('aclOfficersHost');
+            try {
+                const raw = await ApiService.adminListComplianceOfficersForReports();
+                const list = Array.isArray(raw) ? raw : [];
+                aclOfficersCache = list;
+                if (!list.length) {
+                    host.innerHTML = '<p class="mb-0 text-muted">Không có tài khoản COMPLIANCE ACTIVE.</p>';
+                    return;
+                }
+                let html = '<table class="table table-sm table-bordered mb-0"><thead><tr><th>Tên / email</th><th>Đang giữ lock</th></tr></thead><tbody>';
+                list.forEach(function (o) {
+                    const id = o.userId || o.UserId;
+                    const name = o.displayName || o.DisplayName || '';
+                    const em = o.email || o.Email || '';
+                    const n = o.openStoryReportLocks != null ? o.openStoryReportLocks : o.OpenStoryReportLocks;
+                    html += '<tr><td>' + aclEsc(name) + '<div class="text-muted small">' + aclEsc(em) + '</div><code class="small">' + aclEsc(String(id)) + '</code></td><td>' + aclEsc(String(n)) + '</td></tr>';
+                });
+                html += '</tbody></table>';
+                host.innerHTML = html;
+            } catch (e) {
+                host.innerHTML = '<span class="text-danger">' + aclEsc(e.message || e) + '</span>';
+            }
+        }
+
+        function aclFillReassignSelect(excludeRequesterId) {
+            const sel = document.getElementById('aclNewAssignee');
+            sel.innerHTML = '<option value="">— Chọn —</option>';
+            (aclOfficersCache || []).forEach(function (o) {
+                const id = String(o.userId || o.UserId);
+                if (excludeRequesterId && id === String(excludeRequesterId)) return;
+                const name = o.displayName || o.DisplayName || id;
+                const n = o.openStoryReportLocks != null ? o.openStoryReportLocks : o.OpenStoryReportLocks;
+                const opt = document.createElement('option');
+                opt.value = id;
+                opt.textContent = name + ' (đang giữ ' + n + ' lock)';
+                sel.appendChild(opt);
+            });
+        }
+
+        async function aclLoadRequests() {
+            const host = document.getElementById('aclRequestsHost');
+            const err = document.getElementById('aclError');
+            err.style.display = 'none';
+            host.innerHTML = '<div class="p-3 text-center"><div class="spinner-border spinner-border-sm"></div></div>';
+            try {
+                const raw = await ApiService.adminListComplianceLockRequests('PENDING');
+                const list = Array.isArray(raw) ? raw : [];
+                if (!list.length) {
+                    host.innerHTML = '<p class="p-3 text-muted mb-0">Không có yêu cầu PENDING.</p>';
+                    return;
+                }
+                let html = '<table class="table table-sm table-hover mb-0 align-middle"><thead><tr><th>Tạo lúc</th><th>Truyện</th><th>Người gửi</th><th>Lời nhắn</th><th></th></tr></thead><tbody>';
+                list.forEach(function (r) {
+                    const id = r.id || r.Id;
+                    const sid = r.storyId || r.StoryId;
+                    const st = r.storyTitle || r.StoryTitle || '';
+                    const rq = r.requesterId || r.RequesterId;
+                    const em = r.requesterEmail || r.RequesterEmail || '';
+                    const nm = r.requesterDisplayName || r.RequesterDisplayName || '';
+                    const msg = r.message || r.Message || '—';
+                    const ca = r.createdAtUtc || r.CreatedAtUtc;
+                    html += '<tr>' +
+                        '<td class="small">' + aclEsc(ca ? Utils.formatDate(ca) : '—') + '</td>' +
+                        '<td class="small"><a href="/Home/Story/' + encodeURIComponent(sid) + '" target="_blank" rel="noopener">' + aclEsc(st || sid) + '</a><div class="text-muted"><code>' + aclEsc(String(sid)) + '</code></div></td>' +
+                        '<td class="small">' + aclEsc(nm || em) + '<div class="text-muted">' + aclEsc(String(rq)) + '</div></td>' +
+                        '<td class="small">' + aclEsc(msg) + '</td>' +
+                        '<td><button type="button" class="btn btn-sm btn-primary acl-open-resolve" data-req="' + aclEsc(String(id)) + '" data-story="' + aclEsc(String(sid)) + '" data-reqer="' + aclEsc(String(rq)) + '">Duyệt</button></td></tr>';
+                });
+                html += '</tbody></table>';
+                host.innerHTML = html;
+                host.querySelectorAll('.acl-open-resolve').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        document.getElementById('aclResolveRequestId').value = btn.getAttribute('data-req');
+                        const tr = btn.closest('tr');
+                        const cells = tr ? tr.querySelectorAll('td') : [];
+                        const sum = cells.length >= 3
+                            ? ('Truyện: ' + (cells[1].innerText || '').trim() + ' | Người gửi: ' + (cells[2].innerText || '').trim())
+                            : '';
+                        document.getElementById('aclResolveSummary').textContent = sum;
+                        const rqer = btn.getAttribute('data-reqer');
+                        aclFillReassignSelect(rqer);
+                        document.getElementById('aclDecision').value = 'APPROVE_UNLOCK';
+                        document.getElementById('aclReassignWrap').style.display = 'none';
+                        document.getElementById('aclAdminNote').value = '';
+                        const dl = document.getElementById('aclDeadline');
+                        const w = new Date();
+                        w.setDate(w.getDate() + 7);
+                        try {
+                            dl.value = w.toISOString().slice(0, 16);
+                        } catch (x) { dl.value = ''; }
+                        new bootstrap.Modal(document.getElementById('aclResolveModal')).show();
+                    });
+                });
+            } catch (e) {
+                err.textContent = e.message || String(e);
+                err.style.display = 'block';
+                host.innerHTML = '';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async function () {
+            await AuthHelper.loadUserInfo().catch(function () { });
+            if (!AuthHelper.isAuthenticated() || !AuthHelper.isAdmin()) {
+                Utils.showAlert('Chỉ ADMIN.', 'danger');
+                setTimeout(function () { window.location.href = '/'; }, 1600);
+                return;
+            }
+            document.getElementById('aclDecision').addEventListener('change', function () {
+                const v = this.value;
+                document.getElementById('aclReassignWrap').style.display = (v === 'APPROVE_REASSIGN') ? 'block' : 'none';
+            });
+            document.getElementById('aclRefresh').addEventListener('click', function () {
+                aclLoadOfficers();
+                aclLoadRequests();
+            });
+            document.getElementById('aclQuickRelease').addEventListener('click', async function () {
+                const sid = document.getElementById('aclQuickStoryId').value.trim();
+                if (!sid) { Utils.showAlert('Nhập Story ID.', 'warning'); return; }
+                if (!confirm('Gỡ lock compliance cho truyện này?')) return;
+                try {
+                    const r = await ApiService.adminComplianceReleaseStoryReportClaim(sid);
+                    Utils.showAlert((r && (r.message || r.Message)) || 'Đã gỡ lock.', 'success');
+                    aclLoadOfficers();
+                    aclLoadRequests();
+                } catch (e) { Utils.showAlert(e.message || e, 'danger'); }
+            });
+            document.getElementById('aclResolveSubmit').addEventListener('click', async function () {
+                const requestId = document.getElementById('aclResolveRequestId').value;
+                const decision = document.getElementById('aclDecision').value;
+                const note = document.getElementById('aclAdminNote').value.trim();
+                const body = { decision: decision, adminNote: note || null };
+                if (decision === 'APPROVE_REASSIGN') {
+                    const nid = document.getElementById('aclNewAssignee').value;
+                    if (!nid) { Utils.showAlert('Chọn compliance nhận.', 'warning'); return; }
+                    const iso = aclToIsoUtcFromLocal(document.getElementById('aclDeadline').value);
+                    if (!iso) { Utils.showAlert('Chọn hạn xử lý.', 'warning'); return; }
+                    body.newAssigneeId = nid;
+                    body.reviewDeadlineAtUtc = iso;
+                }
+                try {
+                    await ApiService.adminResolveComplianceLockRequest(requestId, body);
+                    Utils.showAlert('Đã xử lý.', 'success');
+                    var modalEl = document.getElementById('aclResolveModal');
+                    var mi = bootstrap.Modal.getInstance(modalEl);
+                    if (mi) mi.hide();
+                    aclLoadOfficers();
+                    aclLoadRequests();
+                } catch (e) { Utils.showAlert(e.message || e, 'danger'); }
+            });
+            aclLoadOfficers();
+            aclLoadRequests();
+        });
+    </script>
+}

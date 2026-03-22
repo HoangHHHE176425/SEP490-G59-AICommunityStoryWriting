@@ -5,6 +5,7 @@ using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Services.DTOs.Admin;
 using Services.DTOs.Admin.Moderation;
 using Services.DTOs.Chapters;
 using Services.DTOs.Moderation;
@@ -21,15 +22,18 @@ namespace AIStory.API.Controllers
     {
         private readonly IModerationService _moderationService;
         private readonly IReviewEscalationService _reviewEscalationService;
+        private readonly IAdminUnifiedEscalationService _adminUnifiedEscalationService;
         private readonly ILogger<AdminModerationController> _logger;
 
         public AdminModerationController(
             IModerationService moderationService,
             IReviewEscalationService reviewEscalationService,
+            IAdminUnifiedEscalationService adminUnifiedEscalationService,
             ILogger<AdminModerationController> logger)
         {
             _moderationService = moderationService;
             _reviewEscalationService = reviewEscalationService;
+            _adminUnifiedEscalationService = adminUnifiedEscalationService;
             _logger = logger;
         }
 
@@ -286,6 +290,28 @@ namespace AIStory.API.Controllers
             }
         }
 
+        /// <summary>Đơn chờ admin — moderator + compliance (lock + hành động tài khoản), một danh sách. Lọc urgencyTier: CRITICAL | HIGH | STANDARD.</summary>
+        [HttpGet("review-escalations/pending-unified")]
+        public async Task<IActionResult> GetPendingUnifiedEscalations([FromQuery] string? urgencyTier = null)
+        {
+            try
+            {
+                if (!GetCurrentUserId().HasValue)
+                    return Unauthorized(new { message = "Không xác định user." });
+                var r = await _adminUnifiedEscalationService.GetPendingUnifiedAsync(urgencyTier);
+                return Ok(new
+                {
+                    items = r.Items,
+                    counts = new { critical = r.Critical, high = r.High, standard = r.Standard }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetPendingUnifiedEscalations failed");
+                return StatusCode(500, new { message = "Lỗi lấy danh sách đơn gửi admin", error = ex.Message });
+            }
+        }
+
         /// <summary>Đơn báo cáo hạn duyệt từ moderator — chỉ PENDING. Lọc urgencyTier: CRITICAL | HIGH | STANDARD.</summary>
         [HttpGet("review-escalations/pending")]
         public IActionResult GetPendingReviewEscalations([FromQuery] string? urgencyTier = null)
@@ -328,7 +354,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Log đầy đủ đơn escalation: lọc, tìm kiếm, phân trang (theo dõi review_escalation_requests).</summary>
+        /// <summary>Log đầy đủ đơn escalation moderator: lọc, tìm kiếm, phân trang (review_escalation_requests).</summary>
         [HttpGet("review-escalations/log")]
         public IActionResult GetReviewEscalationLog([FromQuery] ReviewEscalationLogQueryDto query)
         {
@@ -343,6 +369,24 @@ namespace AIStory.API.Controllers
             {
                 _logger.LogError(ex, "GetReviewEscalationLog failed");
                 return StatusCode(500, new { message = "Lỗi lấy log đơn escalation", error = ex.Message });
+            }
+        }
+
+        /// <summary>Log thống nhất đơn gửi admin: moderator escalation + compliance gỡ lock + compliance hành động tài khoản.</summary>
+        [HttpGet("review-escalations/unified-log")]
+        public async Task<IActionResult> GetUnifiedEscalationLog([FromQuery] UnifiedEscalationLogQueryDto query)
+        {
+            try
+            {
+                if (!GetCurrentUserId().HasValue)
+                    return Unauthorized(new { message = "Không xác định user." });
+                var result = await _adminUnifiedEscalationService.SearchUnifiedLogAsync(query ?? new UnifiedEscalationLogQueryDto());
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetUnifiedEscalationLog failed");
+                return StatusCode(500, new { message = "Lỗi lấy log đơn gửi admin", error = ex.Message });
             }
         }
 

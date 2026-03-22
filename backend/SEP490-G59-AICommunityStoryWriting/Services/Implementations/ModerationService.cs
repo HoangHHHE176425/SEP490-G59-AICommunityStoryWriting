@@ -9,6 +9,7 @@ using Repositories;
 using Services.DTOs.Chapters;
 using Services.DTOs.Moderation;
 using Services.DTOs.Notifications;
+using Services;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 
@@ -148,7 +149,7 @@ namespace Services.Implementations
             var claim = ReviewAssignmentDAO.GetClaimInfo(ReviewAssignmentDAO.TargetTypeStory, item.Id);
             if (claim.HasValue)
             {
-                item.ClaimedAt = claim.Value.AssignedAt;
+                item.ClaimedAt = ApiDateTime.AsUtcForJson(claim.Value.AssignedAt);
                 item.ClaimedByDisplayName = claim.Value.DisplayName;
                 item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
             }
@@ -412,7 +413,7 @@ namespace Services.Implementations
             var claim = ReviewAssignmentDAO.GetClaimInfo(ReviewAssignmentDAO.TargetTypeChapter, item.Id);
             if (claim.HasValue)
             {
-                item.ClaimedAt = claim.Value.AssignedAt;
+                item.ClaimedAt = ApiDateTime.AsUtcForJson(claim.Value.AssignedAt);
                 item.ClaimedByDisplayName = claim.Value.DisplayName;
                 item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
             }

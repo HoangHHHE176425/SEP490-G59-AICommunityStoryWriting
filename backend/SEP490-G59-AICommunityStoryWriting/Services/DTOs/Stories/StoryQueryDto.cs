@@ -20,5 +20,8 @@ namespace Services.DTOs.Stories
         public List<string>? StatusIn { get; set; }
         public string? SortBy { get; set; } = "created_at"; // created_at, updated_at, total_views, avg_rating
         public string? SortOrder { get; set; } = "desc"; // asc, desc
+
+        /// <summary>Khi false (mặc định): loại truyện bị compliance ẩn khỏi danh sách công khai.</summary>
+        public bool IncludeComplianceHiddenInLists { get; set; }
     }
 }

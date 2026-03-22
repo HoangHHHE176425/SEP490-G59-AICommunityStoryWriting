@@ -2,6 +2,7 @@ using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Repositories;
+using Services;
 using Services.DTOs.Admin;
 using Services.DTOs.Moderation;
 using Services.Interfaces;
@@ -54,9 +55,9 @@ namespace Services.Implementations
             return new ReviewAssignmentSelfDto
             {
                 IsAssignedToMe = assigned,
-                ReviewDeadlineAt = deadline,
-                AuthorSubmittedAtUtc = authorSubmitted,
-                PolicySuggestedDeadlineAt = policySuggested,
+                ReviewDeadlineAt = ApiDateTime.AsUtcForJson(deadline),
+                AuthorSubmittedAtUtc = ApiDateTime.AsUtcForJson(authorSubmitted),
+                PolicySuggestedDeadlineAt = ApiDateTime.AsUtcForJson(policySuggested),
                 TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, effectiveFallback),
                 HasPendingEscalation = ReviewEscalationDAO.HasPendingForTarget(tt, targetId)
             };
@@ -126,7 +127,8 @@ namespace Services.Implementations
                 reason = reason,
                 proposed_deadline_at = proposed,
                 status = ReviewEscalationDAO.StatusPending,
-                created_at = DateTime.UtcNow
+                created_at = DateTime.UtcNow,
+                sender_urgency_tier = EscalationUrgencyHelper.TierForModeratorRequestKind(kind)
             };
             ReviewEscalationDAO.Insert(row);
             return row.id;

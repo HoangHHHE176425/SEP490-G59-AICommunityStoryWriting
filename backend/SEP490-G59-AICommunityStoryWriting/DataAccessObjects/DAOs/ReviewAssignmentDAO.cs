@@ -12,6 +12,9 @@ namespace DataAccessObjects.DAOs
         public const string TargetTypeStory = "STORY";
         public const string TargetTypeChapter = "CHAPTER";
 
+        /// <summary>Lock nhận xử lý báo cáo truyện (COMPLIANCE) — target_id = story_id.</summary>
+        public const string TargetTypeComplianceStoryReports = "COMPLIANCE_STORY_REPORTS";
+
         /// <summary>Lấy danh sách target_id đang bị lock bởi moderator KHÁC (để loại khỏi queue của moderator hiện tại).</summary>
         public static List<Guid> GetLockedTargetIdsByOthers(string targetType, Guid currentModeratorId)
         {
@@ -111,8 +114,8 @@ namespace DataAccessObjects.DAOs
             return GetActiveAssignment(targetType, targetId) != null;
         }
 
-        /// <summary>Moderator "nhận duyệt" → tạo assignment (lock). Trả về true nếu claim thành công.</summary>
-        public static bool TryClaim(string targetType, Guid targetId, Guid moderatorId, DateTime reviewDeadlineUtc, string assigneeRole = "MODERATOR")
+        /// <summary>Moderator / compliance "nhận" → tạo assignment. <paramref name="reviewDeadlineUtc"/> null = không hạn (vd. compliance báo cáo truyện).</summary>
+        public static bool TryClaim(string targetType, Guid targetId, Guid moderatorId, DateTime? reviewDeadlineUtc, string assigneeRole = "MODERATOR")
         {
             using var context = new StoryPlatformDbContext();
             var alreadyClaimed = context.review_assignments
@@ -171,6 +174,17 @@ namespace DataAccessObjects.DAOs
                           && r.assignee_id == moderatorId && c.story_id == storyId
                     orderby c.order_index descending
                     select c.id).ToList();
+        }
+
+        /// <summary>Số assignment CLAIMED theo assignee, lọc theo <paramref name="targetType"/> (vd: COMPLIANCE_STORY_REPORTS).</summary>
+        public static Dictionary<Guid, int> GetClaimedAssignmentCountsByAssigneeForTargetType(string targetType)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.review_assignments
+                .AsNoTracking()
+                .Where(r => r.status == StatusClaimed && r.target_type == targetType)
+                .GroupBy(r => r.assignee_id)
+                .ToDictionary(g => g.Key, g => g.Count());
         }
 
         /// <summary>Kiểm tra target có đang được assign cho moderator này không.</summary>
@@ -245,6 +259,76 @@ namespace DataAccessObjects.DAOs
                             target_id = targetId,
                             assignee_id = newAssigneeId.Value,
                             assignee_role = "MODERATOR",
+                            status = StatusClaimed,
+                            priority = 0,
+                            assigned_at = DateTime.UtcNow,
+                            review_deadline_at = newDeadlineUtc.Value
+                        });
+                        context.SaveChanges();
+                    }
+
+                    tx.Commit();
+                }
+                catch
+                {
+                    tx.Rollback();
+                    throw;
+                }
+            });
+        }
+
+        /// <summary>
+        /// Giống <see cref="ReleaseClaimAndOptionallyReassign"/> nhưng cho lock compliance báo cáo truyện (role COMPLIANCE).
+        /// </summary>
+        public static void ReleaseComplianceStoryClaimAndOptionallyReassign(
+            Guid storyId,
+            Guid expectedAssigneeId,
+            Guid? newAssigneeId,
+            DateTime? newDeadlineUtc)
+        {
+            const string targetType = TargetTypeComplianceStoryReports;
+            using var context = new StoryPlatformDbContext();
+            context.Database.CreateExecutionStrategy().Execute(() =>
+            {
+                using var tx = context.Database.BeginTransaction();
+                try
+                {
+                    var cur = context.review_assignments
+                        .FirstOrDefault(r => r.target_type == targetType && r.target_id == storyId && r.status == StatusClaimed);
+                    if (cur == null || cur.assignee_id != expectedAssigneeId)
+                        throw new InvalidOperationException("Assignment đã thay đổi; không thể xử lý.");
+
+                    cur.status = StatusCompleted;
+                    cur.completed_at = DateTime.UtcNow;
+                    context.SaveChanges();
+
+                    if (newAssigneeId.HasValue && newAssigneeId.Value != Guid.Empty)
+                    {
+                        if (!newDeadlineUtc.HasValue)
+                            throw new ArgumentException("Thiếu hạn xử lý khi giao cho compliance khác.");
+
+                        var assigneeUser = context.users.FirstOrDefault(u => u.id == newAssigneeId.Value);
+                        if (assigneeUser == null)
+                            throw new ArgumentException("Không tìm thấy người được giao.");
+                        var roleUpper = (assigneeUser.role ?? "").ToUpperInvariant();
+                        if (roleUpper != "COMPLIANCE")
+                            throw new ArgumentException("Chỉ giao lock cho tài khoản COMPLIANCE.");
+                        if (string.Equals(assigneeUser.status, "ACTIVE", StringComparison.OrdinalIgnoreCase) != true)
+                            throw new ArgumentException("Tài khoản không hoạt động.");
+                        if (newAssigneeId.Value == expectedAssigneeId)
+                            throw new ArgumentException("Không giao lại cho chính người gửi yêu cầu.");
+
+                        var dupe = context.review_assignments.Any(r => r.target_type == targetType && r.target_id == storyId && r.status == StatusClaimed);
+                        if (dupe)
+                            throw new InvalidOperationException("Không gán được: truyện đã có người nhận lock.");
+
+                        context.review_assignments.Add(new review_assignments
+                        {
+                            id = Guid.NewGuid(),
+                            target_type = targetType,
+                            target_id = storyId,
+                            assignee_id = newAssigneeId.Value,
+                            assignee_role = "COMPLIANCE",
                             status = StatusClaimed,
                             priority = 0,
                             assigned_at = DateTime.UtcNow,

@@ -35,6 +35,9 @@
                         <li class="nav-item" id="moderatorNavItem" style="display: none;">
                             <a class="nav-link text-dark" asp-area="" asp-controller="Moderator" asp-action="Index"><i class="bi bi-shield-check"></i> Kiểm duyệt</a>
                         </li>
+                        <li class="nav-item" id="complianceNavItem" style="display: none;">
+                            <a class="nav-link text-dark" asp-area="" asp-controller="Compliance" asp-action="Index"><i class="bi bi-flag"></i> Báo cáo vi phạm</a>
+                        </li>
                         <li class="nav-item" id="adminNavItem" style="display: none;">
                             <a class="nav-link text-dark" asp-area="" asp-controller="Admin" asp-action="Index"><i class="bi bi-gear-wide-connected"></i> Admin</a>
                         </li>
@@ -170,6 +173,10 @@
                 if (moderatorNav) {
                     moderatorNav.style.display = AuthHelper.isModerator() ? 'block' : 'none';
                 }
+                var complianceNav = document.getElementById('complianceNavItem');
+                if (complianceNav) {
+                    complianceNav.style.display = AuthHelper.isComplianceOfficer() ? 'block' : 'none';
+                }
                 var adminNav = document.getElementById('adminNavItem');
                 if (adminNav) {
                     adminNav.style.display = AuthHelper.isAdmin() ? 'block' : 'none';
@@ -218,6 +225,8 @@
                 userNavItem.style.display = 'none';
                 var moderatorNav = document.getElementById('moderatorNavItem');
                 if (moderatorNav) moderatorNav.style.display = 'none';
+                var complianceNav = document.getElementById('complianceNavItem');
+                if (complianceNav) complianceNav.style.display = 'none';
                 var adminNav = document.getElementById('adminNavItem');
                 if (adminNav) adminNav.style.display = 'none';
                 var notificationBell = document.getElementById('notificationBellItem');

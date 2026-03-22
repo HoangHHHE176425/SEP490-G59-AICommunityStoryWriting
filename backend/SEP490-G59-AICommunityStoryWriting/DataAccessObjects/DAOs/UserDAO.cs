@@ -128,6 +128,45 @@ namespace DataAccessObjects.DAOs
             return string.Equals(u.role, "MODERATOR", StringComparison.OrdinalIgnoreCase);
         }
 
+        /// <summary>COMPLIANCE đang ACTIVE — dùng khi admin giao lại lock báo cáo truyện.</summary>
+        public static bool IsActiveComplianceOfficer(Guid id)
+        {
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.AsNoTracking().FirstOrDefault(x => x.id == id);
+            if (u == null)
+                return false;
+            if (string.Equals(u.status, "ACTIVE", StringComparison.OrdinalIgnoreCase) != true)
+                return false;
+            return string.Equals(u.role, "COMPLIANCE", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Danh sách COMPLIANCE ACTIVE + số lock báo cáo truyện đang giữ (COMPLIANCE_STORY_REPORTS).</summary>
+        public static List<(Guid Id, string DisplayName, string? Email, int ComplianceStoryReportLockCount)> ListActiveComplianceOfficersForStoryReportAssignment()
+        {
+            var counts = ReviewAssignmentDAO.GetClaimedAssignmentCountsByAssigneeForTargetType(
+                ReviewAssignmentDAO.TargetTypeComplianceStoryReports);
+            using var context = new StoryPlatformDbContext();
+            var list = context.users
+                .AsNoTracking()
+                .Include(u => u.user_profiles)
+                .Where(u => (u.status ?? "").ToUpper() == "ACTIVE" &&
+                    (u.role ?? "").ToUpper() == "COMPLIANCE")
+                .OrderBy(u => u.email)
+                .ToList();
+            var rows = list.Select(u =>
+            {
+                var name = u.user_profiles?.nickname?.Trim();
+                if (string.IsNullOrEmpty(name))
+                    name = u.email;
+                var n = counts.TryGetValue(u.id, out var c) ? c : 0;
+                return (Id: u.id, DisplayName: name ?? "–", Email: (string?)u.email, ComplianceStoryReportLockCount: n);
+            }).ToList();
+            return rows
+                .OrderBy(x => x.ComplianceStoryReportLockCount)
+                .ThenBy(x => x.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         /// <summary>Danh sách moderator ACTIVE — giao lại lock story/chapter (không gồm admin).</summary>
         public static List<(Guid Id, string DisplayName, int ClaimedAssignmentCount)> ListActiveModeratorsForAssignment()
         {
@@ -223,6 +262,35 @@ namespace DataAccessObjects.DAOs
             var moderators = await q.CountAsync(u => (u.role ?? "").ToUpper() == "MODERATOR");
 
             return (total, active, inactive, banned, pending, authors, moderators);
+        }
+
+        public static bool IsAuthorWritingSuspended(Guid authorUserId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.AsNoTracking().FirstOrDefault(x => x.id == authorUserId);
+            if (u?.author_writing_suspended_until == null)
+                return false;
+            return u.author_writing_suspended_until > DateTime.UtcNow;
+        }
+
+        public static void SetAuthorWritingSuspendedUntil(Guid userId, DateTime? untilUtc)
+        {
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.FirstOrDefault(x => x.id == userId)
+                ?? throw new InvalidOperationException("User not found.");
+            u.author_writing_suspended_until = untilUtc;
+            u.updated_at = DateTime.UtcNow;
+            context.SaveChanges();
+        }
+
+        public static void SetUserAccountStatus(Guid userId, string status)
+        {
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.FirstOrDefault(x => x.id == userId)
+                ?? throw new InvalidOperationException("User not found.");
+            u.status = (status ?? "").Trim().ToUpperInvariant();
+            u.updated_at = DateTime.UtcNow;
+            context.SaveChanges();
         }
     }
 }

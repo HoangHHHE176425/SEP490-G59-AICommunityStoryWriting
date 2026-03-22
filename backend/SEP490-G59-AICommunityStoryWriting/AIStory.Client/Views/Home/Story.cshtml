@@ -4,11 +4,14 @@
 }
 
 <div class="container mt-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div class="d-flex flex-wrap gap-2 align-items-center">
             <a class="btn btn-outline-secondary btn-sm" href="/">
                 <i class="bi bi-arrow-left"></i> Trang chủ
             </a>
+            <button type="button" class="btn btn-outline-danger btn-sm" id="storyTopBarReportBtn" onclick="openStoryPageReport()" title="Báo cáo vi phạm (cần đăng nhập)">
+                <i class="bi bi-flag"></i> Báo cáo
+            </button>
         </div>
         <div class="small text-muted">Reader view</div>
     </div>
@@ -157,6 +160,29 @@
             </div>
         </div>
     </div>
+
+    <div class="modal fade" id="storyPageReportModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-flag"></i> Báo cáo truyện</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted mb-2" id="storyPageReportTitle"></p>
+                    <label class="form-label small">Lý do</label>
+                    <select class="form-select form-select-sm mb-2" id="storyPageReportReason"></select>
+                    <label class="form-label small">Mô tả thêm (tùy chọn)</label>
+                    <textarea class="form-control form-control-sm" id="storyPageReportDesc" rows="3" maxlength="4000"></textarea>
+                    <div class="small text-danger mt-2" id="storyPageReportErr" style="display:none;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Đóng</button>
+                    <button type="button" class="btn btn-danger btn-sm" id="storyPageReportSubmitBtn"><i class="bi bi-send"></i> Gửi báo cáo</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 @section Scripts {
@@ -169,12 +195,71 @@
         let userIsFollowingAuthor = false;
         let authorFollowerCount = 0;
 
+        async function ensureStoryPageReportReasons() {
+            const sel = document.getElementById('storyPageReportReason');
+            if (!sel || sel.options.length > 0) return;
+            try {
+                const list = await ApiService.getStoryReportReasons();
+                (list || []).forEach(function (r) {
+                    const o = document.createElement('option');
+                    o.value = r.code || r.Code;
+                    o.textContent = (r.labelVi || r.LabelVi || r.label || r.Label || o.value);
+                    sel.appendChild(o);
+                });
+            } catch (e) { console.error(e); }
+        }
+
+        window.openStoryPageReport = function () {
+            if (!AuthHelper.isAuthenticated()) {
+                alert('Vui lòng đăng nhập để báo cáo truyện.');
+                window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                return;
+            }
+            if (!story) {
+                alert('Vui lòng đợi truyện tải xong rồi thử lại.');
+                return;
+            }
+            document.getElementById('storyPageReportTitle').textContent = story.title || storyId;
+            document.getElementById('storyPageReportDesc').value = '';
+            document.getElementById('storyPageReportErr').style.display = 'none';
+            ensureStoryPageReportReasons().then(function () {
+                new bootstrap.Modal(document.getElementById('storyPageReportModal')).show();
+            });
+        };
+
         document.addEventListener('DOMContentLoaded', async function () {
             await AuthHelper.loadUserInfo().catch(() => {});
             if (!AuthHelper.isAuthenticated()) {
                 document.getElementById('ratingLoginHint').style.display = 'block';
                 document.getElementById('readerSubmitRatingBtn').disabled = true;
                 document.getElementById('submitCommentBtn').disabled = true;
+            }
+            const spr = document.getElementById('storyPageReportSubmitBtn');
+            if (spr) {
+                spr.addEventListener('click', async function () {
+                    const err = document.getElementById('storyPageReportErr');
+                    err.style.display = 'none';
+                    const reason = document.getElementById('storyPageReportReason').value;
+                    if (!reason) {
+                        err.textContent = 'Chọn lý do.';
+                        err.style.display = 'block';
+                        return;
+                    }
+                    try {
+                        spr.disabled = true;
+                        await ApiService.reportStory(storyId, {
+                            reasonCode: reason,
+                            description: document.getElementById('storyPageReportDesc').value || null
+                        });
+                        bootstrap.Modal.getInstance(document.getElementById('storyPageReportModal')).hide();
+                        Utils.showAlert('Đã gửi báo cáo. Cảm ơn bạn.', 'success');
+                    } catch (e) {
+                        err.textContent = e.message || String(e);
+                        err.style.display = 'block';
+                    } finally {
+                        spr.disabled = false;
+                    }
+                });
             }
             await loadStory();
             await loadChapters();

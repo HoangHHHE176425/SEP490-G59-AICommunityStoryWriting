@@ -7,6 +7,7 @@ using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Services.DTOs.Comments;
 using Services.DTOs.Stories;
+using Services.DTOs.StoryReports;
 using Services.Interfaces;
 
 namespace AIStory.API.Controllers
@@ -18,12 +19,18 @@ namespace AIStory.API.Controllers
     {
         private readonly IStoryService _storyService;
         private readonly IContentGuardrailService _contentGuardrail;
+        private readonly IStoryReportService _storyReportService;
         private readonly ILogger<StoriesController> _logger;
 
-        public StoriesController(IStoryService storyService, IContentGuardrailService contentGuardrail, ILogger<StoriesController> logger)
+        public StoriesController(
+            IStoryService storyService,
+            IContentGuardrailService contentGuardrail,
+            IStoryReportService storyReportService,
+            ILogger<StoriesController> logger)
         {
             _storyService = storyService;
             _contentGuardrail = contentGuardrail;
+            _storyReportService = storyReportService;
             _logger = logger;
         }
 
@@ -133,6 +140,43 @@ namespace AIStory.API.Controllers
             return Guid.TryParse(sub, out var id) ? id : null;
         }
 
+        private bool CanBypassStoryComplianceHidden(StoryResponseDto? story, Guid? userId)
+        {
+            if (story == null || story.ComplianceHidden != true) return true;
+            if (User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE")) return true;
+            if (userId.HasValue && story.AuthorId.HasValue && story.AuthorId.Value == userId.Value) return true;
+            return false;
+        }
+
+        /// <summary>Báo cáo vi phạm truyện (cần đăng nhập).</summary>
+        [HttpPost("{id:guid}/reports")]
+        public async Task<IActionResult> ReportStory(Guid id, [FromBody] CreateStoryReportRequestDto request)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.ReasonCode))
+                return BadRequest(new { message = "ReasonCode is required." });
+            var userId = GetCurrentUserId();
+            if (!userId.HasValue)
+                return Unauthorized(new { message = "Cần đăng nhập để báo cáo." });
+            try
+            {
+                var reportId = await _storyReportService.CreateStoryReportAsync(id, userId.Value, request);
+                return Ok(new { id = reportId, message = "Đã gửi báo cáo." });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Report story failed");
+                return StatusCode(500, new { message = "Không gửi được báo cáo.", error = ex.Message });
+            }
+        }
+
         /// <summary>Lấy danh sách stories với pagination và filtering (cho phép xem không cần đăng nhập)</summary>
         [HttpGet]
         [AllowAnonymous]
@@ -140,6 +184,8 @@ namespace AIStory.API.Controllers
         {
             try
             {
+                if (User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE"))
+                    query.IncludeComplianceHiddenInLists = true;
                 var result = _storyService.GetAll(query);
                 return Ok(result);
             }
@@ -159,6 +205,8 @@ namespace AIStory.API.Controllers
                 var userId = GetCurrentUserId();
                 var story = _storyService.GetById(id, userId);
                 if (story == null)
+                    return NotFound(new { message = $"Story with ID {id} not found" });
+                if (!CanBypassStoryComplianceHidden(story, userId))
                     return NotFound(new { message = $"Story with ID {id} not found" });
                 if (recordView)
                 {
@@ -212,6 +260,8 @@ namespace AIStory.API.Controllers
                 var story = _storyService.GetBySlug(slug, userId);
                 if (story == null)
                     return NotFound(new { message = $"Story with slug '{slug}' not found" });
+                if (!CanBypassStoryComplianceHidden(story, userId))
+                    return NotFound(new { message = $"Story with slug '{slug}' not found" });
                 if (recordView)
                 {
                     var viewerKey = GetViewerKey();
@@ -239,8 +289,11 @@ namespace AIStory.API.Controllers
         {
             try
             {
-                var story = _storyService.GetById(id);
+                var userId = GetCurrentUserId();
+                var story = _storyService.GetById(id, userId);
                 if (story == null)
+                    return NotFound(new { message = $"Story with ID {id} not found" });
+                if (!CanBypassStoryComplianceHidden(story, userId))
                     return NotFound(new { message = $"Story with ID {id} not found" });
                 var viewerKey = GetViewerKey();
                 _storyService.RecordViewIfAllowed(id, viewerKey);
@@ -433,6 +486,8 @@ namespace AIStory.API.Controllers
                 var story = StoryDAO.GetById(id);
                 if (story == null)
                     return NotFound(new { message = $"Story with ID {id} not found" });
+                if (story.comments_disabled)
+                    return BadRequest(new { message = "Truyện này đang tạm khóa bình luận (compliance)." });
                 if (!string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
                     return BadRequest(new { message = "Chỉ có thể comment truyện đã PUBLISHED." });
 
@@ -610,6 +665,9 @@ namespace AIStory.API.Controllers
         {
             try
             {
+                var uid = GetCurrentUserId();
+                if (uid == authorId || User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE"))
+                    query.IncludeComplianceHiddenInLists = true;
                 var result = _storyService.GetByAuthor(authorId, query);
                 return Ok(result);
             }
