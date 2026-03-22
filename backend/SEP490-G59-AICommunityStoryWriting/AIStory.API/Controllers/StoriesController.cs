@@ -6,6 +6,7 @@ using System.Security.Claims;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Services.DTOs.Comments;
+using Services.DTOs.Notifications;
 using Services.DTOs.Stories;
 using Services.DTOs.StoryReports;
 using Services.Interfaces;
@@ -20,18 +21,45 @@ namespace AIStory.API.Controllers
         private readonly IStoryService _storyService;
         private readonly IContentGuardrailService _contentGuardrail;
         private readonly IStoryReportService _storyReportService;
+        private readonly INotificationHubNotifier _notificationHubNotifier;
         private readonly ILogger<StoriesController> _logger;
 
         public StoriesController(
             IStoryService storyService,
             IContentGuardrailService contentGuardrail,
             IStoryReportService storyReportService,
+            INotificationHubNotifier notificationHubNotifier,
             ILogger<StoriesController> logger)
         {
             _storyService = storyService;
             _contentGuardrail = contentGuardrail;
             _storyReportService = storyReportService;
+            _notificationHubNotifier = notificationHubNotifier;
             _logger = logger;
+        }
+
+        private static NotificationDto MapNotificationToDto(notifications n) => new()
+        {
+            Id = n.id,
+            Type = n.type,
+            Title = n.title,
+            Content = n.content,
+            LinkUrl = n.link_url,
+            IsRead = n.is_read == true,
+            CreatedAt = n.created_at
+        };
+
+        private async Task PushCommentReplyNotificationAsync(notifications n)
+        {
+            if (n.user_id == null) return;
+            try
+            {
+                await _notificationHubNotifier.NotifyUserAsync(n.user_id.Value, MapNotificationToDto(n));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Push COMMENT_REPLY notification failed. UserId={UserId} NotificationId={NotificationId}", n.user_id, n.id);
+            }
         }
 
         /// <summary>Tạo story mới - Chỉ AUTHOR</summary>
@@ -475,7 +503,7 @@ namespace AIStory.API.Controllers
                 if (content.Length > 2000)
                     return BadRequest(new { message = "Nội dung comment tối đa 2000 ký tự." });
 
-                var guardrailResult = await _contentGuardrail.CheckAsync(id, content, HttpContext.RequestAborted);
+                var guardrailResult = await _contentGuardrail.CheckCommentBannedWordsAsync(content, HttpContext.RequestAborted);
                 if (!guardrailResult.Passed)
                     return BadRequest(new
                     {
@@ -510,7 +538,8 @@ namespace AIStory.API.Controllers
                         ?? "Ai đó";
                     try
                     {
-                        NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, id, story.title, entity.id);
+                        var notif = NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, id, story.title, entity.id);
+                        await PushCommentReplyNotificationAsync(notif);
                     }
                     catch (Exception ex)
                     {

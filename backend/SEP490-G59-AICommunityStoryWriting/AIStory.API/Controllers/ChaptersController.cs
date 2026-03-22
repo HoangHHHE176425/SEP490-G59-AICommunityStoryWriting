@@ -9,6 +9,7 @@ using DataAccessObjects.DAOs;
 using BusinessObjects;
 using Services.DTOs.Chapters;
 using Services.DTOs.Comments;
+using Services.DTOs.Notifications;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 
@@ -23,14 +24,49 @@ namespace AIStory.API.Controllers
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IStoryService _storyService;
         private readonly IContentGuardrailService _contentGuardrail;
+        private readonly INotificationHubNotifier _notificationHubNotifier;
+        private readonly ILogger<ChaptersController> _logger;
 
-        public ChaptersController(IChapterService chapterService, IChapterVersionService chapterVersionService, IServiceScopeFactory scopeFactory, IStoryService storyService, IContentGuardrailService contentGuardrail)
+        public ChaptersController(
+            IChapterService chapterService,
+            IChapterVersionService chapterVersionService,
+            IServiceScopeFactory scopeFactory,
+            IStoryService storyService,
+            IContentGuardrailService contentGuardrail,
+            INotificationHubNotifier notificationHubNotifier,
+            ILogger<ChaptersController> logger)
         {
             _chapterService = chapterService;
             _chapterVersionService = chapterVersionService;
             _scopeFactory = scopeFactory;
             _storyService = storyService;
             _contentGuardrail = contentGuardrail;
+            _notificationHubNotifier = notificationHubNotifier;
+            _logger = logger;
+        }
+
+        private static NotificationDto MapNotificationToDto(notifications n) => new()
+        {
+            Id = n.id,
+            Type = n.type,
+            Title = n.title,
+            Content = n.content,
+            LinkUrl = n.link_url,
+            IsRead = n.is_read == true,
+            CreatedAt = n.created_at
+        };
+
+        private async Task PushCommentReplyNotificationAsync(notifications n)
+        {
+            if (n.user_id == null) return;
+            try
+            {
+                await _notificationHubNotifier.NotifyUserAsync(n.user_id.Value, MapNotificationToDto(n));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Push COMMENT_REPLY (chapter) failed. UserId={UserId} NotificationId={NotificationId}", n.user_id, n.id);
+            }
         }
 
         private Guid? GetCurrentUserId()
@@ -406,7 +442,7 @@ namespace AIStory.API.Controllers
                 if (content.Length > 2000)
                     return BadRequest(new { message = "Nội dung comment tối đa 2000 ký tự." });
 
-                var guardrailResult = await _contentGuardrail.CheckAsync(Guid.Empty, content, HttpContext.RequestAborted);
+                var guardrailResult = await _contentGuardrail.CheckCommentBannedWordsAsync(content, HttpContext.RequestAborted);
                 if (!guardrailResult.Passed)
                     return BadRequest(new
                     {
@@ -439,9 +475,16 @@ namespace AIStory.API.Controllers
                         ?? entity.userNavigation?.email?.Trim() ?? "Ai đó";
                     try
                     {
-                        NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, storyId, story.title, entity.id);
+                        var chapterCommentLink = $"/chapter?storyId={storyId}&chapterId={id}#comment-{entity.id}";
+                        var chapterDescriptor = $"Chương {chapter.OrderIndex}" +
+                            (string.IsNullOrWhiteSpace(chapter.Title) ? "" : $" «{chapter.Title.Trim()}»");
+                        var notif = NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, storyId, story.title, entity.id, chapterCommentLink, chapterDescriptor);
+                        await PushCommentReplyNotificationAsync(notif);
                     }
-                    catch { /* best effort */ }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "NotifyCommentReply (chapter) failed for parent {ParentId}", parent.id);
+                    }
                 }
                 var dto = MapToStoryCommentDto(entity, userId, story.author_id);
                 return Created($"/api/chapters/{id}/comments/{dto.Id}", dto);

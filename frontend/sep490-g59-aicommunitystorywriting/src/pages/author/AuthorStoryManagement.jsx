@@ -14,6 +14,7 @@ import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
 import { Pagination } from '../../components/pagination/Pagination';
+import { setAuthorChapterListActive } from '../../utils/authorUiFlags';
 
 function mapStoryFromApi(item) {
     const status = item.status || item.Status || '';
@@ -99,6 +100,11 @@ export function AuthorStoryManagement({ onBack }) {
 
     const STORIES_PAGE_SIZE = 10;
     const authorId = user?.id ?? user?.Id;
+
+    useEffect(() => {
+        setAuthorChapterListActive(activeView === 'chapterList');
+        return () => setAuthorChapterListActive(false);
+    }, [activeView]);
 
     // Lịch sử donate + rút tiền (author)
     const [authorActivityItems, setAuthorActivityItems] = useState([]);
