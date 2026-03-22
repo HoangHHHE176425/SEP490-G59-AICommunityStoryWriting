@@ -18,7 +18,8 @@ namespace AIStory.API.Controllers
         }
 
         /// <summary>
-        /// Thống kê tổng quan: truyện PUBLISHED, số tác giả (distinct author_id có ít nhất 1 truyện đã xuất bản), tổng lượt xem (sum total_views các truyện đó).
+        /// Thống kê trang chủ (công khai): truyện đã xuất bản hiển thị cho độc giả (PUBLISHED, không compliance_hidden),
+        /// số tác giả (distinct author_id có ít nhất một truyện như vậy), tổng lượt đọc (sum total_views).
         /// Không cần đăng nhập.
         /// </summary>
         [HttpGet("stats")]
@@ -28,7 +29,10 @@ namespace AIStory.API.Controllers
             try
             {
                 var published = _db.stories.AsNoTracking()
-                    .Where(s => s.status != null && s.status.ToUpper() == "PUBLISHED");
+                    .Where(s =>
+                        s.status != null &&
+                        s.status.ToUpper() == "PUBLISHED" &&
+                        !s.compliance_hidden);
 
                 var publishedStoriesCount = await published.CountAsync(cancellationToken);
 
