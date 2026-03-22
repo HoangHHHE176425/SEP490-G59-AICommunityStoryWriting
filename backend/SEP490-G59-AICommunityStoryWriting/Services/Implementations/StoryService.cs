@@ -286,10 +286,20 @@ namespace Services.Implementations
                 PageSize = query.PageSize,
                 Search = query.Search,
                 CategoryId = query.CategoryId,
+                CategoryIds = query.CategoryIds,
+                ExcludeStoryIds = query.ExcludeStoryIds,
+                IncludeStoryIds = query.IncludeStoryIds,
+                AlsoIncludeStoryIds = query.AlsoIncludeStoryIds,
                 AuthorId = authorId,
                 Status = query.Status,
+                StatusIn = query.StatusIn,
                 SortBy = query.SortBy,
-                SortOrder = query.SortOrder
+                SortOrder = query.SortOrder,
+                StoryProgressStatus = query.StoryProgressStatus,
+                AgeRating = query.AgeRating,
+                MinTotalChapters = query.MinTotalChapters,
+                MaxTotalChapters = query.MaxTotalChapters,
+                IncludeComplianceHiddenInLists = query.IncludeComplianceHiddenInLists,
             };
 
             return GetAll(authorQuery);

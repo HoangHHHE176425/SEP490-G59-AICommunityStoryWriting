@@ -11,8 +11,11 @@ import { AuthorRankingsWidget } from '../../components/homepage/AuthorRankingsWi
 import { SidebarDiscoverWidget } from '../../components/homepage/SidebarDiscoverWidget';
 import { CommunityStatsWidget } from '../../components/homepage/CommunityStatsWidget';
 import { CTASection } from '../../components/homepage/CTASection';
+import { useCommunityStats } from '../../hooks/useCommunityStats';
 
 export default function Homepage() {
+  const communityStats = useCommunityStats();
+
   return (
     <div className="w-full bg-gray-50">
       <Header />
@@ -35,7 +38,12 @@ export default function Homepage() {
           {/* Right Column - Sticky Sidebar */}
           <div className="lg:sticky lg:top-8 lg:self-start space-y-6">
             <AuthorRankingsWidget />
-            <CommunityStatsWidget />
+            <CommunityStatsWidget
+              skipFetch
+              stats={communityStats.stats}
+              loading={communityStats.loading}
+              error={communityStats.error}
+            />
             <SidebarDiscoverWidget />
           </div>
         </div>

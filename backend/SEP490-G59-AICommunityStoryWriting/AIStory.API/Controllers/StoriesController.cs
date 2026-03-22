@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Security.Claims;
@@ -174,6 +176,49 @@ namespace AIStory.API.Controllers
             if (User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE")) return true;
             if (userId.HasValue && story.AuthorId.HasValue && story.AuthorId.Value == userId.Value) return true;
             return false;
+        }
+
+        /// <summary>
+        /// Bổ sung các tham số query từ FE (storyProgressStatus, ageRating, min/maxTotalChapters) vào StoryQueryDto —
+        /// model binder mặc định không gán được một số property (kết quả: lọc trạng thái/độ tuổi không hoạt động).
+        /// </summary>
+        private static void MergeStoryListQueryFromRequest(HttpRequest request, StoryQueryDto query)
+        {
+            static string? FirstQuery(IQueryCollection q, params string[] keys)
+            {
+                foreach (var key in keys)
+                {
+                    var v = q[key].FirstOrDefault();
+                    if (!string.IsNullOrWhiteSpace(v)) return v;
+                }
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(query.StoryProgressStatus))
+            {
+                var v = FirstQuery(request.Query, "storyProgressStatus", "StoryProgressStatus");
+                if (v != null) query.StoryProgressStatus = v;
+            }
+
+            if (string.IsNullOrWhiteSpace(query.AgeRating))
+            {
+                var v = FirstQuery(request.Query, "ageRating", "AgeRating");
+                if (v != null) query.AgeRating = v;
+            }
+
+            if (!query.MinTotalChapters.HasValue)
+            {
+                var v = FirstQuery(request.Query, "minTotalChapters", "MinTotalChapters");
+                if (v != null && int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n))
+                    query.MinTotalChapters = n;
+            }
+
+            if (!query.MaxTotalChapters.HasValue)
+            {
+                var v = FirstQuery(request.Query, "maxTotalChapters", "MaxTotalChapters");
+                if (v != null && int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n))
+                    query.MaxTotalChapters = n;
+            }
         }
 
         /// <summary>Báo cáo vi phạm truyện (cần đăng nhập).</summary>
@@ -694,6 +739,7 @@ namespace AIStory.API.Controllers
         {
             try
             {
+                MergeStoryListQueryFromRequest(Request, query);
                 var uid = GetCurrentUserId();
                 if (uid == authorId || User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE"))
                     query.IncludeComplianceHiddenInLists = true;
