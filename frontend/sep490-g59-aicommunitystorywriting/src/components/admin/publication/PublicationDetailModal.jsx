@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar, AlertTriangle } from 'lucide-react';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
 import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion, getReviewAssignmentSelf, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
@@ -328,6 +328,18 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         if (storyId) return { targetType: 'STORY', targetId: storyId };
         return null;
     };
+
+    /** Lỗi hạn đề xuất (gia hạn): hiển thị đỏ trong dialog khi vi phạm 24h / muộn hơn hạn hiện tại / quá 366 ngày. */
+    const extendProposedDeadlineError = useMemo(() => {
+        if (!escalateOpen || escalateKind !== 'EXTEND_DEADLINE') return null;
+        const raw = escalateProposedDeadline;
+        if (raw == null || String(raw).trim() === '') return null;
+        const iso = localDateTimeInputToIsoUtc(raw);
+        if (!iso) return 'Ngày giờ đề xuất không hợp lệ.';
+        const currentDl = reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt ?? null;
+        const check = validateModeratorExtendProposedDeadline(iso, currentDl);
+        return check.ok ? null : check.message;
+    }, [escalateOpen, escalateKind, escalateProposedDeadline, reviewAssignment]);
 
     const handleSubmitEscalation = async () => {
         const t = escalationTarget();
@@ -1566,7 +1578,15 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     type="datetime-local"
                                     value={escalateProposedDeadline}
                                     onChange={(e) => setEscalateProposedDeadline(e.target.value)}
-                                    style={{ display: 'block', width: '100%', marginTop: '0.35rem', padding: '0.5rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}
+                                    style={{
+                                        display: 'block',
+                                        width: '100%',
+                                        marginTop: '0.35rem',
+                                        padding: '0.5rem',
+                                        borderRadius: '8px',
+                                        border: extendProposedDeadlineError ? '2px solid #ef4444' : '1px solid #cbd5e1',
+                                        outline: extendProposedDeadlineError ? 'none' : undefined,
+                                    }}
                                 />
                             </label>
                             <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.5rem 0 0', lineHeight: 1.45 }}>
@@ -1583,6 +1603,24 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     </>
                                 )}
                             </p>
+                            {extendProposedDeadlineError ? (
+                                <div
+                                    role="alert"
+                                    style={{
+                                        marginTop: '0.5rem',
+                                        padding: '0.5rem 0.75rem',
+                                        backgroundColor: '#fef2f2',
+                                        border: '1px solid #fecaca',
+                                        borderRadius: '8px',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 600,
+                                        color: '#b91c1c',
+                                        lineHeight: 1.5,
+                                    }}
+                                >
+                                    {extendProposedDeadlineError}
+                                </div>
+                            ) : null}
                         </div>
                         <label style={{ display: 'block', marginBottom: '1rem', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
                             Lý do <span style={{ color: '#ef4444' }}>*</span>
@@ -1614,16 +1652,16 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                             </button>
                             <button
                                 type="button"
-                                disabled={escalateSubmitting}
+                                disabled={escalateSubmitting || (escalateKind === 'EXTEND_DEADLINE' && !!extendProposedDeadlineError)}
                                 onClick={handleSubmitEscalation}
                                 style={{
                                     padding: '0.5rem 1rem',
                                     borderRadius: '8px',
                                     border: 'none',
-                                    background: '#0ea5e9',
+                                    background: escalateSubmitting || (escalateKind === 'EXTEND_DEADLINE' && extendProposedDeadlineError) ? '#94a3b8' : '#0ea5e9',
                                     color: '#fff',
                                     fontWeight: 600,
-                                    cursor: escalateSubmitting ? 'wait' : 'pointer',
+                                    cursor: escalateSubmitting || (escalateKind === 'EXTEND_DEADLINE' && extendProposedDeadlineError) ? 'not-allowed' : 'pointer',
                                 }}
                             >
                                 {escalateSubmitting ? 'Đang gửi...' : 'Gửi đơn'}
