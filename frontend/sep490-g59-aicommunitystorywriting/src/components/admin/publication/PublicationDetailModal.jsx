@@ -472,7 +472,6 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 storyApprovedInSessionRef.current = true;
             }
             await approveChapter(selectedChapter.id);
-            showToast('Duyệt chương thành công!', 'success');
             setPublishedOrderIndices((prev) => new Set([...prev, selectedChapter.orderIndex ?? (selectedChapter.chapterNumber - 1)]));
             const remaining = chapters.filter(c => c.id !== selectedChapter.id);
             setChapters(remaining);
@@ -516,7 +515,6 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             if (selectedChapter) {
                 const rejectedId = selectedChapter.id;
                 await rejectChapter(rejectedId, rejectionReason.trim());
-                showToast('Đã từ chối chương.', 'success');
                 onRefresh?.();
 
                 // BE có thể từ chối dây chuyền các chương sau — refetch pending để đồng bộ; hết chương chờ thì đóng dialog.

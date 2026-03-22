@@ -520,6 +520,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             (v) => (v.status ?? '').toString().toLowerCase() === 'pending_review' && (v.id ?? '') !== (editingVersion?.id ?? editingVersion?.Id ?? '')
         );
     const chapterIsPendingReviewVersion = (sourceChapterForVersion?.status ?? '').toString().toLowerCase() === 'pending_review';
+    const chapterIsPublishedVersion = (sourceChapterForVersion?.status ?? '').toString().toLowerCase() === 'published';
     /** Phiên bản đang chỉnh sửa đã ở trạng thái chờ duyệt thì không cho gửi lại. */
     const editingVersionIsPendingReview = (editingVersion?.status ?? '').toString().toLowerCase() === 'pending_review';
     const canSubmitVersion =
@@ -528,19 +529,22 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         canSubmitForPublishVersion &&
         !hasOtherPendingVersion &&
         !chapterIsPendingReviewVersion &&
-        !editingVersionIsPendingReview;
+        !editingVersionIsPendingReview &&
+        !chapterIsPublishedVersion;
     const versionPublishTooltip =
         !versionEligibilityLoaded || !versionsForChapterLoaded
             ? 'Đang kiểm tra điều kiện gửi xuất bản...'
-            : editingVersionIsPendingReview
-                ? 'Phiên bản này đang chờ duyệt, không thể gửi lại.'
-                : !canSubmitForPublishVersion
-                    ? `Phải gửi chương ${chapterNumberForVersion - 1} trước khi gửi chương ${chapterNumberForVersion}.`
-                    : chapterIsPendingReviewVersion
-                        ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.'
-                        : hasOtherPendingVersion
-                            ? 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.'
-                            : 'Gửi phiên bản lên để duyệt xuất bản';
+            : chapterIsPublishedVersion
+                ? 'Chương đã xuất bản, không thể gửi duyệt phiên bản chỉnh sửa.'
+                : editingVersionIsPendingReview
+                    ? 'Phiên bản này đang chờ duyệt, không thể gửi lại.'
+                    : !canSubmitForPublishVersion
+                        ? `Phải gửi chương ${chapterNumberForVersion - 1} trước khi gửi chương ${chapterNumberForVersion}.`
+                        : chapterIsPendingReviewVersion
+                            ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.'
+                            : hasOtherPendingVersion
+                                ? 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.'
+                                : 'Gửi phiên bản lên để duyệt xuất bản';
 
     const validateChapterNumber = (num) => {
         const n = Number(num);
@@ -561,6 +565,10 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             return;
         }
         if (isVersionMode) {
+            if (saveStatus === 'published' && chapterIsPublishedVersion) {
+                showToast('Chương đã xuất bản không còn được gửi duyệt phiên bản chỉnh sửa.', 'error');
+                return;
+            }
             const vNum = Number(chapterData.versionNumber ?? 1);
             if (!Number.isInteger(vNum) || vNum < 1) {
                 setVersionNumberError('Số phiên bản phải là số nguyên từ 1 trở lên');
