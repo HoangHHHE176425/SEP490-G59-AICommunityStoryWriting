@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.Stories
+namespace Services.DTOs.Stories
 {
     public class StoryResponseDto
     {
@@ -11,6 +11,8 @@
         public string? CategoryNames { get; set; }
         public Guid? AuthorId { get; set; }
         public string? AuthorName { get; set; }
+        /// <summary>Đường dẫn avatar tác giả (user_profiles.avatar_url).</summary>
+        public string? AuthorAvatarUrl { get; set; }
 
         public string? CoverImage { get; set; }
         public string? Status { get; set; }

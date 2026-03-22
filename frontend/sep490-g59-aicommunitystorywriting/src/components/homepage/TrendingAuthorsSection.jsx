@@ -3,8 +3,8 @@ import React, { useEffect, useState } from 'react';
 import { TrendingUp, Flame, CheckCircle, UserPlus, UserMinus } from 'lucide-react';
 import { getStories } from '../../api/story/storyApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
-import { getAuthorFollowing, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
-import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { getAuthorFollowing, getAuthorFollowersCount, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
+import { resolveAuthorAvatarUrl, svgAvatarDataUrlFromName } from '../../utils/storyAuthorAvatar';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -118,14 +118,23 @@ export function TrendingAuthorsSection() {
           const storyTitle = s?.title ?? s?.Title ?? '';
 
           const prev = authorAgg.get(authorId);
+          const nameFromStory = String(s?.authorName ?? s?.AuthorName ?? '').trim() || null;
           if (!prev) {
-            authorAgg.set(authorId, { authorId, views: Number(views) || 0, latestStory: storyTitle, genre });
+            authorAgg.set(authorId, {
+              authorId,
+              views: Number(views) || 0,
+              latestStory: storyTitle,
+              genre,
+              authorName: nameFromStory,
+              sampleStory: s,
+            });
           } else {
             authorAgg.set(authorId, {
               ...prev,
               views: (prev.views ?? 0) + (Number(views) || 0),
-              // latestStory: keep the first seen (already sorted by total_views desc)
               genre: prev.genre || genre,
+              authorName: prev.authorName || nameFromStory,
+              sampleStory: prev.sampleStory ?? s,
             });
           }
         }
@@ -133,31 +142,39 @@ export function TrendingAuthorsSection() {
         const authorList = Array.from(authorAgg.values()).sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
         const topAuthors = authorList.slice(0, 3);
 
-        const profiles = await Promise.all(topAuthors.map((a) => getProfileByUserId(a.authorId).catch(() => null)));
+        const profiles =
+          isAuthenticated && topAuthors.length > 0
+            ? await Promise.all(topAuthors.map((a) => getProfileByUserId(a.authorId).catch(() => null)))
+            : topAuthors.map(() => null);
         const profileMap = {};
         topAuthors.forEach((a, idx) => {
           profileMap[a.authorId] = profiles[idx];
         });
 
+        const followerCounts = await Promise.all(
+          topAuthors.map((a) => getAuthorFollowersCount(a.authorId).catch(() => 0))
+        );
+
         const overallMaxViews = Math.max(...authorList.map((x) => x.views ?? 0), 1);
 
         const mapped = topAuthors.map((a, idx) => {
           const profile = profileMap[a.authorId];
-          const followersRaw = profile?.stats?.totalReads ?? 0;
-          const followersNum = profile ? Number(followersRaw) || 0 : 0;
-          const followers = profile ? formatCompactNumber(followersNum) : '-';
+          const displayName =
+            profile?.displayName?.trim() || a.authorName || 'Tác giả';
+          const followersNum = Math.max(0, Number(followerCounts[idx]) || 0);
+          const followers = formatCompactNumber(followersNum);
           const verified = Boolean(profile?.isVerified);
 
           const growthRatio = overallMaxViews > 0 ? (a.views ?? 0) / overallMaxViews : 0;
           const growthPct = Math.max(0, Math.round(growthRatio * 100));
 
           const newFollowersNum = Math.round(followersNum * 0.08);
-          const newFollowers = profile ? `+${formatCompactNumber(newFollowersNum)}` : '+0';
+          const newFollowers = `+${formatCompactNumber(newFollowersNum)}`;
 
           return {
             id: a.authorId,
-            name: profile?.displayName ?? a.authorId ?? 'Ẩn danh',
-            avatar: profile?.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '',
+            name: displayName,
+            avatar: resolveAuthorAvatarUrl(a.sampleStory || {}, profile, displayName),
             latestStory: a.latestStory,
             genre: a.genre,
             growth: `+${growthPct}%`,
@@ -183,7 +200,7 @@ export function TrendingAuthorsSection() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (loadError) console.error('TrendingAuthorsSection load error:', loadError);
@@ -269,7 +286,7 @@ export function TrendingAuthorsSection() {
             ...a,
             isFollowing: nextFollowing,
             followersNum,
-            followers: followersNum ? formatCompactNumber(followersNum) : '0',
+            followers: formatCompactNumber(followersNum),
             newFollowersNum,
             newFollowers: `+${formatCompactNumber(newFollowersNum)}`,
           };

@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { UserPlus, UserMinus, Gift, BookOpen, Quote, Eye, Star, Compass, CheckCircle } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getProfileByUserId } from '../../api/account/accountApi';
 import { getStoriesByAuthor } from '../../api/story/storyApi';
-import { getAuthorFollowing, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
+import { getAuthorFollowing, getAuthorFollowersCount, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
@@ -22,7 +22,8 @@ function formatJoinDate(dateStr) {
 
 export function AuthorDetail() {
     const { authorId } = useParams();
-    const { user } = useAuth();
+    const navigate = useNavigate();
+    const { user, isAuthenticated } = useAuth();
     const [profile, setProfile] = useState(null);
     const [stories, setStories] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -42,15 +43,17 @@ export function AuthorDetail() {
         setLoading(true);
         setError(null);
         try {
-            const [p, s] = await Promise.all([
+            const [p, s, followers] = await Promise.all([
                 getProfileByUserId(authorId),
                 getStoriesByAuthor(authorId, { pageSize: 20, sortBy: 'createdAt', sortOrder: 'DESC' }),
+                getAuthorFollowersCount(authorId).catch(() => null),
             ]);
             const items = Array.isArray(s)
                 ? s
                 : (s?.items ?? s?.Items ?? []);
             setProfile(p);
             setStories(items);
+            if (typeof followers === 'number') setFollowerCount(Math.max(0, followers));
         } catch (err) {
             const msg = err?.response?.data?.message ?? err?.message ?? 'Không tải được thông tin tác giả.';
             setError(msg);
@@ -73,22 +76,34 @@ export function AuthorDetail() {
             .catch(() => setIsFollowing(false));
     }, [authorId, user?.id]);
 
+    const goToLogin = useCallback(() => {
+        const from = authorId ? `/authors/${authorId}` : '/home';
+        navigate('/login', { state: { from } });
+    }, [authorId, navigate]);
+
     const handleFollowToggle = useCallback(async () => {
         if (!authorId || followLoading) return;
+        if (!isAuthenticated) {
+            goToLogin();
+            return;
+        }
         setFollowLoading(true);
         setFollowError(null);
         try {
             if (isFollowing) {
                 await unfollowAuthor(authorId);
                 setIsFollowing(false);
-                // FE update số liệu hiển thị ngay để user thấy phản hồi tức thì.
-                setFollowerCount((c) => Math.max(0, Number(c) - 1));
                 setRecommendationCount((c) => Math.max(0, Number(c) - 1));
             } else {
                 await followAuthor(authorId);
                 setIsFollowing(true);
-                setFollowerCount((c) => Math.max(0, Number(c) + 1));
                 setRecommendationCount((c) => Math.max(0, Number(c) + 1));
+            }
+            try {
+                const fc = await getAuthorFollowersCount(authorId);
+                setFollowerCount(Math.max(0, fc));
+            } catch {
+                /* giữ số cũ nếu API lỗi */
             }
             const p = await getProfileByUserId(authorId);
             setProfile(p);
@@ -98,29 +113,34 @@ export function AuthorDetail() {
         } finally {
             setFollowLoading(false);
         }
-    }, [authorId, isFollowing, followLoading]);
+    }, [authorId, isFollowing, followLoading, isAuthenticated, goToLogin]);
 
     useEffect(() => {
         if (!profile?.stats) return;
-        // Nếu backend có trả đúng `followers`/`recommendations` thì ưu tiên set theo BE.
-        if (typeof profile.stats.followers === 'number') setFollowerCount(profile.stats.followers);
+        // Số người theo dõi lấy từ GET /api/authors/{id}/followers-count (loadData + sau khi follow).
         if (typeof profile.stats.recommendations === 'number') setRecommendationCount(profile.stats.recommendations);
     }, [profile]);
 
     useEffect(() => {
         if (!profile?.stats) return;
-        // Nếu BE chưa cung cấp `followers/recommendations`, FE chỉ có thể hiển thị "tình trạng follow của current user".
-        if (typeof profile.stats.followers !== 'number') setFollowerCount(isFollowing ? 1 : 0);
         if (typeof profile.stats.recommendations !== 'number') setRecommendationCount(isFollowing ? 1 : 0);
     }, [isFollowing, profile]);
 
     const displayName = profile?.displayName ?? 'Tác giả';
+    const handleDonateClick = useCallback(() => {
+        if (!authorId) return;
+        if (!isAuthenticated) {
+            goToLogin();
+            return;
+        }
+        navigate(`/donate/${authorId}?name=${encodeURIComponent(displayName)}`);
+    }, [authorId, isAuthenticated, goToLogin, navigate, displayName]);
     const avatarUrl = profile?.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '';
     const joinDate = formatJoinDate(profile?.joinDate);
     const totalReads = profile?.stats?.totalReads ?? 0;
     const storiesWritten = profile?.stats?.storiesWritten ?? stories.length ?? 0;
     const likes = profile?.stats?.likes ?? 0;
-    // `followers/recommendations` có thể chưa có trong BE hiện tại => hiển thị từ state FE (được cập nhật khi follow/unfollow).
+    // Recommendations: từ profile.stats hoặc fallback theo trạng thái follow; followers: từ API followers-count.
 
     return (
         <div className="min-h-screen bg-slate-50">
@@ -216,13 +236,14 @@ export function AuthorDetail() {
                                             )}
                                         </button>
 
-                                        <Link
-                                            to={authorId ? `/donate/${authorId}?name=${encodeURIComponent(displayName)}` : '#'}
+                                        <button
+                                            type="button"
+                                            onClick={handleDonateClick}
                                             className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-500 text-white hover:bg-amber-600 shadow-md transition-all border border-amber-500/10"
                                         >
                                             <Gift className="w-4 h-4" />
                                             Ủng hộ
-                                        </Link>
+                                        </button>
                                     </div>
 
                                     {followError && (

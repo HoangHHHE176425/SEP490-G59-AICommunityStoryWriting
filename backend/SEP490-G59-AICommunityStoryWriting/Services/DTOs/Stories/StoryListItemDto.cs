@@ -15,6 +15,8 @@ namespace Services.DTOs.Stories
         public string? CategoryNames { get; set; }
         public Guid? AuthorId { get; set; }
         public string? AuthorName { get; set; }
+        /// <summary>Đường dẫn avatar tác giả (user_profiles.avatar_url), ví dụ /uploads/avatars/....</summary>
+        public string? AuthorAvatarUrl { get; set; }
         /// <summary>Độ tuổi phù hợp: ALL, 13+, 16+, 18+</summary>
         public string? AgeRating { get; set; }
 

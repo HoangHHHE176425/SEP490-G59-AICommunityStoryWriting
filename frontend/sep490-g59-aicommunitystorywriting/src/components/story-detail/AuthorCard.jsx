@@ -2,9 +2,16 @@ import { Link } from 'react-router-dom';
 
 export function AuthorCard({ author }) {
     const avatarUrl = author?.avatar;
-    const displayName = author?.name ?? 'Ẩn danh';
-    const followers = typeof author?.followers === 'number' ? author.followers.toLocaleString() : (author?.followers ?? '0');
+    const displayName = author?.name ?? 'Tác giả';
     const authorId = author?.id || author?.userId;
+    const rawFollowers = author?.followers ?? author?.followerCount ?? author?.FollowersCount;
+    const followersNum = Number(rawFollowers);
+    const followersLabel =
+        authorId && (rawFollowers === null || rawFollowers === undefined)
+            ? '…'
+            : Number.isFinite(followersNum)
+              ? Math.max(0, followersNum).toLocaleString('vi-VN')
+              : '0';
     return (
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-6">
             <h3 className="font-bold text-slate-900 dark:text-white mb-4">Tác giả</h3>
@@ -25,7 +32,7 @@ export function AuthorCard({ author }) {
                         {displayName}
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {followers} người theo dõi
+                        {followersLabel} người theo dõi
                     </p>
                 </div>
             </div>
