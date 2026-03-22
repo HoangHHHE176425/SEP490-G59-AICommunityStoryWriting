@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { Sparkles, Eye, Heart } from 'lucide-react';
 import maphapsutoicao from '../../assets/image/maphapsutoicao.jpg';
@@ -13,6 +14,7 @@ import { resolveAuthorAvatarUrl, resolveAuthorDisplayName } from '../../utils/st
 import { useAuth } from '../../contexts/AuthContext';
 
 export function NewAuthorDebutsSection() {
+  const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
   const [debuts, setDebuts] = useState([
     {
@@ -239,7 +241,11 @@ export function NewAuthorDebutsSection() {
             </p>
           </div>
         </div>
-        <button className="text-[#13EC5B] hover:text-[#11D350] font-['Plus_Jakarta_Sans',sans-serif] font-semibold text-[14px] flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => navigate('/story-list?preset=new_author_debut')}
+          className="text-[#13EC5B] hover:text-[#11D350] font-['Plus_Jakarta_Sans',sans-serif] font-semibold text-[14px] flex items-center gap-1"
+        >
           Xem tất cả
           <span>→</span>
         </button>
@@ -274,20 +280,41 @@ export function NewAuthorDebutsSection() {
                     {item.story}
                   </h3>
 
-                  {/* Author Info */}
+                  {/* Author Info — bấm avatar/tên → trang tác giả */}
                   <div className="flex items-center gap-2 mb-2">
-                    <div className="w-8 h-8 rounded-full overflow-hidden border border-gray-200">
-                      <ImageWithFallback src={item.author.avatar} alt={item.author.name} className="w-full h-full object-cover" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-[#1A2332] font-['Plus_Jakarta_Sans',sans-serif] font-semibold text-[14px]">
-                        {item.author.name}
-                      </p>
-                      <p className="text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] font-normal text-[11px]">
-                        Tham gia {item.author.joinDate}
-                      </p>
-                    </div>
-                    <span className="px-2 py-1 bg-[#13EC5B] text-white rounded font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[10px]">
+                    {item.authorId ? (
+                      <Link
+                        to={`/authors/${item.authorId}`}
+                        className="flex items-center gap-2 flex-1 min-w-0 rounded-lg -m-1 p-1 hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="w-8 h-8 rounded-full overflow-hidden border border-gray-200 flex-shrink-0">
+                          <ImageWithFallback src={item.author.avatar} alt={item.author.name} className="w-full h-full object-cover" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[#1A2332] font-['Plus_Jakarta_Sans',sans-serif] font-semibold text-[14px] hover:text-[#13EC5B] transition-colors truncate">
+                            {item.author.name}
+                          </p>
+                          <p className="text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] font-normal text-[11px]">
+                            Tham gia {item.author.joinDate}
+                          </p>
+                        </div>
+                      </Link>
+                    ) : (
+                      <>
+                        <div className="w-8 h-8 rounded-full overflow-hidden border border-gray-200 flex-shrink-0">
+                          <ImageWithFallback src={item.author.avatar} alt={item.author.name} className="w-full h-full object-cover" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[#1A2332] font-['Plus_Jakarta_Sans',sans-serif] font-semibold text-[14px] truncate">
+                            {item.author.name}
+                          </p>
+                          <p className="text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] font-normal text-[11px]">
+                            Tham gia {item.author.joinDate}
+                          </p>
+                        </div>
+                      </>
+                    )}
+                    <span className="px-2 py-1 bg-[#13EC5B] text-white rounded font-['Plus_Jakarta_Sans',sans-serif] font-bold text-[10px] flex-shrink-0">
                       MỚI
                     </span>
                   </div>

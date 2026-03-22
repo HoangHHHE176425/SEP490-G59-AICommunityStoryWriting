@@ -21,6 +21,18 @@ namespace Services.DTOs.Stories
         public string? SortBy { get; set; } = "created_at"; // created_at, updated_at, total_views, avg_rating
         public string? SortOrder { get; set; } = "desc"; // asc, desc
 
+        /// <summary>ONGOING, COMPLETED, HIATUS — lọc theo tiến độ truyện (công khai).</summary>
+        public string? StoryProgressStatus { get; set; }
+
+        /// <summary>ALL, 13+, 16+, 18+ — lọc độ tuổi.</summary>
+        public string? AgeRating { get; set; }
+
+        /// <summary>Tối thiểu total_chapters (ước lượng truyện dài/ngắn).</summary>
+        public int? MinTotalChapters { get; set; }
+
+        /// <summary>Tối đa total_chapters.</summary>
+        public int? MaxTotalChapters { get; set; }
+
         /// <summary>Khi false (mặc định): loại truyện bị compliance ẩn khỏi danh sách công khai.</summary>
         public bool IncludeComplianceHiddenInLists { get; set; }
     }

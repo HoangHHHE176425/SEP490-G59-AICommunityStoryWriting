@@ -261,7 +261,7 @@ File `App.jsx` nằm ngoài package (trong `src/`), import **pages** và **conte
 | `author/story-editor/` | `ChapterEditor.jsx`, `ChapterList.jsx`, `StepIndicator.jsx`, `StoryInfoForm.jsx`, `Toast.jsx` |
 | `chapter-detail/` | `ChapterComments.jsx`, `ChapterContent.jsx`, `ChapterNavBar.jsx`, `ChapterNavigation.jsx`, `ChapterSettings.jsx`, `ChapterSidebar.jsx` |
 | `figma/` | `ImageWithFallback.jsx` |
-| `homepage/` | `AIAssistedStoriesWidget.jsx`, `AuthorRankingsWidget.jsx`, `CommunityEventsWidget.jsx`, `CommunityHighlightsSection.jsx`, `CTASection.jsx`, `Footer.jsx`, `Header.jsx`, `HeroAuthorStoriesBanner.jsx`, `NewAuthorDebutsSection.jsx`, `TopAuthorStoriesSection.jsx`, `TrendingAuthorsSection.jsx` |
+| `homepage/` | `AIAssistedStoriesWidget.jsx`, `AuthorRankingsWidget.jsx`, `CommunityStatsWidget.jsx`, `SidebarDiscoverWidget.jsx`, `CommunityHighlightsSection.jsx`, `CTASection.jsx`, `Footer.jsx`, `Header.jsx`, `HeroAuthorStoriesBanner.jsx`, `NewAuthorDebutsSection.jsx`, `TopAuthorStoriesSection.jsx`, `TrendingAuthorsSection.jsx` |
 | `pagination/` | `Pagination.jsx` |
 | `policy/` | `PolicyBody.jsx` |
 | `profile/` | `ActivityHistory.jsx`, `DeleteAccount.jsx`, `EditProfile.jsx`, `RechargeCoin.jsx`, `ViewProfile.jsx` |

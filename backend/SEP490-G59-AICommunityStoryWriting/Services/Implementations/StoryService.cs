@@ -142,6 +142,33 @@ namespace Services.Implementations
                 storiesQuery = storiesQuery.Where(s => s.author_id == query.AuthorId.Value);
             }
 
+            if (!string.IsNullOrWhiteSpace(query.StoryProgressStatus))
+            {
+                var ps = query.StoryProgressStatus.Trim().ToUpperInvariant();
+                storiesQuery = storiesQuery.Where(s =>
+                    s.story_progress_status != null &&
+                    string.Equals(s.story_progress_status.Trim(), ps, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.AgeRating))
+            {
+                var ar = query.AgeRating.Trim().ToUpperInvariant();
+                storiesQuery = storiesQuery.Where(s =>
+                    string.Equals((s.age_rating ?? "ALL").Trim(), ar, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (query.MinTotalChapters.HasValue)
+            {
+                var min = query.MinTotalChapters.Value;
+                storiesQuery = storiesQuery.Where(s => (s.total_chapters ?? 0) >= min);
+            }
+
+            if (query.MaxTotalChapters.HasValue)
+            {
+                var max = query.MaxTotalChapters.Value;
+                storiesQuery = storiesQuery.Where(s => (s.total_chapters ?? 0) <= max);
+            }
+
             if (query.StatusIn != null && query.StatusIn.Count > 0)
             {
                 var statusList = query.StatusIn.Select(s => s?.Trim().ToUpperInvariant()).Where(s => !string.IsNullOrEmpty(s)).ToList();
