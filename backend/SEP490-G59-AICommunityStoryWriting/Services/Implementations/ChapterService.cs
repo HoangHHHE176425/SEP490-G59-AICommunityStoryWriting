@@ -129,7 +129,7 @@ namespace Services.Implementations
             _chapterRepository.Add(chapter);
 
             if (request.AiGeneratedContentId.HasValue)
-                _aiContentRepository.UpdateChapterId(request.AiGeneratedContentId.Value, chapter.id);
+                _aiContentRepository.UpdateChapterId(request.AiGeneratedContentId.Value, chapter.id, chapter.order_index);
 
             try
             {

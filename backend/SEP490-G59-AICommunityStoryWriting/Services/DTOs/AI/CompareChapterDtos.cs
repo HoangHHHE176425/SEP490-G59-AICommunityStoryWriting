@@ -1,8 +1,9 @@
 namespace Services.DTOs.AI;
 
-/// <summary>Request so sánh chương tác giả với bản AI sinh ra.</summary>
+/// <summary>Request so sánh: chỉ cần <see cref="ChapterId"/> — BE tự lấy <c>story_id</c> và <c>order_index</c> từ chương, so <c>content</c> với các <c>ai_output</c> cùng story và <c>chapter_index</c> = <c>order_index</c>.</summary>
 public class CompareChapterRequest
 {
+    /// <summary>ID chương (<c>chapters.id</c>). Frontend không cần gửi <c>orderIndex</c>.</summary>
     public Guid ChapterId { get; set; }
 }
 

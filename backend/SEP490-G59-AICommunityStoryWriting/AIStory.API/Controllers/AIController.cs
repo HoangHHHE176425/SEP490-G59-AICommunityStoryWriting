@@ -363,7 +363,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>So sánh chương tác giả với bản AI sinh ra: độ giống (0–100%). Chỉ tác giả truyện được gọi.</summary>
+        /// <summary>So sánh <c>chapters.content</c> theo <c>ChapterId</c> (BE tự lấy story + order_index) với các bản AI cùng <c>chapter_index</c>; độ giống 0–100% (lấy max). Chỉ tác giả truyện.</summary>
         [HttpPost("compare-chapter")]
         public async Task<IActionResult> CompareChapter([FromBody] CompareChapterRequest request, CancellationToken cancellationToken)
         {

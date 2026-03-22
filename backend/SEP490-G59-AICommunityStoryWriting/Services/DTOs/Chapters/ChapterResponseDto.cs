@@ -15,7 +15,7 @@ namespace Services.DTOs.Chapters
         public bool IsUnlocked { get; set; }
         public int? WordCount { get; set; }
         public decimal? AiContributionRatio { get; set; }
-        /// <summary>Phần trăm giống với bản AI (0–100), cập nhật khi chương PUBLISHED và gọi compare-chapter.</summary>
+        /// <summary>Phần trăm giống với bản AI (0–100); compare-chapter ghi vào DB khi chương PUBLISHED.</summary>
         public decimal? AiSimilarityPercent { get; set; }
         public bool IsAiClean { get; set; }
         public DateTime? PublishedAt { get; set; }

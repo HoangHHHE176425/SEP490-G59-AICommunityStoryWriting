@@ -176,6 +176,14 @@ class ApiService {
         });
     }
 
+    /**
+     * Thống kê trang chủ (không cần đăng nhập): publishedStoriesCount, authorsCount, totalViews.
+     * GET /api/community/stats
+     */
+    static async getCommunityHomeStats() {
+        return this.request('/community/stats');
+    }
+
     // Stories API
     static async getStories(query = {}) {
         const params = new URLSearchParams();

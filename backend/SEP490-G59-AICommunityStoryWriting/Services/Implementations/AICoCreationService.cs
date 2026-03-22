@@ -265,7 +265,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             reviewFeedback = review.Feedback;
         }
 
-        var saved = SaveDraftChapterAndAiContent(
+        var saved = SaveAiGeneratedContentOnly(
             request.StoryId,
             authorUserId,
             hasAuthorIdea ? rawIdea! : "[AUTO] Tiếp tục theo mạch truyện (không có gợi ý tác giả)",
@@ -278,8 +278,9 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             RevisionCount = revisionCount,
             RevisionFeedbacks = revisionFeedbacks.Count > 0 ? revisionFeedbacks : null,
             ReviewFeedback = approved ? null : reviewFeedback,
-            ChapterId = saved.ChapterId,
-            AiGeneratedContentId = saved.AiGeneratedContentId,
+            ChapterId = null,
+            AiGeneratedContentId = saved.Id,
+            ChapterIndex = saved.ChapterIndex,
             AgentDurations = durations.Count > 0 ? durations : null
         };
     }
@@ -287,68 +288,26 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
     private sealed record ReviewViolation(string Type, string Severity, string? Quote, string? Fix);
     private sealed record ReviewResult(bool Approved, string? Feedback, List<ReviewViolation> Violations);
 
-    /// <summary>Một chapter DRAFT cho "chương tiếp theo"; mỗi lần co-create chỉ thêm một bản ai_generated_content cùng chapter_id để compare-chapter so với tất cả bản và lấy max similarity (dù tác giả chọn bản 1, 2 hay 3).</summary>
-    private (Guid? ChapterId, Guid? AiGeneratedContentId) SaveDraftChapterAndAiContent(Guid storyId, Guid authorUserId, string authorIdea, string finalContent)
+    /// <summary>Chỉ lưu bản <see cref="ai_generated_content"/> (không tạo/cập nhật <see cref="chapters"/>). <see cref="ai_generated_content.chapter_index"/> = slot chương tiếp theo (như <c>order_index</c> khi tạo chương).</summary>
+    private (Guid? Id, int? ChapterIndex) SaveAiGeneratedContentOnly(Guid storyId, Guid authorUserId, string authorIdea, string finalContent)
     {
         if (string.IsNullOrWhiteSpace(finalContent)) return (null, null);
         var chaptersList = _chapterRepository.GetByStoryId(storyId).ToList();
-        var nextOrder = chaptersList.Count == 0 ? 1 : (chaptersList.Max(c => c.order_index) + 1);
+        var nextChapterIndex = chaptersList.Count == 0 ? 1 : chaptersList.Max(c => c.order_index) + 1;
         var now = DateTime.UtcNow;
-
-        // Tìm chapter DRAFT đã có ít nhất một bản AI (slot "chương tiếp theo" đã được tạo bởi co-author trước đó)
-        chapters? targetChapter = chaptersList
-            .Where(c => string.Equals(c.status, "DRAFT", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(c => c.order_index)
-            .FirstOrDefault(c => _aiContentRepository.GetAllByChapterId(c.id).Count > 0);
-
-        if (targetChapter == null)
-        {
-            // Lần đầu co-author cho slot này: tạo chapter DRAFT mới
-            var chapter = new chapters
-            {
-                id = Guid.NewGuid(),
-                story_id = storyId,
-                title = $"Bản nháp AI #{nextOrder}",
-                order_index = nextOrder,
-                content = finalContent,
-                status = "DRAFT",
-                word_count = finalContent.Length,
-                created_at = now,
-                updated_at = now
-            };
-            _chapterRepository.Add(chapter);
-            var aiRecord = new ai_generated_content
-            {
-                id = Guid.NewGuid(),
-                story_id = storyId,
-                chapter_id = chapter.id,
-                user_id = authorUserId,
-                input_prompt = authorIdea.Length > 2000 ? authorIdea[..2000] + "..." : authorIdea,
-                ai_output = finalContent,
-                created_at = now
-            };
-            _aiContentRepository.Add(aiRecord);
-            return (chapter.id, aiRecord.id);
-        }
-
-        // Đã có chapter DRAFT cho slot này: chỉ thêm bản ai_generated_content mới (cùng chapter_id)
-        var aiRecordExisting = new ai_generated_content
+        var aiRecord = new ai_generated_content
         {
             id = Guid.NewGuid(),
             story_id = storyId,
-            chapter_id = targetChapter.id,
+            chapter_id = null,
+            chapter_index = nextChapterIndex,
             user_id = authorUserId,
             input_prompt = authorIdea.Length > 2000 ? authorIdea[..2000] + "..." : authorIdea,
             ai_output = finalContent,
             created_at = now
         };
-        _aiContentRepository.Add(aiRecordExisting);
-        // Cập nhật nội dung chapter = bản mới nhất để tác giả xem nhanh; khi chọn bản cũ thì UI có thể load từ ai_generated_content
-        targetChapter.content = finalContent;
-        targetChapter.updated_at = now;
-        targetChapter.word_count = finalContent.Length;
-        _chapterRepository.Update(targetChapter);
-        return (targetChapter.id, aiRecordExisting.id);
+        _aiContentRepository.Add(aiRecord);
+        return (aiRecord.id, nextChapterIndex);
     }
 
     private static string GetAgent1SystemPrompt() => """

@@ -257,9 +257,10 @@ public class UC06_ChapterServiceTests
     {
         public ai_generated_content? GetLatestByChapterId(Guid chapterId) => null;
         public IReadOnlyList<ai_generated_content> GetAllByChapterId(Guid chapterId) => Array.Empty<ai_generated_content>();
+        public IReadOnlyList<ai_generated_content> GetAllByStoryIdAndChapterIndex(Guid storyId, int chapterIndex, int maxCount = 50) => Array.Empty<ai_generated_content>();
         public ai_generated_content? GetById(Guid id) => null;
         public void Add(ai_generated_content entity) { }
-        public void UpdateChapterId(Guid id, Guid chapterId) { }
+        public void UpdateChapterId(Guid id, Guid chapterId, int chapterOrderIndex) { }
     }
 
     private sealed class FakeServiceScopeFactory : IServiceScopeFactory
