@@ -4,10 +4,10 @@ import { ShieldCheck, ListFilter } from 'lucide-react';
 import {
     getPendingReviewEscalations,
     resolveReviewEscalation,
-    getModeratorsForAssignment,
     getReviewEscalationHistory,
     getReviewEscalationLog,
 } from '../../../api/admin/adminModerationApi';
+import { getChapterReviewContent } from '../../../api/moderator/moderatorApi';
 import { localDateTimeInputToIsoUtc } from '../../../utils/moderatorReviewSla';
 import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 
@@ -63,7 +63,7 @@ function kindShort(k) {
 function kindLong(k) {
     const s = String(k || '').toUpperCase();
     if (s.includes('EXTEND')) return 'Gia hạn hạn duyệt';
-    if (s.includes('RELEASE')) return 'Hủy nhận duyệt (chuyển cho người khác)';
+    if (s.includes('RELEASE')) return 'Hủy nhận duyệt';
     return kindShort(k);
 }
 
@@ -188,10 +188,8 @@ export function ReviewEscalationsManagement() {
 
     const [resolveRow, setResolveRow] = useState(null);
     const [adminNote, setAdminNote] = useState('');
-    const [confirmedDeadline, setConfirmedDeadline] = useState('');
-    const [reassignToUserId, setReassignToUserId] = useState('');
-    const [releaseMode, setReleaseMode] = useState('queue');
-    const [moderators, setModerators] = useState([]);
+    /** { loading, error, data } | null — nội dung chapter khi target CHAPTER */
+    const [resolveChapterPreview, setResolveChapterPreview] = useState(null);
     const [resolving, setResolving] = useState(false);
 
     /** Log tab */
@@ -322,76 +320,47 @@ export function ReviewEscalationsManagement() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [mainTab]);
 
-    const openResolve = async (row) => {
+    const openResolve = (row) => {
         setResolveRow(row);
         setAdminNote('');
-        setReassignToUserId('');
-        setReleaseMode('queue');
-        setConfirmedDeadline('');
-        try {
-            const data = await getModeratorsForAssignment();
-            const list = data?.items ?? data?.Items ?? [];
-            const raw = Array.isArray(list) ? [...list] : [];
-            raw.sort(
-                (a, b) =>
-                    Number(a.claimedAssignmentCount ?? a.ClaimedAssignmentCount ?? 0) -
-                    Number(b.claimedAssignmentCount ?? b.ClaimedAssignmentCount ?? 0),
-            );
-            setModerators(raw);
-        } catch {
-            setModerators([]);
-        }
     };
 
-    const senderId = resolveRow?.senderId ?? resolveRow?.SenderId;
-
-    const buildModeratorOptions = () => {
-        const sid = senderId ? String(senderId).toLowerCase() : null;
-        let senderSeen = false;
-        const opts = moderators.map((m) => {
-            const mid = m.id ?? m.Id;
-            const isSender = sid && String(mid).toLowerCase() === sid;
-            if (isSender) senderSeen = true;
-            const name = m.displayName ?? m.DisplayName ?? mid;
-            const cnt = m.claimedAssignmentCount ?? m.ClaimedAssignmentCount ?? 0;
-            return {
-                value: mid,
-                label: `${name} — ${cnt} đơn đang nhận${isSender ? ' [Người gửi đơn]' : ''}`,
-                disabled: isSender,
-            };
-        });
-        if (sid && !senderSeen && senderId) {
-            opts.push({
-                value: senderId,
-                label: `${resolveRow?.senderName ?? resolveRow?.SenderName ?? senderId} [Người gửi đơn]`,
-                disabled: true,
+    useEffect(() => {
+        if (!resolveRow) {
+            setResolveChapterPreview(null);
+            return;
+        }
+        const tt = String(resolveRow.targetType ?? resolveRow.TargetType ?? '').toUpperCase();
+        const tid = resolveRow.targetId ?? resolveRow.TargetId;
+        if (tt !== 'CHAPTER' || !tid) {
+            setResolveChapterPreview(null);
+            return;
+        }
+        let cancelled = false;
+        setResolveChapterPreview({ loading: true, error: null, data: null });
+        getChapterReviewContent(tid)
+            .then((data) => {
+                if (!cancelled) setResolveChapterPreview({ loading: false, error: null, data });
+            })
+            .catch((e) => {
+                if (!cancelled) {
+                    setResolveChapterPreview({
+                        loading: false,
+                        error: e?.response?.data?.message ?? e?.message ?? 'Không tải được nội dung chương.',
+                        data: null,
+                    });
+                }
             });
-        }
-        return opts;
-    };
+        return () => {
+            cancelled = true;
+        };
+    }, [resolveRow]);
 
     const submitApprove = async () => {
         if (!resolveRow) return;
         const id = resolveRow.id ?? resolveRow.Id;
-        const kind = String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase();
         const body = { approve: true, adminNote: adminNote.trim() || null, confirmedDeadlineAt: null, reassignToUserId: null };
-
-        /* EXTEND: không gửi confirmedDeadlineAt → BE dùng proposed_deadline_at của moderator */
-        if (kind.includes('RELEASE')) {
-            if (releaseMode === 'reassign') {
-                if (!reassignToUserId) {
-                    alert('Chọn người nhận duyệt và hạn duyệt, hoặc chọn trả về hàng đợi.');
-                    return;
-                }
-                const ddl = localDateTimeInputToIsoUtc(confirmedDeadline);
-                if (!ddl) {
-                    alert('Khi giao trực tiếp cần chọn hạn duyệt.');
-                    return;
-                }
-                body.reassignToUserId = reassignToUserId;
-                body.confirmedDeadlineAt = ddl;
-            }
-        }
+        /* EXTEND: BE dùng proposed_deadline_at. RELEASE: luôn trả về hàng đợi (không reassign). */
 
         setResolving(true);
         try {
@@ -424,8 +393,6 @@ export function ReviewEscalationsManagement() {
         setLogPage(1);
         loadLog(1);
     };
-
-    const authorHintUtc = resolveRow?.authorSubmittedAtUtc ?? resolveRow?.AuthorSubmittedAtUtc;
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -939,7 +906,7 @@ export function ReviewEscalationsManagement() {
                         style={{
                             background: T.card,
                             borderRadius: '12px',
-                            maxWidth: 640,
+                            maxWidth: 720,
                             width: '100%',
                             maxHeight: '85vh',
                             overflow: 'auto',
@@ -992,6 +959,70 @@ export function ReviewEscalationsManagement() {
                                 </div>
                             </div>
 
+                            {String(resolveRow.targetType ?? resolveRow.TargetType ?? '').toUpperCase() === 'CHAPTER' && (
+                                <div style={{ marginBottom: 16 }}>
+                                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title, marginBottom: 8 }}>Nội dung chương</div>
+                                    {resolveChapterPreview?.loading && (
+                                        <p style={{ fontSize: '0.8125rem', color: T.slate, margin: 0 }}>Đang tải nội dung…</p>
+                                    )}
+                                    {resolveChapterPreview?.error && (
+                                        <p style={{ fontSize: '0.8125rem', color: '#b91c1c', margin: 0 }}>{resolveChapterPreview.error}</p>
+                                    )}
+                                    {resolveChapterPreview?.data && !resolveChapterPreview.loading && (
+                                        <div
+                                            style={{
+                                                maxHeight: 280,
+                                                overflow: 'auto',
+                                                padding: 12,
+                                                background: T.card,
+                                                borderRadius: 8,
+                                                border: `1px solid ${T.border}`,
+                                                fontSize: '0.8125rem',
+                                                lineHeight: 1.55,
+                                            }}
+                                        >
+                                            {(() => {
+                                                const d = resolveChapterPreview.data;
+                                                const origTitle = d.originalTitle ?? d.OriginalTitle ?? '—';
+                                                const origContent = (d.originalContent ?? d.OriginalContent ?? '').trim() || '—';
+                                                const pending = d.pendingVersions ?? d.PendingVersions ?? [];
+                                                const hasPv = Boolean(d.hasPendingVersion ?? d.HasPendingVersion) && pending.length > 0;
+                                                return (
+                                                    <>
+                                                        <div style={{ marginBottom: hasPv ? 12 : 0 }}>
+                                                            <div style={{ fontWeight: 600, color: T.slate, marginBottom: 4 }}>Bản đang duyệt</div>
+                                                            <div style={{ fontWeight: 600, color: T.title, marginBottom: 6 }}>{origTitle}</div>
+                                                            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: T.title }}>{origContent}</div>
+                                                        </div>
+                                                        {hasPv &&
+                                                            pending.map((v) => (
+                                                                <div
+                                                                    key={v.id ?? v.Id}
+                                                                    style={{
+                                                                        marginTop: 12,
+                                                                        paddingTop: 12,
+                                                                        borderTop: `1px dashed ${T.border}`,
+                                                                    }}
+                                                                >
+                                                                    <div style={{ fontWeight: 600, color: T.slate, marginBottom: 4 }}>
+                                                                        Phiên bản chỉnh sửa #{v.versionNumber ?? v.VersionNumber}
+                                                                    </div>
+                                                                    <div style={{ fontWeight: 600, color: T.title, marginBottom: 6 }}>
+                                                                        {v.titleSnapshot ?? v.TitleSnapshot ?? '—'}
+                                                                    </div>
+                                                                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: T.title }}>
+                                                                        {(v.contentSnapshot ?? v.ContentSnapshot ?? '').trim() || '—'}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                    </>
+                                                );
+                                            })()}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
                             {String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase().includes('EXTEND') && (
                                 <div style={{ marginBottom: 16 }}>
                                     <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title, marginBottom: 6 }}>Hạn duyệt sau khi chấp nhận</div>
@@ -1010,56 +1041,6 @@ export function ReviewEscalationsManagement() {
                                         {formatApiDateTimeLocalVi(resolveRow.proposedDeadlineAt ?? resolveRow.ProposedDeadlineAt)}
                                     </div>
                                     <p style={{ fontSize: '0.75rem', color: T.slate, margin: '6px 0 0' }}>Theo hạn moderator đề xuất — không chỉnh sửa.</p>
-                                </div>
-                            )}
-
-                            {String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase().includes('RELEASE') && (
-                                <div style={{ marginBottom: 16 }}>
-                                    <p style={{ fontSize: '0.8125rem', color: T.slate, margin: '0 0 10px' }}>
-                                        Sau khi chấp nhận &quot;Hủy nhận duyệt&quot;, chọn cách xử lý:
-                                    </p>
-                                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 10, fontSize: '0.8125rem', cursor: 'pointer' }}>
-                                        <input type="radio" checked={releaseMode === 'queue'} onChange={() => setReleaseMode('queue')} style={{ marginTop: 3 }} />
-                                        Trả về hàng đợi — chưa ai nhận, moderator khác có thể tự nhận
-                                    </label>
-                                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, fontSize: '0.8125rem', cursor: 'pointer' }}>
-                                        <input type="radio" checked={releaseMode === 'reassign'} onChange={() => setReleaseMode('reassign')} style={{ marginTop: 3 }} />
-                                        Giao trực tiếp cho moderator khác — lock lại truyện/chương và đặt hạn duyệt
-                                    </label>
-                                    {releaseMode === 'reassign' && (
-                                        <div style={{ paddingLeft: 4 }}>
-                                            {authorHintUtc && (
-                                                <p style={{ fontSize: '0.75rem', color: T.sky, margin: '0 0 8px', background: T.skySoft, padding: '8px 10px', borderRadius: 8 }}>
-                                                    Thời điểm tác giả gửi duyệt (mốc tối thiểu cho hạn): {formatApiDateTimeLocalVi(authorHintUtc)}.
-                                                </p>
-                                            )}
-                                            <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: 6 }}>
-                                                Moderator nhận duyệt (sắp xếp: ít đơn đang nhận → nhiều)
-                                            </label>
-                                            <p style={{ fontSize: '0.75rem', color: T.slate, margin: '0 0 8px' }}>Số đơn = số mục đang nhận duyệt (CLAIMED) để chọn người nhẹ tải.</p>
-                                            <select
-                                                value={reassignToUserId}
-                                                onChange={(e) => setReassignToUserId(e.target.value)}
-                                                style={{ ...inputBase, marginBottom: 12 }}
-                                            >
-                                                <option value="">-- Chọn người nhận --</option>
-                                                {buildModeratorOptions().map((o) => (
-                                                    <option key={String(o.value)} value={o.value} disabled={o.disabled}>
-                                                        {o.label}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                            <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, marginBottom: 6 }}>
-                                                Hạn duyệt — không được trước thời điểm tác giả gửi; đồng thời sau ít nhất 24 giờ kể từ hiện tại
-                                            </label>
-                                            <input
-                                                type="datetime-local"
-                                                value={confirmedDeadline}
-                                                onChange={(e) => setConfirmedDeadline(e.target.value)}
-                                                style={inputBase}
-                                            />
-                                        </div>
-                                    )}
                                 </div>
                             )}
 
@@ -1084,7 +1065,7 @@ export function ReviewEscalationsManagement() {
                                 onClick={submitReject}
                                 style={{ padding: '0.5rem 1rem', borderRadius: 8, border: 'none', background: '#ef4444', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
                             >
-                                Từ chối yêu cầu
+                                Từ chối
                             </button>
                             <button
                                 type="button"
@@ -1094,7 +1075,7 @@ export function ReviewEscalationsManagement() {
                                 onMouseEnter={(e) => { if (!resolving) e.currentTarget.style.background = T.greenHover; }}
                                 onMouseLeave={(e) => { e.currentTarget.style.background = T.green; }}
                             >
-                                Chấp nhận &amp; thực hiện
+                                Chấp nhận
                             </button>
                         </div>
                     </div>
