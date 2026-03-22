@@ -63,13 +63,17 @@ namespace DataAccessObjects.DAOs
         }
 
         /// <summary>Thông báo khi có người trả lời comment của mình. Gọi sau khi đã thêm comment reply thành công.</summary>
-        public static void NotifyCommentReply(Guid recipientUserId, string actorDisplayName, Guid storyId, string? storyTitle, Guid newCommentId)
+        /// <param name="linkUrlOverride">Nếu null: SPA React <c>/story/{storyId}#comment-...</c>. Chapter comment có thể truyền <c>/chapter?storyId=...&amp;chapterId=...</c>.</param>
+        /// <returns>Bản ghi đã lưu (để gửi SignalR).</returns>
+        public static notifications NotifyCommentReply(Guid recipientUserId, string actorDisplayName, Guid storyId, string? storyTitle, Guid newCommentId, string? linkUrlOverride = null)
         {
             if (string.IsNullOrWhiteSpace(actorDisplayName)) actorDisplayName = "Ai đó";
             var title = "Trả lời bình luận";
             var content = $"{actorDisplayName} đã trả lời bình luận của bạn" + (string.IsNullOrWhiteSpace(storyTitle) ? "." : $" trong truyện «{storyTitle.Trim()}».");
-            var linkUrl = $"/Home/Story?id={storyId}#comment-{newCommentId}";
-            Add(new notifications
+            var linkUrl = string.IsNullOrWhiteSpace(linkUrlOverride)
+                ? $"/story/{storyId}#comment-{newCommentId}"
+                : linkUrlOverride.Trim();
+            var n = new notifications
             {
                 id = Guid.NewGuid(),
                 user_id = recipientUserId,
@@ -79,7 +83,9 @@ namespace DataAccessObjects.DAOs
                 link_url = linkUrl,
                 is_read = false,
                 created_at = DateTime.Now
-            });
+            };
+            Add(n);
+            return n;
         }
 
         /// <summary>Thông báo khi có người thả cảm xúc (reaction) vào comment của mình. Chỉ gọi khi đặt/đổi reaction (không gọi khi bỏ reaction).</summary>
@@ -99,7 +105,7 @@ namespace DataAccessObjects.DAOs
             };
             var title = "Reaction bình luận";
             var content = $"{actorDisplayName} đã thả {reactionLabel} vào bình luận của bạn" + (string.IsNullOrWhiteSpace(storyTitle) ? "." : $" trong truyện «{storyTitle.Trim()}».");
-            var linkUrl = $"/Home/Story?id={storyId}";
+            var linkUrl = $"/story/{storyId}";
             Add(new notifications
             {
                 id = Guid.NewGuid(),

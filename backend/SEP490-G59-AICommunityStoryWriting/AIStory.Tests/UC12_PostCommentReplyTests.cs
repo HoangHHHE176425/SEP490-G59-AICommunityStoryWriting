@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using AIStory.API.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -17,7 +17,12 @@ public class UC12_PostCommentReplyTests
 {
     private static StoriesController CreateStoriesController(Guid? userId)
     {
-        var ctrl = new StoriesController(new FakeStoryService(), new FakeContentGuardrailService(), NullLogger<StoriesController>.Instance);
+        var ctrl = new StoriesController(
+            new FakeStoryService(),
+            new FakeContentGuardrailService(),
+            new StubStoryReportService(),
+            new NoOpNotificationHubNotifier(),
+            NullLogger<StoriesController>.Instance);
         ctrl.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -35,7 +40,9 @@ public class UC12_PostCommentReplyTests
             chapterVersionService: new FakeChapterVersionService(),
             scopeFactory: new FakeServiceScopeFactory(),
             storyService: new FakeStoryService(),
-            contentGuardrail: new FakeContentGuardrailService());
+            contentGuardrail: new FakeContentGuardrailService(),
+            notificationHubNotifier: new NoOpNotificationHubNotifier(),
+            logger: NullLogger<ChaptersController>.Instance);
 
         ctrl.ControllerContext = new ControllerContext
         {

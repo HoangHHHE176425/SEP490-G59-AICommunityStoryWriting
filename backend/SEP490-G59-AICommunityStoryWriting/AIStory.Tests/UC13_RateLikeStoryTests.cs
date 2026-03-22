@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using AIStory.API.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -17,6 +17,8 @@ public class UC13_RateLikeStoryTests
         var ctrl = new StoriesController(
             storyService ?? new DelegateStoryService(),
             new FakeContentGuardrailService(),
+            new StubStoryReportService(),
+            new NoOpNotificationHubNotifier(),
             NullLogger<StoriesController>.Instance);
         ctrl.ControllerContext = new ControllerContext
         {

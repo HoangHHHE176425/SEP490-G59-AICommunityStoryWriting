@@ -59,7 +59,7 @@ function CommentBlock({
 }) {
     const timeStr = node.createdAt ? (formatTimeAgo ? formatTimeAgo(node.createdAt) : new Date(node.createdAt).toLocaleString()) : '';
     return (
-        <div className={isReply ? 'ml-10 mt-2' : ''}>
+        <div id={node.id ? `comment-${node.id}` : undefined} className={isReply ? 'ml-10 mt-2' : ''}>
             <div className="flex gap-3">
                 <div className="w-10 h-10 rounded-full bg-primary/20 shrink-0 flex items-center justify-center text-primary font-bold text-sm">
                     {(node.userDisplayName || '?').charAt(0).toUpperCase()}
