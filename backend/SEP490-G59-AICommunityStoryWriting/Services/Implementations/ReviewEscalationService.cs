@@ -10,6 +10,8 @@ namespace Services.Implementations
 {
     public class ReviewEscalationService : IReviewEscalationService
     {
+        /// <summary>Từ chối đơn escalation: ghi chú admin bắt buộc, tối thiểu ký tự (đồng bộ FE).</summary>
+        private const int AdminRejectNoteMinLength = 10;
         private const int MinHoursUntilDeadline = 24;
         private const int MaxDeadlineDaysAhead = 366;
         private const double WarningDaysThreshold = 2; // escalation list tier (admin)
@@ -221,9 +223,15 @@ namespace Services.Implementations
 
             if (!dto.Approve)
             {
+                var rejectNote = (dto.AdminNote ?? string.Empty).Trim();
+                if (rejectNote.Length < AdminRejectNoteMinLength)
+                    throw new ArgumentException($"Khi từ chối đơn, ghi chú admin bắt buộc và tối thiểu {AdminRejectNoteMinLength} ký tự.");
+                if (rejectNote.Length > 2000)
+                    throw new ArgumentException("Ghi chú admin không được vượt quá 2000 ký tự.");
+
                 row.status = ReviewEscalationDAO.StatusRejected;
                 row.resolver_id = resolverId;
-                row.resolver_note = string.IsNullOrWhiteSpace(dto.AdminNote) ? null : dto.AdminNote.Trim();
+                row.resolver_note = rejectNote;
                 row.resolved_at = DateTime.UtcNow;
                 ReviewEscalationDAO.UpdateRow(row);
                 _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();

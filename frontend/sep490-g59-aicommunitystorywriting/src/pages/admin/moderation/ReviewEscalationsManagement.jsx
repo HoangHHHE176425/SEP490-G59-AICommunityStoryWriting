@@ -12,6 +12,58 @@ import { getChapters } from '../../../api/chapter/chapterApi';
 import { localDateTimeInputToIsoUtc } from '../../../utils/moderatorReviewSla';
 import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 
+/** Khi từ chối đơn escalation: ghi chú admin tối thiểu (ký tự, sau trim) — đồng bộ BE ReviewEscalationService. */
+const ADMIN_REJECT_NOTE_MIN_LENGTH = 10;
+const ADMIN_REJECT_NOTE_MAX_LENGTH = 2000;
+
+/** Bỏ URL khỏi chuỗi lỗi (tránh hiện localhost trong UI). */
+function sanitizeApiErrorText(s) {
+    if (typeof s !== 'string' || !s.trim()) return '';
+    return s
+        .replace(/https?:\/\/[^\s]+/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
+/**
+ * Thông báo lỗi thân thiện từ axios/API — không dùng raw message chứa URL.
+ * @param {unknown} err
+ * @returns {string}
+ */
+function getEscalationResolveErrorMessage(err) {
+    const data = err?.response?.data;
+    if (data && typeof data === 'object') {
+        const msg = data.message ?? data.Message;
+        if (typeof msg === 'string' && msg.trim()) {
+            const clean = sanitizeApiErrorText(msg);
+            if (clean) return clean;
+        }
+        const er = data.error ?? data.Error;
+        if (typeof er === 'string' && er.trim()) {
+            const clean = sanitizeApiErrorText(er);
+            if (clean) return clean;
+        }
+    }
+    const code = err?.response?.status;
+    if (code === 401) return 'Phiên đăng nhập hết hạn hoặc không xác định được người dùng.';
+    if (code === 403) return 'Bạn không có quyền thực hiện thao tác này.';
+    if (code === 404) return 'Không tìm thấy đơn hoặc đơn đã được xử lý.';
+    if (code === 400) return 'Dữ liệu không hợp lệ. Vui lòng kiểm tra lại hoặc tải lại trang.';
+    if (code >= 500) return 'Máy chủ đang bận hoặc gặp lỗi. Vui lòng thử lại sau.';
+    const raw = typeof err?.message === 'string' ? err.message : '';
+    if (raw && !/localhost|127\.0\.0\.1|:\/\/\/?/i.test(raw)) {
+        if (/^Request failed with status code\s+\d+/i.test(raw)) {
+            return code ? `Yêu cầu thất bại (mã ${code}).` : 'Yêu cầu thất bại.';
+        }
+        const clean = sanitizeApiErrorText(raw);
+        if (clean) return clean;
+    }
+    if (err?.code === 'ERR_NETWORK' || err?.code === 'ECONNABORTED' || /network error/i.test(raw)) {
+        return 'Không kết nối được máy chủ. Kiểm tra mạng và thử lại.';
+    }
+    return 'Đã xảy ra lỗi. Vui lòng thử lại.';
+}
+
 /** Đồng bộ token với các màn admin (PublicationManagement, CategoryManagement, …). */
 const T = {
     green: '#13ec5b',
@@ -201,6 +253,9 @@ export function ReviewEscalationsManagement() {
 
     const [resolveRow, setResolveRow] = useState(null);
     const [adminNote, setAdminNote] = useState('');
+    const [adminNoteRejectError, setAdminNoteRejectError] = useState('');
+    /** Lỗi API khi chấp nhận/từ chối — hiển thị trong modal (không dùng alert). */
+    const [resolveApiError, setResolveApiError] = useState(null);
     /** { loading, error, data } | null — nội dung chapter khi target CHAPTER */
     const [resolveChapterPreview, setResolveChapterPreview] = useState(null);
     /** { loading, error, items } | null — metadata các chương khi target STORY (không nội dung) */
@@ -338,6 +393,14 @@ export function ReviewEscalationsManagement() {
     const openResolve = (row) => {
         setResolveRow(row);
         setAdminNote('');
+        setAdminNoteRejectError('');
+        setResolveApiError(null);
+    };
+
+    const closeResolveModal = () => {
+        if (resolving) return;
+        setResolveRow(null);
+        setResolveApiError(null);
     };
 
     useEffect(() => {
@@ -422,13 +485,18 @@ export function ReviewEscalationsManagement() {
         const body = { approve: true, adminNote: adminNote.trim() || null, confirmedDeadlineAt: null, reassignToUserId: null };
         /* EXTEND: BE dùng proposed_deadline_at. RELEASE: luôn trả về hàng đợi (không reassign). */
 
+        setResolveApiError(null);
         setResolving(true);
         try {
             await resolveReviewEscalation(id, body);
+            setResolveApiError(null);
             setResolveRow(null);
             await loadOrders();
         } catch (e) {
-            alert(e?.response?.data?.message ?? e?.message ?? 'Lỗi xử lý');
+            setResolveApiError({
+                title: 'Không thể chấp nhận đơn',
+                message: getEscalationResolveErrorMessage(e),
+            });
         } finally {
             setResolving(false);
         }
@@ -436,14 +504,31 @@ export function ReviewEscalationsManagement() {
 
     const submitReject = async () => {
         if (!resolveRow) return;
+        const trimmed = adminNote.trim();
+        if (trimmed.length < ADMIN_REJECT_NOTE_MIN_LENGTH) {
+            setAdminNoteRejectError(
+                `Khi từ chối, bắt buộc nhập lý do (ghi chú admin). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự (đã bỏ khoảng trắng đầu/cuối).`,
+            );
+            return;
+        }
+        if (trimmed.length > ADMIN_REJECT_NOTE_MAX_LENGTH) {
+            setAdminNoteRejectError(`Ghi chú admin không được vượt quá ${ADMIN_REJECT_NOTE_MAX_LENGTH} ký tự.`);
+            return;
+        }
+        setAdminNoteRejectError('');
+        setResolveApiError(null);
         const id = resolveRow.id ?? resolveRow.Id;
         setResolving(true);
         try {
-            await resolveReviewEscalation(id, { approve: false, adminNote: adminNote.trim() || null });
+            await resolveReviewEscalation(id, { approve: false, adminNote: trimmed });
+            setResolveApiError(null);
             setResolveRow(null);
             await loadOrders();
         } catch (e) {
-            alert(e?.response?.data?.message ?? e?.message ?? 'Lỗi xử lý');
+            setResolveApiError({
+                title: 'Không thể từ chối đơn',
+                message: getEscalationResolveErrorMessage(e),
+            });
         } finally {
             setResolving(false);
         }
@@ -960,7 +1045,7 @@ export function ReviewEscalationsManagement() {
                         justifyContent: 'center',
                         padding: '1rem',
                     }}
-                    onClick={() => !resolving && setResolveRow(null)}
+                    onClick={() => !resolving && closeResolveModal()}
                 >
                     <div
                         style={{
@@ -984,7 +1069,7 @@ export function ReviewEscalationsManagement() {
                             </h3>
                             <button
                                 type="button"
-                                onClick={() => !resolving && setResolveRow(null)}
+                                onClick={() => !resolving && closeResolveModal()}
                                 style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}
                                 aria-label="Đóng"
                             >
@@ -1004,6 +1089,26 @@ export function ReviewEscalationsManagement() {
                                     Người gửi: {resolveRow.senderName ?? resolveRow.SenderName ?? '—'} · Gửi lúc: {formatApiDateTimeLocalVi(resolveRow.createdAt ?? resolveRow.CreatedAt)}
                                 </p>
                             </div>
+
+                            {resolveApiError ? (
+                                <div
+                                    role="alert"
+                                    style={{
+                                        marginBottom: 16,
+                                        padding: '0.75rem 1rem',
+                                        borderRadius: 8,
+                                        border: '1px solid #fecaca',
+                                        background: '#fef2f2',
+                                    }}
+                                >
+                                    <div style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>
+                                        {resolveApiError.title}
+                                    </div>
+                                    <div style={{ fontSize: '0.8125rem', color: '#7f1d1d', lineHeight: 1.45 }}>
+                                        {resolveApiError.message}
+                                    </div>
+                                </div>
+                            ) : null}
 
                             {String(resolveRow.targetType ?? resolveRow.TargetType ?? '').toUpperCase() === 'STORY' &&
                                 String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase() === 'RELEASE_ASSIGNMENT' && (
@@ -1113,7 +1218,27 @@ export function ReviewEscalationsManagement() {
 
                             {String(resolveRow.targetType ?? resolveRow.TargetType ?? '').toUpperCase() === 'CHAPTER' && (
                                 <div style={{ marginBottom: 16 }}>
-                                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title, marginBottom: 8 }}>Nội dung chương</div>
+                                    {(() => {
+                                        const kindExt = String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase().includes('EXTEND');
+                                        const d = resolveChapterPreview?.data;
+                                        const pending = d ? (d.pendingVersions ?? d.PendingVersions ?? []) : [];
+                                        const hasPv = Boolean(d && (d.hasPendingVersion ?? d.HasPendingVersion)) && pending.length > 0;
+                                        const extendVersionOnly = kindExt && hasPv;
+                                        return (
+                                            <>
+                                                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title, marginBottom: 8 }}>
+                                                    {extendVersionOnly
+                                                        ? 'Phiên bản chờ duyệt (đơn gia hạn)'
+                                                        : 'Nội dung chương'}
+                                                </div>
+                                                {extendVersionOnly ? (
+                                                    <p style={{ fontSize: '0.72rem', color: T.slate, margin: '0 0 8px', lineHeight: 1.45 }}>
+                                                        Chỉ hiển thị nội dung snapshot của phiên bản chỉnh sửa — không hiển thị bản gốc đã xuất bản.
+                                                    </p>
+                                                ) : null}
+                                            </>
+                                        );
+                                    })()}
                                     {resolveChapterPreview?.loading && (
                                         <p style={{ fontSize: '0.8125rem', color: T.slate, margin: 0 }}>Đang tải nội dung…</p>
                                     )}
@@ -1139,6 +1264,38 @@ export function ReviewEscalationsManagement() {
                                                 const origContent = (d.originalContent ?? d.OriginalContent ?? '').trim() || '—';
                                                 const pending = d.pendingVersions ?? d.PendingVersions ?? [];
                                                 const hasPv = Boolean(d.hasPendingVersion ?? d.HasPendingVersion) && pending.length > 0;
+                                                const kindExt = String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase().includes('EXTEND');
+                                                const extendVersionOnly = kindExt && hasPv;
+
+                                                const versionBlocks = pending.map((v, vIdx) => (
+                                                    <div
+                                                        key={v.id ?? v.Id}
+                                                        style={{
+                                                            marginTop: extendVersionOnly ? (vIdx === 0 ? 0 : 12) : 12,
+                                                            paddingTop: extendVersionOnly ? (vIdx === 0 ? 0 : 12) : 12,
+                                                            borderTop: extendVersionOnly
+                                                                ? vIdx === 0
+                                                                    ? 'none'
+                                                                    : `1px dashed ${T.border}`
+                                                                : `1px dashed ${T.border}`,
+                                                        }}
+                                                    >
+                                                        <div style={{ fontWeight: 600, color: T.slate, marginBottom: 4 }}>
+                                                            Phiên bản chỉnh sửa #{v.versionNumber ?? v.VersionNumber}
+                                                        </div>
+                                                        <div style={{ fontWeight: 600, color: T.title, marginBottom: 6 }}>
+                                                            {v.titleSnapshot ?? v.TitleSnapshot ?? '—'}
+                                                        </div>
+                                                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: T.title }}>
+                                                            {(v.contentSnapshot ?? v.ContentSnapshot ?? '').trim() || '—'}
+                                                        </div>
+                                                    </div>
+                                                ));
+
+                                                if (extendVersionOnly) {
+                                                    return <>{versionBlocks}</>;
+                                                }
+
                                                 return (
                                                     <>
                                                         <div style={{ marginBottom: hasPv ? 12 : 0 }}>
@@ -1146,27 +1303,7 @@ export function ReviewEscalationsManagement() {
                                                             <div style={{ fontWeight: 600, color: T.title, marginBottom: 6 }}>{origTitle}</div>
                                                             <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: T.title }}>{origContent}</div>
                                                         </div>
-                                                        {hasPv &&
-                                                            pending.map((v) => (
-                                                                <div
-                                                                    key={v.id ?? v.Id}
-                                                                    style={{
-                                                                        marginTop: 12,
-                                                                        paddingTop: 12,
-                                                                        borderTop: `1px dashed ${T.border}`,
-                                                                    }}
-                                                                >
-                                                                    <div style={{ fontWeight: 600, color: T.slate, marginBottom: 4 }}>
-                                                                        Phiên bản chỉnh sửa #{v.versionNumber ?? v.VersionNumber}
-                                                                    </div>
-                                                                    <div style={{ fontWeight: 600, color: T.title, marginBottom: 6 }}>
-                                                                        {v.titleSnapshot ?? v.TitleSnapshot ?? '—'}
-                                                                    </div>
-                                                                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: T.title }}>
-                                                                        {(v.contentSnapshot ?? v.ContentSnapshot ?? '').trim() || '—'}
-                                                                    </div>
-                                                                </div>
-                                                            ))}
+                                                        {hasPv ? versionBlocks : null}
                                                     </>
                                                 );
                                             })()}
@@ -1198,17 +1335,35 @@ export function ReviewEscalationsManagement() {
 
                             <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
                                 Ghi chú admin
+                                <span style={{ fontWeight: 500, color: T.slate, marginLeft: 6 }}>
+                                    (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự)
+                                </span>
                                 <textarea
                                     value={adminNote}
-                                    onChange={(e) => setAdminNote(e.target.value)}
+                                    onChange={(e) => {
+                                        setAdminNote(e.target.value);
+                                        if (adminNoteRejectError) setAdminNoteRejectError('');
+                                        if (resolveApiError) setResolveApiError(null);
+                                    }}
                                     rows={3}
-                                    placeholder="Tùy chọn; nên ghi khi từ chối."
-                                    style={{ ...inputBase, marginTop: 6, fontFamily: 'inherit', minHeight: '4.5rem' }}
+                                    placeholder="Khi chấp nhận: có thể để trống. Khi từ chối: nhập lý do rõ ràng (≥ 10 ký tự)."
+                                    style={{
+                                        ...inputBase,
+                                        marginTop: 6,
+                                        fontFamily: 'inherit',
+                                        minHeight: '4.5rem',
+                                        borderColor: adminNoteRejectError ? '#ef4444' : T.border,
+                                    }}
                                 />
+                                {adminNoteRejectError ? (
+                                    <p style={{ fontSize: '0.75rem', color: '#b91c1c', margin: '6px 0 0', fontWeight: 600 }} role="alert">
+                                        {adminNoteRejectError}
+                                    </p>
+                                ) : null}
                             </label>
                         </div>
                         <div style={{ padding: '0.75rem 1.25rem 1.25rem', display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end', borderTop: `1px solid ${T.border}`, background: T.bg }}>
-                            <button type="button" disabled={resolving} onClick={() => setResolveRow(null)} style={{ padding: '0.5rem 1rem', borderRadius: 8, border: `1px solid ${T.border}`, background: T.card, fontWeight: 600, cursor: 'pointer', color: T.title }}>
+                            <button type="button" disabled={resolving} onClick={closeResolveModal} style={{ padding: '0.5rem 1rem', borderRadius: 8, border: `1px solid ${T.border}`, background: T.card, fontWeight: 600, cursor: 'pointer', color: T.title }}>
                                 Đóng
                             </button>
                             <button

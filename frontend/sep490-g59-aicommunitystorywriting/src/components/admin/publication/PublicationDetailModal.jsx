@@ -514,38 +514,112 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         setIsSubmitting(true);
         try {
             if (selectedChapter) {
-                await rejectChapter(selectedChapter.id, rejectionReason.trim());
+                const rejectedId = selectedChapter.id;
+                await rejectChapter(rejectedId, rejectionReason.trim());
                 showToast('Đã từ chối chương.', 'success');
-                const remaining = chapters.filter(c => c.id !== selectedChapter.id);
-                setChapters(remaining);
-                setSelectedChapter(remaining[0] ?? null);
-                setChapterContents((prev) => {
-                    const next = { ...prev };
-                    delete next[selectedChapter.id];
-                    return next;
-                });
-                setChapterReviewContent((prev) => {
-                    const next = { ...prev };
-                    delete next[selectedChapter.id];
-                    return next;
-                });
                 onRefresh?.();
-                // Gọi rejectStory khi không còn chương chờ duyệt. Bắt 404 (truyện đã PUBLISHED sau khi duyệt chương trước) để vẫn đóng form và không hiện toast lỗi.
-                const isStoryRow = publication.type === 'story' || publication.type === 'new_story';
-                if (remaining.length === 0 && isStoryRow && publication.status !== 'approved') {
+
+                // BE có thể từ chối dây chuyền các chương sau — refetch pending để đồng bộ; hết chương chờ thì đóng dialog.
+                if (publication?.status === 'pending' && storyId) {
                     try {
-                        await rejectStory(storyId, rejectionReason.trim());
-                        onReject(publication.id);
-                    } catch (rejectErr) {
-                        if (rejectErr?.response?.status === 404) {
+                        const [pendingRes, publishedRes] = await Promise.all([
+                            getPendingChapters({
+                                storyId,
+                                pageSize: 100,
+                                claimFilter: 'CLAIMED',
+                                sortBy: 'deadline_at',
+                                sortOrder: 'asc',
+                            }),
+                            getChapters({ storyId, status: 'PUBLISHED', page: 1, pageSize: 500 }),
+                        ]);
+                        const pubList = publishedRes?.items ?? publishedRes?.Items ?? publishedRes?.data ?? [];
+                        const arr = Array.isArray(pubList) ? pubList : [];
+                        setPublishedOrderIndices(new Set(arr.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0))));
+
+                        const items = pendingRes?.items ?? pendingRes?.Items ?? pendingRes?.data ?? [];
+                        const mapped = (Array.isArray(items) ? items : []).map(mapChapterItem);
+
+                        if (mapped.length === 0) {
+                            setChapters([]);
+                            setSelectedChapter(null);
+                            setChapterContents({});
+                            setChapterReviewContent({});
+                            const isStoryRow = publication.type === 'story' || publication.type === 'new_story';
+                            if (isStoryRow && publication.status !== 'approved') {
+                                try {
+                                    await rejectStory(storyId, rejectionReason.trim());
+                                    onReject?.(publication.id);
+                                } catch (rejectErr) {
+                                    if (rejectErr?.response?.status !== 404) throw rejectErr;
+                                    onRefresh?.();
+                                }
+                            }
                             onRefresh?.();
+                            onClose?.();
                         } else {
-                            throw rejectErr;
+                            const results = await Promise.allSettled(mapped.map((c) => getChapterReviewContent(c.id)));
+                            const nextReview = {};
+                            results.forEach((r, i) => {
+                                if (r.status === 'fulfilled' && mapped[i]) nextReview[mapped[i].id] = r.value;
+                            });
+                            setChapterReviewContent(nextReview);
+                            setChapters(mapped);
+                            setSelectedChapter(mapped[0] ?? null);
+                            setChapterContents((prev) => {
+                                const next = {};
+                                mapped.forEach((c) => {
+                                    if (prev[c.id] != null) next[c.id] = prev[c.id];
+                                });
+                                return next;
+                            });
+                        }
+                    } catch (refetchErr) {
+                        console.error('[PublicationDetailModal] Refetch sau từ chối chương thất bại:', refetchErr);
+                        const remaining = chapters.filter((c) => c.id !== rejectedId);
+                        setChapters(remaining);
+                        setSelectedChapter(remaining[0] ?? null);
+                        setChapterContents((prev) => {
+                            const next = { ...prev };
+                            delete next[rejectedId];
+                            return next;
+                        });
+                        setChapterReviewContent((prev) => {
+                            const next = { ...prev };
+                            delete next[rejectedId];
+                            return next;
+                        });
+                        if (remaining.length === 0) onClose?.();
+                    }
+                } else {
+                    const remaining = chapters.filter((c) => c.id !== rejectedId);
+                    setChapters(remaining);
+                    setSelectedChapter(remaining[0] ?? null);
+                    setChapterContents((prev) => {
+                        const next = { ...prev };
+                        delete next[rejectedId];
+                        return next;
+                    });
+                    setChapterReviewContent((prev) => {
+                        const next = { ...prev };
+                        delete next[rejectedId];
+                        return next;
+                    });
+                    const isStoryRow = publication.type === 'story' || publication.type === 'new_story';
+                    if (remaining.length === 0 && isStoryRow && publication.status !== 'approved') {
+                        try {
+                            await rejectStory(storyId, rejectionReason.trim());
+                            onReject(publication.id);
+                        } catch (rejectErr) {
+                            if (rejectErr?.response?.status === 404) {
+                                onRefresh?.();
+                            } else {
+                                throw rejectErr;
+                            }
                         }
                     }
-                }
-                if (remaining.length === 0) {
-                    onClose?.();
+                    if (remaining.length === 0) {
+                        onClose?.();
+                    }
                 }
             } else {
                 if (publication.type === 'story' || publication.type === 'new_story') {

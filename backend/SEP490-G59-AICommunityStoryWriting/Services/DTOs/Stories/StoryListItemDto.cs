@@ -57,7 +57,7 @@ namespace Services.DTOs.Stories
         /// <summary>Admin: tên moderator đã duyệt/từ chối.</summary>
         public string? ReviewedByModeratorName { get; set; }
 
-        /// <summary>Ghi chú admin khi từ chối đơn RELEASE_ASSIGNMENT (hủy nhận duyệt) do moderator hiện tại gửi.</summary>
+        /// <summary>Ghi chú admin khi từ chối đơn RELEASE_ASSIGNMENT (hủy nhận duyệt) do moderator hiện tại gửi. Chỉ điền khi truyện còn ít nhất một chương chờ duyệt (sau khi xử lý hết chương thì ẩn; nhận duyệt lại sau khi hết hạn đơn vẫn theo so sánh claim vs resolved_at).</summary>
         public string? AdminRejectedReleaseNote { get; set; }
         /// <summary>Thời điểm admin từ chối đơn hủy nhận duyệt.</summary>
         public DateTime? AdminRejectedReleaseAt { get; set; }

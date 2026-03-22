@@ -255,24 +255,77 @@ namespace Services.Implementations
             return result;
         }
 
-        private static (string? Note, DateTime? At)? PickBestChapterEscalationRejection(
+        /// <summary>
+        /// Còn chương chờ moderator (PENDING_REVIEW hoặc có version PENDING_REVIEW) — đồng bộ tiêu chí GetPendingChapters.
+        /// Dùng để ẩn banner &quot;admin từ chối đơn hủy nhận duyệt&quot; sau khi moderator đã xử lý hết chương trong đợt này.
+        /// </summary>
+        private bool StoryHasAnyChapterPendingModerationReview(Guid storyId)
+        {
+            var pendingVersionChapterIds = new HashSet<Guid>(DataAccessObjects.DAOs.ChapterVersionDAO.GetChapterIdsWithPendingReviewVersion());
+            foreach (var ch in _chapterRepository.GetByStoryId(storyId))
+            {
+                if (string.Equals(ch.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (pendingVersionChapterIds.Contains(ch.id))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Chỉ hiển thị ghi chú admin (từ chối đơn hủy nhận duyệt / gia hạn) nếu đơn bị xử lý trong phiên nhận duyệt hiện tại:
+        /// resolved_at phải &gt;= assigned_at của lock STORY/CHAPTER tương ứng. Tránh hiện lý do đơn cũ sau khi tác giả gửi lại và moderator nhận duyệt mới.
+        /// Với đơn RELEASE ở cấp truyện: chỉ gộp từ story khi <paramref name="storyIdsEligibleForStoryLevelRelease"/> chứa story (còn chương chờ duyệt).
+        /// </summary>
+        private static (string? Note, DateTime? At)? PickBestChapterEscalationRejectionForCurrentClaim(
             Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> chDict,
             Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> stDict,
             Guid chapterId,
-            Guid? storyId)
+            Guid? storyId,
+            DateTime? chapterClaimedAt,
+            IReadOnlyDictionary<Guid, DateTime> storyClaimAssignedAtByStoryId,
+            HashSet<Guid>? storyIdsEligibleForStoryLevelRelease)
         {
-            var candidates = new List<(DateTime? At, string? Note)>();
-            if (chDict.TryGetValue(chapterId, out var cn))
-                candidates.Add((cn.ResolvedAt, cn.Note));
-            if (storyId.HasValue && stDict.TryGetValue(storyId.Value, out var sn))
-                candidates.Add((sn.ResolvedAt, sn.Note));
+            var candidates = new List<(DateTime At, string? Note)>();
+            if (chDict.TryGetValue(chapterId, out var cn) && cn.ResolvedAt.HasValue)
+            {
+                var at = cn.ResolvedAt.Value;
+                if (!chapterClaimedAt.HasValue || at >= chapterClaimedAt.Value)
+                    candidates.Add((at, cn.Note));
+            }
+
+            if (storyId.HasValue && stDict.TryGetValue(storyId.Value, out var sn) && sn.ResolvedAt.HasValue)
+            {
+                if (storyIdsEligibleForStoryLevelRelease != null && !storyIdsEligibleForStoryLevelRelease.Contains(storyId.Value))
+                {
+                    // Bỏ qua từ chối RELEASE cấp truyện khi đã xử lý hết chương — vẫn giữ candidate cấp chương ở trên.
+                }
+                else
+                {
+                    var at = sn.ResolvedAt.Value;
+                    var stClaim = storyClaimAssignedAtByStoryId.TryGetValue(storyId.Value, out var ca) ? (DateTime?)ca : null;
+                    if (!stClaim.HasValue || at >= stClaim.Value)
+                        candidates.Add((at, sn.Note));
+                }
+            }
+
             if (candidates.Count == 0)
                 return null;
-            var top = candidates.OrderByDescending(c => c.At ?? DateTime.MinValue).First();
+            var top = candidates.OrderByDescending(c => c.At).First();
             return (top.Note, top.At);
         }
 
-        private static void ApplyAdminRejectedEscalationNotesForStories(IReadOnlyList<StoryListItemDto> items, Guid? moderatorId)
+        private static bool IsAdminEscalationRejectionStillRelevantForStoryClaim(DateTime? rejectionResolvedAt, DateTime? storyClaimedAt)
+        {
+            if (!rejectionResolvedAt.HasValue)
+                return true;
+            if (!storyClaimedAt.HasValue)
+                return true;
+            return rejectionResolvedAt.Value >= storyClaimedAt.Value;
+        }
+
+        private void ApplyAdminRejectedEscalationNotesForStories(IReadOnlyList<StoryListItemDto> items, Guid? moderatorId)
         {
             if (!moderatorId.HasValue || items.Count == 0)
                 return;
@@ -282,13 +335,16 @@ namespace Services.Implementations
             var ext = ReviewEscalationDAO.GetLatestRejectedExtendByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, ids);
             foreach (var item in items)
             {
-                if (rel.TryGetValue(item.Id, out var r))
+                if (rel.TryGetValue(item.Id, out var r)
+                    && IsAdminEscalationRejectionStillRelevantForStoryClaim(r.ResolvedAt, item.ClaimedAt)
+                    && StoryHasAnyChapterPendingModerationReview(item.Id))
                 {
                     item.AdminRejectedReleaseNote = r.Note;
                     item.AdminRejectedReleaseAt = r.ResolvedAt;
                 }
 
-                if (ext.TryGetValue(item.Id, out var e))
+                if (ext.TryGetValue(item.Id, out var e)
+                    && IsAdminEscalationRejectionStillRelevantForStoryClaim(e.ResolvedAt, item.ClaimedAt))
                 {
                     item.AdminRejectedExtendNote = e.Note;
                     item.AdminRejectedExtendAt = e.ResolvedAt;
@@ -296,7 +352,7 @@ namespace Services.Implementations
             }
         }
 
-        private static void ApplyAdminRejectedEscalationNotesForChapters(IReadOnlyList<ChapterListItemDto> items, Guid? moderatorId)
+        private void ApplyAdminRejectedEscalationNotesForChapters(IReadOnlyList<ChapterListItemDto> items, Guid? moderatorId)
         {
             if (!moderatorId.HasValue || items.Count == 0)
                 return;
@@ -314,16 +370,30 @@ namespace Services.Implementations
                 ? ReviewEscalationDAO.GetLatestRejectedExtendByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, storyIds)
                 : empty;
 
+            var storyClaimAssignedAtByStoryId = storyIds.Count > 0
+                ? ReviewAssignmentDAO.GetActiveClaimInfosByTargetIds(ReviewAssignmentDAO.TargetTypeStory, storyIds)
+                    .ToDictionary(kv => kv.Key, kv => kv.Value.AssignedAt)
+                : new Dictionary<Guid, DateTime>();
+
+            var storyIdsEligibleForStoryLevelRelease = new HashSet<Guid>();
+            foreach (var sid in storyIds)
+            {
+                if (StoryHasAnyChapterPendingModerationReview(sid))
+                    storyIdsEligibleForStoryLevelRelease.Add(sid);
+            }
+
             foreach (var item in items)
             {
-                var rel = PickBestChapterEscalationRejection(chRel, stRel, item.Id, item.StoryId);
+                var rel = PickBestChapterEscalationRejectionForCurrentClaim(
+                    chRel, stRel, item.Id, item.StoryId, item.ClaimedAt, storyClaimAssignedAtByStoryId, storyIdsEligibleForStoryLevelRelease);
                 if (rel.HasValue)
                 {
                     item.AdminRejectedReleaseNote = rel.Value.Note;
                     item.AdminRejectedReleaseAt = rel.Value.At;
                 }
 
-                var ext = PickBestChapterEscalationRejection(chExt, stExt, item.Id, item.StoryId);
+                var ext = PickBestChapterEscalationRejectionForCurrentClaim(
+                    chExt, stExt, item.Id, item.StoryId, item.ClaimedAt, storyClaimAssignedAtByStoryId, null);
                 if (ext.HasValue)
                 {
                     item.AdminRejectedExtendNote = ext.Value.Note;
