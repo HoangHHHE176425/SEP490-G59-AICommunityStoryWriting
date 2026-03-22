@@ -48,5 +48,10 @@ namespace Services.DTOs.Chapters
         public DateTime? ReviewedAt { get; set; }
         /// <summary>Admin: tên moderator đã duyệt/từ chối.</summary>
         public string? ReviewedByModeratorName { get; set; }
+
+        /// <summary>Ghi chú admin khi từ chối đơn RELEASE_ASSIGNMENT (hủy nhận duyệt) do moderator hiện tại gửi (chapter hoặc truyện chứa chương).</summary>
+        public string? AdminRejectedReleaseNote { get; set; }
+        /// <summary>Thời điểm admin từ chối đơn hủy nhận duyệt (theo bản ghi mới nhất áp dụng).</summary>
+        public DateTime? AdminRejectedReleaseAt { get; set; }
     }
 }

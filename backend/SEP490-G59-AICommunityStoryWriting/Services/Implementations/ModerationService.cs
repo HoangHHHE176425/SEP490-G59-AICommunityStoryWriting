@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
@@ -117,6 +119,7 @@ namespace Services.Implementations
 
                 var total = list.Count;
                 var pageItems = list.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                ApplyAdminRejectedReleaseNotesForStories(pageItems, moderatorId);
                 return new PagedResultDto<StoryListItemDto>
                 {
                     Items = pageItems,
@@ -128,6 +131,7 @@ namespace Services.Implementations
 
             foreach (var item in result.Items)
                 EnrichPendingStoryItem(item, moderatorId, pendingEscalationStoryIds);
+            ApplyAdminRejectedReleaseNotesForStories(result.Items.ToList(), moderatorId);
             return result;
         }
 
@@ -235,6 +239,7 @@ namespace Services.Implementations
 
                 var total = list.Count;
                 var pageItems = list.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                ApplyAdminRejectedReleaseNotesForChapters(pageItems, moderatorId);
                 return new PagedResultDto<ChapterListItemDto>
                 {
                     Items = pageItems,
@@ -246,7 +251,53 @@ namespace Services.Implementations
 
             foreach (var item in result.Items)
                 EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds, pendingEscalationStoryIds);
+            ApplyAdminRejectedReleaseNotesForChapters(result.Items.ToList(), moderatorId);
             return result;
+        }
+
+        private static void ApplyAdminRejectedReleaseNotesForStories(IReadOnlyList<StoryListItemDto> items, Guid? moderatorId)
+        {
+            if (!moderatorId.HasValue || items.Count == 0)
+                return;
+            var dict = ReviewEscalationDAO.GetLatestRejectedReleaseByTargetsForSender(
+                moderatorId.Value,
+                ReviewAssignmentDAO.TargetTypeStory,
+                items.Select(i => i.Id).ToList());
+            foreach (var item in items)
+            {
+                if (dict.TryGetValue(item.Id, out var x))
+                {
+                    item.AdminRejectedReleaseNote = x.Note;
+                    item.AdminRejectedReleaseAt = x.ResolvedAt;
+                }
+            }
+        }
+
+        private static void ApplyAdminRejectedReleaseNotesForChapters(IReadOnlyList<ChapterListItemDto> items, Guid? moderatorId)
+        {
+            if (!moderatorId.HasValue || items.Count == 0)
+                return;
+            var mid = moderatorId.Value;
+            var chapterIds = items.Select(i => i.Id).ToList();
+            var storyIds = items.Where(i => i.StoryId.HasValue).Select(i => i.StoryId!.Value).Distinct().ToList();
+            var chDict = ReviewEscalationDAO.GetLatestRejectedReleaseByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeChapter, chapterIds);
+            var stDict = storyIds.Count > 0
+                ? ReviewEscalationDAO.GetLatestRejectedReleaseByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, storyIds)
+                : new Dictionary<Guid, (string? Note, DateTime? ResolvedAt)>();
+
+            foreach (var item in items)
+            {
+                var candidates = new List<(DateTime? At, string? Note)>();
+                if (chDict.TryGetValue(item.Id, out var cn))
+                    candidates.Add((cn.ResolvedAt, cn.Note));
+                if (item.StoryId.HasValue && stDict.TryGetValue(item.StoryId.Value, out var sn))
+                    candidates.Add((sn.ResolvedAt, sn.Note));
+                if (candidates.Count == 0)
+                    continue;
+                var top = candidates.OrderByDescending(c => c.At ?? DateTime.MinValue).First();
+                item.AdminRejectedReleaseNote = top.Note;
+                item.AdminRejectedReleaseAt = top.At;
+            }
         }
 
         private void EnrichPendingChapterItem(ChapterListItemDto item, Guid? moderatorId, HashSet<Guid> pendingEscalationChapterIds, HashSet<Guid> pendingEscalationStoryIds)

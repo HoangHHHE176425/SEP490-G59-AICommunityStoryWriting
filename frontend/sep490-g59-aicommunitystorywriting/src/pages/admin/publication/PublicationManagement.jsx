@@ -108,6 +108,32 @@ const PAGE_SIZE = 10;
 /** Backend khuyến nghị: load lại danh sách duyệt/từ chối mỗi 30 giây để cập nhật khi có thay đổi từ nơi khác */
 const REFRESH_INTERVAL_MS = 30 * 1000;
 
+/** Gộp thông báo admin từ chối đơn hủy nhận duyệt (mới nhất theo thời gian). */
+function pickGroupAdminRejectedRelease(chapters, storyItem) {
+    const items = [];
+    if (storyItem) items.push(storyItem);
+    if (Array.isArray(chapters)) items.push(...chapters);
+    let bestTime = -Infinity;
+    let bestNote = null;
+    for (const it of items) {
+        const note = it.adminRejectedReleaseNote ?? it.AdminRejectedReleaseNote ?? null;
+        const atStr = it.adminRejectedReleaseAt ?? it.AdminRejectedReleaseAt;
+        const t = atStr ? new Date(atStr).getTime() : NaN;
+        const hasSignal = Number.isFinite(t) || (note != null && String(note).trim() !== '');
+        if (!hasSignal) continue;
+        const sortKey = Number.isFinite(t) ? t : 0;
+        if (sortKey >= bestTime) {
+            bestTime = sortKey;
+            bestNote = note;
+        }
+    }
+    if (bestTime === -Infinity && (bestNote == null || String(bestNote).trim() === '')) return {};
+    return {
+        adminRejectedReleaseNote: bestNote != null && String(bestNote).trim() !== '' ? String(bestNote).trim() : null,
+        adminRejectedReleaseAt: bestTime > -Infinity ? new Date(bestTime).toISOString() : null,
+    };
+}
+
 /** Map item từ moderator/stories/pending sang format dùng chung (type story). Dùng trạng thái thật từ API để khi duyệt chương không gọi approveStory nếu truyện đã PUBLISHED. */
 function mapPendingStoryToItem(s) {
     const id = s.id ?? s.Id;
@@ -220,6 +246,8 @@ function mapPendingChapterToItem(c) {
         pendingSince: c.pendingSince ?? c.PendingSince ?? null,
         timeStatus: c.timeStatus ?? c.TimeStatus ?? null,
         hasPendingEscalation: c.hasPendingEscalation ?? c.HasPendingEscalation ?? false,
+        adminRejectedReleaseNote: c.adminRejectedReleaseNote ?? c.AdminRejectedReleaseNote ?? null,
+        adminRejectedReleaseAt: c.adminRejectedReleaseAt ?? c.AdminRejectedReleaseAt ?? null,
     };
 }
 
@@ -582,6 +610,7 @@ export function PublicationManagement() {
                         const slaPendingSince = times.length ? new Date(Math.min(...times)).toISOString() : null;
                         const slaTimeStatus = worstTimeStatus(g.chapters.map((c) => c.timeStatus).filter(Boolean));
                         const hasPendingEscalation = g.chapters.some((c) => c.hasPendingEscalation);
+                        const adminRej = pickGroupAdminRejectedRelease(g.chapters, g.storyItem);
                         groupedList.push({
                             type: 'story_group',
                             id: g.storyId,
@@ -598,6 +627,7 @@ export function PublicationManagement() {
                             slaPendingSince,
                             slaTimeStatus,
                             hasPendingEscalation,
+                            ...adminRej,
                         });
                     }
                     groupedList.sort((a, b) => {

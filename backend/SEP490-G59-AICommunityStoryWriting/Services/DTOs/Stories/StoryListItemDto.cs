@@ -56,5 +56,10 @@ namespace Services.DTOs.Stories
         public DateTime? ReviewedAt { get; set; }
         /// <summary>Admin: tên moderator đã duyệt/từ chối.</summary>
         public string? ReviewedByModeratorName { get; set; }
+
+        /// <summary>Ghi chú admin khi từ chối đơn RELEASE_ASSIGNMENT (hủy nhận duyệt) do moderator hiện tại gửi.</summary>
+        public string? AdminRejectedReleaseNote { get; set; }
+        /// <summary>Thời điểm admin từ chối đơn hủy nhận duyệt.</summary>
+        public DateTime? AdminRejectedReleaseAt { get; set; }
     }
 }
