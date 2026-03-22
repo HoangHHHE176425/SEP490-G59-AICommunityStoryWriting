@@ -1,0 +1,906 @@
+﻿@{
+    ViewData["Title"] = "Báo cáo truyện (Compliance)";
+}
+
+<style>
+    .cr-hero {
+        background: linear-gradient(135deg, #1e3a5f 0%, #0d2137 100%);
+        color: #fff;
+        border-radius: 12px;
+        padding: 1.25rem 1.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 8px 24px rgba(13,33,55,.25);
+    }
+
+        .cr-hero .cr-hero-sub {
+            color: rgba(255,255,255,.88);
+            font-size: .9rem;
+            max-width: 52rem;
+        }
+
+    .cr-filters.card {
+        border: none;
+        box-shadow: 0 2px 12px rgba(0,0,0,.06);
+        border-radius: 12px;
+    }
+
+    .cr-table-wrap {
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 2px 12px rgba(0,0,0,.06);
+    }
+
+        .cr-table-wrap table {
+            margin-bottom: 0;
+        }
+
+    .cr-story-badges .badge {
+        font-weight: 500;
+    }
+</style>
+
+<div class="container-fluid mt-3 mb-5 px-2 px-md-3">
+    <div class="cr-hero">
+        <h2 class="h4 mb-2"><i class="bi bi-shield-exclamation me-2"></i>Xử lý báo cáo truyện</h2>
+        <p class="cr-hero-sub mb-0">
+            Sau khi <strong>nhận (lock)</strong>, xử lý vi phạm rồi <strong>đánh dấu báo cáo đã xử lý</strong> (RESOLVED / DISMISSED) — ticket đó biến khỏi danh sách đang mở; xem lại tại tab <strong>Lịch sử của tôi</strong>.
+            Gắn cờ, ẩn truyện, tắt bình luận, gửi đơn lên admin như trước. Đơn admin: <a href="/Admin?esc=compliance" class="link-light text-decoration-underline">Admin → Compliance</a>.
+        </p>
+    </div>
+    <p class="text-muted small d-none d-md-block mb-2" id="crHelpActive">
+        <strong>PriorityScore</strong> = Severity (gộp) + (ReportCount × 5) + TimeWeight. Mặc định chỉ <code>NEW</code> + <code>IN_REVIEW</code> (báo cáo đã xử lý không hiện ở đây).
+        <strong>Nhận xử lý</strong> = lock truyện; độc giả vẫn gửi thêm báo cáo. Khi <strong>hết</strong> báo cáo mở, lock tự hết.
+        Tự <strong>gỡ lock</strong> khi cần: <strong>Gửi yêu cầu admin</strong> — chỉ admin gỡ trực tiếp (hoặc duyệt đơn).
+        Cột <strong>Lock</strong>: thời điểm nhận (UTC) và cảnh báo theo thời gian đã trôi.
+    </p>
+    <p class="text-muted small d-none d-md-block mb-3" id="crHelpHistory" style="display:none;">
+        Các báo cáo <strong>bạn</strong> đã đánh dấu <code>RESOLVED</code> hoặc <code>DISMISSED</code>. Admin đóng ticket không hiện ở đây.
+    </p>
+
+    <ul class="nav nav-tabs mb-3" id="crViewTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" type="button" id="crTabActive" data-cr-view="active" aria-selected="true">Đang xử lý</button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" type="button" id="crTabHistory" data-cr-view="history" aria-selected="false">Lịch sử của tôi</button>
+        </li>
+    </ul>
+
+    <div id="crPanelActive">
+        <div class="card cr-filters mb-3">
+            <div class="card-body">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Chế độ</label>
+                        <select class="form-select form-select-sm" id="crGroupBy">
+                            <option value="true" selected>Gom theo truyện</option>
+                            <option value="false">Từng báo cáo</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Trạng thái</label>
+                        <select class="form-select form-select-sm" id="crStatuses">
+                            <option value="" selected>NEW + IN_REVIEW</option>
+                            <option value="ALL">Tất cả</option>
+                            <option value="NEW">NEW</option>
+                            <option value="IN_REVIEW">IN_REVIEW</option>
+                            <option value="RESOLVED">RESOLVED</option>
+                            <option value="DISMISSED">DISMISSED</option>
+                            <option value="NEW,IN_REVIEW,RESOLVED,DISMISSED">Kết hợp (tất cả mã)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Lý do</label>
+                        <select class="form-select form-select-sm" id="crReason">
+                            <option value="">(Mọi lý do)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Story ID</label>
+                        <input class="form-control form-control-sm" id="crStoryId" placeholder="Guid (tùy chọn)" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Tìm tiêu đề / slug</label>
+                        <input class="form-control form-control-sm" id="crSearch" placeholder="Search..." />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Lock / nhận</label>
+                        <select class="form-select form-select-sm" id="crClaimFilter" title="Giống moderator: ẩn mục đang bị người khác lock (mặc định all)">
+                            <option value="all" selected>Tất cả (trừ lock người khác)</option>
+                            <option value="unclaimed">Chưa ai nhận</option>
+                            <option value="mine">Tôi đang nhận</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Sắp xếp</label>
+                        <select class="form-select form-select-sm" id="crSort">
+                            <option value="priority_desc" selected>Ưu tiên ↓</option>
+                            <option value="priority_asc">Ưu tiên ↑</option>
+                            <option value="oldest">Cũ nhất trước</option>
+                            <option value="newest">Mới nhất trước</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Priority min</label>
+                        <input type="number" class="form-control form-control-sm" id="crMinP" placeholder="—" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Priority max</label>
+                        <input type="number" class="form-control form-control-sm" id="crMaxP" placeholder="—" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Tạo từ (UTC)</label>
+                        <input type="datetime-local" class="form-control form-control-sm" id="crFrom" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Tạo đến (UTC)</label>
+                        <input type="datetime-local" class="form-control form-control-sm" id="crTo" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Trang</label>
+                        <input type="number" min="1" class="form-control form-control-sm" id="crPage" value="1" />
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-primary btn-sm w-100" id="crApply"><i class="bi bi-search"></i> Lọc</button>
+                    </div>
+                    <div class="col-12 mt-2 pt-2 border-top">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="crFlaggedOnly" />
+                            <label class="form-check-label small" for="crFlaggedOnly">Chỉ hiển thị truyện đang <strong>gắn cờ</strong> theo dõi (cần thêm thời gian xử lý)</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="crError" class="alert alert-danger py-2" style="display:none;"></div>
+        <div id="crTableHost" class="table-responsive cr-table-wrap">
+            <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+        </div>
+    </div>
+
+    <div id="crPanelHistory" style="display:none;">
+        <div class="card cr-filters mb-3">
+            <div class="card-body">
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label small mb-0">Tìm (tiêu đề / slug / lý do / id)</label>
+                        <input type="text" class="form-control form-control-sm" id="crHistSearch" placeholder="Tùy chọn" autocomplete="off" />
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-0">Trang</label>
+                        <input type="number" min="1" class="form-control form-control-sm" id="crHistPage" value="1" />
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-primary btn-sm w-100" id="crHistApply"><i class="bi bi-search"></i> Tải lịch sử</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="crHistError" class="alert alert-danger py-2" style="display:none;"></div>
+        <div id="crHistHost" class="table-responsive cr-table-wrap">
+            <div class="text-center py-4 text-muted small">Chọn tab và bấm Tải lịch sử.</div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="crModalLockRelease" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-send me-1"></i>Gửi yêu cầu admin — gỡ lock</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted mb-2">Mức ưu tiên trên admin được hệ thống gán <strong>tự động</strong> (đơn gỡ lock = cao).</p>
+                    <label class="form-label small">Nội dung (tùy chọn)</label>
+                    <textarea class="form-control" id="crLockReleaseMsg" rows="3" placeholder="Lý do cần admin gỡ lock / hỗ trợ…"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                    <button type="button" class="btn btn-primary" id="crLockReleaseSubmit"><i class="bi bi-send"></i> Gửi</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="crModalFlag" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-bookmark-flag me-1"></i>Gắn / bỏ cờ theo dõi</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="crFlagChecked" />
+                        <label class="form-check-label" for="crFlagChecked">Đang gắn cờ theo dõi</label>
+                    </div>
+                    <label class="form-label small">Ghi chú (khi gắn cờ)</label>
+                    <textarea class="form-control" id="crFlagNote" rows="2" placeholder="Ví dụ: chờ pháp lý, cần thêm bằng chứng…"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                    <button type="button" class="btn btn-primary" id="crFlagSubmit">Lưu</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="crModalAdminAction" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-person-slash me-1"></i>Yêu cầu admin — tài khoản tác giả</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted mb-3">Mức ưu tiên gửi admin: <strong>tự động</strong> — ban tài khoản = nghiêm trọng; tạm khóa viết = cao.</p>
+                    <ul class="nav nav-tabs mb-3" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#crActBan" type="button">Ban user</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#crActSuspend" type="button">Tạm khóa viết</button>
+                        </li>
+                    </ul>
+                    <div class="tab-content">
+                        <div class="tab-pane fade show active" id="crActBan">
+                            <p class="small text-muted">Admin sẽ duyệt và thực hiện ban tài khoản.</p>
+                            <label class="form-label small">Lý do / chi tiết</label>
+                            <textarea class="form-control" id="crBanMsg" rows="3"></textarea>
+                        </div>
+                        <div class="tab-pane fade" id="crActSuspend">
+                            <p class="small text-muted">Đến thời điểm này tác giả không tạo truyện/chương mới (UTC trên server — chọn theo giờ máy bạn, hệ thống gửi ISO UTC).</p>
+                            <label class="form-label small">Khóa đến (local)</label>
+                            <input type="datetime-local" class="form-control mb-2" id="crSuspendUntilLocal" />
+                            <label class="form-label small">Ghi chú</label>
+                            <textarea class="form-control" id="crSuspendMsg" rows="2"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                    <button type="button" class="btn btn-danger" id="crAdminActionSubmit">Gửi yêu cầu</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="crModalViolations" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-clock-history me-1"></i>Lịch sử vi phạm (violation_logs)</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="crViolationsBody"><div class="text-muted small">Đang tải…</div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        let crPageSize = 20;
+        let crCtx = { storyId: '', authorId: null, complianceFlagged: false };
+        let crViewMode = 'active';
+
+        function crApplyStatusFilterForRole() {
+            const sel = document.getElementById('crStatuses');
+            if (!sel) return;
+            const adm = AuthHelper.isAdmin();
+            ['ALL', 'RESOLVED', 'DISMISSED', 'NEW,IN_REVIEW,RESOLVED,DISMISSED'].forEach(function (val) {
+                const opt = Array.from(sel.options).find(function (o) { return o.value === val; });
+                if (opt) opt.hidden = !adm;
+            });
+            if (!adm && ['ALL', 'RESOLVED', 'DISMISSED', 'NEW,IN_REVIEW,RESOLVED,DISMISSED'].indexOf(sel.value) >= 0) {
+                sel.value = '';
+            }
+        }
+
+        function crEffectiveStatusFilterValue() {
+            const sel = document.getElementById('crStatuses');
+            const st = sel ? sel.value : '';
+            if (AuthHelper.isAdmin()) return st;
+            if (st === 'NEW' || st === 'IN_REVIEW') return st;
+            return '';
+        }
+
+        function crSwitchView(mode) {
+            crViewMode = mode;
+            const pa = document.getElementById('crPanelActive');
+            const ph = document.getElementById('crPanelHistory');
+            const ha = document.getElementById('crHelpActive');
+            const hh = document.getElementById('crHelpHistory');
+            const t1 = document.getElementById('crTabActive');
+            const t2 = document.getElementById('crTabHistory');
+            if (mode === 'history') {
+                if (pa) pa.style.display = 'none';
+                if (ph) ph.style.display = '';
+                if (ha) ha.style.display = 'none';
+                if (hh) hh.style.display = '';
+                if (t1) { t1.classList.remove('active'); t1.setAttribute('aria-selected', 'false'); }
+                if (t2) { t2.classList.add('active'); t2.setAttribute('aria-selected', 'true'); }
+            } else {
+                if (pa) pa.style.display = '';
+                if (ph) ph.style.display = 'none';
+                if (ha) ha.style.display = '';
+                if (hh) hh.style.display = 'none';
+                if (t1) { t1.classList.add('active'); t1.setAttribute('aria-selected', 'true'); }
+                if (t2) { t2.classList.remove('active'); t2.setAttribute('aria-selected', 'false'); }
+            }
+        }
+
+        async function crLoadHistory() {
+            const host = document.getElementById('crHistHost');
+            const err = document.getElementById('crHistError');
+            if (!host) return;
+            if (err) err.style.display = 'none';
+            host.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+            const page = parseInt(document.getElementById('crHistPage').value, 10) || 1;
+            const search = document.getElementById('crHistSearch').value.trim() || null;
+            try {
+                const data = await ApiService.complianceGetMyResolvedHistory({ page: page, pageSize: crPageSize, search: search });
+                const total = data.totalCount != null ? data.totalCount : data.TotalCount;
+                const rows = data.rows || data.Rows || [];
+                let html = '<table class="table table-sm table-hover align-middle"><thead class="table-light"><tr>' +
+                    '<th>Id</th><th>Truyện</th><th>Lý do</th><th>Trạng thái</th><th>Tạo</th><th>Đóng lúc</th></tr></thead><tbody>';
+                if (!rows.length) {
+                    html += '<tr><td colspan="6" class="text-muted text-center py-4">Chưa có bản ghi.</td></tr>';
+                } else {
+                    rows.forEach(function (x) {
+                        const rid = x.reportId || x.ReportId;
+                        const stitle = x.storyTitle || x.StoryTitle || '';
+                        const sid = x.storyId || x.StoryId;
+                        const reason = x.reasonCode || x.ReasonCode || '';
+                        const st = x.status || x.Status || '';
+                        const ca = x.createdAtUtc || x.CreatedAtUtc;
+                        const ra = x.resolvedAtUtc || x.ResolvedAtUtc;
+                        html += '<tr><td class="small text-break">' + crEscapeHtml(String(rid)) + '</td>' +
+                            '<td><a href="/Home/Story/' + encodeURIComponent(sid) + '" target="_blank" rel="noopener">' + crEscapeHtml(stitle) + '</a></td>' +
+                            '<td class="small">' + crEscapeHtml(String(reason)) + '</td>' +
+                            '<td class="small">' + crEscapeHtml(String(st)) + '</td>' +
+                            '<td class="small">' + crEscapeHtml(ca ? Utils.formatDateUtc(ca) : '—') + '</td>' +
+                            '<td class="small">' + crEscapeHtml(ra ? Utils.formatDateUtc(ra) : '—') + '</td></tr>';
+                    });
+                }
+                html += '</tbody></table>';
+                html += '<div class="small text-muted mt-2">Tổng: ' + total + '</div>';
+                host.innerHTML = html;
+            } catch (e) {
+                if (err) {
+                    err.textContent = e.message || String(e);
+                    err.style.display = 'block';
+                }
+                host.innerHTML = '';
+            }
+        }
+
+        function crEscapeHtml(t) {
+            if (t == null) return '';
+            const d = document.createElement('div');
+            d.textContent = t;
+            return d.innerHTML;
+        }
+
+        function crFormatContributors(arr) {
+            arr = arr || [];
+            if (!arr.length) return '<span class="text-muted">—</span>';
+            const parts = [];
+            for (let i = 0; i < arr.length; i++) {
+                const c = arr[i];
+                const em = c.userEmail != null ? c.userEmail : (c.UserEmail != null ? c.UserEmail : '—');
+                const code = c.reasonCode || c.ReasonCode || '';
+                const lab = c.reasonLabelVi || c.ReasonLabelVi || code;
+                const at = c.reportedAtUtc != null ? c.reportedAtUtc : c.ReportedAtUtc;
+                const note = c.detailNote || c.DetailNote || '';
+                const desc = c.description || c.Description || '';
+                let inner = crEscapeHtml(String(em)) + ' — <strong>' + crEscapeHtml(String(lab)) + '</strong> <span class="text-muted">(' + crEscapeHtml(String(code)) + ')</span>';
+                if (at) inner += '<div class="text-muted">' + crEscapeHtml(Utils.formatDate(at)) + '</div>';
+                if (desc) {
+                    const d = String(desc);
+                    inner += '<div class="text-muted">' + crEscapeHtml(d.length > 160 ? d.slice(0, 160) + '…' : d) + '</div>';
+                }
+                if (note) inner += '<div class="text-warning small mt-1">' + crEscapeHtml(String(note)) + '</div>';
+                parts.push('<div class="mb-2 border-bottom border-light pb-1">' + inner + '</div>');
+            }
+            return '<div class="cr-contrib-list" style="max-width:28rem">' + parts.join('') + '</div>';
+        }
+
+        function crFormatComplianceLockSla(x) {
+            const locked = x.isComplianceLocked === true || x.IsComplianceLocked === true;
+            const lockName = x.complianceClaimedByDisplayName || x.ComplianceClaimedByDisplayName || '';
+            const cat = x.complianceClaimedAtUtc || x.ComplianceClaimedAtUtc;
+            const st = (x.complianceHandlingSlaStatus || x.ComplianceHandlingSlaStatus || '').toUpperCase();
+            const msg = x.complianceHandlingSlaMessageVi || x.ComplianceHandlingSlaMessageVi || '';
+            const hrs = x.hoursSinceComplianceClaim != null ? x.hoursSinceComplianceClaim : x.HoursSinceComplianceClaim;
+            if (!locked) {
+                return '<span class="text-muted">—</span>';
+            }
+            let tierBadge = '<span class="badge bg-secondary">Đang lock</span>';
+            if (st === 'OK') tierBadge = '<span class="badge bg-success">Đang lock</span>';
+            else if (st === 'NOTICE') tierBadge = '<span class="badge bg-info">Đang lock</span>';
+            else if (st === 'WARNING') tierBadge = '<span class="badge bg-warning text-dark">Đang lock</span>';
+            else if (st === 'SEVERE') tierBadge = '<span class="badge text-white" style="background-color:#e8590c;">Đang lock</span>';
+            else if (st === 'CRITICAL') tierBadge = '<span class="badge bg-dark">Đang lock</span>';
+
+            let html = tierBadge + '<div class="small">' + crEscapeHtml(lockName) + '</div>';
+            if (cat) {
+                html += '<div class="small mt-1"><strong>Nhận lock (UTC):</strong> ' + crEscapeHtml(Utils.formatDateUtc(cat)) + '</div>';
+            }
+            if (hrs != null && !Number.isNaN(Number(hrs))) {
+                html += '<div class="small text-muted">' + crEscapeHtml(Number(hrs).toFixed(1)) + ' h từ lúc nhận</div>';
+            }
+            if (msg && st !== 'OK') {
+                let mCls = 'bg-info';
+                if (st === 'NOTICE') mCls = 'bg-info';
+                else if (st === 'WARNING') mCls = 'bg-warning text-dark';
+                else if (st === 'SEVERE') mCls = 'text-white';
+                else if (st === 'CRITICAL') mCls = 'bg-danger';
+                const sevStyle = st === 'SEVERE' ? ' style="background-color:#e8590c;"' : '';
+                html += '<div class="mt-1"><span class="badge ' + mCls + '"' + sevStyle + '>' + crEscapeHtml(msg) + '</span></div>';
+            }
+            return html;
+        }
+
+        function crToIsoUtcFromLocal(dtLocalVal) {
+            if (!dtLocalVal) return '';
+            return Utils.datetimeLocalToIsoUtc(dtLocalVal) || '';
+        }
+
+        async function crLoadReasons() {
+            const sel = document.getElementById('crReason');
+            try {
+                const list = await ApiService.getStoryReportReasons();
+                (list || []).forEach(function (r) {
+                    const o = document.createElement('option');
+                    o.value = r.code || r.Code;
+                    const vi = r.labelVi || r.LabelVi || '';
+                    const sc = r.severityScore != null ? r.severityScore : r.SeverityScore;
+                    o.textContent = (vi || r.label || r.Label || o.value) + ' (' + sc + ')';
+                    sel.appendChild(o);
+                });
+            } catch (e) { console.warn(e); }
+        }
+
+        function crQueryPayload() {
+            const groupByStory = document.getElementById('crGroupBy').value === 'true';
+            const st = crEffectiveStatusFilterValue();
+            const q = {
+                groupByStory: groupByStory,
+                page: parseInt(document.getElementById('crPage').value, 10) || 1,
+                pageSize: crPageSize,
+                sortBy: document.getElementById('crSort').value,
+                search: document.getElementById('crSearch').value.trim() || null,
+                reasonCode: document.getElementById('crReason').value || null
+            };
+            if (st === 'ALL') q.statuses = 'ALL';
+            else if (st) q.statuses = st;
+
+            const sid = document.getElementById('crStoryId').value.trim();
+            if (sid) q.storyId = sid;
+
+            const minP = document.getElementById('crMinP').value.trim();
+            const maxP = document.getElementById('crMaxP').value.trim();
+            if (minP !== '') q.minPriority = parseInt(minP, 10);
+            if (maxP !== '') q.maxPriority = parseInt(maxP, 10);
+
+            const from = crToIsoUtcFromLocal(document.getElementById('crFrom').value);
+            const to = crToIsoUtcFromLocal(document.getElementById('crTo').value);
+            if (from) q.createdFromUtc = from;
+            if (to) q.createdToUtc = to;
+
+            const cf = (document.getElementById('crClaimFilter') || {}).value;
+            if (cf && cf !== 'all') q.claimFilter = cf;
+
+            if (document.getElementById('crFlaggedOnly') && document.getElementById('crFlaggedOnly').checked)
+                q.flaggedOnly = true;
+
+            return q;
+        }
+
+        function crStoryBadgesHtml(x) {
+            const flagged = x.complianceFlagged === true || x.ComplianceFlagged === true;
+            const hid = x.complianceHidden === true || x.ComplianceHidden === true;
+            const cmt = x.commentsDisabled === true || x.CommentsDisabled === true;
+            const parts = [];
+            if (flagged) parts.push('<span class="badge bg-warning text-dark">Cờ</span>');
+            if (hid) parts.push('<span class="badge bg-secondary">Ẩn</span>');
+            if (cmt) parts.push('<span class="badge bg-dark">Tắt BL</span>');
+            if (!parts.length) return '<span class="text-muted small">—</span>';
+            return '<div class="cr-story-badges d-flex flex-wrap gap-1">' + parts.join('') + '</div>';
+        }
+
+        async function crLoad() {
+            const host = document.getElementById('crTableHost');
+            const err = document.getElementById('crError');
+            err.style.display = 'none';
+            host.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+            try {
+                const data = await ApiService.complianceGetStoryReports(crQueryPayload());
+                const total = data.totalCount != null ? data.totalCount : data.TotalCount;
+                const items = data.queueItems || data.QueueItems || [];
+                const rows = data.rows || data.Rows || [];
+                const grouped = (document.getElementById('crGroupBy').value === 'true');
+                const isAdm = AuthHelper.isAdmin();
+
+                if (grouped) {
+                    let html = '<table class="table table-sm table-hover align-middle"><thead class="table-light"><tr>' +
+                        '<th>Ưu tiên</th><th>Sev</th><th>#BC</th><th>TW</th><th>Truyện</th><th>Tác giả</th><th>Vi phạm / mod</th><th>Người báo</th><th>Ticket</th><th>Lock</th><th class="text-end" style="min-width:7rem">Thao tác</th></tr></thead><tbody>';
+                    if (!items.length) {
+                        html += '<tr><td colspan="11" class="text-muted text-center py-4">Không có dữ liệu.</td></tr>';
+                    } else {
+                        items.forEach(function (x) {
+                            const sid = x.storyId || x.StoryId;
+                            const title = x.storyTitle || x.StoryTitle || '';
+                            const pri = x.priorityScore != null ? x.priorityScore : x.PriorityScore;
+                            const ms = x.maxSeverityScore != null ? x.maxSeverityScore : x.MaxSeverityScore;
+                            const priFmt = (typeof pri === 'number' && !Number.isNaN(pri)) ? pri.toFixed(1) : String(pri);
+                            const msFmt = (typeof ms === 'number' && !Number.isNaN(ms)) ? ms.toFixed(1) : String(ms);
+                            const rc = x.reportCount != null ? x.reportCount : x.ReportCount;
+                            const tw = x.timeWeight != null ? x.timeWeight : x.TimeWeight;
+                            const contribs = x.contributors || x.Contributors || [];
+                            const sts = (x.statusesPresent || x.StatusesPresent || []).join(', ');
+                            const locked = x.isComplianceLocked === true || x.IsComplianceLocked === true;
+                            const mine = x.isComplianceClaimedByMe === true || x.IsComplianceClaimedByMe === true;
+                            const lockCell = crFormatComplianceLockSla(x);
+                            const aid = x.authorId || x.AuthorId;
+                            const aidStr = aid ? String(aid) : '';
+                            const aname = x.authorDisplayName || x.AuthorDisplayName || '—';
+                            const badgeCell = crStoryBadgesHtml(x);
+                            const cmtOn = x.commentsDisabled === true || x.CommentsDisabled === true;
+                            const hidOn = x.complianceHidden === true || x.ComplianceHidden === true;
+                            const fOn = x.complianceFlagged === true || x.ComplianceFlagged === true;
+                            const openIds = x.openReportIds || x.OpenReportIds || [];
+                            const hasOpenTickets = openIds.length > 0;
+                            let btns = '';
+                            if (!locked) {
+                                btns += '<button type="button" class="btn btn-outline-primary btn-sm mb-1" data-cr-claim="' + crEscapeHtml(String(sid)) + '"><i class="bi bi-lock"></i> Nhận</button> ';
+                            } else if (mine && isAdm) {
+                                btns += '<button type="button" class="btn btn-outline-warning btn-sm mb-1" data-cr-release="' + crEscapeHtml(String(sid)) + '"><i class="bi bi-unlock"></i> Gỡ lock</button> ';
+                            } else if (mine && !isAdm) {
+                                btns += '<button type="button" class="btn btn-outline-info btn-sm mb-1" data-cr-open-lock-rel data-sid="' + crEscapeHtml(String(sid)) + '"><i class="bi bi-send"></i> Gửi admin</button> ';
+                            } else {
+                                btns += '<span class="small text-danger d-block mb-1">Người khác lock</span>';
+                            }
+                            btns += '<button type="button" class="btn btn-outline-secondary btn-sm mb-1" data-cr-detail="' + crEscapeHtml(String(sid)) + '">Chi tiết BC</button>';
+                            let tools = '';
+                            if (mine && locked) {
+                                tools += '<div class="btn-group btn-group-sm mt-1" role="group">';
+                                tools += '<button type="button" class="btn btn-outline-dark" title="Gắn / bỏ cờ" data-cr-open-flag data-sid="' + String(sid) + '" data-aid="' + crEscapeHtml(aidStr) + '" data-flagged="' + (fOn ? '1' : '0') + '"><i class="bi bi-bookmark-flag"></i></button>';
+                                tools += '<button type="button" class="btn btn-outline-dark" title="Tắt/bật bình luận" data-cr-toggle-cmt data-sid="' + String(sid) + '" data-on="' + (cmtOn ? '1' : '0') + '"><i class="bi bi-chat-dots"></i></button>';
+                                tools += '<button type="button" class="btn btn-outline-dark" title="Ẩn/hiện truyện" data-cr-toggle-hide data-sid="' + String(sid) + '" data-on="' + (hidOn ? '1' : '0') + '"><i class="bi bi-eye-slash"></i></button>';
+                                tools += '<button type="button" class="btn btn-outline-danger" title="Ban / tạm khóa viết → admin" data-cr-open-admin-act data-sid="' + String(sid) + '" data-aid="' + crEscapeHtml(aidStr) + '"><i class="bi bi-person-slash"></i></button>';
+                                if (aidStr) tools += '<button type="button" class="btn btn-outline-secondary" title="Lịch sử vi phạm" data-cr-open-viol data-aid="' + crEscapeHtml(aidStr) + '"><i class="bi bi-clock-history"></i></button>';
+                                tools += '</div>';
+                                if (hasOpenTickets) {
+                                    tools += '<div class="d-flex flex-wrap gap-1 mt-2 justify-content-end">';
+                                    tools += '<button type="button" class="btn btn-success btn-sm" data-cr-resolve-all data-sid="' + crEscapeHtml(String(sid)) + '" data-st="RESOLVED" title="Đóng hết ticket NEW/IN_REVIEW">Xong hết ticket</button>';
+                                    tools += '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-resolve-all data-sid="' + crEscapeHtml(String(sid)) + '" data-st="DISMISSED" title="Bác bỏ hết ticket đang mở">Bác bỏ hết</button>';
+                                    tools += '</div>';
+                                }
+                            }
+                            html += '<tr>' +
+                                '<td class="fw-bold">' + crEscapeHtml(priFmt) + '</td>' +
+                                '<td>' + crEscapeHtml(msFmt) + '</td>' +
+                                '<td>' + crEscapeHtml(String(rc)) + '</td>' +
+                                '<td>' + crEscapeHtml(String(tw)) + '</td>' +
+                                '<td><a href="/Home/Story/' + encodeURIComponent(sid) + '" target="_blank" rel="noopener" class="fw-medium">' + crEscapeHtml(title) + '</a><div class="small text-muted text-break">' + crEscapeHtml(String(sid)) + '</div></td>' +
+                                '<td class="small">' + crEscapeHtml(String(aname)) + (aidStr ? '<div class="text-muted small text-break">' + crEscapeHtml(aidStr) + '</div>' : '') + '</td>' +
+                                '<td class="small">' + badgeCell + '</td>' +
+                                '<td class="small">' + crFormatContributors(contribs) + '</td>' +
+                                '<td class="small">' + crEscapeHtml(sts) + '</td>' +
+                                '<td class="small">' + lockCell + '</td>' +
+                                '<td class="text-end"><div class="d-inline-flex flex-column align-items-end">' + btns + tools + '</div></td></tr>';
+                        });
+                    }
+                    html += '</tbody></table>';
+                    html += '<div class="small text-muted mt-2">Tổng: ' + total + ' (trang ' + (data.page || data.Page) + ')</div>';
+                    host.innerHTML = html;
+                    host.querySelectorAll('[data-cr-claim]').forEach(function (btn) {
+                        btn.addEventListener('click', async function () {
+                            const id = btn.getAttribute('data-cr-claim');
+                            try {
+                                const r = await ApiService.complianceClaimStoryReports(id);
+                                const base = (r && (r.message || r.Message)) || 'Đã nhận.';
+                                const cat = r && (r.claimedAtUtc != null ? r.claimedAtUtc : r.ClaimedAtUtc);
+                                const extra = cat ? (' Chi tiết thời điểm nhận xem trong cột Lock sau khi tải lại.') : '';
+                                Utils.showAlert(base + extra, 'success');
+                                crLoad();
+                            } catch (e) { Utils.showAlert(e.message || e, 'danger'); }
+                        });
+                    });
+                    host.querySelectorAll('[data-cr-release]').forEach(function (btn) {
+                        btn.addEventListener('click', async function () {
+                            const id = btn.getAttribute('data-cr-release');
+                            if (!confirm('ADMIN: Gỡ lock truyện này và đưa báo cáo IN_REVIEW (người cũ) về NEW?')) return;
+                            try {
+                                const r = await ApiService.complianceReleaseStoryClaim(id);
+                                Utils.showAlert((r && (r.message || r.Message)) || 'Đã gỡ lock.', 'success');
+                                crLoad();
+                            } catch (e) { Utils.showAlert(e.message || e, 'danger'); }
+                        });
+                    });
+                    host.querySelectorAll('[data-cr-detail]').forEach(function (btn) {
+                        btn.addEventListener('click', function () {
+                            const id = btn.getAttribute('data-cr-detail');
+                            document.getElementById('crStoryId').value = id;
+                            document.getElementById('crGroupBy').value = 'false';
+                            document.getElementById('crPage').value = '1';
+                            crLoad();
+                        });
+                    });
+                    host.querySelectorAll('[data-cr-resolve-all]').forEach(function (btn) {
+                        btn.addEventListener('click', async function () {
+                            const sid = btn.getAttribute('data-sid');
+                            const st = btn.getAttribute('data-st') || 'RESOLVED';
+                            const verb = st === 'DISMISSED' ? 'bác bỏ (DISMISSED)' : 'đánh dấu đã xử lý (RESOLVED)';
+                            if (!confirm('Đóng hết báo cáo đang mở của truyện này — ' + verb + '?')) return;
+                            try {
+                                const r = await ApiService.complianceResolveAllOpenReports(sid, { status: st });
+                                Utils.showAlert((r && (r.message || r.Message)) || 'Đã cập nhật.', 'success');
+                                crLoad();
+                            } catch (e) { Utils.showAlert(e.message || e, 'danger'); }
+                        });
+                    });
+                } else {
+                    let html = '<table class="table table-sm table-hover align-middle"><thead class="table-light"><tr>' +
+                        '<th>Id báo cáo</th><th>Truyện</th><th>Mod</th><th>Lý do</th><th>Điểm</th><th>Người báo</th><th>Trạng thái</th><th>Tạo lúc</th><th>Lock</th><th></th></tr></thead><tbody>';
+                    if (!rows.length) {
+                        html += '<tr><td colspan="10" class="text-muted text-center py-4">Không có dữ liệu.</td></tr>';
+                    } else {
+                        rows.forEach(function (x) {
+                            const rid = x.reportId || x.ReportId;
+                            const stitle = x.storyTitle || x.StoryTitle || '';
+                            const sid = x.storyId || x.StoryId;
+                            const reason = x.reasonCode || x.ReasonCode || '';
+                            const sev = x.severityScore != null ? x.severityScore : x.SeverityScore;
+                            const em = x.reporterEmail || x.ReporterEmail || '—';
+                            const contribsFlat = x.contributors || x.Contributors || [];
+                            const contribsHtml = contribsFlat.length ? crFormatContributors(contribsFlat) : ('<span class="text-muted">' + crEscapeHtml(em) + '</span>');
+                            const st = x.status || x.Status || '';
+                            const ca = x.createdAtUtc || x.CreatedAtUtc;
+                            const lockCell = crFormatComplianceLockSla(x);
+                            const mine = x.isComplianceClaimedByMe === true || x.IsComplianceClaimedByMe === true;
+                            const stUp = (st || '').toUpperCase();
+                            const isOpenTicket = stUp === 'NEW' || stUp === 'IN_REVIEW';
+                            let actionCell = '';
+                            if (isAdm) {
+                                actionCell = '<select class="form-select form-select-sm cr-status-sel" data-rid="' + crEscapeHtml(String(rid)) + '">' +
+                                    '<option value="">Đổi trạng thái…</option>' +
+                                    '<option value="IN_REVIEW">IN_REVIEW</option>' +
+                                    '<option value="RESOLVED">RESOLVED</option>' +
+                                    '<option value="DISMISSED">DISMISSED</option>' +
+                                    '<option value="NEW">NEW</option></select>';
+                            } else if (mine && isOpenTicket) {
+                                actionCell = '<select class="form-select form-select-sm cr-resolve-sel" data-rid="' + crEscapeHtml(String(rid)) + '">' +
+                                    '<option value="">Đánh dấu xử lý…</option>' +
+                                    '<option value="RESOLVED">RESOLVED (đã xử lý)</option>' +
+                                    '<option value="DISMISSED">DISMISSED (bác bỏ)</option></select>';
+                            } else {
+                                actionCell = '<span class="text-muted small" title="Chỉ khi bạn đang nhận lock truyện và ticket còn mở.">—</span>';
+                            }
+                            html += '<tr>' +
+                                '<td class="small text-break">' + crEscapeHtml(String(rid)) + '</td>' +
+                                '<td><a href="/Home/Story/' + encodeURIComponent(sid) + '" target="_blank" rel="noopener">' + crEscapeHtml(stitle) + '</a></td>' +
+                                '<td class="small">' + crStoryBadgesHtml(x) + '</td>' +
+                                '<td class="small">' + crEscapeHtml(reason) + '</td>' +
+                                '<td>' + crEscapeHtml(String(sev)) + '</td>' +
+                                '<td class="small">' + contribsHtml + '</td>' +
+                                '<td class="small">' + crEscapeHtml(st) + '</td>' +
+                                '<td class="small">' + crEscapeHtml(ca ? Utils.formatDate(ca) : '—') + '</td>' +
+                                '<td class="small">' + lockCell + '</td>' +
+                                '<td>' + actionCell + '</td></tr>';
+                        });
+                    }
+                    html += '</tbody></table>';
+                    html += '<div class="small text-muted mt-2">Tổng: ' + total + '</div>';
+                    host.innerHTML = html;
+                    host.querySelectorAll('.cr-status-sel').forEach(function (sel) {
+                        sel.addEventListener('change', async function () {
+                            const v = sel.value;
+                            if (!v) return;
+                            const rid = sel.getAttribute('data-rid');
+                            try {
+                                await ApiService.complianceUpdateStoryReport(rid, v);
+                                Utils.showAlert('Đã cập nhật.', 'success');
+                                sel.value = '';
+                                crLoad();
+                            } catch (e) {
+                                Utils.showAlert(e.message || e, 'danger');
+                                sel.value = '';
+                            }
+                        });
+                    });
+                    host.querySelectorAll('.cr-resolve-sel').forEach(function (sel) {
+                        sel.addEventListener('change', async function () {
+                            const v = sel.value;
+                            if (!v) return;
+                            const rid = sel.getAttribute('data-rid');
+                            try {
+                                await ApiService.complianceResolveReport(rid, { status: v });
+                                Utils.showAlert('Đã đánh dấu xử lý.', 'success');
+                                sel.value = '';
+                                crLoad();
+                            } catch (e) {
+                                Utils.showAlert(e.message || e, 'danger');
+                                sel.value = '';
+                            }
+                        });
+                    });
+                }
+            } catch (e) {
+                err.textContent = e.message || String(e);
+                err.style.display = 'block';
+                host.innerHTML = '';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', async function () {
+            await AuthHelper.loadUserInfo().catch(function () { });
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập.', 'warning');
+                setTimeout(function () { window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname); }, 1200);
+                return;
+            }
+            if (!AuthHelper.isComplianceOfficer()) {
+                Utils.showAlert('Chỉ COMPLIANCE hoặc ADMIN.', 'danger');
+                setTimeout(function () { window.location.href = '/'; }, 1800);
+                return;
+            }
+            await crLoadReasons();
+            crApplyStatusFilterForRole();
+            document.querySelectorAll('#crViewTabs [data-cr-view]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    const m = btn.getAttribute('data-cr-view') || 'active';
+                    crSwitchView(m);
+                    if (m === 'history') {
+                        var hp = document.getElementById('crHistPage');
+                        if (hp) hp.value = '1';
+                        crLoadHistory();
+                    }
+                });
+            });
+            var crHistApply = document.getElementById('crHistApply');
+            if (crHistApply) crHistApply.addEventListener('click', function () { crLoadHistory(); });
+
+            document.getElementById('crApply').addEventListener('click', function () {
+                document.getElementById('crPage').value = '1';
+                crLoad();
+            });
+
+            document.getElementById('crTableHost').addEventListener('click', function (ev) {
+                const rel = ev.target.closest('[data-cr-open-lock-rel]');
+                if (rel) {
+                    crCtx.storyId = rel.getAttribute('data-sid') || '';
+                    document.getElementById('crLockReleaseMsg').value = '';
+                    var u1 = document.getElementById('crLockReleaseUrgency');
+                    if (u1) u1.value = 'STANDARD';
+                    new bootstrap.Modal(document.getElementById('crModalLockRelease')).show();
+                    return;
+                }
+                const fl = ev.target.closest('[data-cr-open-flag]');
+                if (fl) {
+                    crCtx.storyId = fl.getAttribute('data-sid') || '';
+                    crCtx.authorId = fl.getAttribute('data-aid') || null;
+                    const f = fl.getAttribute('data-flagged') === '1';
+                    document.getElementById('crFlagChecked').checked = f;
+                    document.getElementById('crFlagNote').value = '';
+                    new bootstrap.Modal(document.getElementById('crModalFlag')).show();
+                    return;
+                }
+                const adm = ev.target.closest('[data-cr-open-admin-act]');
+                if (adm) {
+                    crCtx.storyId = adm.getAttribute('data-sid') || '';
+                    crCtx.authorId = adm.getAttribute('data-aid') || null;
+                    document.getElementById('crBanMsg').value = '';
+                    document.getElementById('crSuspendMsg').value = '';
+                    document.getElementById('crSuspendUntilLocal').value = '';
+                    new bootstrap.Modal(document.getElementById('crModalAdminAction')).show();
+                    return;
+                }
+                const vl = ev.target.closest('[data-cr-open-viol]');
+                if (vl) {
+                    const aid = vl.getAttribute('data-aid');
+                    const body = document.getElementById('crViolationsBody');
+                    body.innerHTML = '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div></div>';
+                    new bootstrap.Modal(document.getElementById('crModalViolations')).show();
+                    ApiService.complianceListUserViolations(aid, 80).then(function (list) {
+                        if (!list || !list.length) {
+                            body.innerHTML = '<p class="text-muted small mb-0">Chưa có bản ghi violation_logs.</p>';
+                            return;
+                        }
+                        var h = '<ul class="list-group list-group-flush">';
+                        list.forEach(function (v) {
+                            var pid = v.penaltyType != null ? v.penaltyType : v.PenaltyType;
+                            var rs = v.reason != null ? v.reason : v.Reason;
+                            var ca = v.createdAtUtc != null ? v.createdAtUtc : v.CreatedAtUtc;
+                            var off = v.complianceOfficerDisplayName != null ? v.complianceOfficerDisplayName : v.ComplianceOfficerDisplayName;
+                            h += '<li class="list-group-item small"><div class="fw-semibold">' + crEscapeHtml(String(pid || '—')) + '</div>';
+                            h += '<div class="text-muted">' + crEscapeHtml(ca ? Utils.formatDate(ca) : '') + '</div>';
+                            if (off) h += '<div class="small">Bởi: ' + crEscapeHtml(String(off)) + '</div>';
+                            if (rs) h += '<div class="mt-1">' + crEscapeHtml(String(rs)) + '</div>';
+                            h += '</li>';
+                        });
+                        h += '</ul>';
+                        body.innerHTML = h;
+                    }).catch(function (e) {
+                        body.innerHTML = '<p class="text-danger small">' + crEscapeHtml(e.message || String(e)) + '</p>';
+                    });
+                    return;
+                }
+                const tc = ev.target.closest('[data-cr-toggle-cmt]');
+                if (tc) {
+                    const sid = tc.getAttribute('data-sid');
+                    const on = tc.getAttribute('data-on') === '1';
+                    if (!confirm(on ? 'Bật lại bình luận cho truyện này?' : 'Tắt bình luận (độc giả không gửi comment mới)?')) return;
+                    ApiService.complianceSetStoryCommentsDisabled(sid, !on).then(function () {
+                        Utils.showAlert('Đã cập nhật bình luận.', 'success');
+                        crLoad();
+                    }).catch(function (e) { Utils.showAlert(e.message || e, 'danger'); });
+                    return;
+                }
+                const th = ev.target.closest('[data-cr-toggle-hide]');
+                if (th) {
+                    const sid = th.getAttribute('data-sid');
+                    const on = th.getAttribute('data-on') === '1';
+                    if (!confirm(on ? 'Hiện lại truyện trên danh sách công khai?' : 'Ẩn truyện khỏi người xem thường (tác giả / admin / compliance vẫn xem được)?')) return;
+                    ApiService.complianceSetStoryHidden(sid, !on).then(function () {
+                        Utils.showAlert('Đã cập nhật hiển thị truyện.', 'success');
+                        crLoad();
+                    }).catch(function (e) { Utils.showAlert(e.message || e, 'danger'); });
+                }
+            });
+
+            document.getElementById('crLockReleaseSubmit').addEventListener('click', async function () {
+                const msg = document.getElementById('crLockReleaseMsg').value.trim();
+                try {
+                    await ApiService.complianceRequestLockRelease(crCtx.storyId, { message: msg || null });
+                    bootstrap.Modal.getInstance(document.getElementById('crModalLockRelease')).hide();
+                    Utils.showAlert('Đã gửi yêu cầu admin.', 'success');
+                    crLoad();
+                } catch (e) { Utils.showAlert(e.message || e, 'danger'); }
+            });
+
+            document.getElementById('crFlagSubmit').addEventListener('click', async function () {
+                const flagged = document.getElementById('crFlagChecked').checked;
+                const note = document.getElementById('crFlagNote').value.trim();
+                try {
+                    await ApiService.complianceSetStoryFlag(crCtx.storyId, { flagged: flagged, note: note || null });
+                    bootstrap.Modal.getInstance(document.getElementById('crModalFlag')).hide();
+                    Utils.showAlert('Đã cập nhật cờ theo dõi.', 'success');
+                    crLoad();
+                } catch (e) { Utils.showAlert(e.message || e, 'danger'); }
+            });
+
+            document.getElementById('crAdminActionSubmit').addEventListener('click', async function () {
+                const pane = document.querySelector('#crModalAdminAction .tab-pane.active');
+                const pid = pane ? pane.id : '';
+                try {
+                    if (pid === 'crActBan') {
+                        await ApiService.complianceRequestAdminAction(crCtx.storyId, {
+                            requestKind: 'BAN_USER',
+                            message: document.getElementById('crBanMsg').value.trim() || null
+                        });
+                    } else {
+                        const iso = crToIsoUtcFromLocal(document.getElementById('crSuspendUntilLocal').value);
+                        if (!iso) {
+                            Utils.showAlert('Chọn thời điểm kết thúc tạm khóa viết.', 'warning');
+                            return;
+                        }
+                        await ApiService.complianceRequestAdminAction(crCtx.storyId, {
+                            requestKind: 'SUSPEND_AUTHOR_WRITING',
+                            message: document.getElementById('crSuspendMsg').value.trim() || null,
+                            proposedSuspendUntilUtc: iso
+                        });
+                    }
+                    bootstrap.Modal.getInstance(document.getElementById('crModalAdminAction')).hide();
+                    Utils.showAlert('Đã gửi yêu cầu lên admin.', 'success');
+                    crLoad();
+                } catch (e) { Utils.showAlert(e.message || e, 'danger'); }
+            });
+
+            crLoad();
+        });
+    </script>
+}
