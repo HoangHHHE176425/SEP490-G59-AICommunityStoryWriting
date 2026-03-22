@@ -613,12 +613,13 @@ export function AuthorStoryManagement({ onBack }) {
         const title = chapterFromList?.title ?? chapterFromList?.name ?? `Chương ${number}`;
         setCurrentStory(story);
         setCurrentChapter(null);
+        const chStatus = (chapterFromList?.status ?? 'draft').toString().toLowerCase();
         setSourceChapterForVersion({
             id: chapterId,
             number: Number(number) || 1,
             title,
             content: '',
-            status: 'draft',
+            status: chStatus,
             accessType: 'public',
             price: 0,
         });
@@ -645,6 +646,7 @@ export function AuthorStoryManagement({ onBack }) {
                 id: chapterId,
                 number: Number(chapterNumber) || 1,
                 title: chapter.title ?? chapter.name ?? `Chương ${chapterNumber}`,
+                status: (chapter.status ?? chapter.Status ?? 'draft').toString().toLowerCase(),
             };
             setSourceChapterForVersion(sourceMapped);
             setEditingVersion({

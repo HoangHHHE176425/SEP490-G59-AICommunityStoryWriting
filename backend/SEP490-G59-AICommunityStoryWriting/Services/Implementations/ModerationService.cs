@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
@@ -118,6 +120,7 @@ namespace Services.Implementations
 
                 var total = list.Count;
                 var pageItems = list.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                ApplyAdminRejectedEscalationNotesForStories(pageItems, moderatorId);
                 return new PagedResultDto<StoryListItemDto>
                 {
                     Items = pageItems,
@@ -129,6 +132,7 @@ namespace Services.Implementations
 
             foreach (var item in result.Items)
                 EnrichPendingStoryItem(item, moderatorId, pendingEscalationStoryIds);
+            ApplyAdminRejectedEscalationNotesForStories(result.Items.ToList(), moderatorId);
             return result;
         }
 
@@ -212,12 +216,13 @@ namespace Services.Implementations
             };
             var result = _chapterService.GetAll(query);
             var pendingEscalationChapterIds = ReviewEscalationDAO.GetPendingTargetIds(ReviewAssignmentDAO.TargetTypeChapter);
+            var pendingEscalationStoryIds = ReviewEscalationDAO.GetPendingTargetIds(ReviewAssignmentDAO.TargetTypeStory);
 
             if (useMemory)
             {
                 var list = result.Items.ToList();
                 foreach (var item in list)
-                    EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds);
+                    EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds, pendingEscalationStoryIds);
 
                 if (!string.IsNullOrWhiteSpace(timeStatusFilter))
                 {
@@ -235,6 +240,7 @@ namespace Services.Implementations
 
                 var total = list.Count;
                 var pageItems = list.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                ApplyAdminRejectedEscalationNotesForChapters(pageItems, moderatorId);
                 return new PagedResultDto<ChapterListItemDto>
                 {
                     Items = pageItems,
@@ -245,11 +251,159 @@ namespace Services.Implementations
             }
 
             foreach (var item in result.Items)
-                EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds);
+                EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds, pendingEscalationStoryIds);
+            ApplyAdminRejectedEscalationNotesForChapters(result.Items.ToList(), moderatorId);
             return result;
         }
 
-        private void EnrichPendingChapterItem(ChapterListItemDto item, Guid? moderatorId, HashSet<Guid> pendingEscalationChapterIds)
+        /// <summary>
+        /// Còn chương chờ moderator (PENDING_REVIEW hoặc có version PENDING_REVIEW) — đồng bộ tiêu chí GetPendingChapters.
+        /// Dùng để ẩn banner &quot;admin từ chối đơn hủy nhận duyệt&quot; sau khi moderator đã xử lý hết chương trong đợt này.
+        /// </summary>
+        private bool StoryHasAnyChapterPendingModerationReview(Guid storyId)
+        {
+            var pendingVersionChapterIds = new HashSet<Guid>(DataAccessObjects.DAOs.ChapterVersionDAO.GetChapterIdsWithPendingReviewVersion());
+            foreach (var ch in _chapterRepository.GetByStoryId(storyId))
+            {
+                if (string.Equals(ch.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (pendingVersionChapterIds.Contains(ch.id))
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Chỉ hiển thị ghi chú admin (từ chối đơn hủy nhận duyệt / gia hạn) nếu đơn bị xử lý trong phiên nhận duyệt hiện tại:
+        /// resolved_at phải &gt;= assigned_at của lock STORY/CHAPTER tương ứng. Tránh hiện lý do đơn cũ sau khi tác giả gửi lại và moderator nhận duyệt mới.
+        /// Với đơn RELEASE ở cấp truyện: chỉ gộp từ story khi <paramref name="storyIdsEligibleForStoryLevelRelease"/> chứa story (còn chương chờ duyệt).
+        /// </summary>
+        private static (string? Note, DateTime? At)? PickBestChapterEscalationRejectionForCurrentClaim(
+            Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> chDict,
+            Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> stDict,
+            Guid chapterId,
+            Guid? storyId,
+            DateTime? chapterClaimedAt,
+            IReadOnlyDictionary<Guid, DateTime> storyClaimAssignedAtByStoryId,
+            HashSet<Guid>? storyIdsEligibleForStoryLevelRelease)
+        {
+            var candidates = new List<(DateTime At, string? Note)>();
+            if (chDict.TryGetValue(chapterId, out var cn) && cn.ResolvedAt.HasValue)
+            {
+                var at = cn.ResolvedAt.Value;
+                if (!chapterClaimedAt.HasValue || at >= chapterClaimedAt.Value)
+                    candidates.Add((at, cn.Note));
+            }
+
+            if (storyId.HasValue && stDict.TryGetValue(storyId.Value, out var sn) && sn.ResolvedAt.HasValue)
+            {
+                if (storyIdsEligibleForStoryLevelRelease != null && !storyIdsEligibleForStoryLevelRelease.Contains(storyId.Value))
+                {
+                    // Bỏ qua từ chối RELEASE cấp truyện khi đã xử lý hết chương — vẫn giữ candidate cấp chương ở trên.
+                }
+                else
+                {
+                    var at = sn.ResolvedAt.Value;
+                    var stClaim = storyClaimAssignedAtByStoryId.TryGetValue(storyId.Value, out var ca) ? (DateTime?)ca : null;
+                    if (!stClaim.HasValue || at >= stClaim.Value)
+                        candidates.Add((at, sn.Note));
+                }
+            }
+
+            if (candidates.Count == 0)
+                return null;
+            var top = candidates.OrderByDescending(c => c.At).First();
+            return (top.Note, top.At);
+        }
+
+        private static bool IsAdminEscalationRejectionStillRelevantForStoryClaim(DateTime? rejectionResolvedAt, DateTime? storyClaimedAt)
+        {
+            if (!rejectionResolvedAt.HasValue)
+                return true;
+            if (!storyClaimedAt.HasValue)
+                return true;
+            return rejectionResolvedAt.Value >= storyClaimedAt.Value;
+        }
+
+        private void ApplyAdminRejectedEscalationNotesForStories(IReadOnlyList<StoryListItemDto> items, Guid? moderatorId)
+        {
+            if (!moderatorId.HasValue || items.Count == 0)
+                return;
+            var mid = moderatorId.Value;
+            var ids = items.Select(i => i.Id).ToList();
+            var rel = ReviewEscalationDAO.GetLatestRejectedReleaseByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, ids);
+            var ext = ReviewEscalationDAO.GetLatestRejectedExtendByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, ids);
+            foreach (var item in items)
+            {
+                if (rel.TryGetValue(item.Id, out var r)
+                    && IsAdminEscalationRejectionStillRelevantForStoryClaim(r.ResolvedAt, item.ClaimedAt)
+                    && StoryHasAnyChapterPendingModerationReview(item.Id))
+                {
+                    item.AdminRejectedReleaseNote = r.Note;
+                    item.AdminRejectedReleaseAt = r.ResolvedAt;
+                }
+
+                if (ext.TryGetValue(item.Id, out var e)
+                    && IsAdminEscalationRejectionStillRelevantForStoryClaim(e.ResolvedAt, item.ClaimedAt))
+                {
+                    item.AdminRejectedExtendNote = e.Note;
+                    item.AdminRejectedExtendAt = e.ResolvedAt;
+                }
+            }
+        }
+
+        private void ApplyAdminRejectedEscalationNotesForChapters(IReadOnlyList<ChapterListItemDto> items, Guid? moderatorId)
+        {
+            if (!moderatorId.HasValue || items.Count == 0)
+                return;
+            var mid = moderatorId.Value;
+            var chapterIds = items.Select(i => i.Id).ToList();
+            var storyIds = items.Where(i => i.StoryId.HasValue).Select(i => i.StoryId!.Value).Distinct().ToList();
+            var empty = new Dictionary<Guid, (string? Note, DateTime? ResolvedAt)>();
+
+            var chRel = ReviewEscalationDAO.GetLatestRejectedReleaseByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeChapter, chapterIds);
+            var stRel = storyIds.Count > 0
+                ? ReviewEscalationDAO.GetLatestRejectedReleaseByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, storyIds)
+                : empty;
+            var chExt = ReviewEscalationDAO.GetLatestRejectedExtendByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeChapter, chapterIds);
+            var stExt = storyIds.Count > 0
+                ? ReviewEscalationDAO.GetLatestRejectedExtendByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, storyIds)
+                : empty;
+
+            var storyClaimAssignedAtByStoryId = storyIds.Count > 0
+                ? ReviewAssignmentDAO.GetActiveClaimInfosByTargetIds(ReviewAssignmentDAO.TargetTypeStory, storyIds)
+                    .ToDictionary(kv => kv.Key, kv => kv.Value.AssignedAt)
+                : new Dictionary<Guid, DateTime>();
+
+            var storyIdsEligibleForStoryLevelRelease = new HashSet<Guid>();
+            foreach (var sid in storyIds)
+            {
+                if (StoryHasAnyChapterPendingModerationReview(sid))
+                    storyIdsEligibleForStoryLevelRelease.Add(sid);
+            }
+
+            foreach (var item in items)
+            {
+                var rel = PickBestChapterEscalationRejectionForCurrentClaim(
+                    chRel, stRel, item.Id, item.StoryId, item.ClaimedAt, storyClaimAssignedAtByStoryId, storyIdsEligibleForStoryLevelRelease);
+                if (rel.HasValue)
+                {
+                    item.AdminRejectedReleaseNote = rel.Value.Note;
+                    item.AdminRejectedReleaseAt = rel.Value.At;
+                }
+
+                var ext = PickBestChapterEscalationRejectionForCurrentClaim(
+                    chExt, stExt, item.Id, item.StoryId, item.ClaimedAt, storyClaimAssignedAtByStoryId, null);
+                if (ext.HasValue)
+                {
+                    item.AdminRejectedExtendNote = ext.Value.Note;
+                    item.AdminRejectedExtendAt = ext.Value.At;
+                }
+            }
+        }
+
+        private void EnrichPendingChapterItem(ChapterListItemDto item, Guid? moderatorId, HashSet<Guid> pendingEscalationChapterIds, HashSet<Guid> pendingEscalationStoryIds)
         {
             var pendingSince = item.UpdatedAt ?? item.CreatedAt;
             var authorSubmitted = ModeratorReviewSlaHelper.GetAuthorSubmittedUtc(
@@ -264,7 +418,9 @@ namespace Services.Implementations
                 item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
             }
 
-            item.HasPendingEscalation = pendingEscalationChapterIds.Contains(item.Id);
+            var sid = item.StoryId;
+            item.HasPendingEscalation = pendingEscalationChapterIds.Contains(item.Id)
+                || (sid.HasValue && pendingEscalationStoryIds.Contains(sid.Value));
             var fallbackDeadline = ResolveReviewDeadlineUtc(pendingSince, claim);
             item.DeadlineAt = null;
             item.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
@@ -525,6 +681,18 @@ namespace Services.Implementations
             throw new InvalidOperationException("Đang có báo cáo chờ admin xử lý — không thể duyệt hoặc từ chối cho đến khi admin quyết định.");
         }
 
+        /// <summary>Đơn escalation gắn <c>STORY</c> (vd. trả cả truyện về hàng đợi) đang PENDING → chặn duyệt/từ chối chương mà moderator đang giữ.</summary>
+        private static void EnsureNoPendingStoryEscalationBlocksChapterReview(Guid chapterId, Guid? storyId, Guid moderatorId)
+        {
+            if (!storyId.HasValue || storyId.Value == Guid.Empty)
+                return;
+            if (!ReviewEscalationDAO.HasPendingForTarget(ReviewAssignmentDAO.TargetTypeStory, storyId.Value))
+                return;
+            if (!ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId))
+                return;
+            throw new InvalidOperationException("Đang có báo cáo chờ quản trị viên xử lý ở cấp truyện — không thể duyệt hoặc từ chối chương cho đến khi đơn được xử lý.");
+        }
+
         private static DateTime NormalizeToUtc(DateTime value)
         {
             return value.Kind switch
@@ -762,6 +930,7 @@ namespace Services.Implementations
             }
             EnsureModeratorHasClaimedForReview(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
             EnsureNoPendingEscalationBlocksModeratorReview(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
+            EnsureNoPendingStoryEscalationBlocksChapterReview(chapterId, chapter.story_id, moderatorId);
 
             // Có version chờ duyệt: từ chối (các) version đó, không đổi trạng thái chương gốc (dù chương đang PUBLISHED, DRAFT hay REJECTED).
             // Không ghi LogModeration("CHAPTER", ...) ở đây: lý do từ chối version đã lưu trên từng version (rejection_reason). API "lý do từ chối chương" (GetLatestRejection CHAPTER) chỉ dùng cho khi chương gốc bị từ chối, tránh lý do version đè lên lý do chương.
@@ -798,8 +967,81 @@ namespace Services.Implementations
             LogModeration("CHAPTER", chapterId, "REJECTED", moderatorId, reason.Trim());
             var chapterNotif2 = NotifyChapterResult(chapter, "REJECTED", reason.Trim());
             if (chapterNotif2 != null) _ = PushAuthorNotificationAsync(chapterNotif2);
+
+            // Cùng truyện: các chương PENDING_REVIEW có order_index lớn hơn chương vừa từ chối cũng bị từ chối (lý do chuỗi).
+            if (chapter.story_id.HasValue)
+                RejectSubsequentPendingChaptersAfterPriorRejected(chapter.story_id.Value, chapter.order_index, moderatorId, reason.Trim(), allowedCategoryIds);
+
             _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
+        }
+
+        /// <summary>
+        /// Khi moderator từ chối một chương đang PENDING_REVIEW, tự động từ chối mọi chương sau (cùng truyện, cùng đã nhận duyệt bởi moderator này)
+        /// với lý do tham chiếu chương trước bị từ chối.
+        /// </summary>
+        private void RejectSubsequentPendingChaptersAfterPriorRejected(
+            Guid storyId,
+            int rejectedOrderIndex,
+            Guid moderatorId,
+            string primaryRejectionReason,
+            IReadOnlyList<Guid>? allowedCategoryIds)
+        {
+            var primary = (primaryRejectionReason ?? string.Empty).Trim();
+            if (primary.Length > 1500)
+                primary = primary.Substring(0, 1497) + "...";
+
+            var cascadeReason =
+                "Không duyệt chương này vì một chương có thứ tự trước trong cùng truyện đã bị từ chối. Lý do từ chối chương trước: "
+                + primary;
+            if (cascadeReason.Length > 3900)
+                cascadeReason = cascadeReason.Substring(0, 3897) + "...";
+
+            var followers = _chapterRepository.GetByStoryId(storyId)
+                .Where(c => c.order_index > rejectedOrderIndex
+                    && string.Equals(c.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(c => c.order_index)
+                .ToList();
+
+            foreach (var ch in followers)
+            {
+                if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && ch.story_id.HasValue)
+                {
+                    var st = StoryDAO.GetById(ch.story_id.Value);
+                    if (st == null || !st.category.Any(c => allowedCategoryIds.Contains(c.id)))
+                        continue;
+                }
+
+                if (!ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, ch.id))
+                    continue;
+                if (!ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, ch.id, moderatorId))
+                    continue;
+
+                try
+                {
+                    EnsureNoPendingEscalationBlocksModeratorReview(ReviewAssignmentDAO.TargetTypeChapter, ch.id, moderatorId);
+                    EnsureNoPendingStoryEscalationBlocksChapterReview(ch.id, ch.story_id, moderatorId);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger.LogInformation(ex, "Cascade reject skipped for chapter {ChapterId}: escalation/claim guard.", ch.id);
+                    continue;
+                }
+
+                var fresh = _chapterRepository.GetById(ch.id);
+                if (fresh == null || !string.Equals(fresh.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                fresh.status = "REJECTED";
+                fresh.updated_at = DateTime.Now;
+                fresh.submitted_for_review_at = null;
+                _chapterRepository.Update(fresh);
+
+                ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, fresh.id);
+                LogModeration("CHAPTER", fresh.id, "REJECTED", moderatorId, cascadeReason);
+                var n = NotifyChapterResult(fresh, "REJECTED", cascadeReason);
+                if (n != null) _ = PushAuthorNotificationAsync(n);
+            }
         }
 
         private static notifications? NotifyStoryResult(stories story, string action, string? rejectionReason)

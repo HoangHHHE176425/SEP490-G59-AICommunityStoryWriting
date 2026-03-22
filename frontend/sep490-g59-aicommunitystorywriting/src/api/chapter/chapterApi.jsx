@@ -49,7 +49,7 @@ export async function createChapter(data) {
 
 /**
  * Lấy danh sách chapters có phân trang và lọc.
- * @param {Object} params - { storyId?, page?, pageSize?, status?, accessType?, sortBy?, sortOrder? }
+ * @param {Object} params - { storyId?, page?, pageSize?, status?, accessType?, sortBy?, sortOrder?, includeChapterIds?: string[] }
  * @returns {Promise} - PagedResultDto
  */
 export async function getChapters(params = {}) {
@@ -61,6 +61,12 @@ export async function getChapters(params = {}) {
     if (params.accessType) q.append("accessType", params.accessType);
     if (params.sortBy) q.append("sortBy", params.sortBy);
     if (params.sortOrder) q.append("sortOrder", params.sortOrder);
+    const inc = params.includeChapterIds;
+    if (Array.isArray(inc) && inc.length > 0) {
+        inc.forEach((id) => {
+            if (id != null && String(id).trim() !== "") q.append("includeChapterIds", String(id).trim());
+        });
+    }
 
     const url = q.toString() ? `/chapters?${q}` : "/chapters";
     const response = await axiosInstance.get(url);
@@ -301,5 +307,16 @@ export async function setChapterCommentReaction(chapterId, commentId, reactionTy
     const response = await axiosInstance.post(`/chapters/${chapterId}/comments/${commentId}/reaction`, {
         reactionType: reactionType ?? null,
     });
+    return response.data;
+}
+
+/**
+ * POST /api/chapters/{chapterId}/unlock
+ * Mở khóa chapter trả phí: trừ coin người mua, chia 30%/70% và ghi lịch sử purchases + author_income_logs.
+ * @param {string} chapterId
+ * @returns {Promise<{unlocked: boolean, alreadyUnlocked?: boolean}>}
+ */
+export async function unlockPaidChapter(chapterId) {
+    const response = await axiosInstance.post(`/chapters/${chapterId}/unlock`);
     return response.data;
 }

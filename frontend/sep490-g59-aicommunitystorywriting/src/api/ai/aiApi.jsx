@@ -18,15 +18,20 @@ export async function indexRag(storyId) {
  * Gợi ý 3 hướng đi cho chương tiếp theo (chỉ tác giả, có rate limit).
  * @param {string} storyId - ID truyện (Guid)
  * @param {string|null} afterChapterId - ID chương sau đó muốn gợi ý; null = sau chương mới nhất
+ * @param {string|null} prompt - Prompt tùy chọn do tác giả nhập
  * @returns {Promise<{ suggestions: Array<{ title, summary, direction }>, contextUsed?: { storyTitle?, chaptersIncluded } }>}
  */
-export async function suggestNextChapter(storyId, afterChapterId = null) {
+export async function suggestNextChapter(storyId, afterChapterId = null, prompt = null) {
     if (!storyId) {
         throw new Error("StoryId là bắt buộc.");
     }
+    const trimmedPrompt = (prompt ?? "").toString().trim();
     const body = {
         storyId,
         afterChapterId: afterChapterId || null,
+        // Hỗ trợ BE theo nhiều naming convention (BE có thể chọn 1 trong các field này)
+        prompt: trimmedPrompt || null,
+        authorPrompt: trimmedPrompt || null,
     };
     const response = await axiosInstance.post("ai/suggest-next-chapter", body);
     return response.data;
@@ -41,8 +46,12 @@ export async function suggestNextChapter(storyId, afterChapterId = null) {
 export async function coCreate(storyId, authorIdea) {
     if (!storyId) throw new Error("StoryId là bắt buộc.");
     const trimmed = (authorIdea || "").trim();
-    if (!trimmed) throw new Error("Ý tưởng (AuthorIdea) là bắt buộc.");
-    const response = await axiosInstance.post("ai/co-create", { storyId, authorIdea: trimmed });
+    // BE hỗ trợ 2 luồng: có nhập định hướng và không nhập định hướng.
+    const response = await axiosInstance.post("ai/co-create", {
+        storyId,
+        authorIdea: trimmed || null,
+        saveAsDraft: false,
+    });
     return response.data;
 }
 
@@ -59,7 +68,10 @@ export async function checkChapter(payload) {
         storyId: payload?.storyId ?? null,
         chapterTitle: payload?.chapterTitle ?? null,
     };
-    const response = await axiosInstance.post("ai/check-chapter", body);
+    const token = localStorage.getItem("accessToken");
+    const response = await axiosInstance.post("ai/check-chapter", body, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
     return response.data;
 }
 

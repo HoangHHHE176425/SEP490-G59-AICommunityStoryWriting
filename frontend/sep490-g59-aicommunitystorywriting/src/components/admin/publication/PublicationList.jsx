@@ -1,6 +1,18 @@
-import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen, UserCheck } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen, UserCheck, AlertCircle, RotateCcw } from 'lucide-react';
+import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus } from '../../../utils/moderatorReviewSla';
+import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 
-export function PublicationList({ publications, onViewDetail, onClaimStory, onClaimChapter, claimingId, showClaimButton }) {
+export function PublicationList({
+    publications,
+    onViewDetail,
+    onClaimStory,
+    onClaimChapter,
+    claimingId,
+    showClaimButton,
+    showModeratorSla = false,
+    onReleaseAllClaimsForStory,
+    releasingAllClaimsStoryId = null,
+}) {
     const getStatusBadge = (status) => {
         const configs = {
             pending: {
@@ -68,7 +80,9 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
     };
 
     const formatDate = (dateString) => {
+        if (!dateString) return '—';
         const date = new Date(dateString);
+        if (Number.isNaN(date.getTime())) return '—';
         const now = new Date();
         const diffMs = now - date;
         const diffMins = Math.floor(diffMs / 60000);
@@ -78,6 +92,23 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
         if (diffMins < 60) return `${diffMins} phút trước`;
         if (diffHours < 24) return `${diffHours} giờ trước`;
         return `${diffDays} ngày trước`;
+    };
+
+    const pendingSinceForPub = (pub) => {
+        if (pub.type === 'story_group') {
+            return pub.slaPendingSince
+                ?? pub.representativePublication?.pendingSince
+                ?? pub.representativePublication?.submittedAt
+                ?? null;
+        }
+        return pub.pendingSince ?? pub.submittedAt ?? null;
+    };
+
+    const timeStatusForPub = (pub) => {
+        if (pub.type === 'story_group') {
+            return normalizeTimeStatus(pub.slaTimeStatus) ?? normalizeTimeStatus(pub.representativePublication?.timeStatus);
+        }
+        return normalizeTimeStatus(pub.timeStatus);
     };
 
     if (publications.length === 0) {
@@ -166,6 +197,37 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
                                         {getTypeBadge(pub)}
                                         {getStatusBadge(pub.status)}
+                                        {showModeratorSla && pub.status === 'pending' && timeStatusForPub(pub) && (() => {
+                                            const sla = getSlaBadgeStyle(timeStatusForPub(pub));
+                                            return (
+                                                <span style={{
+                                                    fontSize: '0.75rem',
+                                                    fontWeight: 600,
+                                                    padding: '0.25rem 0.5rem',
+                                                    borderRadius: '9999px',
+                                                    backgroundColor: sla.bg,
+                                                    color: sla.color,
+                                                }}>
+                                                    SLA: {sla.label}
+                                                </span>
+                                            );
+                                        })()}
+                                        {showModeratorSla && pub.status === 'pending' && pub.hasPendingEscalation && (
+                                            <span style={{
+                                                fontSize: '0.75rem',
+                                                fontWeight: 600,
+                                                padding: '0.25rem 0.5rem',
+                                                borderRadius: '9999px',
+                                                backgroundColor: '#fef2f2',
+                                                color: '#b91c1c',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '0.25rem',
+                                            }}>
+                                                <AlertCircle style={{ width: '12px', height: '12px' }} />
+                                                Đơn báo cáo chờ admin
+                                            </span>
+                                        )}
                                         {showClaimButton && pub.claimedByDisplayName && (
                                             <span style={{
                                                 fontSize: '0.75rem',
@@ -211,6 +273,35 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                         {pub.author ? <>Tác giả: <span style={{ fontWeight: 500, color: '#475569' }}>{pub.author}</span></> : null}
                                         {pub.type === 'chapter' && pub.wordCount != null ? ` • ${pub.wordCount} từ` : null}
                                     </p>
+                                    {showModeratorSla && pub.status === 'pending' && (pub.adminRejectedReleaseNote || pub.adminRejectedReleaseAt) && (
+                                        <div
+                                            style={{
+                                                marginTop: '0.75rem',
+                                                padding: '0.75rem 0.875rem',
+                                                backgroundColor: '#fff7ed',
+                                                border: '1px solid #fdba74',
+                                                borderRadius: '8px',
+                                            }}
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#9a3412', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                                <AlertCircle style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                                                Admin đã từ chối đơn hủy nhận duyệt
+                                            </div>
+                                            {pub.adminRejectedReleaseAt ? (
+                                                <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.35rem' }}>
+                                                    Thời điểm: {formatApiDateTimeLocalVi(pub.adminRejectedReleaseAt)}
+                                                </div>
+                                            ) : null}
+                                            <div style={{ fontSize: '0.8125rem', color: '#431407', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                                                <strong style={{ color: '#7c2d12' }}>Lý do / ghi chú:</strong>{' '}
+                                                {pub.adminRejectedReleaseNote && String(pub.adminRejectedReleaseNote).trim()
+                                                    ? pub.adminRejectedReleaseNote
+                                                    : 'Admin không nhập ghi chú.'}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {/* Từ chối gia hạn: chỉ hiển thị trong dialog chi tiết, theo từng chương (không gộp trên thẻ truyện). */}
                                 </div>
 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0, flexWrap: 'wrap' }}>
@@ -252,6 +343,41 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                             </button>
                                         );
                                     })()}
+                                    {showModeratorSla && pub.status === 'pending' && pub.type === 'story_group'
+                                        && Array.isArray(pub.chapters) && pub.chapters.some((c) => c.isClaimedByMe)
+                                        && !pub.hasPendingEscalation && typeof onReleaseAllClaimsForStory === 'function' && (() => {
+                                            const sid = pub.storyId ?? pub.id;
+                                            const busy = releasingAllClaimsStoryId != null && String(releasingAllClaimsStoryId) === String(sid);
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (busy) return;
+                                                        onReleaseAllClaimsForStory(pub);
+                                                    }}
+                                                    disabled={busy}
+                                                    title="Hủy nhận duyệt tất cả chương của truyện này và trả về hàng đợi"
+                                                    style={{
+                                                        padding: '0.625rem 1rem',
+                                                        backgroundColor: busy ? '#e2e8f0' : '#fef2f2',
+                                                        color: busy ? '#64748b' : '#b91c1c',
+                                                        fontSize: '0.8125rem',
+                                                        fontWeight: 600,
+                                                        borderRadius: '8px',
+                                                        border: '1px solid #fecaca',
+                                                        cursor: busy ? 'wait' : 'pointer',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '0.375rem',
+                                                        whiteSpace: 'nowrap',
+                                                    }}
+                                                >
+                                                    <RotateCcw style={{ width: '14px', height: '14px' }} />
+                                                    {busy ? 'Đang xử lý...' : 'Hủy nhận duyệt'}
+                                                </button>
+                                            );
+                                        })()}
                                     <button
                                         onClick={() => onViewDetail(pub)}
                                         style={{
@@ -314,14 +440,20 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                     </div>
                                 )}
 
-                                <div>
-                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
-                                        Nộp lúc
+                                {!(showModeratorSla && pub.status === 'pending') && (
+                                    <div>
+                                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                                            Nộp lúc
+                                        </div>
+                                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
+                                            {formatDate(
+                                                pub.type === 'story_group' && pub.representativePublication
+                                                    ? pub.representativePublication.submittedAt
+                                                    : pub.submittedAt
+                                            )}
+                                        </div>
                                     </div>
-                                    <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
-                                        {formatDate(pub.type === 'story_group' && pub.representativePublication ? pub.representativePublication.submittedAt : pub.submittedAt)}
-                                    </div>
-                                </div>
+                                )}
 
                                 {pub.reviewedAt && (
                                     <div>
@@ -334,6 +466,24 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                     </div>
                                 )}
                             </div>
+
+                            {showModeratorSla && pub.status === 'pending' && pendingSinceForPub(pub) && (() => {
+                                const { line } = formatPolicySlaCountdown(pendingSinceForPub(pub));
+                                if (!line) return null;
+                                return (
+                                    <div style={{
+                                        marginBottom: '0.75rem',
+                                        padding: '0.5rem 0.75rem',
+                                        backgroundColor: '#f8fafc',
+                                        borderRadius: '8px',
+                                        borderLeft: '3px solid #0ea5e9',
+                                        fontSize: '0.8125rem',
+                                        color: '#334155',
+                                    }}>
+                                        {line}
+                                    </div>
+                                );
+                            })()}
 
                             {/* Categories */}
                             {Array.isArray(pub.categories) && pub.categories.length > 0 && (

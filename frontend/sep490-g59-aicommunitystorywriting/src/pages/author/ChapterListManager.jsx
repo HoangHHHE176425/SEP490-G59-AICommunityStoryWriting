@@ -666,11 +666,12 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                     }));
                                     const hasPendingVersion = versions.some((ver) => (ver.status ?? '').toLowerCase() === 'pending_review');
                                     const chapterIsPendingReview = (chapter.status ?? '').toLowerCase() === 'pending_review';
+                                    const chapterIsPublished = (chapter.status ?? '').toLowerCase() === 'published';
                                     const prevOrderIndex = chapter.number - 2;
                                     const prevChapter = chapters.find((c) => c.number === chapter.number - 1);
                                     const prevHasPendingVersion = prevChapter && (chapterVersionsMap[prevChapter.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review');
                                     const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(prevOrderIndex) || pendingOrderIndices.has(prevOrderIndex) || prevHasPendingVersion;
-                                    const canSubmitVersion = canSubmitForPublish && !hasPendingVersion && !chapterIsPendingReview;
+                                    const canSubmitVersion = canSubmitForPublish && !hasPendingVersion && !chapterIsPendingReview && !chapterIsPublished;
                                     const versionsLoading = loadingVersionsForChapterId === chapter.id;
                                     const toggleExpand = (e) => {
                                         if (e.target.closest('button')) return;
@@ -679,6 +680,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                     const handleCreateVersion = (e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
+                                        if (chapterIsPublished) {
+                                            setMessageModal({
+                                                open: true,
+                                                title: 'Không thể tạo phiên bản',
+                                                message: 'Chương đã xuất bản không còn luồng gửi duyệt phiên bản chỉnh sửa.',
+                                            });
+                                            return;
+                                        }
                                         onAddVersion?.(chapter);
                                     };
                                     return (
@@ -987,26 +996,31 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                         <button
                                                             type="button"
                                                             onClick={handleCreateVersion}
+                                                            disabled={chapterIsPublished}
+                                                            title={chapterIsPublished ? 'Chương đã xuất bản — không tạo phiên bản chỉnh sửa' : 'Tạo phiên bản chỉnh sửa (bản nháp)'}
                                                             style={{
                                                                 display: 'inline-flex',
                                                                 alignItems: 'center',
                                                                 gap: '0.5rem',
                                                                 padding: '0.5rem 1rem',
-                                                                backgroundColor: '#13ec5b',
-                                                                color: '#fff',
+                                                                backgroundColor: chapterIsPublished ? '#e2e8f0' : '#13ec5b',
+                                                                color: chapterIsPublished ? '#94a3b8' : '#fff',
                                                                 border: 'none',
                                                                 borderRadius: '9999px',
                                                                 fontSize: '0.8125rem',
                                                                 fontWeight: 700,
-                                                                cursor: 'pointer',
-                                                                boxShadow: '0 2px 8px rgba(19, 236, 91, 0.3)',
+                                                                cursor: chapterIsPublished ? 'not-allowed' : 'pointer',
+                                                                boxShadow: chapterIsPublished ? 'none' : '0 2px 8px rgba(19, 236, 91, 0.3)',
                                                                 fontFamily: "'Plus Jakarta Sans', sans-serif",
+                                                                opacity: chapterIsPublished ? 0.85 : 1,
                                                             }}
                                                             onMouseEnter={(e) => {
+                                                                if (chapterIsPublished) return;
                                                                 e.currentTarget.style.backgroundColor = '#10d452';
                                                                 e.currentTarget.style.transform = 'translateY(-1px)';
                                                             }}
                                                             onMouseLeave={(e) => {
+                                                                if (chapterIsPublished) return;
                                                                 e.currentTarget.style.backgroundColor = '#13ec5b';
                                                                 e.currentTarget.style.transform = 'translateY(0)';
                                                             }}
@@ -1243,7 +1257,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                     if (vStatusLower === 'published' || !canSubmitVersion) return;
                                                                                                     openVersionSubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                                 }}
-                                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (!canSubmitForPublish ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.' : 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.') : 'Gửi duyệt phiên bản'}
+                                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : chapterIsPublished ? 'Chương đã xuất bản — không gửi thêm phiên bản chỉnh sửa (đã có phiên bản xuất bản).' : !canSubmitVersion ? (!canSubmitForPublish ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.' : 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.') : 'Gửi duyệt phiên bản'}
                                                                                                 disabled={vStatusLower === 'published' || !canSubmitVersion}
                                                                                                 style={{
                                                                                                     display: 'inline-flex',
@@ -1265,7 +1279,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                 }}
                                                                                             >
                                                                                                 <Send size={12} />
-                                                                                                {vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (!canSubmitForPublish ? `Gửi chương ${chapter.number - 1} trước` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt' : 'Đã có phiên bản chờ duyệt') : 'Xuất bản'}
+                                                                                                {vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (!canSubmitForPublish ? `Gửi chương ${chapter.number - 1} trước` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt' : chapterIsPublished ? 'Đã có phiên bản xuất bản' : 'Đã có phiên bản chờ duyệt') : 'Xuất bản'}
                                                                                             </button>
                                                                                         )}
                                                                                     </div>
