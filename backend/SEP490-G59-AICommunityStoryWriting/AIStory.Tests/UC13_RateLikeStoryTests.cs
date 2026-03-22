@@ -125,6 +125,9 @@ public class UC13_RateLikeStoryTests
     {
         public Task<GuardrailResult> CheckAsync(Guid storyId, string draftContent, System.Threading.CancellationToken cancellationToken = default)
             => Task.FromResult(new GuardrailResult { Passed = true, Violations = new() });
+
+        public Task<GuardrailResult> CheckCommentBannedWordsAsync(string content, System.Threading.CancellationToken cancellationToken = default)
+            => Task.FromResult(new GuardrailResult { Passed = true, Violations = new() });
     }
 }
 

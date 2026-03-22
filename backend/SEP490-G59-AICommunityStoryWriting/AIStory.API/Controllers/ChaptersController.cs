@@ -442,7 +442,7 @@ namespace AIStory.API.Controllers
                 if (content.Length > 2000)
                     return BadRequest(new { message = "Nội dung comment tối đa 2000 ký tự." });
 
-                var guardrailResult = await _contentGuardrail.CheckAsync(Guid.Empty, content, HttpContext.RequestAborted);
+                var guardrailResult = await _contentGuardrail.CheckCommentBannedWordsAsync(content, HttpContext.RequestAborted);
                 if (!guardrailResult.Passed)
                     return BadRequest(new
                     {
@@ -476,7 +476,9 @@ namespace AIStory.API.Controllers
                     try
                     {
                         var chapterCommentLink = $"/chapter?storyId={storyId}&chapterId={id}#comment-{entity.id}";
-                        var notif = NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, storyId, story.title, entity.id, chapterCommentLink);
+                        var chapterDescriptor = $"Chương {chapter.OrderIndex}" +
+                            (string.IsNullOrWhiteSpace(chapter.Title) ? "" : $" «{chapter.Title.Trim()}»");
+                        var notif = NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, storyId, story.title, entity.id, chapterCommentLink, chapterDescriptor);
                         await PushCommentReplyNotificationAsync(notif);
                     }
                     catch (Exception ex)

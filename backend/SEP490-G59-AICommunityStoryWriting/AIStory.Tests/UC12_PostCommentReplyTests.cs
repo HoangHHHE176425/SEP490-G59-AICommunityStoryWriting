@@ -158,7 +158,13 @@ public class UC12_PostCommentReplyTests
 
     private sealed class FakeContentGuardrailService : IContentGuardrailService
     {
-        public Task<GuardrailResult> CheckAsync(Guid storyId, string draftContent, System.Threading.CancellationToken cancellationToken = default)
+        public Task<GuardrailResult> CheckAsync(Guid storyId, string draftContent, System.Threading.CancellationToken cancellationToken = default) =>
+            EvaluateBanned(draftContent);
+
+        public Task<GuardrailResult> CheckCommentBannedWordsAsync(string content, System.Threading.CancellationToken cancellationToken = default) =>
+            EvaluateBanned(content);
+
+        private static Task<GuardrailResult> EvaluateBanned(string? draftContent)
         {
             var s = draftContent ?? string.Empty;
             var isBanned = s.Contains("bannedword", StringComparison.OrdinalIgnoreCase)

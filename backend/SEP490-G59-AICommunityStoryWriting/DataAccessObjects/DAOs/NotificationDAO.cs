@@ -64,12 +64,23 @@ namespace DataAccessObjects.DAOs
 
         /// <summary>Thông báo khi có người trả lời comment của mình. Gọi sau khi đã thêm comment reply thành công.</summary>
         /// <param name="linkUrlOverride">Nếu null: SPA React <c>/story/{storyId}#comment-...</c>. Chapter comment có thể truyền <c>/chapter?storyId=...&amp;chapterId=...</c>.</param>
+        /// <param name="chapterDescriptor">Ví dụ <c>Chương 3: «Tiêu đề»</c> — khi trả lời comment trong chapter (null = comment cấp truyện).</param>
         /// <returns>Bản ghi đã lưu (để gửi SignalR).</returns>
-        public static notifications NotifyCommentReply(Guid recipientUserId, string actorDisplayName, Guid storyId, string? storyTitle, Guid newCommentId, string? linkUrlOverride = null)
+        public static notifications NotifyCommentReply(Guid recipientUserId, string actorDisplayName, Guid storyId, string? storyTitle, Guid newCommentId, string? linkUrlOverride = null, string? chapterDescriptor = null)
         {
             if (string.IsNullOrWhiteSpace(actorDisplayName)) actorDisplayName = "Ai đó";
             var title = "Trả lời bình luận";
-            var content = $"{actorDisplayName} đã trả lời bình luận của bạn" + (string.IsNullOrWhiteSpace(storyTitle) ? "." : $" trong truyện «{storyTitle.Trim()}».");
+            string content;
+            if (!string.IsNullOrWhiteSpace(chapterDescriptor))
+            {
+                var ch = chapterDescriptor.Trim();
+                var storyPart = string.IsNullOrWhiteSpace(storyTitle) ? "truyện này" : $"truyện «{storyTitle.Trim()}»";
+                content = $"{actorDisplayName} đã trả lời bình luận của bạn trong {ch} của {storyPart}.";
+            }
+            else
+            {
+                content = $"{actorDisplayName} đã trả lời bình luận của bạn" + (string.IsNullOrWhiteSpace(storyTitle) ? "." : $" trong truyện «{storyTitle.Trim()}».");
+            }
             var linkUrl = string.IsNullOrWhiteSpace(linkUrlOverride)
                 ? $"/story/{storyId}#comment-{newCommentId}"
                 : linkUrlOverride.Trim();

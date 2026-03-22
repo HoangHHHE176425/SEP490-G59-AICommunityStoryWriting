@@ -503,7 +503,7 @@ namespace AIStory.API.Controllers
                 if (content.Length > 2000)
                     return BadRequest(new { message = "Nội dung comment tối đa 2000 ký tự." });
 
-                var guardrailResult = await _contentGuardrail.CheckAsync(id, content, HttpContext.RequestAborted);
+                var guardrailResult = await _contentGuardrail.CheckCommentBannedWordsAsync(content, HttpContext.RequestAborted);
                 if (!guardrailResult.Passed)
                     return BadRequest(new
                     {

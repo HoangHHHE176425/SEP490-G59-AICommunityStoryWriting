@@ -1,12 +1,15 @@
 import { ThumbsUp, Flag } from 'lucide-react';
 import { useState } from 'react';
+import { getCommentRoleBadge } from '../../utils/commentRoleBadge';
 
-/** Chuẩn hóa 1 comment từ API (id, content, userDisplayName, likesCount, userHasLiked, createdAt, parentId). */
+/** Chuẩn hóa 1 comment từ API (id, content, userDisplayName, userRole, userCreatedAt, …). */
 function norm(c) {
     return {
         id: c.id ?? c.Id,
         parentId: c.parentId ?? c.ParentId ?? null,
         userDisplayName: c.userDisplayName ?? c.UserDisplayName ?? 'Ẩn danh',
+        userRole: c.userRole ?? c.UserRole ?? null,
+        userCreatedAt: c.userCreatedAt ?? c.UserCreatedAt ?? null,
         content: c.content ?? c.Content ?? '',
         likesCount: c.likesCount ?? c.LikesCount ?? 0,
         userHasLiked: c.userHasLiked ?? c.UserHasLiked ?? false,
@@ -58,6 +61,7 @@ function CommentBlock({
     onHideReplies,
 }) {
     const timeStr = node.createdAt ? (formatTimeAgo ? formatTimeAgo(node.createdAt) : new Date(node.createdAt).toLocaleString()) : '';
+    const roleBadge = getCommentRoleBadge(node.userRole, node.userCreatedAt);
     return (
         <div id={node.id ? `comment-${node.id}` : undefined} className={isReply ? 'ml-10 mt-2' : ''}>
             <div className="flex gap-3">
@@ -66,9 +70,18 @@ function CommentBlock({
                 </div>
                 <div className="flex-1 min-w-0">
                     <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">
-                        <p className="font-semibold text-slate-900 dark:text-white text-sm mb-1">
-                            {node.userDisplayName}
-                        </p>
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <span className="font-semibold text-slate-900 dark:text-white text-sm">
+                                {node.userDisplayName}
+                            </span>
+                            {roleBadge ? (
+                                <span
+                                    className={`text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${roleBadge.className}`}
+                                >
+                                    {roleBadge.label}
+                                </span>
+                            ) : null}
+                        </div>
                         <p className="text-slate-600 dark:text-slate-400 text-sm whitespace-pre-wrap">
                             {node.content}
                         </p>
