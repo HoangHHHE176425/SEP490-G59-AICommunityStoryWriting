@@ -119,7 +119,7 @@ namespace Services.Implementations
 
                 var total = list.Count;
                 var pageItems = list.Skip((page - 1) * pageSize).Take(pageSize).ToList();
-                ApplyAdminRejectedReleaseNotesForStories(pageItems, moderatorId);
+                ApplyAdminRejectedEscalationNotesForStories(pageItems, moderatorId);
                 return new PagedResultDto<StoryListItemDto>
                 {
                     Items = pageItems,
@@ -131,7 +131,7 @@ namespace Services.Implementations
 
             foreach (var item in result.Items)
                 EnrichPendingStoryItem(item, moderatorId, pendingEscalationStoryIds);
-            ApplyAdminRejectedReleaseNotesForStories(result.Items.ToList(), moderatorId);
+            ApplyAdminRejectedEscalationNotesForStories(result.Items.ToList(), moderatorId);
             return result;
         }
 
@@ -239,7 +239,7 @@ namespace Services.Implementations
 
                 var total = list.Count;
                 var pageItems = list.Skip((page - 1) * pageSize).Take(pageSize).ToList();
-                ApplyAdminRejectedReleaseNotesForChapters(pageItems, moderatorId);
+                ApplyAdminRejectedEscalationNotesForChapters(pageItems, moderatorId);
                 return new PagedResultDto<ChapterListItemDto>
                 {
                     Items = pageItems,
@@ -251,52 +251,84 @@ namespace Services.Implementations
 
             foreach (var item in result.Items)
                 EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds, pendingEscalationStoryIds);
-            ApplyAdminRejectedReleaseNotesForChapters(result.Items.ToList(), moderatorId);
+            ApplyAdminRejectedEscalationNotesForChapters(result.Items.ToList(), moderatorId);
             return result;
         }
 
-        private static void ApplyAdminRejectedReleaseNotesForStories(IReadOnlyList<StoryListItemDto> items, Guid? moderatorId)
+        private static (string? Note, DateTime? At)? PickBestChapterEscalationRejection(
+            Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> chDict,
+            Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> stDict,
+            Guid chapterId,
+            Guid? storyId)
+        {
+            var candidates = new List<(DateTime? At, string? Note)>();
+            if (chDict.TryGetValue(chapterId, out var cn))
+                candidates.Add((cn.ResolvedAt, cn.Note));
+            if (storyId.HasValue && stDict.TryGetValue(storyId.Value, out var sn))
+                candidates.Add((sn.ResolvedAt, sn.Note));
+            if (candidates.Count == 0)
+                return null;
+            var top = candidates.OrderByDescending(c => c.At ?? DateTime.MinValue).First();
+            return (top.Note, top.At);
+        }
+
+        private static void ApplyAdminRejectedEscalationNotesForStories(IReadOnlyList<StoryListItemDto> items, Guid? moderatorId)
         {
             if (!moderatorId.HasValue || items.Count == 0)
                 return;
-            var dict = ReviewEscalationDAO.GetLatestRejectedReleaseByTargetsForSender(
-                moderatorId.Value,
-                ReviewAssignmentDAO.TargetTypeStory,
-                items.Select(i => i.Id).ToList());
+            var mid = moderatorId.Value;
+            var ids = items.Select(i => i.Id).ToList();
+            var rel = ReviewEscalationDAO.GetLatestRejectedReleaseByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, ids);
+            var ext = ReviewEscalationDAO.GetLatestRejectedExtendByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, ids);
             foreach (var item in items)
             {
-                if (dict.TryGetValue(item.Id, out var x))
+                if (rel.TryGetValue(item.Id, out var r))
                 {
-                    item.AdminRejectedReleaseNote = x.Note;
-                    item.AdminRejectedReleaseAt = x.ResolvedAt;
+                    item.AdminRejectedReleaseNote = r.Note;
+                    item.AdminRejectedReleaseAt = r.ResolvedAt;
+                }
+
+                if (ext.TryGetValue(item.Id, out var e))
+                {
+                    item.AdminRejectedExtendNote = e.Note;
+                    item.AdminRejectedExtendAt = e.ResolvedAt;
                 }
             }
         }
 
-        private static void ApplyAdminRejectedReleaseNotesForChapters(IReadOnlyList<ChapterListItemDto> items, Guid? moderatorId)
+        private static void ApplyAdminRejectedEscalationNotesForChapters(IReadOnlyList<ChapterListItemDto> items, Guid? moderatorId)
         {
             if (!moderatorId.HasValue || items.Count == 0)
                 return;
             var mid = moderatorId.Value;
             var chapterIds = items.Select(i => i.Id).ToList();
             var storyIds = items.Where(i => i.StoryId.HasValue).Select(i => i.StoryId!.Value).Distinct().ToList();
-            var chDict = ReviewEscalationDAO.GetLatestRejectedReleaseByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeChapter, chapterIds);
-            var stDict = storyIds.Count > 0
+            var empty = new Dictionary<Guid, (string? Note, DateTime? ResolvedAt)>();
+
+            var chRel = ReviewEscalationDAO.GetLatestRejectedReleaseByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeChapter, chapterIds);
+            var stRel = storyIds.Count > 0
                 ? ReviewEscalationDAO.GetLatestRejectedReleaseByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, storyIds)
-                : new Dictionary<Guid, (string? Note, DateTime? ResolvedAt)>();
+                : empty;
+            var chExt = ReviewEscalationDAO.GetLatestRejectedExtendByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeChapter, chapterIds);
+            var stExt = storyIds.Count > 0
+                ? ReviewEscalationDAO.GetLatestRejectedExtendByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, storyIds)
+                : empty;
 
             foreach (var item in items)
             {
-                var candidates = new List<(DateTime? At, string? Note)>();
-                if (chDict.TryGetValue(item.Id, out var cn))
-                    candidates.Add((cn.ResolvedAt, cn.Note));
-                if (item.StoryId.HasValue && stDict.TryGetValue(item.StoryId.Value, out var sn))
-                    candidates.Add((sn.ResolvedAt, sn.Note));
-                if (candidates.Count == 0)
-                    continue;
-                var top = candidates.OrderByDescending(c => c.At ?? DateTime.MinValue).First();
-                item.AdminRejectedReleaseNote = top.Note;
-                item.AdminRejectedReleaseAt = top.At;
+                var rel = PickBestChapterEscalationRejection(chRel, stRel, item.Id, item.StoryId);
+                if (rel.HasValue)
+                {
+                    item.AdminRejectedReleaseNote = rel.Value.Note;
+                    item.AdminRejectedReleaseAt = rel.Value.At;
+                }
+
+                var ext = PickBestChapterEscalationRejection(chExt, stExt, item.Id, item.StoryId);
+                if (ext.HasValue)
+                {
+                    item.AdminRejectedExtendNote = ext.Value.Note;
+                    item.AdminRejectedExtendAt = ext.Value.At;
+                }
             }
         }
 

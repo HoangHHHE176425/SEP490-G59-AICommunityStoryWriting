@@ -301,6 +301,7 @@ export function PublicationList({
                                             </div>
                                         </div>
                                     )}
+                                    {/* Từ chối gia hạn: chỉ hiển thị trong dialog chi tiết, theo từng chương (không gộp trên thẻ truyện). */}
                                 </div>
 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0, flexWrap: 'wrap' }}>

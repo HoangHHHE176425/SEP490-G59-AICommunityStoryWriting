@@ -187,13 +187,13 @@ namespace DataAccessObjects.DAOs
         }
 
         /// <summary>
-        /// Batch: với mỗi target_id, bản ghi RELEASE_ASSIGNMENT + REJECTED gần nhất do <paramref name="senderId"/> gửi (theo resolved_at / created_at).
-        /// Dùng hiển thị lý do admin từ chối đơn hủy nhận duyệt trên queue moderator.
+        /// Batch: REJECTED + <paramref name="requestKind"/> gần nhất theo target (moderator là sender).
         /// </summary>
-        public static Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> GetLatestRejectedReleaseByTargetsForSender(
+        public static Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> GetLatestRejectedByTargetsForSenderAndRequestKind(
             Guid senderId,
             string targetType,
-            IReadOnlyCollection<Guid> targetIds)
+            IReadOnlyCollection<Guid> targetIds,
+            string requestKind)
         {
             var result = new Dictionary<Guid, (string? Note, DateTime? ResolvedAt)>();
             if (targetIds == null || targetIds.Count == 0)
@@ -207,7 +207,7 @@ namespace DataAccessObjects.DAOs
                     r.sender_id == senderId
                     && r.target_type == targetType
                     && r.status == StatusRejected
-                    && r.request_kind == KindRelease
+                    && r.request_kind == requestKind
                     && set.Contains(r.target_id))
                 .Select(r => new { r.target_id, r.resolver_note, r.resolved_at, r.created_at })
                 .ToList();
@@ -221,5 +221,23 @@ namespace DataAccessObjects.DAOs
 
             return result;
         }
+
+        /// <summary>
+        /// Batch: RELEASE_ASSIGNMENT + REJECTED — lý do admin từ chối đơn hủy nhận duyệt.
+        /// </summary>
+        public static Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> GetLatestRejectedReleaseByTargetsForSender(
+            Guid senderId,
+            string targetType,
+            IReadOnlyCollection<Guid> targetIds) =>
+            GetLatestRejectedByTargetsForSenderAndRequestKind(senderId, targetType, targetIds, KindRelease);
+
+        /// <summary>
+        /// Batch: EXTEND_DEADLINE + REJECTED — lý do admin từ chối đơn xin gia hạn.
+        /// </summary>
+        public static Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> GetLatestRejectedExtendByTargetsForSender(
+            Guid senderId,
+            string targetType,
+            IReadOnlyCollection<Guid> targetIds) =>
+            GetLatestRejectedByTargetsForSenderAndRequestKind(senderId, targetType, targetIds, KindExtend);
     }
 }

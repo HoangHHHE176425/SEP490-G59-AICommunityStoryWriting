@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar, AlertTriangle } from 'lucide-react';
+import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar, AlertTriangle, AlertCircle } from 'lucide-react';
+import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
 import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion, getReviewAssignmentSelf, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
 import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus, localDateTimeInputToIsoUtc, validateModeratorExtendProposedDeadline } from '../../../utils/moderatorReviewSla';
@@ -20,6 +21,8 @@ function mapChapterItem(item) {
         publishedAt: item.publishedAt ?? item.PublishedAt ?? null,
         pendingVersionTitle: item.pendingVersionTitle ?? item.PendingVersionTitle ?? null,
         pendingVersionWordCount: item.pendingVersionWordCount ?? item.PendingVersionWordCount ?? null,
+        adminRejectedExtendNote: item.adminRejectedExtendNote ?? item.AdminRejectedExtendNote ?? null,
+        adminRejectedExtendAt: item.adminRejectedExtendAt ?? item.AdminRejectedExtendAt ?? null,
     };
 }
 
@@ -44,6 +47,9 @@ function mapStoryGroupChapterToModal(ch) {
         publishedAt: null,
         rejectionReason: ch.rejectionReason ?? null,
         rejectedAt: ch.rejectedAt ?? null,
+        adminRejectedExtendNote: ch.adminRejectedExtendNote ?? ch.AdminRejectedExtendNote ?? null,
+        adminRejectedExtendAt: ch.adminRejectedExtendAt ?? ch.AdminRejectedExtendAt ?? null,
+        isEditRequest: !!(ch.isEditRequest ?? ch.IsEditRequest),
     };
 }
 
@@ -98,8 +104,14 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         const pubStatus = options.publicationStatus ?? 'pending';
         if (pubStatus === 'pending') {
             const prefetchId = ++pendingPrefetchIdRef.current;
-            // Dùng API moderator để lấy đủ: chương PENDING_REVIEW + chương đã PUBLISHED có version chờ duyệt (hiển thị 2 tab Chương gốc / Phiên bản gửi duyệt).
-            const pendingPromise = getPendingChapters({ storyId: sid, pageSize: 100 });
+            // CLAIMED + sort deadline: khớp tab Chờ duyệt (PublicationManagement) để có đủ AdminRejectedExtend* từ backend.
+            const pendingPromise = getPendingChapters({
+                storyId: sid,
+                pageSize: 100,
+                claimFilter: options.claimFilter ?? 'CLAIMED',
+                sortBy: options.sortBy ?? 'deadline_at',
+                sortOrder: options.sortOrder ?? 'asc',
+            });
             const publishedPromise = getChapters({ storyId: sid, status: 'PUBLISHED', page: 1, pageSize: 500 });
             Promise.allSettled([pendingPromise, publishedPromise])
                 .then(([pendingResult, publishedResult]) => {
@@ -177,8 +189,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             setSelectedChapter(null);
             setChapterContents({});
             setChapterReviewContent({});
-            // Tab Đã duyệt / Từ chối: item là story_group có sẵn danh sách chương (đã duyệt hoặc bị từ chối) — chỉ hiển thị các chương đó, không gọi API lấy hết chương.
-            if (publication?.type === 'story_group' && Array.isArray(publication?.chapters) && publication.chapters.length > 0) {
+            // Tab Đã duyệt / Từ chối: story_group dùng danh sách chương gắn sẵn (không gọi pending API).
+            // Tab Chờ duyệt + story_group: vẫn gọi API pending (CLAIMED) để có AdminRejectedExtendNote/At đúng từng chương.
+            if (publication?.type === 'story_group' && Array.isArray(publication?.chapters) && publication.chapters.length > 0 && publication?.status !== 'pending') {
                 const mapped = publication.chapters
                     .map(mapStoryGroupChapterToModal)
                     // Sidebar lịch sử từ chối: mới nhất → cũ nhất theo thời điểm bị từ chối
@@ -201,7 +214,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const refetchChaptersRef = useRef(() => { });
     refetchChaptersRef.current = () => {
         if (!storyId) return;
-        if (publication?.type === 'story_group' && publication?.chapters?.length > 0) return;
+        if (publication?.type === 'story_group' && publication?.chapters?.length > 0 && publication?.status !== 'pending') return;
         fetchChaptersForStory(storyId, { showLoading: false, publicationStatus: publication?.status });
     };
     useEffect(() => {
@@ -724,62 +737,103 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         const rd = reviewAssignment.reviewDeadlineAt ?? reviewAssignment.ReviewDeadlineAt;
                         const ts = normalizeTimeStatus(reviewAssignment.timeStatus ?? reviewAssignment.TimeStatus);
                         const badge = ts ? getSlaBadgeStyle(ts) : null;
+                        const extNote = selectedChapter && !selectedChapter.isVersionHistory
+                            ? (selectedChapter.adminRejectedExtendNote ?? selectedChapter.AdminRejectedExtendNote)
+                            : null;
+                        const extAt = selectedChapter && !selectedChapter.isVersionHistory
+                            ? (selectedChapter.adminRejectedExtendAt ?? selectedChapter.AdminRejectedExtendAt)
+                            : null;
+                        const showAdminExtendRejection = !!(extNote || extAt);
                         return (
                             <div style={{
                                 padding: '0.75rem 1.5rem',
                                 backgroundColor: '#f0f9ff',
                                 borderBottom: '1px solid #bae6fd',
                                 display: 'flex',
-                                flexWrap: 'wrap',
-                                alignItems: 'center',
+                                flexDirection: 'column',
                                 gap: '0.75rem',
-                                justifyContent: 'space-between',
                             }}
                             >
-                                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
-                                    {badge && (
-                                        <span style={{
-                                            fontSize: '0.75rem',
-                                            fontWeight: 700,
-                                            padding: '0.25rem 0.5rem',
-                                            borderRadius: '9999px',
-                                            backgroundColor: badge.bg,
-                                            color: badge.color,
-                                        }}>
-                                            {badge.label}
+                                <div style={{
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    alignItems: 'center',
+                                    gap: '0.75rem',
+                                    justifyContent: 'space-between',
+                                }}
+                                >
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
+                                        {badge && (
+                                            <span style={{
+                                                fontSize: '0.75rem',
+                                                fontWeight: 700,
+                                                padding: '0.25rem 0.5rem',
+                                                borderRadius: '9999px',
+                                                backgroundColor: badge.bg,
+                                                color: badge.color,
+                                            }}>
+                                                {badge.label}
+                                            </span>
+                                        )}
+                                        <span style={{ fontSize: '0.8125rem', color: '#0c4a6e' }}>
+                                            {policySlaLine ? <>{policySlaLine}</> : null}
+                                            {rd ? (
+                                                <> {' '}• Hạn duyệt (bạn đã chọn): {formatDate(rd)}</>
+                                            ) : null}
                                         </span>
+                                    </div>
+                                    {!hasPendingEscalationBlock && escalationTarget() && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setEscalateKind('EXTEND_DEADLINE');
+                                                setEscalateOpen(true);
+                                            }}
+                                            style={{
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '0.35rem',
+                                                padding: '0.45rem 0.85rem',
+                                                fontSize: '0.8125rem',
+                                                fontWeight: 600,
+                                                backgroundColor: '#fff',
+                                                color: '#0369a1',
+                                                border: '1px solid #7dd3fc',
+                                                borderRadius: '8px',
+                                                cursor: 'pointer',
+                                            }}
+                                        >
+                                            <AlertTriangle style={{ width: '14px', height: '14px' }} />
+                                            Xin gia hạn hạn duyệt với quản trị viên
+                                        </button>
                                     )}
-                                    <span style={{ fontSize: '0.8125rem', color: '#0c4a6e' }}>
-                                        {policySlaLine ? <>{policySlaLine}</> : null}
-                                        {rd ? (
-                                            <> {' '}• Hạn duyệt (bạn đã chọn): {formatDate(rd)}</>
-                                        ) : null}
-                                    </span>
                                 </div>
-                                {!hasPendingEscalationBlock && escalationTarget() && (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setEscalateKind('EXTEND_DEADLINE');
-                                            setEscalateOpen(true);
-                                        }}
-                                        style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: '0.35rem',
-                                            padding: '0.45rem 0.85rem',
-                                            fontSize: '0.8125rem',
-                                            fontWeight: 600,
-                                            backgroundColor: '#fff',
-                                            color: '#0369a1',
-                                            border: '1px solid #7dd3fc',
-                                            borderRadius: '8px',
-                                            cursor: 'pointer',
-                                        }}
+                                {showAdminExtendRejection && (
+                                    <div style={{
+                                        padding: '0.75rem 0.875rem',
+                                        backgroundColor: '#eff6ff',
+                                        border: '1px solid #93c5fd',
+                                        borderRadius: '8px',
+                                        width: '100%',
+                                        boxSizing: 'border-box',
+                                    }}
                                     >
-                                        <AlertTriangle style={{ width: '14px', height: '14px' }} />
-                                        Báo cáo quản trị viên
-                                    </button>
+                                        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#1e40af', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                            <AlertCircle style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                                            Admin đã từ chối đơn xin gia hạn hạn duyệt
+                                        </div>
+                                        {extAt ? (
+                                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.35rem' }}>
+                                                Thời điểm: {formatApiDateTimeLocalVi(extAt)}
+                                            </div>
+                                        ) : null}
+                                        <div style={{ fontSize: '0.8125rem', color: '#1e3a8a', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                                            <strong style={{ color: '#1d4ed8' }}>Lý do / ghi chú:</strong>{' '}
+                                            {extNote && String(extNote).trim()
+                                                ? extNote
+                                                : 'Admin không nhập ghi chú.'}
+                                        </div>
+                                    </div>
                                 )}
                             </div>
                         );
@@ -888,6 +942,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                             return `${chapter.wordCount ?? 0} từ`;
                                                         })()}
                                                     </div>
+                                                    {publication?.status === 'pending' && !chapter.isVersionHistory && (chapter.adminRejectedExtendNote || chapter.adminRejectedExtendAt || chapter.AdminRejectedExtendNote || chapter.AdminRejectedExtendAt) && (
+                                                        <div style={{ fontSize: '0.6875rem', color: '#1d4ed8', marginTop: '0.35rem', fontWeight: 600, lineHeight: 1.35 }}>
+                                                            Admin đã từ chối xin gia hạn — xem lý do trên thanh hạn duyệt phía trên
+                                                        </div>
+                                                    )}
                                                     {publication?.status === 'approved' && chapter.publishedAt && (
                                                         <div style={{ fontSize: '0.6875rem', color: '#10b981', marginTop: '0.25rem' }}>
                                                             Duyệt: {formatDate(chapter.publishedAt)}
