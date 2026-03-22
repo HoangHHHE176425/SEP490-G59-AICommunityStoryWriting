@@ -896,8 +896,81 @@ namespace Services.Implementations
             LogModeration("CHAPTER", chapterId, "REJECTED", moderatorId, reason.Trim());
             var chapterNotif2 = NotifyChapterResult(chapter, "REJECTED", reason.Trim());
             if (chapterNotif2 != null) _ = PushAuthorNotificationAsync(chapterNotif2);
+
+            // Cùng truyện: các chương PENDING_REVIEW có order_index lớn hơn chương vừa từ chối cũng bị từ chối (lý do chuỗi).
+            if (chapter.story_id.HasValue)
+                RejectSubsequentPendingChaptersAfterPriorRejected(chapter.story_id.Value, chapter.order_index, moderatorId, reason.Trim(), allowedCategoryIds);
+
             _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
             return true;
+        }
+
+        /// <summary>
+        /// Khi moderator từ chối một chương đang PENDING_REVIEW, tự động từ chối mọi chương sau (cùng truyện, cùng đã nhận duyệt bởi moderator này)
+        /// với lý do tham chiếu chương trước bị từ chối.
+        /// </summary>
+        private void RejectSubsequentPendingChaptersAfterPriorRejected(
+            Guid storyId,
+            int rejectedOrderIndex,
+            Guid moderatorId,
+            string primaryRejectionReason,
+            IReadOnlyList<Guid>? allowedCategoryIds)
+        {
+            var primary = (primaryRejectionReason ?? string.Empty).Trim();
+            if (primary.Length > 1500)
+                primary = primary.Substring(0, 1497) + "...";
+
+            var cascadeReason =
+                "Không duyệt chương này vì một chương có thứ tự trước trong cùng truyện đã bị từ chối. Lý do từ chối chương trước: "
+                + primary;
+            if (cascadeReason.Length > 3900)
+                cascadeReason = cascadeReason.Substring(0, 3897) + "...";
+
+            var followers = _chapterRepository.GetByStoryId(storyId)
+                .Where(c => c.order_index > rejectedOrderIndex
+                    && string.Equals(c.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(c => c.order_index)
+                .ToList();
+
+            foreach (var ch in followers)
+            {
+                if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && ch.story_id.HasValue)
+                {
+                    var st = StoryDAO.GetById(ch.story_id.Value);
+                    if (st == null || !st.category.Any(c => allowedCategoryIds.Contains(c.id)))
+                        continue;
+                }
+
+                if (!ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, ch.id))
+                    continue;
+                if (!ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, ch.id, moderatorId))
+                    continue;
+
+                try
+                {
+                    EnsureNoPendingEscalationBlocksModeratorReview(ReviewAssignmentDAO.TargetTypeChapter, ch.id, moderatorId);
+                    EnsureNoPendingStoryEscalationBlocksChapterReview(ch.id, ch.story_id, moderatorId);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger.LogInformation(ex, "Cascade reject skipped for chapter {ChapterId}: escalation/claim guard.", ch.id);
+                    continue;
+                }
+
+                var fresh = _chapterRepository.GetById(ch.id);
+                if (fresh == null || !string.Equals(fresh.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                fresh.status = "REJECTED";
+                fresh.updated_at = DateTime.Now;
+                fresh.submitted_for_review_at = null;
+                _chapterRepository.Update(fresh);
+
+                ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, fresh.id);
+                LogModeration("CHAPTER", fresh.id, "REJECTED", moderatorId, cascadeReason);
+                var n = NotifyChapterResult(fresh, "REJECTED", cascadeReason);
+                if (n != null) _ = PushAuthorNotificationAsync(n);
+            }
         }
 
         private static notifications? NotifyStoryResult(stories story, string action, string? rejectionReason)

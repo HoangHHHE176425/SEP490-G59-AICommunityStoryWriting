@@ -1,5 +1,5 @@
 /**
- * Logic SLA duyệt dùng chung (FE): mốc tác giả gửi + chính sách +7 ngày, badge theo TimeStatus từ BE.
+ * Logic SLA duyệt dùng chung (FE): mốc thời gian (pendingSince từ BE) + chính sách +7 ngày, badge theo TimeStatus.
  * BE: ModeratorReviewSlaHelper — OnTime / Warning / Critical / Overdue.
  */
 
@@ -82,7 +82,7 @@ export function worstTimeStatus(statuses) {
     }, list[0]);
 }
 
-/** Mốc kết thúc chính sách (+7 ngày từ lúc tác giả gửi / pendingSince). */
+/** Mốc kết thúc chính sách (+7 ngày từ mốc pendingSince; copy UI: từ lúc nhận duyệt đơn). */
 export function policySuggestedEndUtc(pendingSinceIso) {
     if (!pendingSinceIso) return null;
     const t = new Date(pendingSinceIso).getTime();
@@ -104,8 +104,8 @@ export function getSlaBadgeStyle(timeStatus) {
 }
 
 /**
- * Copy đếm ngược tới hạn chính sách (+7 ngày từ pendingSince).
- * @param {string|null} pendingSinceIso - mốc tác giả gửi (UTC ISO)
+ * Copy đếm ngược tới hạn chính sách (+7 ngày; label hiển thị: từ lúc nhận duyệt đơn).
+ * @param {string|null} pendingSinceIso - mốc thời gian từ BE (UTC ISO), thường là pendingSince
  * @param {Date} [now]
  */
 export function formatPolicySlaCountdown(pendingSinceIso, now = new Date()) {
@@ -121,7 +121,7 @@ export function formatPolicySlaCountdown(pendingSinceIso, now = new Date()) {
         else if (overH >= 1) overTxt = `${overH} giờ`;
         else overTxt = `${overMin} phút`;
         return {
-            line: `Đã quá hạn chính sách (+7 ngày từ lúc tác giả gửi) khoảng ${overTxt}.`,
+            line: `Đã quá hạn chính sách (+7 ngày từ lúc nhận duyệt đơn) khoảng ${overTxt}.`,
             short: `Quá hạn ~${overTxt}`,
         };
     }
@@ -134,7 +134,7 @@ export function formatPolicySlaCountdown(pendingSinceIso, now = new Date()) {
     else if (h >= 1) remain = `${h} giờ ${m} phút`;
     else remain = `${m} phút`;
     return {
-        line: `Hạn chính sách (+7 ngày từ lúc tác giả gửi): còn khoảng ${remain}.`,
+        line: `Hạn chính sách (+7 ngày từ lúc nhận duyệt đơn): còn khoảng ${remain}.`,
         short: `Còn ~${remain}`,
     };
 }

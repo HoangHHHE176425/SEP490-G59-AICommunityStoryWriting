@@ -440,20 +440,20 @@ export function PublicationList({
                                     </div>
                                 )}
 
-                                <div>
-                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
-                                        {showModeratorSla && pub.status === 'pending' ? 'Chờ từ (mốc gửi)' : 'Nộp lúc'}
-                                    </div>
-                                    <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
-                                        {formatDate(
-                                            showModeratorSla && pub.status === 'pending'
-                                                ? pendingSinceForPub(pub)
-                                                : (pub.type === 'story_group' && pub.representativePublication
+                                {!(showModeratorSla && pub.status === 'pending') && (
+                                    <div>
+                                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                                            Nộp lúc
+                                        </div>
+                                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
+                                            {formatDate(
+                                                pub.type === 'story_group' && pub.representativePublication
                                                     ? pub.representativePublication.submittedAt
-                                                    : pub.submittedAt)
-                                        )}
+                                                    : pub.submittedAt
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
+                                )}
 
                                 {pub.reviewedAt && (
                                     <div>
