@@ -22,17 +22,21 @@ public class ContentGuardrailService : IContentGuardrailService
         _bannedWordsRepository = bannedWordsRepository;
     }
 
-    public Task<GuardrailResult> CheckAsync(Guid storyId, string draftContent, CancellationToken cancellationToken = default)
+    public Task<GuardrailResult> CheckAsync(Guid storyId, string draftContent, CancellationToken cancellationToken = default) =>
+        CheckAgainstWordList(draftContent, GetBannedWords());
+
+    public Task<GuardrailResult> CheckCommentBannedWordsAsync(string content, CancellationToken cancellationToken = default) =>
+        CheckAgainstWordList(content, GetBannedWordsCommentOnly());
+
+    private static Task<GuardrailResult> CheckAgainstWordList(string? draftContent, string[] bannedWords)
     {
         var violations = new List<GuardrailViolation>();
         var draft = (draftContent ?? "").Trim();
         if (draft.Length == 0)
             return Task.FromResult(new GuardrailResult { Passed = true, Violations = violations });
 
-        // Normalize for better match on Vietnamese (ignore diacritics, but still do case-insensitive).
-        // Ví dụ: "cấm" sẽ match "cam".
+        // Bỏ dấu + chữ thường để khớp keyword Anh/Việt ổn định.
         var draftNorm = NormalizeForMatch(draft);
-        var bannedWords = GetBannedWords();
 
         foreach (var word in bannedWords)
         {
@@ -40,7 +44,7 @@ public class ContentGuardrailService : IContentGuardrailService
             var w = word.Trim();
             var wNorm = NormalizeForMatch(w);
             if (wNorm.Length == 0) continue;
-            if (draftNorm.IndexOf(wNorm, StringComparison.OrdinalIgnoreCase) >= 0)
+            if (draftNorm.Contains(wNorm, StringComparison.Ordinal))
                 violations.Add(new GuardrailViolation
                 {
                     Type = "BannedWord",
@@ -80,6 +84,18 @@ public class ContentGuardrailService : IContentGuardrailService
         return fromConfig;
     }
 
+    /// <summary>Comment story/chapter: chỉ category BannedWord; không gộp mọi category trong bảng.</summary>
+    private string[] GetBannedWordsCommentOnly()
+    {
+        var fromDb = _bannedWordsRepository.GetAll(BannedWordCategory)
+            .Select(w => w.word?.Trim())
+            .Where(w => !string.IsNullOrEmpty(w))
+            .Select(w => w!)
+            .ToArray();
+        if (fromDb.Length > 0) return fromDb;
+        return ParseCommaSeparated(_configuration["ContentGuardrail:BannedWords"] ?? _configuration["AI:CoCreateBannedWords"]);
+    }
+
     private static string[] ParseCommaSeparated(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return Array.Empty<string>();
@@ -100,7 +116,7 @@ public class ContentGuardrailService : IContentGuardrailService
             sb.Append(ch);
         }
 
-        // Normalize back to FormC (mainly for consistency).
-        return sb.ToString().Normalize(NormalizationForm.FormC);
+        // Normalize back to FormC rồi chữ thường để so khớp không phân hoa/thường.
+        return sb.ToString().Normalize(NormalizationForm.FormC).ToLowerInvariant();
     }
 }

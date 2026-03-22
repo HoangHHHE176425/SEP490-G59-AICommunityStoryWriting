@@ -1,6 +1,6 @@
 import { ChevronRight, Star } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import StoryHeader from '../../components/story-detail/StoryHeader';
 import { ChapterList } from '../../components/story-detail/ChapterList';
 import { CommentSection } from '../../components/story-detail/CommentSection';
@@ -48,6 +48,7 @@ function formatTimeAgo(dateStr) {
 export function StoryDetail() {
     const { storyId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const { user } = useAuth();
     const viewerKey = getViewerKeyForViewCache(user?.id ?? null);
     const [story, setStory] = useState(null);
@@ -274,6 +275,25 @@ export function StoryDetail() {
     useEffect(() => {
         if (storyId && activeTab === 'comments') loadComments();
     }, [storyId, activeTab, loadComments]);
+
+    // Mở tab bình luận khi vào từ thông báo (hash #comment-{guid})
+    useEffect(() => {
+        const h = location.hash || '';
+        if (h && /^#comment-/i.test(h)) {
+            setActiveTab('comments');
+        }
+    }, [location.hash]);
+
+    useEffect(() => {
+        const h = location.hash || '';
+        if (!h || !/^#comment-/i.test(h)) return;
+        if (activeTab !== 'comments' || commentsLoading) return;
+        const elId = h.slice(1);
+        const frame = requestAnimationFrame(() => {
+            document.getElementById(elId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [location.hash, activeTab, commentsLoading, comments.length]);
 
     // Load comment count sớm (silent) để tab hiển thị đúng số trước khi user click vào.
     useEffect(() => {
