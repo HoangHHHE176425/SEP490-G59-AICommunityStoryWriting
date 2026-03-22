@@ -152,10 +152,10 @@ export function AuthorRankingsWidget() {
       </div>
       <button
         type="button"
-        onClick={() => navigate('/story-list')}
+        onClick={() => navigate('/story-list?preset=author_ranking_views')}
         className="w-full mt-4 py-2 text-[#13EC5B] hover:text-[#11D350] font-['Plus_Jakarta_Sans',sans-serif] font-semibold text-[13px]"
       >
-        Khám phá truyện →
+        Xem tất cả →
       </button>
     </div>
   );

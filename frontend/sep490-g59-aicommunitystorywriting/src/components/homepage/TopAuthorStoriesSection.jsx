@@ -127,7 +127,11 @@ export function TopAuthorStoriesSection() {
             </p>
           </div>
         </div>
-        <button className="text-[#13EC5B] hover:text-[#11D350] font-['Plus_Jakarta_Sans',sans-serif] font-semibold text-[14px] flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => navigate('/story-list?preset=top_author_follow')}
+          className="text-[#13EC5B] hover:text-[#11D350] font-['Plus_Jakarta_Sans',sans-serif] font-semibold text-[14px] flex items-center gap-1"
+        >
           Xem tất cả
           <span>→</span>
         </button>
