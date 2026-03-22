@@ -59,4 +59,7 @@ public partial class review_escalation_requests
     public DateTime created_at { get; set; }
 
     public DateTime? resolved_at { get; set; }
+
+    /// <summary>STANDARD | HIGH | CRITICAL — moderator chọn khi gửi; merge với mức tính theo thời gian.</summary>
+    public string? sender_urgency_tier { get; set; }
 }

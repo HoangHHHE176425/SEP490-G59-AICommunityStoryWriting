@@ -593,6 +593,14 @@ class ApiService {
         return this.request(`/admin/moderation/review-escalations/pending${q ? '?' + q : ''}`);
     }
 
+    /** Moderator + compliance — một danh sách đơn chờ admin (có counts). */
+    static async adminGetPendingUnifiedEscalations(urgencyTier) {
+        const params = new URLSearchParams();
+        if (urgencyTier) params.append('urgencyTier', urgencyTier);
+        const q = params.toString();
+        return this.request(`/admin/moderation/review-escalations/pending-unified${q ? '?' + q : ''}`);
+    }
+
     static async adminGetReviewEscalationHistory(skip, take) {
         const params = new URLSearchParams();
         if (skip != null && skip !== undefined) params.append('skip', skip);
@@ -601,12 +609,13 @@ class ApiService {
         return this.request(`/admin/moderation/review-escalations/history${q ? '?' + q : ''}`);
     }
 
-    /** Log đơn escalation: filter + search + phân trang (query keys khớp ReviewEscalationLogQueryDto). */
-    static async adminGetReviewEscalationLog(options = {}) {
+    /** Log thống nhất đơn gửi admin: moderator escalation + compliance lock + compliance hành động (UnifiedEscalationLogQueryDto). */
+    static async adminGetUnifiedEscalationLog(options = {}) {
         const params = new URLSearchParams();
         const n = (k, v) => { if (v !== undefined && v !== null && v !== '') params.append(k, v); };
         n('page', options.page);
         n('pageSize', options.pageSize);
+        n('source', options.source);
         n('search', options.search);
         n('status', options.status);
         n('requestKind', options.requestKind);
@@ -619,7 +628,7 @@ class ApiService {
         n('resolvedTo', options.resolvedTo);
         n('sortBy', options.sortBy);
         n('sortOrder', options.sortOrder);
-        return this.request(`/admin/moderation/review-escalations/log?${params.toString()}`);
+        return this.request(`/admin/moderation/review-escalations/unified-log?${params.toString()}`);
     }
 
     static async adminGetModeratorsForAssignment() {
@@ -924,9 +933,184 @@ class ApiService {
             method: 'GET'
         });
     }
+
+    static async getStoryReportReasons() {
+        return this.request('/story-reporting/reasons');
+    }
+
+    static async reportStory(storyId, payload) {
+        return this.request(`/stories/${encodeURIComponent(storyId)}/reports`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
+    static async complianceGetStoryReports(query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach((key) => {
+            const v = query[key];
+            if (v !== null && v !== undefined && v !== '') params.append(key, v);
+        });
+        const qs = params.toString();
+        return this.request(`/compliance/story-reports${qs ? '?' + qs : ''}`);
+    }
+
+    /** COMPLIANCE (đang lock truyện): đóng một báo cáo — status RESOLVED | DISMISSED */
+    static async complianceResolveReport(reportId, body = {}) {
+        return this.request(`/compliance/story-reports/${encodeURIComponent(reportId)}/resolve`, {
+            method: 'POST',
+            body: JSON.stringify({ status: body.status || 'RESOLVED' })
+        });
+    }
+
+    /** COMPLIANCE: đóng mọi báo cáo mở của truyện */
+    static async complianceResolveAllOpenReports(storyId, body = {}) {
+        return this.request(`/compliance/story-reports/stories/${encodeURIComponent(storyId)}/resolve-all-open`, {
+            method: 'POST',
+            body: JSON.stringify({ status: body.status || 'RESOLVED' })
+        });
+    }
+
+    static async complianceGetMyResolvedHistory(query = {}) {
+        const params = new URLSearchParams();
+        if (query.page) params.append('page', query.page);
+        if (query.pageSize) params.append('pageSize', query.pageSize);
+        if (query.search) params.append('search', query.search);
+        const qs = params.toString();
+        return this.request(`/compliance/story-reports/my-resolved-history${qs ? '?' + qs : ''}`);
+    }
+
+    static async complianceUpdateStoryReport(reportId, status) {
+        return this.request(`/admin/compliance-story-reports/${encodeURIComponent(reportId)}/status`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status })
+        });
+    }
+
+    static async complianceRequestLockRelease(storyId, body) {
+        return this.request(`/compliance/story-reports/stories/${encodeURIComponent(storyId)}/request-release`, {
+            method: 'POST',
+            body: JSON.stringify(body || {})
+        });
+    }
+
+    static async adminListComplianceLockRequests(status = 'PENDING') {
+        const q = status ? `?status=${encodeURIComponent(status)}` : '';
+        return this.request(`/admin/compliance-story-reports/lock-requests${q}`);
+    }
+
+    static async adminListComplianceOfficersForReports() {
+        return this.request('/admin/compliance-story-reports/compliance-officers');
+    }
+
+    static async adminResolveComplianceLockRequest(requestId, body) {
+        return this.request(`/admin/compliance-story-reports/lock-requests/${encodeURIComponent(requestId)}/resolve`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+    }
+
+    static async adminComplianceReleaseStoryReportClaim(storyId) {
+        return this.request(`/admin/compliance-story-reports/stories/${encodeURIComponent(storyId)}/release-claim`, {
+            method: 'POST'
+        });
+    }
+
+    static async complianceClaimStoryReports(storyId) {
+        return this.request(`/compliance/story-reports/stories/${encodeURIComponent(storyId)}/claim`, {
+            method: 'POST',
+            body: '{}'
+        });
+    }
+
+    static async complianceReleaseStoryClaim(storyId) {
+        return this.request(`/admin/compliance-story-reports/stories/${encodeURIComponent(storyId)}/release-claim`, {
+            method: 'POST'
+        });
+    }
+
+    static async complianceSetStoryFlag(storyId, body) {
+        return this.request(`/compliance/story-reports/stories/${encodeURIComponent(storyId)}/flag`, {
+            method: 'POST',
+            body: JSON.stringify(body || {})
+        });
+    }
+
+    static async complianceSetStoryCommentsDisabled(storyId, value) {
+        return this.request(`/compliance/story-reports/stories/${encodeURIComponent(storyId)}/comments-disabled`, {
+            method: 'POST',
+            body: JSON.stringify({ value: !!value })
+        });
+    }
+
+    static async complianceSetStoryHidden(storyId, value) {
+        return this.request(`/compliance/story-reports/stories/${encodeURIComponent(storyId)}/compliance-hidden`, {
+            method: 'POST',
+            body: JSON.stringify({ value: !!value })
+        });
+    }
+
+    static async complianceRequestAdminAction(storyId, body) {
+        return this.request(`/compliance/story-reports/stories/${encodeURIComponent(storyId)}/admin-action-requests`, {
+            method: 'POST',
+            body: JSON.stringify(body || {})
+        });
+    }
+
+    static async complianceListUserViolations(userId, take = 80) {
+        return this.request(`/compliance/story-reports/users/${encodeURIComponent(userId)}/violations?take=${encodeURIComponent(take)}`, {
+            method: 'GET'
+        });
+    }
+
+    static async adminListComplianceActionRequests(status = 'PENDING') {
+        const q = status ? `?status=${encodeURIComponent(status)}` : '';
+        return this.request(`/admin/compliance-story-reports/admin-action-requests${q}`);
+    }
+
+    static async adminResolveComplianceActionRequest(requestId, body) {
+        return this.request(`/admin/compliance-story-reports/admin-action-requests/${encodeURIComponent(requestId)}/resolve`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+    }
 }
 
 // Utility functions
+/** Chuỗi ISO từ API không có offset → coi là UTC (tránh browser parse như giờ địa phương). */
+function normalizeApiDateForParse(dateString) {
+    if (dateString == null || dateString === '') return dateString;
+    let s = String(dateString).trim();
+    // .NET / SQL đôi khi: "2024-03-22 14:30:00" — chuẩn hóa rồi gắn Z (đồng bộ với ApiDateTime.AsUtcForJson trên server)
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) && !/[zZ]$/.test(s) && !/[+-]\d{2}/.test(s)) {
+        s = s.replace(' ', 'T');
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) s += ':00';
+    }
+    if (/^\d{4}-\d{2}-\d{2}T/.test(s) && !/[zZ]$/.test(s) && !/[+-][0-9]{2}/.test(s))
+        return s + 'Z';
+    return s;
+}
+
+/**
+ * Giá trị `<input type="datetime-local">` (không kèm múi giờ) → ISO UTC gửi API.
+ * Dùng thành phần lịch theo giờ địa phương máy người dùng, không dùng Date.parse(chuỗi) (tránh khác nhau giữa trình duyệt/OS).
+ */
+function datetimeLocalValueToIsoUtc(localVal) {
+    if (localVal == null || localVal === '') return '';
+    const s = String(localVal).trim();
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (!m) return '';
+    const y = +m[1];
+    const mo = +m[2] - 1;
+    const d = +m[3];
+    const h = +m[4];
+    const mi = +m[5];
+    const sec = m[6] != null ? +m[6] : 0;
+    const dt = new Date(y, mo, d, h, mi, sec, 0);
+    if (isNaN(dt.getTime())) return '';
+    return dt.toISOString();
+}
+
 const Utils = {
     showAlert: (message, type = 'info') => {
         const alertDiv = document.createElement('div');
@@ -941,14 +1125,28 @@ const Utils = {
 
     formatDate: (dateString) => {
         if (!dateString) return 'N/A';
-        const date = new Date(dateString);
+        const s = normalizeApiDateForParse(dateString);
+        const date = new Date(s);
+        if (isNaN(date.getTime())) return String(dateString);
         return date.toLocaleString('vi-VN');
+    },
+
+    /** datetime-local → ISO UTC (gửi claim / hạn duyệt / lọc ngày). */
+    datetimeLocalToIsoUtc: datetimeLocalValueToIsoUtc,
+
+    /** Hiển thị theo múi UTC (có hậu tố UTC). */
+    formatDateUtc: (dateString) => {
+        if (!dateString) return 'N/A';
+        const s = normalizeApiDateForParse(dateString);
+        const date = new Date(s);
+        if (isNaN(date.getTime())) return String(dateString);
+        return date.toLocaleString('vi-VN', { timeZone: 'UTC' }) + ' UTC';
     },
 
     /** Thời điểm trong quá khứ (UTC) → "đã gửi x giây trước" / "đã gửi x tháng trước" (tiếng Việt). */
     formatRelativePastVi: (iso) => {
         if (!iso) return '';
-        const t = new Date(iso).getTime();
+        const t = new Date(normalizeApiDateForParse(iso)).getTime();
         if (isNaN(t)) return '';
         const sec = Math.floor((Date.now() - t) / 1000);
         if (sec < 0) return 'vừa mới';
@@ -969,7 +1167,7 @@ const Utils = {
     /** Đếm ngược tới hạn SLA (ISO UTC/local) — "còn X ngày …" / "đã quá hạn …". */
     formatCountdownRemainingVi: (isoDeadline) => {
         if (!isoDeadline) return '';
-        const end = new Date(isoDeadline).getTime();
+        const end = new Date(normalizeApiDateForParse(isoDeadline)).getTime();
         if (isNaN(end)) return '';
         const sec = Math.floor((end - Date.now()) / 1000);
         if (sec < 0) {

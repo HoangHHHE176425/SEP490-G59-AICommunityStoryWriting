@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.Moderation
+namespace Services.DTOs.Moderation
 {
     public class ReviewEscalationListItemDto
     {
@@ -25,6 +25,12 @@
         public DateTime? ResolvedAt { get; set; }
         /// <summary>Hạn xác nhận sau khi admin xử lý (gia hạn / giao lại).</summary>
         public DateTime? ConfirmedDeadlineAt { get; set; }
+
+        /// <summary>
+        /// RELEASE_ASSIGNMENT + STORY: id các chương đang được moderator gửi đơn claim (thứ tự order_index tăng dần).
+        /// Admin dùng để chỉ hiển thị đúng phạm vi hủy nhận duyệt.
+        /// </summary>
+        public List<Guid>? ReleaseAffectedChapterIds { get; set; }
     }
 
     public class ReviewAssignmentSelfDto

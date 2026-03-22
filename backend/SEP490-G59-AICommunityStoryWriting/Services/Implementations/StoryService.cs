@@ -36,6 +36,9 @@ namespace Services.Implementations
                     "AuthorId không tồn tại trong bảng users. Vui lòng kiểm tra DefaultAuthorIdForStories trong appsettings.json (dùng Guid của user có trong bảng users).");
             }
 
+            if (UserDAO.IsAuthorWritingSuspended(authorId))
+                throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
+
             if (request.CategoryIds == null || !request.CategoryIds.Any())
             {
                 throw new InvalidOperationException("Chọn ít nhất một thể loại.");
@@ -99,6 +102,9 @@ namespace Services.Implementations
         public PagedResultDto<StoryListItemDto> GetAll(StoryQueryDto query)
         {
             var storiesQuery = _storyRepository.GetAll();
+
+            if (!query.IncludeComplianceHiddenInLists)
+                storiesQuery = storiesQuery.Where(s => !s.compliance_hidden);
 
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
@@ -632,7 +638,10 @@ namespace Services.Implementations
                 UpdatedAt = story.updated_at,
                 LatestUpdatedAt = latestUpdatedAt,
                 PublishedAt = story.published_at,
-                LastPublishedAt = story.last_published_at
+                LastPublishedAt = story.last_published_at,
+                CommentsDisabled = story.comments_disabled,
+                ComplianceHidden = story.compliance_hidden,
+                ComplianceFlagged = story.compliance_flagged
             };
         }
 

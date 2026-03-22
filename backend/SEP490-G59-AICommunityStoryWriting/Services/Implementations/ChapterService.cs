@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
@@ -52,6 +54,9 @@ namespace Services.Implementations
             {
                 throw new InvalidOperationException($"Story with ID {request.StoryId} not found.");
             }
+
+            if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
+                throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin).");
 
             var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(request.StoryId, request.OrderIndex);
             if (existingChapter != null)
@@ -261,6 +266,8 @@ namespace Services.Implementations
                 return dto;
             }).ToList();
 
+            EnrichChapterListItemsWithReviewSla(chapterList, items);
+
             return new PagedResultDto<ChapterListItemDto>
             {
                 Items = items,
@@ -295,7 +302,10 @@ namespace Services.Implementations
                 .OrderBy(c => c.order_index)
                 .ToList();
 
-            return chapterList.Select(c => MapToListItemDto(c));
+            var storyTitle = StoryDAO.GetById(storyId)?.title;
+            var items = chapterList.Select(c => MapToListItemDto(c, storyTitle)).ToList();
+            EnrichChapterListItemsWithReviewSla(chapterList, items);
+            return items;
         }
 
         public ChapterResponseDto? GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex)
@@ -703,6 +713,83 @@ namespace Services.Implementations
                 CreatedAt = chapter.created_at,
                 UpdatedAt = chapter.updated_at
             };
+        }
+
+        /// <summary>
+        /// Điền PendingSince, DeadlineAt (SLA), TimeStatus, ClaimedAt, ClaimedByDisplayName cho list API
+        /// (cùng quy tắc queue moderator; tránh gán mốc sai cho chương không liên quan duyệt).
+        /// </summary>
+        private static void EnrichChapterListItemsWithReviewSla(IReadOnlyList<chapters> chapterEntities, List<ChapterListItemDto> items)
+        {
+            if (chapterEntities.Count == 0 || items.Count != chapterEntities.Count)
+                return;
+
+            var ids = chapterEntities.Select(c => c.id).ToList();
+            var claims = ReviewAssignmentDAO.GetActiveClaimInfosByTargetIds(ReviewAssignmentDAO.TargetTypeChapter, ids);
+            var pendingVersionMaxCreated = ChapterVersionDAO.GetMaxPendingReviewCreatedAtByChapterIds(ids);
+
+            for (var i = 0; i < items.Count; i++)
+            {
+                var c = chapterEntities[i];
+                var dto = items[i];
+                var hasPendingVersion = pendingVersionMaxCreated.ContainsKey(c.id);
+                var hasClaim = claims.ContainsKey(c.id);
+                var pendingReviewStatus = string.Equals(c.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase);
+                if (!pendingReviewStatus && !hasPendingVersion && !hasClaim)
+                    continue;
+
+                DateTime? authorSubmitted = null;
+                if (c.submitted_for_review_at.HasValue)
+                    authorSubmitted = ModeratorReviewSlaHelper.NormalizeToUtc(c.submitted_for_review_at.Value);
+                else
+                {
+                    var rawBase = c.updated_at ?? c.created_at;
+                    var baseUtc = rawBase.HasValue ? ModeratorReviewSlaHelper.NormalizeToUtc(rawBase.Value) : (DateTime?)null;
+                    if (pendingVersionMaxCreated.TryGetValue(c.id, out var maxPendingRaw))
+                    {
+                        var maxPending = ModeratorReviewSlaHelper.NormalizeToUtc(maxPendingRaw);
+                        if (baseUtc.HasValue)
+                            authorSubmitted = maxPending > baseUtc.Value ? maxPending : baseUtc.Value;
+                        else
+                            authorSubmitted = maxPending;
+                    }
+                    else
+                        authorSubmitted = baseUtc;
+                }
+
+                dto.PendingSince = authorSubmitted;
+
+                (Guid AssigneeId, DateTime AssignedAt, string DisplayName, DateTime? ReviewDeadlineAt)? claim = null;
+                if (claims.TryGetValue(c.id, out var tuple))
+                    claim = tuple;
+
+                if (claim.HasValue)
+                {
+                    dto.ClaimedAt = claim.Value.AssignedAt;
+                    dto.ClaimedByDisplayName = claim.Value.DisplayName;
+                }
+
+                var fallbackDeadline = ResolveChapterListReviewDeadlineUtc(authorSubmitted, claim);
+                dto.DeadlineAt = fallbackDeadline;
+                dto.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
+            }
+        }
+
+        /// <summary>Đã nhận duyệt: ưu tiên hạn moderator; bản cũ: assigned_at + 7 ngày. Chưa nhận: mốc gửi + 7 ngày.</summary>
+        private static DateTime? ResolveChapterListReviewDeadlineUtc(
+            DateTime? pendingSince,
+            (Guid AssigneeId, DateTime AssignedAt, string DisplayName, DateTime? ReviewDeadlineAt)? claim)
+        {
+            if (claim.HasValue)
+            {
+                if (claim.Value.ReviewDeadlineAt.HasValue)
+                    return ModeratorReviewSlaHelper.NormalizeToUtc(claim.Value.ReviewDeadlineAt.Value);
+                return claim.Value.AssignedAt.AddDays(ModeratorReviewSlaHelper.PolicyDaysAfterAuthorSubmit);
+            }
+
+            if (pendingSince.HasValue)
+                return pendingSince.Value.AddDays(ModeratorReviewSlaHelper.PolicyDaysAfterAuthorSubmit);
+            return null;
         }
     }
 }

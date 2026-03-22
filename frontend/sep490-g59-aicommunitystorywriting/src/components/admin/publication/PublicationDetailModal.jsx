@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar, AlertTriangle, AlertCircle } from 'lucide-react';
+import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
-import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion } from '../../../api/moderator/moderatorApi';
+import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion, getReviewAssignmentSelf, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
+import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus, localDateTimeInputToIsoUtc, validateModeratorExtendProposedDeadline } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { useToast } from '../../author/story-editor/Toast';
 
@@ -19,6 +21,8 @@ function mapChapterItem(item) {
         publishedAt: item.publishedAt ?? item.PublishedAt ?? null,
         pendingVersionTitle: item.pendingVersionTitle ?? item.PendingVersionTitle ?? null,
         pendingVersionWordCount: item.pendingVersionWordCount ?? item.PendingVersionWordCount ?? null,
+        adminRejectedExtendNote: item.adminRejectedExtendNote ?? item.AdminRejectedExtendNote ?? null,
+        adminRejectedExtendAt: item.adminRejectedExtendAt ?? item.AdminRejectedExtendAt ?? null,
     };
 }
 
@@ -43,6 +47,9 @@ function mapStoryGroupChapterToModal(ch) {
         publishedAt: null,
         rejectionReason: ch.rejectionReason ?? null,
         rejectedAt: ch.rejectedAt ?? null,
+        adminRejectedExtendNote: ch.adminRejectedExtendNote ?? ch.AdminRejectedExtendNote ?? null,
+        adminRejectedExtendAt: ch.adminRejectedExtendAt ?? ch.AdminRejectedExtendAt ?? null,
+        isEditRequest: !!(ch.isEditRequest ?? ch.IsEditRequest),
     };
 }
 
@@ -78,6 +85,17 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     /** Request id để bỏ qua kết quả prefetch cũ nếu đã mở publication khác. */
     const pendingPrefetchIdRef = useRef(0);
 
+    /** Assignment / SLA / escalation (moderator đang nhận duyệt). */
+    const [reviewAssignment, setReviewAssignment] = useState(null);
+    const [slaTick, setSlaTick] = useState(0);
+    const [escalateOpen, setEscalateOpen] = useState(false);
+    const [escalateKind, setEscalateKind] = useState('EXTEND_DEADLINE');
+    const [escalateReason, setEscalateReason] = useState('');
+    const [escalateProposedDeadline, setEscalateProposedDeadline] = useState('');
+    const [escalateSubmitting, setEscalateSubmitting] = useState(false);
+    /** Đơn escalation gắn STORY (vd. trả cả truyện về hàng đợi) — tách khỏi assignment theo từng chương. */
+    const [storyLevelReviewAssignment, setStoryLevelReviewAssignment] = useState(null);
+
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
     const fetchChaptersForStory = useCallback((sid, options = {}) => {
@@ -86,8 +104,14 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         const pubStatus = options.publicationStatus ?? 'pending';
         if (pubStatus === 'pending') {
             const prefetchId = ++pendingPrefetchIdRef.current;
-            // Dùng API moderator để lấy đủ: chương PENDING_REVIEW + chương đã PUBLISHED có version chờ duyệt (hiển thị 2 tab Chương gốc / Phiên bản gửi duyệt).
-            const pendingPromise = getPendingChapters({ storyId: sid, pageSize: 100 });
+            // CLAIMED + sort deadline: khớp tab Chờ duyệt (PublicationManagement) để có đủ AdminRejectedExtend* từ backend.
+            const pendingPromise = getPendingChapters({
+                storyId: sid,
+                pageSize: 100,
+                claimFilter: options.claimFilter ?? 'CLAIMED',
+                sortBy: options.sortBy ?? 'deadline_at',
+                sortOrder: options.sortOrder ?? 'asc',
+            });
             const publishedPromise = getChapters({ storyId: sid, status: 'PUBLISHED', page: 1, pageSize: 500 });
             Promise.allSettled([pendingPromise, publishedPromise])
                 .then(([pendingResult, publishedResult]) => {
@@ -165,8 +189,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             setSelectedChapter(null);
             setChapterContents({});
             setChapterReviewContent({});
-            // Tab Đã duyệt / Từ chối: item là story_group có sẵn danh sách chương (đã duyệt hoặc bị từ chối) — chỉ hiển thị các chương đó, không gọi API lấy hết chương.
-            if (publication?.type === 'story_group' && Array.isArray(publication?.chapters) && publication.chapters.length > 0) {
+            // Tab Đã duyệt / Từ chối: story_group dùng danh sách chương gắn sẵn (không gọi pending API).
+            // Tab Chờ duyệt + story_group: vẫn gọi API pending (CLAIMED) để có AdminRejectedExtendNote/At đúng từng chương.
+            if (publication?.type === 'story_group' && Array.isArray(publication?.chapters) && publication.chapters.length > 0 && publication?.status !== 'pending') {
                 const mapped = publication.chapters
                     .map(mapStoryGroupChapterToModal)
                     // Sidebar lịch sử từ chối: mới nhất → cũ nhất theo thời điểm bị từ chối
@@ -189,7 +214,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const refetchChaptersRef = useRef(() => { });
     refetchChaptersRef.current = () => {
         if (!storyId) return;
-        if (publication?.type === 'story_group' && publication?.chapters?.length > 0) return;
+        if (publication?.type === 'story_group' && publication?.chapters?.length > 0 && publication?.status !== 'pending') return;
         fetchChaptersForStory(storyId, { showLoading: false, publicationStatus: publication?.status });
     };
     useEffect(() => {
@@ -248,6 +273,133 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     useEffect(() => {
         setContentTab('original');
     }, [selectedChapter?.id]);
+
+    useEffect(() => {
+        if (publication?.status !== 'pending') return undefined;
+        const id = setInterval(() => setSlaTick((t) => t + 1), 30000);
+        return () => clearInterval(id);
+    }, [publication?.status]);
+
+    useEffect(() => {
+        if (publication?.status !== 'pending') {
+            setReviewAssignment(null);
+            return;
+        }
+        if (chaptersLoading) return;
+
+        let cancelled = false;
+        (async () => {
+            try {
+                if (selectedChapter && !selectedChapter.isVersionHistory) {
+                    const dto = await getReviewAssignmentSelf('CHAPTER', selectedChapter.id);
+                    if (!cancelled) setReviewAssignment(dto);
+                    return;
+                }
+                if (chapters.length === 0 && storyId) {
+                    const dto = await getReviewAssignmentSelf('STORY', storyId);
+                    if (!cancelled) setReviewAssignment(dto);
+                    return;
+                }
+                if (!cancelled) setReviewAssignment(null);
+            } catch {
+                if (!cancelled) setReviewAssignment(null);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [publication?.status, chaptersLoading, selectedChapter, chapters.length, storyId]);
+
+    /** Khối nhiều chương: đơn PENDING cấp STORY (RELEASE / gia hạn truyện) vẫn phải chặn duyệt/từ chối chương. */
+    useEffect(() => {
+        if (publication?.status !== 'pending' || !storyId) {
+            setStoryLevelReviewAssignment(null);
+            return undefined;
+        }
+        const isMultiChapterContext =
+            publication?.type === 'story_group'
+            || (Array.isArray(publication?.chapters) && publication.chapters.length > 0)
+            || chapters.length > 0;
+        if (!isMultiChapterContext) {
+            setStoryLevelReviewAssignment(null);
+            return undefined;
+        }
+        let cancelled = false;
+        (async () => {
+            try {
+                const dto = await getReviewAssignmentSelf('STORY', storyId);
+                if (!cancelled) setStoryLevelReviewAssignment(dto);
+            } catch {
+                if (!cancelled) setStoryLevelReviewAssignment(null);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [publication?.status, publication?.type, publication?.chapters?.length, storyId, chapters.length]); // eslint-disable-line react-hooks/exhaustive-deps -- tránh dependency publication.chapters (ref)
+
+    const escalationTarget = () => {
+        if (selectedChapter && !selectedChapter.isVersionHistory) {
+            return { targetType: 'CHAPTER', targetId: selectedChapter.id };
+        }
+        if (storyId) return { targetType: 'STORY', targetId: storyId };
+        return null;
+    };
+
+    /** Lỗi hạn đề xuất (gia hạn): hiển thị đỏ trong dialog khi vi phạm 24h / muộn hơn hạn hiện tại / quá 366 ngày. */
+    const extendProposedDeadlineError = useMemo(() => {
+        if (!escalateOpen || escalateKind !== 'EXTEND_DEADLINE') return null;
+        const raw = escalateProposedDeadline;
+        if (raw == null || String(raw).trim() === '') return null;
+        const iso = localDateTimeInputToIsoUtc(raw);
+        if (!iso) return 'Ngày giờ đề xuất không hợp lệ.';
+        const currentDl = reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt ?? null;
+        const check = validateModeratorExtendProposedDeadline(iso, currentDl);
+        return check.ok ? null : check.message;
+    }, [escalateOpen, escalateKind, escalateProposedDeadline, reviewAssignment]);
+
+    const handleSubmitEscalation = async () => {
+        const t = escalationTarget();
+        if (!t || !escalateReason.trim()) {
+            showToast('Vui lòng nhập lý do.', 'error');
+            return;
+        }
+        if (escalateReason.trim().length < 10) {
+            showToast('Lý do báo cáo cần ít nhất 10 ký tự (theo quy định hệ thống).', 'error');
+            return;
+        }
+        if (escalateKind === 'EXTEND_DEADLINE') {
+            const iso = localDateTimeInputToIsoUtc(escalateProposedDeadline);
+            if (!iso) {
+                showToast('Vui lòng chọn hạn đề xuất (gia hạn).', 'error');
+                return;
+            }
+            const currentDl = reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt ?? null;
+            const check = validateModeratorExtendProposedDeadline(iso, currentDl);
+            if (!check.ok) {
+                showToast(check.message, 'error');
+                return;
+            }
+        }
+        setEscalateSubmitting(true);
+        try {
+            await submitReviewEscalation({
+                targetType: t.targetType,
+                targetId: t.targetId,
+                requestKind: escalateKind,
+                reason: escalateReason.trim(),
+                proposedDeadlineAt: escalateKind === 'EXTEND_DEADLINE' ? localDateTimeInputToIsoUtc(escalateProposedDeadline) : null,
+            });
+            showToast('Đã gửi đơn lên quản trị.', 'success');
+            setEscalateOpen(false);
+            setEscalateReason('');
+            setEscalateProposedDeadline('');
+            const dto = await getReviewAssignmentSelf(t.targetType, t.targetId);
+            setReviewAssignment(dto);
+            onRefresh?.();
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Gửi đơn thất bại.';
+            showToast(msg, 'error');
+        } finally {
+            setEscalateSubmitting(false);
+        }
+    };
 
     const startResize = useCallback((e) => {
         e.preventDefault();
@@ -320,7 +472,6 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 storyApprovedInSessionRef.current = true;
             }
             await approveChapter(selectedChapter.id);
-            showToast('Duyệt chương thành công!', 'success');
             setPublishedOrderIndices((prev) => new Set([...prev, selectedChapter.orderIndex ?? (selectedChapter.chapterNumber - 1)]));
             const remaining = chapters.filter(c => c.id !== selectedChapter.id);
             setChapters(remaining);
@@ -362,38 +513,111 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         setIsSubmitting(true);
         try {
             if (selectedChapter) {
-                await rejectChapter(selectedChapter.id, rejectionReason.trim());
-                showToast('Đã từ chối chương.', 'success');
-                const remaining = chapters.filter(c => c.id !== selectedChapter.id);
-                setChapters(remaining);
-                setSelectedChapter(remaining[0] ?? null);
-                setChapterContents((prev) => {
-                    const next = { ...prev };
-                    delete next[selectedChapter.id];
-                    return next;
-                });
-                setChapterReviewContent((prev) => {
-                    const next = { ...prev };
-                    delete next[selectedChapter.id];
-                    return next;
-                });
+                const rejectedId = selectedChapter.id;
+                await rejectChapter(rejectedId, rejectionReason.trim());
                 onRefresh?.();
-                // Gọi rejectStory khi không còn chương chờ duyệt. Bắt 404 (truyện đã PUBLISHED sau khi duyệt chương trước) để vẫn đóng form và không hiện toast lỗi.
-                const isStoryRow = publication.type === 'story' || publication.type === 'new_story';
-                if (remaining.length === 0 && isStoryRow && publication.status !== 'approved') {
+
+                // BE có thể từ chối dây chuyền các chương sau — refetch pending để đồng bộ; hết chương chờ thì đóng dialog.
+                if (publication?.status === 'pending' && storyId) {
                     try {
-                        await rejectStory(storyId, rejectionReason.trim());
-                        onReject(publication.id);
-                    } catch (rejectErr) {
-                        if (rejectErr?.response?.status === 404) {
+                        const [pendingRes, publishedRes] = await Promise.all([
+                            getPendingChapters({
+                                storyId,
+                                pageSize: 100,
+                                claimFilter: 'CLAIMED',
+                                sortBy: 'deadline_at',
+                                sortOrder: 'asc',
+                            }),
+                            getChapters({ storyId, status: 'PUBLISHED', page: 1, pageSize: 500 }),
+                        ]);
+                        const pubList = publishedRes?.items ?? publishedRes?.Items ?? publishedRes?.data ?? [];
+                        const arr = Array.isArray(pubList) ? pubList : [];
+                        setPublishedOrderIndices(new Set(arr.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0))));
+
+                        const items = pendingRes?.items ?? pendingRes?.Items ?? pendingRes?.data ?? [];
+                        const mapped = (Array.isArray(items) ? items : []).map(mapChapterItem);
+
+                        if (mapped.length === 0) {
+                            setChapters([]);
+                            setSelectedChapter(null);
+                            setChapterContents({});
+                            setChapterReviewContent({});
+                            const isStoryRow = publication.type === 'story' || publication.type === 'new_story';
+                            if (isStoryRow && publication.status !== 'approved') {
+                                try {
+                                    await rejectStory(storyId, rejectionReason.trim());
+                                    onReject?.(publication.id);
+                                } catch (rejectErr) {
+                                    if (rejectErr?.response?.status !== 404) throw rejectErr;
+                                    onRefresh?.();
+                                }
+                            }
                             onRefresh?.();
+                            onClose?.();
                         } else {
-                            throw rejectErr;
+                            const results = await Promise.allSettled(mapped.map((c) => getChapterReviewContent(c.id)));
+                            const nextReview = {};
+                            results.forEach((r, i) => {
+                                if (r.status === 'fulfilled' && mapped[i]) nextReview[mapped[i].id] = r.value;
+                            });
+                            setChapterReviewContent(nextReview);
+                            setChapters(mapped);
+                            setSelectedChapter(mapped[0] ?? null);
+                            setChapterContents((prev) => {
+                                const next = {};
+                                mapped.forEach((c) => {
+                                    if (prev[c.id] != null) next[c.id] = prev[c.id];
+                                });
+                                return next;
+                            });
+                        }
+                    } catch (refetchErr) {
+                        console.error('[PublicationDetailModal] Refetch sau từ chối chương thất bại:', refetchErr);
+                        const remaining = chapters.filter((c) => c.id !== rejectedId);
+                        setChapters(remaining);
+                        setSelectedChapter(remaining[0] ?? null);
+                        setChapterContents((prev) => {
+                            const next = { ...prev };
+                            delete next[rejectedId];
+                            return next;
+                        });
+                        setChapterReviewContent((prev) => {
+                            const next = { ...prev };
+                            delete next[rejectedId];
+                            return next;
+                        });
+                        if (remaining.length === 0) onClose?.();
+                    }
+                } else {
+                    const remaining = chapters.filter((c) => c.id !== rejectedId);
+                    setChapters(remaining);
+                    setSelectedChapter(remaining[0] ?? null);
+                    setChapterContents((prev) => {
+                        const next = { ...prev };
+                        delete next[rejectedId];
+                        return next;
+                    });
+                    setChapterReviewContent((prev) => {
+                        const next = { ...prev };
+                        delete next[rejectedId];
+                        return next;
+                    });
+                    const isStoryRow = publication.type === 'story' || publication.type === 'new_story';
+                    if (remaining.length === 0 && isStoryRow && publication.status !== 'approved') {
+                        try {
+                            await rejectStory(storyId, rejectionReason.trim());
+                            onReject(publication.id);
+                        } catch (rejectErr) {
+                            if (rejectErr?.response?.status === 404) {
+                                onRefresh?.();
+                            } else {
+                                throw rejectErr;
+                            }
                         }
                     }
-                }
-                if (remaining.length === 0) {
-                    onClose?.();
+                    if (remaining.length === 0) {
+                        onClose?.();
+                    }
                 }
             } else {
                 if (publication.type === 'story' || publication.type === 'new_story') {
@@ -441,14 +665,27 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const selectedOrderIndex = Number(selectedChapter?.orderIndex ?? (selectedChapter?.chapterNumber != null ? selectedChapter.chapterNumber - 1 : -1));
     const minOrderInList = chapters.length > 0 ? Math.min(...chapters.map((c) => Number(c.orderIndex ?? (c.chapterNumber != null ? c.chapterNumber - 1 : 0)))) : -1;
     const isFirstInPendingQueue = selectedOrderIndex >= 0 && minOrderInList >= 0 && selectedOrderIndex === minOrderInList;
-    const canApproveReject = selectedChapter && !selectedChapter?.isVersionHistory && (
+    const ra = reviewAssignment ?? {};
+    const sra = storyLevelReviewAssignment ?? {};
+    const hasPendingEscalationBlock = Boolean(
+        (ra.hasPendingEscalation ?? ra.HasPendingEscalation)
+        || (sra.hasPendingEscalation ?? sra.HasPendingEscalation),
+    );
+    const baseCanApproveReject = selectedChapter && !selectedChapter?.isVersionHistory && (
         selectedOrderIndex === 0
         || publishedOrderIndices.has(Number(selectedOrderIndex - 1))
         || (minOrderInList >= 1 && isFirstInPendingQueue)
     );
-    const orderHint = !canApproveReject && selectedChapter
+    const canApproveReject = baseCanApproveReject && !hasPendingEscalationBlock;
+    const orderHint = !baseCanApproveReject && selectedChapter
         ? `Phải duyệt hoặc từ chối chương ${selectedOrderIndex} trước khi xử lý chương ${selectedOrderIndex + 1}.`
-        : '';
+        : hasPendingEscalationBlock
+            ? 'Đã gửi đơn lên quản trị viên (theo truyện hoặc theo chương) — chờ xử lý xong mới được duyệt / từ chối.'
+            : '';
+
+    const authorSubmittedForSla = ra.authorSubmittedAtUtc ?? ra.AuthorSubmittedAtUtc;
+    void slaTick;
+    const policySlaLine = authorSubmittedForSla ? formatPolicySlaCountdown(authorSubmittedForSla).line : null;
 
     return (
         <>
@@ -554,6 +791,126 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         </div>
                     </div>
 
+                    {publication?.status === 'pending' && hasPendingEscalationBlock && (
+                        <div style={{
+                            padding: '0.75rem 1.5rem',
+                            backgroundColor: '#fef2f2',
+                            borderBottom: '1px solid #fecaca',
+                            fontSize: '0.875rem',
+                            color: '#991b1b',
+                            fontWeight: 600,
+                        }}>
+                            Bạn đã gửi đơn lên quản trị viên (gia hạn, trả truyện về hàng đợi, hoặc báo cáo theo chương) — đơn đang chờ xử lý.
+                            {' '}Thao tác <strong>duyệt</strong> và <strong>từ chối</strong> chương bị khóa cho đến khi quản trị viên xử lý xong.
+                        </div>
+                    )}
+
+                    {publication?.status === 'pending' && reviewAssignment && (reviewAssignment.isAssignedToMe ?? reviewAssignment.IsAssignedToMe) && (() => {
+                        const rd = reviewAssignment.reviewDeadlineAt ?? reviewAssignment.ReviewDeadlineAt;
+                        const ts = normalizeTimeStatus(reviewAssignment.timeStatus ?? reviewAssignment.TimeStatus);
+                        const badge = ts ? getSlaBadgeStyle(ts) : null;
+                        const extNote = selectedChapter && !selectedChapter.isVersionHistory
+                            ? (selectedChapter.adminRejectedExtendNote ?? selectedChapter.AdminRejectedExtendNote)
+                            : null;
+                        const extAt = selectedChapter && !selectedChapter.isVersionHistory
+                            ? (selectedChapter.adminRejectedExtendAt ?? selectedChapter.AdminRejectedExtendAt)
+                            : null;
+                        const showAdminExtendRejection = !!(extNote || extAt);
+                        return (
+                            <div style={{
+                                padding: '0.75rem 1.5rem',
+                                backgroundColor: '#f0f9ff',
+                                borderBottom: '1px solid #bae6fd',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.75rem',
+                            }}
+                            >
+                                <div style={{
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    alignItems: 'center',
+                                    gap: '0.75rem',
+                                    justifyContent: 'space-between',
+                                }}
+                                >
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
+                                        {badge && (
+                                            <span style={{
+                                                fontSize: '0.75rem',
+                                                fontWeight: 700,
+                                                padding: '0.25rem 0.5rem',
+                                                borderRadius: '9999px',
+                                                backgroundColor: badge.bg,
+                                                color: badge.color,
+                                            }}>
+                                                {badge.label}
+                                            </span>
+                                        )}
+                                        <span style={{ fontSize: '0.8125rem', color: '#0c4a6e' }}>
+                                            {policySlaLine ? <>{policySlaLine}</> : null}
+                                            {rd ? (
+                                                <> {' '}• Hạn duyệt (bạn đã chọn): {formatDate(rd)}</>
+                                            ) : null}
+                                        </span>
+                                    </div>
+                                    {!hasPendingEscalationBlock && escalationTarget() && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setEscalateKind('EXTEND_DEADLINE');
+                                                setEscalateOpen(true);
+                                            }}
+                                            style={{
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '0.35rem',
+                                                padding: '0.45rem 0.85rem',
+                                                fontSize: '0.8125rem',
+                                                fontWeight: 600,
+                                                backgroundColor: '#fff',
+                                                color: '#0369a1',
+                                                border: '1px solid #7dd3fc',
+                                                borderRadius: '8px',
+                                                cursor: 'pointer',
+                                            }}
+                                        >
+                                            <AlertTriangle style={{ width: '14px', height: '14px' }} />
+                                            Xin gia hạn hạn duyệt với quản trị viên
+                                        </button>
+                                    )}
+                                </div>
+                                {showAdminExtendRejection && (
+                                    <div style={{
+                                        padding: '0.75rem 0.875rem',
+                                        backgroundColor: '#eff6ff',
+                                        border: '1px solid #93c5fd',
+                                        borderRadius: '8px',
+                                        width: '100%',
+                                        boxSizing: 'border-box',
+                                    }}
+                                    >
+                                        <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#1e40af', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                            <AlertCircle style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                                            Admin đã từ chối đơn xin gia hạn hạn duyệt
+                                        </div>
+                                        {extAt ? (
+                                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.35rem' }}>
+                                                Thời điểm: {formatApiDateTimeLocalVi(extAt)}
+                                            </div>
+                                        ) : null}
+                                        <div style={{ fontSize: '0.8125rem', color: '#1e3a8a', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                                            <strong style={{ color: '#1d4ed8' }}>Lý do / ghi chú:</strong>{' '}
+                                            {extNote && String(extNote).trim()
+                                                ? extNote
+                                                : 'Admin không nhập ghi chú.'}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
+
                     {/* Body — overflow: auto để khi kéo cao vùng đọc, có thể cuộn xem hết */}
                     <div style={{
                         display: 'flex',
@@ -657,6 +1014,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                             return `${chapter.wordCount ?? 0} từ`;
                                                         })()}
                                                     </div>
+                                                    {publication?.status === 'pending' && !chapter.isVersionHistory && (chapter.adminRejectedExtendNote || chapter.adminRejectedExtendAt || chapter.AdminRejectedExtendNote || chapter.AdminRejectedExtendAt) && (
+                                                        <div style={{ fontSize: '0.6875rem', color: '#1d4ed8', marginTop: '0.35rem', fontWeight: 600, lineHeight: 1.35 }}>
+                                                            Admin đã từ chối xin gia hạn — xem lý do trên thanh hạn duyệt phía trên
+                                                        </div>
+                                                    )}
                                                     {publication?.status === 'approved' && chapter.publishedAt && (
                                                         <div style={{ fontSize: '0.6875rem', color: '#10b981', marginTop: '0.25rem' }}>
                                                             Duyệt: {formatDate(chapter.publishedAt)}
@@ -1302,6 +1664,138 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 }}
                             >
                                 Xác nhận
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {escalateOpen && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10001,
+                        padding: '1rem',
+                    }}
+                    onClick={() => !escalateSubmitting && setEscalateOpen(false)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '480px',
+                            width: '100%',
+                            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ margin: '0 0 0.75rem', fontSize: '1.125rem', fontWeight: 700, color: '#0f172a' }}>
+                            Gửi báo cáo lên quản trị — xin gia hạn hạn duyệt
+                        </h3>
+                        <p style={{ margin: '0 0 1rem', fontSize: '0.8125rem', color: '#64748b' }}>
+                            Đơn gia hạn theo từng chương (hoặc truyện nếu bạn đang xem cấp truyện). Sau khi gửi, bạn không thể duyệt/từ chối mục đó cho đến khi quản trị viên xử lý.
+                            {' '}Để hủy nhận duyệt cả truyện, dùng nút <strong>Hủy nhận duyệt</strong> cạnh &quot;Xem chi tiết&quot; trên danh sách chờ duyệt.
+                        </p>
+                        <div style={{ marginBottom: '0.75rem' }}>
+                            <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
+                                Hạn đề xuất sau gia hạn (bắt buộc)
+                                <input
+                                    type="datetime-local"
+                                    value={escalateProposedDeadline}
+                                    onChange={(e) => setEscalateProposedDeadline(e.target.value)}
+                                    style={{
+                                        display: 'block',
+                                        width: '100%',
+                                        marginTop: '0.35rem',
+                                        padding: '0.5rem',
+                                        borderRadius: '8px',
+                                        border: extendProposedDeadlineError ? '2px solid #ef4444' : '1px solid #cbd5e1',
+                                        outline: extendProposedDeadlineError ? 'none' : undefined,
+                                    }}
+                                />
+                            </label>
+                            <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.5rem 0 0', lineHeight: 1.45 }}>
+                                {(reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt) ? (
+                                    <>
+                                        <strong>Hạn duyệt hiện tại của bạn:</strong>{' '}
+                                        {formatDate(reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt)}.
+                                        {' '}Hạn đề xuất phải <strong>muộn hơn</strong> mốc này (gia hạn = kéo dài thêm, không được chọn ngày sớm hơn).
+                                        {' '}Ngoài ra phải cách <strong>thời điểm hiện tại ít nhất 24 giờ</strong>.
+                                    </>
+                                ) : (
+                                    <>
+                                        Hạn đề xuất phải <strong>muộn hơn hạn duyệt</strong> bạn đã chọn khi nhận đơn, và cách <strong>hiện tại ít nhất 24 giờ</strong>.
+                                    </>
+                                )}
+                            </p>
+                            {extendProposedDeadlineError ? (
+                                <div
+                                    role="alert"
+                                    style={{
+                                        marginTop: '0.5rem',
+                                        padding: '0.5rem 0.75rem',
+                                        backgroundColor: '#fef2f2',
+                                        border: '1px solid #fecaca',
+                                        borderRadius: '8px',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 600,
+                                        color: '#b91c1c',
+                                        lineHeight: 1.5,
+                                    }}
+                                >
+                                    {extendProposedDeadlineError}
+                                </div>
+                            ) : null}
+                        </div>
+                        <label style={{ display: 'block', marginBottom: '1rem', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
+                            Lý do <span style={{ color: '#ef4444' }}>*</span>
+                            <textarea
+                                value={escalateReason}
+                                onChange={(e) => setEscalateReason(e.target.value)}
+                                rows={4}
+                                placeholder="Mô tả lý do (tối thiểu 10 ký tự)..."
+                                style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    marginTop: '0.35rem',
+                                    padding: '0.5rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid #cbd5e1',
+                                    fontFamily: 'inherit',
+                                    resize: 'vertical',
+                                }}
+                            />
+                        </label>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                            <button
+                                type="button"
+                                disabled={escalateSubmitting}
+                                onClick={() => setEscalateOpen(false)}
+                                style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer' }}
+                            >
+                                Đóng
+                            </button>
+                            <button
+                                type="button"
+                                disabled={escalateSubmitting || (escalateKind === 'EXTEND_DEADLINE' && !!extendProposedDeadlineError)}
+                                onClick={handleSubmitEscalation}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    background: escalateSubmitting || (escalateKind === 'EXTEND_DEADLINE' && extendProposedDeadlineError) ? '#94a3b8' : '#0ea5e9',
+                                    color: '#fff',
+                                    fontWeight: 600,
+                                    cursor: escalateSubmitting || (escalateKind === 'EXTEND_DEADLINE' && extendProposedDeadlineError) ? 'not-allowed' : 'pointer',
+                                }}
+                            >
+                                {escalateSubmitting ? 'Đang gửi...' : 'Gửi đơn'}
                             </button>
                         </div>
                     </div>

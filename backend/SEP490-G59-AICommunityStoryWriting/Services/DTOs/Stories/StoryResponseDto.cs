@@ -50,5 +50,9 @@ namespace Services.DTOs.Stories
         public string? LastReadChapterTitle { get; set; }
         /// <summary>Thời điểm đọc chương đó lần cuối.</summary>
         public DateTime? LastReadAt { get; set; }
+
+        public bool CommentsDisabled { get; set; }
+        public bool ComplianceHidden { get; set; }
+        public bool ComplianceFlagged { get; set; }
     }
 }

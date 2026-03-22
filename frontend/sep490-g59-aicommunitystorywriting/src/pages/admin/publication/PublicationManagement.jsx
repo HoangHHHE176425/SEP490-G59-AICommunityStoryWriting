@@ -3,8 +3,9 @@ import { PublicationList } from '../../../components/admin/publication/Publicati
 import { PublicationDetailModal } from '../../../components/admin/publication/PublicationDetailModal';
 import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories, getStoryById } from '../../../api/story/storyApi';
-import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, getRejectedChapterVersionsHistory, claimStory, claimChapter } from '../../../api/moderator/moderatorApi';
+import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, getRejectedChapterVersionsHistory, claimStory, claimChapter, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
 import { getProfileByUserId } from '../../../api/account/accountApi';
+import { reviewDeadlineAfterDaysUtc, localDateTimeInputToIsoUtc, worstTimeStatus } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 
@@ -149,6 +150,58 @@ function validateClaimDeadlineLocal(datetimeLocalValue) {
 /** Backend khuyến nghị: load lại danh sách duyệt/từ chối mỗi 30 giây để cập nhật khi có thay đổi từ nơi khác */
 const REFRESH_INTERVAL_MS = 30 * 1000;
 
+/** Gộp thông báo admin từ chối đơn hủy nhận duyệt (mới nhất theo thời gian). */
+function pickGroupAdminRejectedRelease(chapters, storyItem) {
+    const items = [];
+    if (storyItem) items.push(storyItem);
+    if (Array.isArray(chapters)) items.push(...chapters);
+    let bestTime = -Infinity;
+    let bestNote = null;
+    for (const it of items) {
+        const note = it.adminRejectedReleaseNote ?? it.AdminRejectedReleaseNote ?? null;
+        const atStr = it.adminRejectedReleaseAt ?? it.AdminRejectedReleaseAt;
+        const t = atStr ? new Date(atStr).getTime() : NaN;
+        const hasSignal = Number.isFinite(t) || (note != null && String(note).trim() !== '');
+        if (!hasSignal) continue;
+        const sortKey = Number.isFinite(t) ? t : 0;
+        if (sortKey >= bestTime) {
+            bestTime = sortKey;
+            bestNote = note;
+        }
+    }
+    if (bestTime === -Infinity && (bestNote == null || String(bestNote).trim() === '')) return {};
+    return {
+        adminRejectedReleaseNote: bestNote != null && String(bestNote).trim() !== '' ? String(bestNote).trim() : null,
+        adminRejectedReleaseAt: bestTime > -Infinity ? new Date(bestTime).toISOString() : null,
+    };
+}
+
+/** Gộp thông báo admin từ chối đơn xin gia hạn (EXTEND_DEADLINE). */
+function pickGroupAdminRejectedExtend(chapters, storyItem) {
+    const items = [];
+    if (storyItem) items.push(storyItem);
+    if (Array.isArray(chapters)) items.push(...chapters);
+    let bestTime = -Infinity;
+    let bestNote = null;
+    for (const it of items) {
+        const note = it.adminRejectedExtendNote ?? it.AdminRejectedExtendNote ?? null;
+        const atStr = it.adminRejectedExtendAt ?? it.AdminRejectedExtendAt;
+        const t = atStr ? new Date(atStr).getTime() : NaN;
+        const hasSignal = Number.isFinite(t) || (note != null && String(note).trim() !== '');
+        if (!hasSignal) continue;
+        const sortKey = Number.isFinite(t) ? t : 0;
+        if (sortKey >= bestTime) {
+            bestTime = sortKey;
+            bestNote = note;
+        }
+    }
+    if (bestTime === -Infinity && (bestNote == null || String(bestNote).trim() === '')) return {};
+    return {
+        adminRejectedExtendNote: bestNote != null && String(bestNote).trim() !== '' ? String(bestNote).trim() : null,
+        adminRejectedExtendAt: bestTime > -Infinity ? new Date(bestTime).toISOString() : null,
+    };
+}
+
 /** Map item từ moderator/stories/pending sang format dùng chung (type story). Dùng trạng thái thật từ API để khi duyệt chương không gọi approveStory nếu truyện đã PUBLISHED. */
 function mapPendingStoryToItem(s) {
     const id = s.id ?? s.Id;
@@ -174,6 +227,13 @@ function mapPendingStoryToItem(s) {
         isClaimedByMe: s.isClaimedByMe ?? s.IsClaimedByMe ?? false,
         claimedByDisplayName: s.claimedByDisplayName ?? s.ClaimedByDisplayName ?? null,
         claimedAt: s.claimedAt ?? s.ClaimedAt ?? null,
+        pendingSince: s.pendingSince ?? s.PendingSince ?? null,
+        timeStatus: s.timeStatus ?? s.TimeStatus ?? null,
+        hasPendingEscalation: s.hasPendingEscalation ?? s.HasPendingEscalation ?? false,
+        adminRejectedReleaseNote: s.adminRejectedReleaseNote ?? s.AdminRejectedReleaseNote ?? null,
+        adminRejectedReleaseAt: s.adminRejectedReleaseAt ?? s.AdminRejectedReleaseAt ?? null,
+        adminRejectedExtendNote: s.adminRejectedExtendNote ?? s.AdminRejectedExtendNote ?? null,
+        adminRejectedExtendAt: s.adminRejectedExtendAt ?? s.AdminRejectedExtendAt ?? null,
     };
 }
 
@@ -255,6 +315,13 @@ function mapPendingChapterToItem(c) {
         claimedByDisplayName: c.claimedByDisplayName ?? c.ClaimedByDisplayName ?? null,
         claimedAt: c.claimedAt ?? c.ClaimedAt ?? null,
         isEditRequest,
+        pendingSince: c.pendingSince ?? c.PendingSince ?? null,
+        timeStatus: c.timeStatus ?? c.TimeStatus ?? null,
+        hasPendingEscalation: c.hasPendingEscalation ?? c.HasPendingEscalation ?? false,
+        adminRejectedReleaseNote: c.adminRejectedReleaseNote ?? c.AdminRejectedReleaseNote ?? null,
+        adminRejectedReleaseAt: c.adminRejectedReleaseAt ?? c.AdminRejectedReleaseAt ?? null,
+        adminRejectedExtendNote: c.adminRejectedExtendNote ?? c.AdminRejectedExtendNote ?? null,
+        adminRejectedExtendAt: c.adminRejectedExtendAt ?? c.AdminRejectedExtendAt ?? null,
     };
 }
 
@@ -269,6 +336,15 @@ export function PublicationManagement() {
     const [totalPages, setTotalPages] = useState(1);
     const [totalCount, setTotalCount] = useState(0);
     const [claimingId, setClaimingId] = useState(null); // id đang gọi claim
+    const [releasingAllClaimsStoryId, setReleasingAllClaimsStoryId] = useState(null);
+    /** Popup xác nhận hủy nhận duyệt (thay window.confirm). */
+    const [releaseConfirmTarget, setReleaseConfirmTarget] = useState(null); // { storyId, storyTitle, chapterCount }
+    /** Thông báo sau khi gửi đơn / lỗi. */
+    const [releaseResultMessage, setReleaseResultMessage] = useState(null);
+    /** Lý do gửi đơn RELEASE_ASSIGNMENT cấp truyện (tối thiểu 10 ký tự). */
+    const [releaseReason, setReleaseReason] = useState('');
+    /** Lỗi trong popup gửi đơn (validation / API). */
+    const [releaseFormError, setReleaseFormError] = useState('');
     const [showClaimModal, setShowClaimModal] = useState(false); // modal "Chọn truyện để nhận duyệt"
     const [claimConfirmTarget, setClaimConfirmTarget] = useState(null); // { type: 'story', id, title } khi cần popup xác nhận
     /** Hạn hoàn thành duyệt (datetime-local) khi xác nhận trong popup — gửi API reviewDeadlineAt (ISO UTC). */
@@ -283,6 +359,11 @@ export function PublicationManagement() {
     const [rejectedCache, setRejectedCache] = useState({ items: [], total: 0, totalPages: 1 });
     const [approvedCacheLoading, setApprovedCacheLoading] = useState(false);
     const [rejectedCacheLoading, setRejectedCacheLoading] = useState(false);
+    /** Popup nhận duyệt: chọn hạn (7/14 ngày hoặc tùy chỉnh) + cam kết */
+    const [claimDeadlineChoice, setClaimDeadlineChoice] = useState('7'); // '7' | '14' | 'custom'
+    const [claimCustomDeadline, setClaimCustomDeadline] = useState('');
+    const [claimCommitted, setClaimCommitted] = useState(false);
+    const [modalClaimBusy, setModalClaimBusy] = useState(false);
 
     /** Modal "Nhận duyệt đơn": gộp theo truyện — mỗi truyện 1 dòng; nhận 1 lần = claim truyện (nếu chưa) + tất cả chương chờ duyệt của truyện đó. */
     const loadClaimModalItems = useCallback(() => {
@@ -549,8 +630,8 @@ export function PublicationManagement() {
             // Tab Chờ duyệt: chỉ lấy đơn đã được moderator hiện tại nhận (CLAIMED) để luôn thấy đúng danh sách sau khi nhận duyệt.
             const claimFilterParam = 'CLAIMED';
             Promise.all([
-                getPendingStories({ pageSize: 500, claimFilter: claimFilterParam, sortBy: 'updated_at', sortOrder: 'asc' }),
-                getPendingChapters({ pageSize: 500, claimFilter: claimFilterParam, sortBy: 'created_at', sortOrder: 'asc' })
+                getPendingStories({ pageSize: 500, claimFilter: claimFilterParam, sortBy: 'deadline_at', sortOrder: 'asc' }),
+                getPendingChapters({ pageSize: 500, claimFilter: claimFilterParam, sortBy: 'deadline_at', sortOrder: 'asc' })
             ])
                 .then(([storiesRes, chaptersRes]) => {
                     const storyItems = storiesRes?.items ?? storiesRes?.Items ?? [];
@@ -597,6 +678,16 @@ export function PublicationManagement() {
                         if (!rep) continue;
                         // Chỉ hiển thị nhóm có ít nhất 1 chương chờ duyệt. Truyện đã hủy hết chương (0 chương) thì không hiện trong Chờ duyệt.
                         if (g.chapters.length === 0) continue;
+                        const times = g.chapters
+                            .map((c) => c.pendingSince ?? c.submittedAt)
+                            .filter(Boolean)
+                            .map((d) => new Date(d).getTime())
+                            .filter((t) => Number.isFinite(t));
+                        const slaPendingSince = times.length ? new Date(Math.min(...times)).toISOString() : null;
+                        const slaTimeStatus = worstTimeStatus(g.chapters.map((c) => c.timeStatus).filter(Boolean));
+                        const hasPendingEscalation = g.chapters.some((c) => c.hasPendingEscalation);
+                        const adminRej = pickGroupAdminRejectedRelease(g.chapters, g.storyItem);
+                        const adminExt = pickGroupAdminRejectedExtend(g.chapters, g.storyItem);
                         groupedList.push({
                             type: 'story_group',
                             id: g.storyId,
@@ -610,8 +701,18 @@ export function PublicationManagement() {
                             chapters: g.chapters,
                             representativePublication: rep,
                             chapterCount: g.chapters.length,
+                            slaPendingSince,
+                            slaTimeStatus,
+                            hasPendingEscalation,
+                            ...adminRej,
+                            ...adminExt,
                         });
                     }
+                    groupedList.sort((a, b) => {
+                        const ta = a.slaPendingSince ? new Date(a.slaPendingSince).getTime() : Infinity;
+                        const tb = b.slaPendingSince ? new Date(b.slaPendingSince).getTime() : Infinity;
+                        return ta - tb;
+                    });
                     if (groupedList.length === 0) {
                         setPublications([]);
                         setTotalCount(0);
@@ -873,6 +974,22 @@ export function PublicationManagement() {
         if (showClaimModal) loadClaimModalItems();
     }, [showClaimModal, loadClaimModalItems]);
 
+    useEffect(() => {
+        if (claimConfirmTarget) {
+            setClaimDeadlineChoice('7');
+            setClaimCustomDeadline('');
+            setClaimCommitted(false);
+        }
+    }, [claimConfirmTarget]);
+
+    const getClaimReviewDeadlineIso = () => {
+        if (claimDeadlineChoice === 'custom') {
+            const iso = localDateTimeInputToIsoUtc(claimCustomDeadline);
+            return iso || reviewDeadlineAfterDaysUtc(7);
+        }
+        return reviewDeadlineAfterDaysUtc(claimDeadlineChoice === '14' ? 14 : 7);
+    };
+
     const filteredPublications = (filterStatus === 'pending' || filterStatus === 'rejected' || filterStatus === 'approved')
         ? publications.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
         : publications;
@@ -896,7 +1013,7 @@ export function PublicationManagement() {
     const handleClaimStory = async (storyId) => {
         setClaimingId(storyId);
         try {
-            await claimStory(storyId);
+            await claimStory(storyId, reviewDeadlineAfterDaysUtc(7));
             loadPublications(currentPage);
             loadStats();
         } catch (err) {
@@ -909,7 +1026,7 @@ export function PublicationManagement() {
     const handleClaimChapter = async (chapterId) => {
         setClaimingId(chapterId);
         try {
-            await claimChapter(chapterId);
+            await claimChapter(chapterId, reviewDeadlineAfterDaysUtc(7));
             loadPublications(currentPage);
             loadStats();
         } catch (err) {
@@ -919,29 +1036,83 @@ export function PublicationManagement() {
         }
     };
 
+    /** Mở popup xác nhận hủy nhận duyệt. */
+    const handleReleaseAllClaimsForStory = (pub) => {
+        const storyId = pub?.storyId ?? pub?.id;
+        if (!storyId) return;
+        const chapterCount = pub?.chapterCount ?? pub?.chapters?.length ?? 0;
+        setReleaseReason('');
+        setReleaseFormError('');
+        setReleaseConfirmTarget({
+            storyId,
+            storyTitle: pub?.storyTitle ?? '',
+            chapterCount,
+        });
+    };
+
+    /** Xác nhận trong popup — gửi đơn RELEASE_ASSIGNMENT (STORY) lên admin. */
+    const handleConfirmReleaseAllClaims = async () => {
+        const target = releaseConfirmTarget;
+        if (!target?.storyId) return;
+        const reason = releaseReason.trim();
+        if (reason.length < 10) {
+            setReleaseFormError('Lý do cần ít nhất 10 ký tự (theo quy định hệ thống).');
+            return;
+        }
+        setReleaseFormError('');
+        const { storyId } = target;
+        setReleasingAllClaimsStoryId(storyId);
+        try {
+            await submitReviewEscalation({
+                targetType: 'STORY',
+                targetId: String(storyId),
+                requestKind: 'RELEASE_ASSIGNMENT',
+                reason,
+                proposedDeadlineAt: null,
+            });
+            setReleaseConfirmTarget(null);
+            setReleaseReason('');
+            const openSid = selectedPublication?.storyId ?? selectedPublication?.id;
+            if (openSid != null && String(openSid) === String(storyId)) {
+                setSelectedPublication(null);
+            }
+            loadPublications(currentPage);
+            loadStats();
+            setReleaseResultMessage('Đã gửi đơn lên quản trị viên. Sau khi đơn được duyệt, các chương và phần nhận duyệt truyện (nếu có) sẽ trở lại hàng đợi. Trong lúc chờ, bạn không thể duyệt/từ chối chương của truyện này.');
+        } catch (err) {
+            setReleaseFormError(err?.response?.data?.message ?? err?.message ?? 'Không thể gửi đơn.');
+        } finally {
+            setReleasingAllClaimsStoryId(null);
+        }
+    };
+
     /** Xác nhận nhận duyệt từ popup. story_group = nhận cả truyện (nếu chưa) + tất cả chương của truyện đó trong một lần. */
     const handleConfirmClaimFromModal = async () => {
         if (!claimConfirmTarget) return;
-        const deadlineErr = validateClaimDeadlineLocal(claimReviewDeadlineLocal);
-        if (deadlineErr) {
-            alert(deadlineErr);
+        if (!claimCommitted) {
+            alert('Vui lòng xác nhận cam kết hoàn thành duyệt trong hạn đã chọn.');
             return;
         }
-        const deadlineIso = new Date(claimReviewDeadlineLocal).toISOString();
+        if (claimDeadlineChoice === 'custom' && !localDateTimeInputToIsoUtc(claimCustomDeadline)) {
+            alert('Vui lòng chọn ngày giờ hạn duyệt hợp lệ.');
+            return;
+        }
+        const reviewDeadlineAt = getClaimReviewDeadlineIso();
         const { type, id, storyId, chapterIds, isStoryUnclaimed } = claimConfirmTarget;
+        setModalClaimBusy(true);
         setClaimingId(id ?? storyId);
-        setClaimConfirmTarget(null);
         try {
             if (type === 'story_group') {
-                if (isStoryUnclaimed && (storyId || id)) await claimStory(storyId || id, deadlineIso);
+                if (isStoryUnclaimed && (storyId || id)) await claimStory(storyId || id, reviewDeadlineAt);
                 for (const chapterId of chapterIds ?? []) {
-                    await claimChapter(chapterId, deadlineIso);
+                    await claimChapter(chapterId, reviewDeadlineAt);
                 }
             } else if (type === 'story') {
-                await claimStory(id, deadlineIso);
+                await claimStory(id, reviewDeadlineAt);
             } else {
-                await claimChapter(id, deadlineIso);
+                await claimChapter(id, reviewDeadlineAt);
             }
+            setClaimConfirmTarget(null);
             setShowClaimModal(false);
             loadPublications(1);
             loadStats();
@@ -951,6 +1122,7 @@ export function PublicationManagement() {
             alert(getClaimErrorMessage(err));
         } finally {
             setClaimingId(null);
+            setModalClaimBusy(false);
         }
     };
 
@@ -1113,6 +1285,9 @@ export function PublicationManagement() {
                             onClaimChapter={handleClaimChapter}
                             claimingId={claimingId}
                             showClaimButton={false}
+                            showModeratorSla={filterStatus === 'pending'}
+                            onReleaseAllClaimsForStory={handleReleaseAllClaimsForStory}
+                            releasingAllClaimsStoryId={releasingAllClaimsStoryId}
                         />
                         {totalPages > 1 && (
                             <Pagination
@@ -1282,37 +1457,70 @@ export function PublicationManagement() {
                             backgroundColor: '#fff',
                             borderRadius: '12px',
                             padding: '1.5rem',
-                            maxWidth: '400px',
+                            maxWidth: '440px',
                             width: '100%',
                             boxShadow: '0 20px 40px rgba(0,0,0,0.15)'
                         }}
                         onClick={(e) => e.stopPropagation()}
                     >
-                        <p style={{ margin: 0, marginBottom: '1rem', fontSize: '0.9375rem', color: '#1e293b' }}>
-                            Bạn có chắc muốn nhận duyệt {claimConfirmTarget.type === 'story_group' ? 'truyện và tất cả chương' : claimConfirmTarget.type === 'chapter' ? 'chương' : 'truyện'} <strong>"{claimConfirmTarget.title}"</strong>?
+                        <p style={{ margin: 0, marginBottom: '0.75rem', fontSize: '0.9375rem', color: '#1e293b' }}>
+                            Nhận duyệt {claimConfirmTarget.type === 'story_group' ? 'truyện và tất cả chương' : claimConfirmTarget.type === 'chapter' ? 'chương' : 'truyện'}{' '}
+                            <strong>&quot;{claimConfirmTarget.title}&quot;</strong>
                         </p>
-                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#475569', marginBottom: '0.35rem' }}>
-                            Hạn hoàn thành duyệt
+                        <p style={{ margin: '0 0 0.75rem', fontSize: '0.8125rem', color: '#64748b' }}>
+                            Chọn <strong>hạn hoàn thành duyệt</strong> (UTC theo máy chủ). Hạn phải cách hiện tại ít nhất ~24 giờ theo quy định hệ thống.
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                            {[
+                                { v: '7', label: '7 ngày' },
+                                { v: '14', label: '14 ngày' },
+                                { v: 'custom', label: 'Tùy chỉnh' },
+                            ].map((opt) => (
+                                <button
+                                    key={opt.v}
+                                    type="button"
+                                    onClick={() => setClaimDeadlineChoice(opt.v)}
+                                    style={{
+                                        padding: '0.4rem 0.75rem',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 600,
+                                        borderRadius: '8px',
+                                        border: claimDeadlineChoice === opt.v ? '2px solid #0ea5e9' : '1px solid #e2e8f0',
+                                        backgroundColor: claimDeadlineChoice === opt.v ? '#e0f2fe' : '#fff',
+                                        color: '#0f172a',
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    {opt.label}
+                                </button>
+                            ))}
+                        </div>
+                        {claimDeadlineChoice === 'custom' && (
+                            <input
+                                type="datetime-local"
+                                value={claimCustomDeadline}
+                                onChange={(e) => setClaimCustomDeadline(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    marginBottom: '0.75rem',
+                                    padding: '0.5rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid #cbd5e1',
+                                    fontSize: '0.875rem',
+                                }}
+                            />
+                        )}
+                        <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8125rem', color: '#334155', marginBottom: '1rem', cursor: 'pointer' }}>
+                            <input
+                                type="checkbox"
+                                checked={claimCommitted}
+                                onChange={(e) => setClaimCommitted(e.target.checked)}
+                                style={{ marginTop: '0.2rem' }}
+                            />
+                            <span>
+                                Tôi cam kết sẽ xử lý kiểm duyệt trong hạn đã chọn; nếu không kịp tôi sẽ gửi báo cáo lên quản trị để gia hạn hoặc chuyển đơn.
+                            </span>
                         </label>
-                        <input
-                            type="datetime-local"
-                            value={claimReviewDeadlineLocal}
-                            min={getMinDatetimeLocalForClaim()}
-                            max={getMaxDatetimeLocalForClaim()}
-                            onChange={(e) => setClaimReviewDeadlineLocal(e.target.value)}
-                            style={{
-                                width: '100%',
-                                marginBottom: '0.5rem',
-                                padding: '0.5rem 0.75rem',
-                                fontSize: '0.875rem',
-                                borderRadius: '8px',
-                                border: '1px solid #e2e8f0',
-                                color: '#1e293b',
-                            }}
-                        />
-                        <p style={{ margin: 0, marginBottom: '1rem', fontSize: '0.75rem', color: '#64748b' }}>
-                            Phải sau ít nhất 24 giờ so với hiện tại; tối đa {MAX_CLAIM_DEADLINE_DAYS} ngày (theo quy định hệ thống).
-                        </p>
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
                             <button
                                 type="button"
@@ -1324,9 +1532,188 @@ export function PublicationManagement() {
                             <button
                                 type="button"
                                 onClick={handleConfirmClaimFromModal}
-                                style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', fontWeight: 600, backgroundColor: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
+                                disabled={!claimCommitted || modalClaimBusy}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    backgroundColor: claimCommitted && !modalClaimBusy ? '#0ea5e9' : '#94a3b8',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: claimCommitted && !modalClaimBusy ? 'pointer' : 'not-allowed',
+                                }}
                             >
-                                Xác nhận
+                                Xác nhận nhận duyệt
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Popup xác nhận hủy nhận duyệt (toàn bộ chương + lock truyện nếu có) */}
+            {releaseConfirmTarget && (
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="release-confirm-title"
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10050,
+                        padding: '1rem',
+                    }}
+                    onClick={() => {
+                        if (releasingAllClaimsStoryId) return;
+                        setReleaseConfirmTarget(null);
+                        setReleaseFormError('');
+                    }}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '440px',
+                            width: '100%',
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h2 id="release-confirm-title" style={{ margin: '0 0 0.35rem', fontSize: '1.125rem', fontWeight: 700, color: '#0f172a', lineHeight: 1.35 }}>
+                            Trả truyện về hàng đợi kiểm duyệt chung?
+                        </h2>
+                        <p style={{ margin: '0 0 0.65rem', fontSize: '0.8125rem', fontWeight: 600, color: '#64748b' }}>
+                            Gửi đơn lên quản trị viên — sau khi đơn được <strong>chấp nhận</strong>, hệ thống mới trả các mục về hàng đợi (giống luồng hủy nhận duyệt thông thường).
+                        </p>
+                        <p style={{ margin: '0 0 0.75rem', fontSize: '0.9375rem', color: '#334155', lineHeight: 1.55 }}>
+                            Yêu cầu này áp dụng cho <strong>tất cả chương</strong> bạn đang giữ trong truyện
+                            {releaseConfirmTarget.chapterCount > 0 ? (
+                                <> (hiện <strong>{releaseConfirmTarget.chapterCount}</strong> chương)</>
+                            ) : null}
+                            {' '}và phần nhận duyệt <strong>truyện</strong> (nếu bạn đã nhận). Trong lúc đơn chờ xử lý, bạn không thể duyệt/từ chối chương của truyện này.
+                        </p>
+                        {releaseConfirmTarget.storyTitle ? (
+                            <p style={{ margin: '0 0 0.75rem', fontSize: '0.875rem', color: '#475569', padding: '0.65rem 0.75rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                <span style={{ color: '#64748b' }}>Truyện áp dụng:</span>{' '}
+                                <strong style={{ color: '#0f172a' }}>&quot;{releaseConfirmTarget.storyTitle}&quot;</strong>
+                            </p>
+                        ) : null}
+                        <label style={{ display: 'block', marginBottom: '0.75rem', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
+                            Lý do gửi đơn <span style={{ color: '#ef4444' }}>*</span> (tối thiểu 10 ký tự)
+                            <textarea
+                                value={releaseReason}
+                                onChange={(e) => { setReleaseReason(e.target.value); if (releaseFormError) setReleaseFormError(''); }}
+                                rows={4}
+                                placeholder="Ví dụ: Không đủ thời gian xử lý hết khối chương, đề nghị trả về hàng đợi..."
+                                disabled={!!releasingAllClaimsStoryId}
+                                style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    marginTop: '0.35rem',
+                                    padding: '0.5rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid #cbd5e1',
+                                    fontFamily: 'inherit',
+                                    resize: 'vertical',
+                                    boxSizing: 'border-box',
+                                }}
+                            />
+                        </label>
+                        {releaseFormError ? (
+                            <p style={{ margin: '0 0 0.75rem', fontSize: '0.8125rem', color: '#b91c1c' }}>{releaseFormError}</p>
+                        ) : null}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <button
+                                type="button"
+                                disabled={!!releasingAllClaimsStoryId}
+                                onClick={() => { setReleaseConfirmTarget(null); setReleaseFormError(''); }}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    backgroundColor: '#f1f5f9',
+                                    color: '#475569',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: releasingAllClaimsStoryId ? 'wait' : 'pointer',
+                                }}
+                            >
+                                Đóng
+                            </button>
+                            <button
+                                type="button"
+                                disabled={!!releasingAllClaimsStoryId}
+                                onClick={handleConfirmReleaseAllClaims}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    backgroundColor: releasingAllClaimsStoryId ? '#94a3b8' : '#dc2626',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: releasingAllClaimsStoryId ? 'wait' : 'pointer',
+                                }}
+                            >
+                                {releasingAllClaimsStoryId ? 'Đang gửi...' : 'Gửi đơn lên quản trị'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Thông báo đã gửi đơn thành công */}
+            {releaseResultMessage && (
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10051,
+                        padding: '1rem',
+                    }}
+                    onClick={() => setReleaseResultMessage(null)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '400px',
+                            width: '100%',
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <p style={{ margin: '0 0 1rem', fontSize: '0.9375rem', color: '#334155', lineHeight: 1.5 }}>
+                            {releaseResultMessage}
+                        </p>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                                type="button"
+                                onClick={() => setReleaseResultMessage(null)}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    backgroundColor: '#0ea5e9',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                Đã hiểu
                             </button>
                         </div>
                     </div>

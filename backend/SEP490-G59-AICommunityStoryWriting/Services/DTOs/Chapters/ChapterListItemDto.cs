@@ -40,7 +40,7 @@ namespace Services.DTOs.Chapters
 
         /// <summary>Mốc tác giả gửi duyệt (submitted_for_review_at; fallback nếu cũ).</summary>
         public DateTime? PendingSince { get; set; }
-        /// <summary>Moderator queue: không dùng (null). SLA theo <see cref="PendingSince"/> + <see cref="TimeStatus"/>.</summary>
+        /// <summary>Hạn SLA duyệt (ưu tiên review_deadline_at khi đã claim; không claim thì mốc gửi + policy ngày). List chapter (GetAll/GetByStoryId) điền khi chương đang trong luồng duyệt.</summary>
         public DateTime? DeadlineAt { get; set; }
         /// <summary>Mức ưu tiên theo thời gian chờ từ mốc gửi (OnTime / Warning / Critical / Overdue).</summary>
         public string? TimeStatus { get; set; }
@@ -48,5 +48,15 @@ namespace Services.DTOs.Chapters
         public DateTime? ReviewedAt { get; set; }
         /// <summary>Admin: tên moderator đã duyệt/từ chối.</summary>
         public string? ReviewedByModeratorName { get; set; }
+
+        /// <summary>Ghi chú admin khi từ chối đơn RELEASE_ASSIGNMENT (hủy nhận duyệt) do moderator hiện tại gửi (chapter hoặc truyện chứa chương). Phần gộp từ cấp truyện chỉ khi truyện đó còn chương chờ duyệt.</summary>
+        public string? AdminRejectedReleaseNote { get; set; }
+        /// <summary>Thời điểm admin từ chối đơn hủy nhận duyệt (theo bản ghi mới nhất áp dụng).</summary>
+        public DateTime? AdminRejectedReleaseAt { get; set; }
+
+        /// <summary>Ghi chú admin khi từ chối đơn EXTEND_DEADLINE (xin gia hạn).</summary>
+        public string? AdminRejectedExtendNote { get; set; }
+        /// <summary>Thời điểm admin từ chối đơn xin gia hạn.</summary>
+        public DateTime? AdminRejectedExtendAt { get; set; }
     }
 }

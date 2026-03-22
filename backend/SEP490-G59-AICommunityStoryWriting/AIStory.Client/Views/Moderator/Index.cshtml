@@ -402,6 +402,7 @@
                         <option value="EXTEND_DEADLINE">Gia hạn hạn duyệt</option>
                         <option value="RELEASE_ASSIGNMENT">Hủy nhận duyệt (chuyển cho người khác)</option>
                     </select>
+                    <p class="small text-muted mb-0 mt-2">Mức ưu tiên gửi admin do hệ thống gán theo loại đơn: <strong>Hủy nhận duyệt</strong> → nghiêm trọng; <strong>Gia hạn</strong> → chuẩn (có thể tăng thêm theo hạn / thời gian chờ).</p>
                 </div>
                 <div id="escExtendBlock" class="mb-3">
                     <label class="form-label small mb-1">Hạn duyệt đề xuất <span class="text-danger">*</span></label>
@@ -542,11 +543,12 @@
                 Utils.showAlert('Vui lòng tick xác nhận cam kết hoàn thành duyệt trước hạn.', 'warning');
                 return;
             }
-            var dt = new Date(localStr);
-            if (isNaN(dt.getTime())) {
+            var deadlineIso = Utils.datetimeLocalToIsoUtc(localStr);
+            if (!deadlineIso) {
                 Utils.showAlert('Thời gian không hợp lệ.', 'warning');
                 return;
             }
+            var dt = new Date(deadlineIso);
             var minMs = Date.now() + 24 * 60 * 60 * 1000;
             if (dt.getTime() <= minMs) {
                 Utils.showAlert('Hạn duyệt phải sau ít nhất 24 giờ so với hiện tại.', 'warning');
@@ -557,11 +559,12 @@
                 Utils.showAlert('Hạn duyệt không được vượt quá 366 ngày.', 'warning');
                 return;
             }
-            claimModalState.deadlineIso = dt.toISOString();
+            claimModalState.deadlineIso = deadlineIso;
             var label = claimModalState.type === 'STORY' ? 'truyện' : 'chapter';
             document.getElementById('claimConfirmSummary').innerHTML =
                 '<p class="small mb-2">Bạn sắp <strong>nhận duyệt ' + label + '</strong> và <strong>cam kết</strong> hoàn thành kiểm duyệt trước:</p>' +
-                '<p class="fw-semibold mb-0">' + Utils.formatDate(claimModalState.deadlineIso) + '</p>';
+                '<p class="fw-semibold mb-0">' + Utils.formatDateUtc(claimModalState.deadlineIso) + '</p>' +
+                '<p class="small text-muted mb-0">(Giờ địa phương: ' + Utils.formatDate(claimModalState.deadlineIso) + ')</p>';
             document.getElementById('claimStep1').classList.add('d-none');
             document.getElementById('claimStep2').classList.remove('d-none');
             document.getElementById('claimModalFooterStep1').classList.add('d-none');
@@ -662,12 +665,17 @@
                     Utils.showAlert('Chọn hạn duyệt đề xuất.', 'warning');
                     return;
                 }
-                var dt = new Date(localStr);
-                if (isNaN(dt.getTime()) || dt.getTime() <= Date.now() + 24 * 60 * 60 * 1000) {
+                var pIso = Utils.datetimeLocalToIsoUtc(localStr);
+                if (!pIso) {
+                    Utils.showAlert('Hạn đề xuất không hợp lệ.', 'warning');
+                    return;
+                }
+                var dt = new Date(pIso);
+                if (dt.getTime() <= Date.now() + 24 * 60 * 60 * 1000) {
                     Utils.showAlert('Hạn đề xuất phải sau ít nhất 24 giờ.', 'warning');
                     return;
                 }
-                body.proposedDeadlineAt = dt.toISOString();
+                body.proposedDeadlineAt = pIso;
             }
             try {
                 await ApiService.moderatorSubmitReviewEscalation(body);
@@ -859,7 +867,7 @@
                     '<div class="d-flex flex-wrap align-items-center gap-2 mb-2">' +
                     (s.categoryNames ? '<span class="badge bg-secondary badge-status">' + s.categoryNames + '</span>' : '') +
                     '<span class="badge bg-warning text-dark badge-status">' + (s.status || 'PENDING_REVIEW') + '</span>' +
-                    ((s.isClaimedByMe || s.claimedByDisplayName) ? '<span class="badge bg-info badge-status" title="' + (s.claimedAt ? Utils.formatDate(s.claimedAt) : '') + '">' + (s.isClaimedByMe ? '<i class="bi bi-person-check me-1"></i> Bạn đang duyệt' : '<i class="bi bi-person me-1"></i> ' + (s.claimedByDisplayName || '–')) + (s.claimedAt ? ' • ' + Utils.formatDate(s.claimedAt) : '') + '</span>' : '') +
+                    ((s.isClaimedByMe || s.claimedByDisplayName) ? '<span class="badge bg-info badge-status" title="' + (s.claimedAt ? ('Nhận (UTC): ' + Utils.formatDateUtc(s.claimedAt)) : '') + '">' + (s.isClaimedByMe ? '<i class="bi bi-person-check me-1"></i> Bạn đang duyệt' : '<i class="bi bi-person me-1"></i> ' + (s.claimedByDisplayName || '–')) + (s.claimedAt ? ' • ' + Utils.formatDateUtc(s.claimedAt) : '') + '</span>' : '') +
                     (escalationLocked ? '<span class="badge bg-secondary badge-status"><i class="bi bi-shield-lock me-1"></i> Chờ admin</span>' : '') +
                     (s.authorName ? '<span class="small text-muted">' + s.authorName + '</span>' : '') +
                     '<span class="small text-muted">Cập nhật: ' + Utils.formatDate(s.updatedAt) + '</span>' +
@@ -938,7 +946,7 @@
             var tableRows = pendingChapters.map(function (c) {
                 var escalationLocked = !!(c.isClaimedByMe && c.hasPendingEscalation);
                 var storyTitle = (c.storyTitle || '').trim() || ('ID: ' + (c.storyId || '').toString().substring(0, 8) + '…');
-                var claimBadge = (c.claimedByDisplayName || c.isClaimedByMe) ? '<span class="badge bg-info badge-status" title="' + (c.claimedAt ? Utils.formatDate(c.claimedAt) : '') + '">' + (c.isClaimedByMe ? '<i class="bi bi-person-check me-1"></i> Bạn' : '<i class="bi bi-person me-1"></i> ' + (c.claimedByDisplayName || '–')) + (c.claimedAt ? ' • ' + Utils.formatDate(c.claimedAt) : '') + '</span>' : '–';
+                var claimBadge = (c.claimedByDisplayName || c.isClaimedByMe) ? '<span class="badge bg-info badge-status" title="' + (c.claimedAt ? ('Nhận (UTC): ' + Utils.formatDateUtc(c.claimedAt)) : '') + '">' + (c.isClaimedByMe ? '<i class="bi bi-person-check me-1"></i> Bạn' : '<i class="bi bi-person me-1"></i> ' + (c.claimedByDisplayName || '–')) + (c.claimedAt ? ' • ' + Utils.formatDateUtc(c.claimedAt) : '') + '</span>' : '–';
                 var reviewBtns;
                 if (escalationLocked) {
                     reviewBtns = '<span class="small text-muted align-self-center"><i class="bi bi-hourglass-split"></i> Chờ admin xử lý đơn báo cáo — không thể duyệt/từ chối.</span>';
