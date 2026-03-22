@@ -1,7 +1,17 @@
-import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen, UserCheck, AlertCircle } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen, UserCheck, AlertCircle, RotateCcw } from 'lucide-react';
 import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus } from '../../../utils/moderatorReviewSla';
 
-export function PublicationList({ publications, onViewDetail, onClaimStory, onClaimChapter, claimingId, showClaimButton, showModeratorSla = false }) {
+export function PublicationList({
+    publications,
+    onViewDetail,
+    onClaimStory,
+    onClaimChapter,
+    claimingId,
+    showClaimButton,
+    showModeratorSla = false,
+    onReleaseAllClaimsForStory,
+    releasingAllClaimsStoryId = null,
+}) {
     const getStatusBadge = (status) => {
         const configs = {
             pending: {
@@ -303,6 +313,41 @@ export function PublicationList({ publications, onViewDetail, onClaimStory, onCl
                                             </button>
                                         );
                                     })()}
+                                    {showModeratorSla && pub.status === 'pending' && pub.type === 'story_group'
+                                        && Array.isArray(pub.chapters) && pub.chapters.some((c) => c.isClaimedByMe)
+                                        && !pub.hasPendingEscalation && typeof onReleaseAllClaimsForStory === 'function' && (() => {
+                                            const sid = pub.storyId ?? pub.id;
+                                            const busy = releasingAllClaimsStoryId != null && String(releasingAllClaimsStoryId) === String(sid);
+                                            return (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (busy) return;
+                                                        onReleaseAllClaimsForStory(pub);
+                                                    }}
+                                                    disabled={busy}
+                                                    title="Hủy nhận duyệt tất cả chương của truyện này và trả về hàng đợi"
+                                                    style={{
+                                                        padding: '0.625rem 1rem',
+                                                        backgroundColor: busy ? '#e2e8f0' : '#fef2f2',
+                                                        color: busy ? '#64748b' : '#b91c1c',
+                                                        fontSize: '0.8125rem',
+                                                        fontWeight: 600,
+                                                        borderRadius: '8px',
+                                                        border: '1px solid #fecaca',
+                                                        cursor: busy ? 'wait' : 'pointer',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '0.375rem',
+                                                        whiteSpace: 'nowrap',
+                                                    }}
+                                                >
+                                                    <RotateCcw style={{ width: '14px', height: '14px' }} />
+                                                    {busy ? 'Đang xử lý...' : 'Hủy nhận duyệt'}
+                                                </button>
+                                            );
+                                        })()}
                                     <button
                                         onClick={() => onViewDetail(pub)}
                                         style={{

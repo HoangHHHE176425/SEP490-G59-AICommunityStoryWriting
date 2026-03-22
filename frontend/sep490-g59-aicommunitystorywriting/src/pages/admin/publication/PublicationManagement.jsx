@@ -3,7 +3,7 @@ import { PublicationList } from '../../../components/admin/publication/Publicati
 import { PublicationDetailModal } from '../../../components/admin/publication/PublicationDetailModal';
 import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories, getStoryById } from '../../../api/story/storyApi';
-import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, getRejectedChapterVersionsHistory, claimStory, claimChapter } from '../../../api/moderator/moderatorApi';
+import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, getRejectedChapterVersionsHistory, claimStory, claimChapter, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
 import { getProfileByUserId } from '../../../api/account/accountApi';
 import { reviewDeadlineAfterDaysUtc, localDateTimeInputToIsoUtc, worstTimeStatus } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
@@ -234,6 +234,15 @@ export function PublicationManagement() {
     const [totalPages, setTotalPages] = useState(1);
     const [totalCount, setTotalCount] = useState(0);
     const [claimingId, setClaimingId] = useState(null); // id đang gọi claim
+    const [releasingAllClaimsStoryId, setReleasingAllClaimsStoryId] = useState(null);
+    /** Popup xác nhận hủy nhận duyệt (thay window.confirm). */
+    const [releaseConfirmTarget, setReleaseConfirmTarget] = useState(null); // { storyId, storyTitle, chapterCount }
+    /** Thông báo sau khi gửi đơn / lỗi. */
+    const [releaseResultMessage, setReleaseResultMessage] = useState(null);
+    /** Lý do gửi đơn RELEASE_ASSIGNMENT cấp truyện (tối thiểu 10 ký tự). */
+    const [releaseReason, setReleaseReason] = useState('');
+    /** Lỗi trong popup gửi đơn (validation / API). */
+    const [releaseFormError, setReleaseFormError] = useState('');
     const [showClaimModal, setShowClaimModal] = useState(false); // modal "Chọn truyện để nhận duyệt"
     const [claimConfirmTarget, setClaimConfirmTarget] = useState(null); // { type: 'story', id, title } khi cần popup xác nhận
     /** Modal "Nhận duyệt đơn": danh sách truyện + chương chưa nhận (type 'story' | 'chapter') */
@@ -919,6 +928,56 @@ export function PublicationManagement() {
         }
     };
 
+    /** Mở popup xác nhận hủy nhận duyệt. */
+    const handleReleaseAllClaimsForStory = (pub) => {
+        const storyId = pub?.storyId ?? pub?.id;
+        if (!storyId) return;
+        const chapterCount = pub?.chapterCount ?? pub?.chapters?.length ?? 0;
+        setReleaseReason('');
+        setReleaseFormError('');
+        setReleaseConfirmTarget({
+            storyId,
+            storyTitle: pub?.storyTitle ?? '',
+            chapterCount,
+        });
+    };
+
+    /** Xác nhận trong popup — gửi đơn RELEASE_ASSIGNMENT (STORY) lên admin. */
+    const handleConfirmReleaseAllClaims = async () => {
+        const target = releaseConfirmTarget;
+        if (!target?.storyId) return;
+        const reason = releaseReason.trim();
+        if (reason.length < 10) {
+            setReleaseFormError('Lý do cần ít nhất 10 ký tự (theo quy định hệ thống).');
+            return;
+        }
+        setReleaseFormError('');
+        const { storyId } = target;
+        setReleasingAllClaimsStoryId(storyId);
+        try {
+            await submitReviewEscalation({
+                targetType: 'STORY',
+                targetId: String(storyId),
+                requestKind: 'RELEASE_ASSIGNMENT',
+                reason,
+                proposedDeadlineAt: null,
+            });
+            setReleaseConfirmTarget(null);
+            setReleaseReason('');
+            const openSid = selectedPublication?.storyId ?? selectedPublication?.id;
+            if (openSid != null && String(openSid) === String(storyId)) {
+                setSelectedPublication(null);
+            }
+            loadPublications(currentPage);
+            loadStats();
+            setReleaseResultMessage('Đã gửi đơn lên quản trị viên. Sau khi đơn được duyệt, các chương và phần nhận duyệt truyện (nếu có) sẽ trở lại hàng đợi. Trong lúc chờ, bạn không thể duyệt/từ chối chương của truyện này.');
+        } catch (err) {
+            setReleaseFormError(err?.response?.data?.message ?? err?.message ?? 'Không thể gửi đơn.');
+        } finally {
+            setReleasingAllClaimsStoryId(null);
+        }
+    };
+
     /** Xác nhận nhận duyệt từ popup. story_group = nhận cả truyện (nếu chưa) + tất cả chương của truyện đó trong một lần. */
     const handleConfirmClaimFromModal = async () => {
         if (!claimConfirmTarget) return;
@@ -1119,6 +1178,8 @@ export function PublicationManagement() {
                             claimingId={claimingId}
                             showClaimButton={false}
                             showModeratorSla={filterStatus === 'pending'}
+                            onReleaseAllClaimsForStory={handleReleaseAllClaimsForStory}
+                            releasingAllClaimsStoryId={releasingAllClaimsStoryId}
                         />
                         {totalPages > 1 && (
                             <Pagination
@@ -1373,6 +1434,175 @@ export function PublicationManagement() {
                                 }}
                             >
                                 Xác nhận nhận duyệt
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Popup xác nhận hủy nhận duyệt (toàn bộ chương + lock truyện nếu có) */}
+            {releaseConfirmTarget && (
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="release-confirm-title"
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10050,
+                        padding: '1rem',
+                    }}
+                    onClick={() => {
+                        if (releasingAllClaimsStoryId) return;
+                        setReleaseConfirmTarget(null);
+                        setReleaseFormError('');
+                    }}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '440px',
+                            width: '100%',
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h2 id="release-confirm-title" style={{ margin: '0 0 0.35rem', fontSize: '1.125rem', fontWeight: 700, color: '#0f172a', lineHeight: 1.35 }}>
+                            Trả truyện về hàng đợi kiểm duyệt chung?
+                        </h2>
+                        <p style={{ margin: '0 0 0.65rem', fontSize: '0.8125rem', fontWeight: 600, color: '#64748b' }}>
+                            Gửi đơn lên quản trị viên — sau khi đơn được <strong>chấp nhận</strong>, hệ thống mới trả các mục về hàng đợi (giống luồng hủy nhận duyệt thông thường).
+                        </p>
+                        <p style={{ margin: '0 0 0.75rem', fontSize: '0.9375rem', color: '#334155', lineHeight: 1.55 }}>
+                            Yêu cầu này áp dụng cho <strong>tất cả chương</strong> bạn đang giữ trong truyện
+                            {releaseConfirmTarget.chapterCount > 0 ? (
+                                <> (hiện <strong>{releaseConfirmTarget.chapterCount}</strong> chương)</>
+                            ) : null}
+                            {' '}và phần nhận duyệt <strong>truyện</strong> (nếu bạn đã nhận). Trong lúc đơn chờ xử lý, bạn không thể duyệt/từ chối chương của truyện này.
+                        </p>
+                        {releaseConfirmTarget.storyTitle ? (
+                            <p style={{ margin: '0 0 0.75rem', fontSize: '0.875rem', color: '#475569', padding: '0.65rem 0.75rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                <span style={{ color: '#64748b' }}>Truyện áp dụng:</span>{' '}
+                                <strong style={{ color: '#0f172a' }}>&quot;{releaseConfirmTarget.storyTitle}&quot;</strong>
+                            </p>
+                        ) : null}
+                        <label style={{ display: 'block', marginBottom: '0.75rem', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
+                            Lý do gửi đơn <span style={{ color: '#ef4444' }}>*</span> (tối thiểu 10 ký tự)
+                            <textarea
+                                value={releaseReason}
+                                onChange={(e) => { setReleaseReason(e.target.value); if (releaseFormError) setReleaseFormError(''); }}
+                                rows={4}
+                                placeholder="Ví dụ: Không đủ thời gian xử lý hết khối chương, đề nghị trả về hàng đợi..."
+                                disabled={!!releasingAllClaimsStoryId}
+                                style={{
+                                    display: 'block',
+                                    width: '100%',
+                                    marginTop: '0.35rem',
+                                    padding: '0.5rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid #cbd5e1',
+                                    fontFamily: 'inherit',
+                                    resize: 'vertical',
+                                    boxSizing: 'border-box',
+                                }}
+                            />
+                        </label>
+                        {releaseFormError ? (
+                            <p style={{ margin: '0 0 0.75rem', fontSize: '0.8125rem', color: '#b91c1c' }}>{releaseFormError}</p>
+                        ) : null}
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <button
+                                type="button"
+                                disabled={!!releasingAllClaimsStoryId}
+                                onClick={() => { setReleaseConfirmTarget(null); setReleaseFormError(''); }}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    backgroundColor: '#f1f5f9',
+                                    color: '#475569',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: releasingAllClaimsStoryId ? 'wait' : 'pointer',
+                                }}
+                            >
+                                Đóng
+                            </button>
+                            <button
+                                type="button"
+                                disabled={!!releasingAllClaimsStoryId}
+                                onClick={handleConfirmReleaseAllClaims}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    backgroundColor: releasingAllClaimsStoryId ? '#94a3b8' : '#dc2626',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: releasingAllClaimsStoryId ? 'wait' : 'pointer',
+                                }}
+                            >
+                                {releasingAllClaimsStoryId ? 'Đang gửi...' : 'Gửi đơn lên quản trị'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Thông báo đã gửi đơn thành công */}
+            {releaseResultMessage && (
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10051,
+                        padding: '1rem',
+                    }}
+                    onClick={() => setReleaseResultMessage(null)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '400px',
+                            width: '100%',
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <p style={{ margin: '0 0 1rem', fontSize: '0.9375rem', color: '#334155', lineHeight: 1.5 }}>
+                            {releaseResultMessage}
+                        </p>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                                type="button"
+                                onClick={() => setReleaseResultMessage(null)}
+                                style={{
+                                    padding: '0.5rem 1rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    backgroundColor: '#0ea5e9',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                Đã hiểu
                             </button>
                         </div>
                     </div>

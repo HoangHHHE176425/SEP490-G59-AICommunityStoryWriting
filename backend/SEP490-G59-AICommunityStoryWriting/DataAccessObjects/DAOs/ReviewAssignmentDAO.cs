@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -74,6 +74,37 @@ namespace DataAccessObjects.DAOs
             return (assignment.assignee_id, assignment.assigned_at, name ?? "–", assignment.review_deadline_at);
         }
 
+        /// <summary>Batch: claim đang CLAIMED cho nhiều target (tránh N+1 khi list chapter).</summary>
+        public static Dictionary<Guid, (Guid AssigneeId, DateTime AssignedAt, string DisplayName, DateTime? ReviewDeadlineAt)> GetActiveClaimInfosByTargetIds(
+            string targetType,
+            IReadOnlyList<Guid> targetIds)
+        {
+            var result = new Dictionary<Guid, (Guid, DateTime, string, DateTime?)>();
+            if (targetIds == null || targetIds.Count == 0)
+                return result;
+
+            var idSet = targetIds.ToHashSet();
+            using var context = new StoryPlatformDbContext();
+            var rows = context.review_assignments
+                .AsNoTracking()
+                .Include(r => r.assignee)
+                .ThenInclude(u => u.user_profiles)
+                .Where(r => r.target_type == targetType && r.status == StatusClaimed && idSet.Contains(r.target_id))
+                .ToList();
+
+            foreach (var assignment in rows)
+            {
+                if (assignment.assignee == null)
+                    continue;
+                var name = assignment.assignee.user_profiles?.nickname?.Trim();
+                if (string.IsNullOrEmpty(name))
+                    name = assignment.assignee.email;
+                result[assignment.target_id] = (assignment.assignee_id, assignment.assigned_at, name ?? "–", assignment.review_deadline_at);
+            }
+
+            return result;
+        }
+
         /// <summary>Kiểm tra target đã bị claim chưa (bởi bất kỳ ai).</summary>
         public static bool IsLocked(string targetType, Guid targetId)
         {
@@ -128,6 +159,18 @@ namespace DataAccessObjects.DAOs
                 .Where(r => r.status == StatusClaimed)
                 .GroupBy(r => r.assignee_id)
                 .ToDictionary(g => g.Key, g => g.Count());
+        }
+
+        /// <summary>Id các chương đang CLAIMED bởi moderator, thuộc <paramref name="storyId"/> — sắp xếp <c>order_index</c> giảm dần (chương số cao trước).</summary>
+        public static List<Guid> GetMyClaimedChapterIdsForStoryOrderedByOrderIndexDesc(Guid storyId, Guid moderatorId)
+        {
+            using var context = new StoryPlatformDbContext();
+            return (from r in context.review_assignments.AsNoTracking()
+                    join c in context.chapters.AsNoTracking() on r.target_id equals c.id
+                    where r.target_type == TargetTypeChapter && r.status == StatusClaimed
+                          && r.assignee_id == moderatorId && c.story_id == storyId
+                    orderby c.order_index descending
+                    select c.id).ToList();
         }
 
         /// <summary>Kiểm tra target có đang được assign cho moderator này không.</summary>

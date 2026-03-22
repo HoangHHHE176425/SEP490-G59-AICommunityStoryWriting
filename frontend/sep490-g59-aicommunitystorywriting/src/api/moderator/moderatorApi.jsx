@@ -118,7 +118,7 @@ export async function getReviewAssignmentSelf(targetType, targetId) {
 }
 
 /**
- * Gửi đơn báo cáo lên admin (gia hạn / hủy nhận duyệt).
+ * Gửi đơn báo cáo lên admin (gia hạn hạn duyệt / hủy nhận duyệt RELEASE_ASSIGNMENT).
  * @param {{ targetType: string, targetId: string, requestKind: string, reason: string, proposedDeadlineAt?: string|null }} dto
  */
 export async function submitReviewEscalation(dto) {

@@ -211,12 +211,13 @@ namespace Services.Implementations
             };
             var result = _chapterService.GetAll(query);
             var pendingEscalationChapterIds = ReviewEscalationDAO.GetPendingTargetIds(ReviewAssignmentDAO.TargetTypeChapter);
+            var pendingEscalationStoryIds = ReviewEscalationDAO.GetPendingTargetIds(ReviewAssignmentDAO.TargetTypeStory);
 
             if (useMemory)
             {
                 var list = result.Items.ToList();
                 foreach (var item in list)
-                    EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds);
+                    EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds, pendingEscalationStoryIds);
 
                 if (!string.IsNullOrWhiteSpace(timeStatusFilter))
                 {
@@ -244,11 +245,11 @@ namespace Services.Implementations
             }
 
             foreach (var item in result.Items)
-                EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds);
+                EnrichPendingChapterItem(item, moderatorId, pendingEscalationChapterIds, pendingEscalationStoryIds);
             return result;
         }
 
-        private void EnrichPendingChapterItem(ChapterListItemDto item, Guid? moderatorId, HashSet<Guid> pendingEscalationChapterIds)
+        private void EnrichPendingChapterItem(ChapterListItemDto item, Guid? moderatorId, HashSet<Guid> pendingEscalationChapterIds, HashSet<Guid> pendingEscalationStoryIds)
         {
             var pendingSince = item.UpdatedAt ?? item.CreatedAt;
             var authorSubmitted = ModeratorReviewSlaHelper.GetAuthorSubmittedUtc(
@@ -263,7 +264,9 @@ namespace Services.Implementations
                 item.IsClaimedByMe = moderatorId.HasValue && claim.Value.AssigneeId == moderatorId.Value;
             }
 
-            item.HasPendingEscalation = pendingEscalationChapterIds.Contains(item.Id);
+            var sid = item.StoryId;
+            item.HasPendingEscalation = pendingEscalationChapterIds.Contains(item.Id)
+                || (sid.HasValue && pendingEscalationStoryIds.Contains(sid.Value));
             var fallbackDeadline = ResolveReviewDeadlineUtc(pendingSince, claim);
             item.DeadlineAt = null;
             item.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
@@ -524,6 +527,18 @@ namespace Services.Implementations
             throw new InvalidOperationException("Đang có báo cáo chờ admin xử lý — không thể duyệt hoặc từ chối cho đến khi admin quyết định.");
         }
 
+        /// <summary>Đơn escalation gắn <c>STORY</c> (vd. trả cả truyện về hàng đợi) đang PENDING → chặn duyệt/từ chối chương mà moderator đang giữ.</summary>
+        private static void EnsureNoPendingStoryEscalationBlocksChapterReview(Guid chapterId, Guid? storyId, Guid moderatorId)
+        {
+            if (!storyId.HasValue || storyId.Value == Guid.Empty)
+                return;
+            if (!ReviewEscalationDAO.HasPendingForTarget(ReviewAssignmentDAO.TargetTypeStory, storyId.Value))
+                return;
+            if (!ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId))
+                return;
+            throw new InvalidOperationException("Đang có báo cáo chờ quản trị viên xử lý ở cấp truyện — không thể duyệt hoặc từ chối chương cho đến khi đơn được xử lý.");
+        }
+
         private static DateTime NormalizeToUtc(DateTime value)
         {
             return value.Kind switch
@@ -761,6 +776,7 @@ namespace Services.Implementations
             }
             EnsureModeratorHasClaimedForReview(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
             EnsureNoPendingEscalationBlocksModeratorReview(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId);
+            EnsureNoPendingStoryEscalationBlocksChapterReview(chapterId, chapter.story_id, moderatorId);
 
             // Có version chờ duyệt: từ chối (các) version đó, không đổi trạng thái chương gốc (dù chương đang PUBLISHED, DRAFT hay REJECTED).
             // Không ghi LogModeration("CHAPTER", ...) ở đây: lý do từ chối version đã lưu trên từng version (rejection_reason). API "lý do từ chối chương" (GetLatestRejection CHAPTER) chỉ dùng cho khi chương gốc bị từ chối, tránh lý do version đè lên lý do chương.

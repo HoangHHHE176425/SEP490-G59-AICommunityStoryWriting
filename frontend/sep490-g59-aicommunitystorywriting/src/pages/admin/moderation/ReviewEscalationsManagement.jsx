@@ -8,6 +8,7 @@ import {
     getReviewEscalationLog,
 } from '../../../api/admin/adminModerationApi';
 import { getChapterReviewContent } from '../../../api/moderator/moderatorApi';
+import { getChapters } from '../../../api/chapter/chapterApi';
 import { localDateTimeInputToIsoUtc } from '../../../utils/moderatorReviewSla';
 import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 
@@ -132,6 +133,18 @@ function truncate(str, max) {
     return `${t.slice(0, max)}…`;
 }
 
+/** Nhãn trạng thái chương cho bảng tóm tắt (không tải nội dung). */
+function chapterStatusVi(status) {
+    const s = String(status ?? '').toUpperCase();
+    const map = {
+        PENDING_REVIEW: 'Chờ duyệt',
+        PUBLISHED: 'Đã xuất bản',
+        REJECTED: 'Từ chối',
+        DRAFT: 'Bản nháp',
+    };
+    return map[s] || (status ? String(status) : '—');
+}
+
 function TargetTitleCell({ row }) {
     const tt = String(row.targetType ?? row.TargetType ?? '').toUpperCase();
     const id = row.targetId ?? row.TargetId;
@@ -190,6 +203,8 @@ export function ReviewEscalationsManagement() {
     const [adminNote, setAdminNote] = useState('');
     /** { loading, error, data } | null — nội dung chapter khi target CHAPTER */
     const [resolveChapterPreview, setResolveChapterPreview] = useState(null);
+    /** { loading, error, items } | null — metadata các chương khi target STORY (không nội dung) */
+    const [resolveStoryChaptersPreview, setResolveStoryChaptersPreview] = useState(null);
     const [resolving, setResolving] = useState(false);
 
     /** Log tab */
@@ -328,29 +343,74 @@ export function ReviewEscalationsManagement() {
     useEffect(() => {
         if (!resolveRow) {
             setResolveChapterPreview(null);
-            return;
+            setResolveStoryChaptersPreview(null);
+            return undefined;
         }
         const tt = String(resolveRow.targetType ?? resolveRow.TargetType ?? '').toUpperCase();
         const tid = resolveRow.targetId ?? resolveRow.TargetId;
-        if (tt !== 'CHAPTER' || !tid) {
-            setResolveChapterPreview(null);
-            return;
-        }
         let cancelled = false;
-        setResolveChapterPreview({ loading: true, error: null, data: null });
-        getChapterReviewContent(tid)
-            .then((data) => {
-                if (!cancelled) setResolveChapterPreview({ loading: false, error: null, data });
-            })
-            .catch((e) => {
-                if (!cancelled) {
-                    setResolveChapterPreview({
-                        loading: false,
-                        error: e?.response?.data?.message ?? e?.message ?? 'Không tải được nội dung chương.',
-                        data: null,
+
+        if (tt === 'CHAPTER' && tid) {
+            setResolveChapterPreview({ loading: true, error: null, data: null });
+            getChapterReviewContent(tid)
+                .then((data) => {
+                    if (!cancelled) setResolveChapterPreview({ loading: false, error: null, data });
+                })
+                .catch((e) => {
+                    if (!cancelled) {
+                        setResolveChapterPreview({
+                            loading: false,
+                            error: e?.response?.data?.message ?? e?.message ?? 'Không tải được nội dung chương.',
+                            data: null,
+                        });
+                    }
+                });
+        } else {
+            setResolveChapterPreview(null);
+        }
+
+        if (tt === 'STORY' && tid) {
+            const kind = String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase();
+            const isRelease = kind === 'RELEASE_ASSIGNMENT';
+            const releaseIds = resolveRow.releaseAffectedChapterIds ?? resolveRow.ReleaseAffectedChapterIds;
+            const idList = Array.isArray(releaseIds) ? releaseIds.map((x) => String(x)) : [];
+
+            if (isRelease && idList.length > 0) {
+                setResolveStoryChaptersPreview({ loading: true, error: null, items: [] });
+                getChapters({
+                    storyId: String(tid),
+                    includeChapterIds: idList,
+                    page: 1,
+                    pageSize: Math.max(idList.length, 20),
+                    sortBy: 'order_index',
+                    sortOrder: 'asc',
+                })
+                    .then((res) => {
+                        const list = res?.items ?? res?.Items ?? [];
+                        const arr = Array.isArray(list) ? list : [];
+                        const sorted = [...arr].sort(
+                            (a, b) => (Number(a.orderIndex ?? a.OrderIndex ?? 0)) - (Number(b.orderIndex ?? b.OrderIndex ?? 0)),
+                        );
+                        if (!cancelled) setResolveStoryChaptersPreview({ loading: false, error: null, items: sorted });
+                    })
+                    .catch((e) => {
+                        if (!cancelled) {
+                            setResolveStoryChaptersPreview({
+                                loading: false,
+                                error: e?.response?.data?.message ?? e?.message ?? 'Không tải được danh sách chương.',
+                                items: [],
+                            });
+                        }
                     });
-                }
-            });
+            } else if (isRelease) {
+                setResolveStoryChaptersPreview({ loading: false, error: null, items: [] });
+            } else {
+                setResolveStoryChaptersPreview(null);
+            }
+        } else {
+            setResolveStoryChaptersPreview(null);
+        }
+
         return () => {
             cancelled = true;
         };
@@ -945,19 +1005,111 @@ export function ReviewEscalationsManagement() {
                                 </p>
                             </div>
 
-                            <div style={{ marginBottom: 14, padding: 12, background: T.bg, borderRadius: 8, border: `1px solid ${T.border}`, fontSize: '0.8125rem' }}>
-                                <div style={{ fontWeight: 600, marginBottom: 8, color: T.title }}>Chi tiết moderator</div>
-                                <div style={{ marginBottom: 6 }}>
-                                    <span style={{ color: T.slate }}>Hạn duyệt hiện tại (lock):</span>{' '}
-                                    <strong>{formatApiDateTimeLocalVi(resolveRow.currentAssignmentDeadlineAt ?? resolveRow.CurrentAssignmentDeadlineAt)}</strong>
-                                </div>
-                                <div>
-                                    <div style={{ fontWeight: 700, color: T.slate, marginBottom: 4 }}>Lý do</div>
-                                    <div style={{ padding: 8, background: T.card, borderRadius: 6, border: `1px solid ${T.border}`, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                                        {(resolveRow.reason ?? resolveRow.Reason ?? '').trim() || '—'}
+                            {String(resolveRow.targetType ?? resolveRow.TargetType ?? '').toUpperCase() === 'STORY' &&
+                                String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase() === 'RELEASE_ASSIGNMENT' && (
+                                    <div style={{ marginBottom: 16 }}>
+                                        <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title, marginBottom: 8 }}>
+                                            Các chương đang nhận duyệt (phạm vi hủy nhận duyệt)
+                                        </div>
+                                        {(() => {
+                                            const rids = resolveRow.releaseAffectedChapterIds ?? resolveRow.ReleaseAffectedChapterIds;
+                                            const needFetch = Array.isArray(rids) && rids.length > 0;
+                                            const loading = needFetch && (!resolveStoryChaptersPreview || resolveStoryChaptersPreview.loading);
+                                            return loading ? (
+                                                <p style={{ fontSize: '0.8125rem', color: T.slate, margin: 0 }}>Đang tải danh sách chương…</p>
+                                            ) : null;
+                                        })()}
+                                        {resolveStoryChaptersPreview?.error && (
+                                            <p style={{ fontSize: '0.8125rem', color: '#b91c1c', margin: 0 }}>{resolveStoryChaptersPreview.error}</p>
+                                        )}
+                                        {resolveStoryChaptersPreview &&
+                                            !resolveStoryChaptersPreview.loading &&
+                                            !resolveStoryChaptersPreview.error &&
+                                            (resolveStoryChaptersPreview.items?.length ?? 0) === 0 && (
+                                                <p style={{ fontSize: '0.8125rem', color: T.slate, margin: 0 }}>
+                                                    Không có chương nào đang được moderator này giữ lock trên truyện (có thể chỉ còn lock cấp truyện).
+                                                </p>
+                                            )}
+                                        {resolveStoryChaptersPreview &&
+                                            !resolveStoryChaptersPreview.loading &&
+                                            !resolveStoryChaptersPreview.error &&
+                                            (resolveStoryChaptersPreview.items?.length ?? 0) > 0 && (
+                                                <div
+                                                    style={{
+                                                        maxHeight: 280,
+                                                        overflow: 'auto',
+                                                        border: `1px solid ${T.border}`,
+                                                        borderRadius: 8,
+                                                    }}
+                                                >
+                                                    <table style={{ ...tableBase, margin: 0, width: '100%' }}>
+                                                        <thead>
+                                                            <tr>
+                                                                {['#', 'Tiêu đề', 'Trạng thái', 'Số từ', 'Tạo lúc', 'Cập nhật', 'Gửi duyệt', 'Hạn (SLA)', 'Người nhận duyệt'].map((h) => (
+                                                                    <th key={h} style={{ ...thBase, fontSize: '0.7rem', whiteSpace: 'nowrap', padding: '8px 6px' }}>
+                                                                        {h}
+                                                                    </th>
+                                                                ))}
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {resolveStoryChaptersPreview.items.map((ch, rowIdx) => {
+                                                                const oid = ch.id ?? ch.Id;
+                                                                const oiRaw = ch.orderIndex ?? ch.OrderIndex ?? ch.order_index;
+                                                                const oiNum = oiRaw != null && oiRaw !== '' ? Number(oiRaw) : NaN;
+                                                                const ord = Number.isFinite(oiNum) && oiNum > 0 ? oiNum : rowIdx + 1;
+                                                                const fullTitle = (ch.title ?? ch.Title ?? '—').toString();
+                                                                const st = chapterStatusVi(ch.status ?? ch.Status);
+                                                                const wc = ch.wordCount ?? ch.WordCount;
+                                                                const created = ch.createdAt ?? ch.CreatedAt;
+                                                                const updated = ch.updatedAt ?? ch.UpdatedAt;
+                                                                const ps = ch.pendingSince ?? ch.PendingSince;
+                                                                const dl = ch.deadlineAt ?? ch.DeadlineAt;
+                                                                const claim = ch.claimedByDisplayName ?? ch.ClaimedByDisplayName;
+                                                                return (
+                                                                    <tr key={oid}>
+                                                                        <td style={{ ...tdBase, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>{ord}</td>
+                                                                        <td
+                                                                            style={{
+                                                                                ...tdBase,
+                                                                                fontSize: '0.72rem',
+                                                                                maxWidth: 200,
+                                                                                overflow: 'hidden',
+                                                                                textOverflow: 'ellipsis',
+                                                                                whiteSpace: 'nowrap',
+                                                                            }}
+                                                                            title={fullTitle}
+                                                                        >
+                                                                            {fullTitle}
+                                                                        </td>
+                                                                        <td style={{ ...tdBase, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>{st}</td>
+                                                                        <td style={{ ...tdBase, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
+                                                                            {wc != null && wc !== '' ? Number(wc).toLocaleString('vi-VN') : '—'}
+                                                                        </td>
+                                                                        <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
+                                                                            {formatApiDateTimeLocalVi(created)}
+                                                                        </td>
+                                                                        <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
+                                                                            {formatApiDateTimeLocalVi(updated)}
+                                                                        </td>
+                                                                        <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
+                                                                            {formatApiDateTimeLocalVi(ps)}
+                                                                        </td>
+                                                                        <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
+                                                                            {formatApiDateTimeLocalVi(dl)}
+                                                                        </td>
+                                                                        <td style={{ ...tdBase, fontSize: '0.72rem', maxWidth: 140, wordBreak: 'break-word' }}>
+                                                                            {claim || '—'}
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            )}
                                     </div>
-                                </div>
-                            </div>
+                                )}
 
                             {String(resolveRow.targetType ?? resolveRow.TargetType ?? '').toUpperCase() === 'CHAPTER' && (
                                 <div style={{ marginBottom: 16 }}>

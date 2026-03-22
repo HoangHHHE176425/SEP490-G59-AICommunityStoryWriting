@@ -65,14 +65,32 @@ namespace Services.Implementations
             if (dto == null)
                 throw new ArgumentNullException(nameof(dto));
             var tt = NormalizeTargetType(dto.TargetType);
-            if (!ReviewAssignmentDAO.IsAssignedTo(tt, dto.TargetId, senderId))
+            var kind = (dto.RequestKind ?? "").Trim().ToUpperInvariant();
+
+            var assignedOk = ReviewAssignmentDAO.IsAssignedTo(tt, dto.TargetId, senderId);
+            if (kind == ReviewEscalationDAO.KindRelease
+                && string.Equals(tt, ReviewAssignmentDAO.TargetTypeStory, StringComparison.OrdinalIgnoreCase)
+                && !assignedOk)
+            {
+                assignedOk = SenderHoldsAnyStoryOrChapterClaimOnStory(dto.TargetId, senderId);
+            }
+
+            if (!assignedOk)
                 throw new InvalidOperationException("Chỉ moderator đang nhận duyệt mục này mới được gửi báo cáo.");
             if (ReviewEscalationDAO.HasPendingForTarget(tt, dto.TargetId))
                 throw new InvalidOperationException("Đã có đơn chờ admin xử lý cho mục này.");
+            if (kind == ReviewEscalationDAO.KindRelease
+                && string.Equals(tt, ReviewAssignmentDAO.TargetTypeStory, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var chId in ReviewAssignmentDAO.GetMyClaimedChapterIdsForStoryOrderedByOrderIndexDesc(dto.TargetId, senderId))
+                {
+                    if (ReviewEscalationDAO.HasPendingForTarget(ReviewAssignmentDAO.TargetTypeChapter, chId))
+                        throw new InvalidOperationException("Có chương đang có đơn báo cáo chờ quản trị viên xử lý. Vui lòng chờ xử lý hoặc rút đơn chương trước khi gửi đơn trả cả truyện về hàng đợi.");
+                }
+            }
+
             if (!TargetStillInReviewQueue(tt, dto.TargetId))
                 throw new InvalidOperationException("Nội dung không còn ở trạng thái chờ duyệt phù hợp.");
-
-            var kind = (dto.RequestKind ?? "").Trim().ToUpperInvariant();
             if (kind != ReviewEscalationDAO.KindExtend && kind != ReviewEscalationDAO.KindRelease)
                 throw new ArgumentException("requestKind phải là EXTEND_DEADLINE hoặc RELEASE_ASSIGNMENT.");
             var reason = (dto.Reason ?? "").Trim();
@@ -212,15 +230,46 @@ namespace Services.Implementations
                 return;
             }
 
+            Guid? newAssignee = dto.ReassignToUserId;
+            if (newAssignee.HasValue && newAssignee.Value == Guid.Empty)
+                newAssignee = null;
+
+            // RELEASE + STORY + moderator đang giữ ít nhất một chương: một đơn duyệt = trả tất cả chương + lock truyện (nếu có).
+            if (row.request_kind == ReviewEscalationDAO.KindRelease
+                && string.Equals(row.target_type, ReviewAssignmentDAO.TargetTypeStory, StringComparison.OrdinalIgnoreCase))
+            {
+                var bulkChapterIds = ReviewAssignmentDAO.GetMyClaimedChapterIdsForStoryOrderedByOrderIndexDesc(row.target_id, row.sender_id);
+                if (bulkChapterIds.Count > 0)
+                {
+                    if (!SenderHoldsAnyStoryOrChapterClaimOnStory(row.target_id, row.sender_id))
+                        throw InvalidOp("Assignment đã thay đổi; không thể duyệt đơn này.");
+                    if (newAssignee.HasValue)
+                        throw InvalidOp("Đơn trả toàn bộ chương về hàng đợi không hỗ trợ giao trực tiếp cho moderator khác. Vui lòng để trống người nhận.");
+                    foreach (var chId in bulkChapterIds)
+                    {
+                        if (ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeChapter, chId, row.sender_id))
+                            ReviewAssignmentDAO.ReleaseClaimAndOptionallyReassign(
+                                ReviewAssignmentDAO.TargetTypeChapter, chId, row.sender_id, null, null);
+                    }
+                    if (ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeStory, row.target_id, row.sender_id))
+                        ReviewAssignmentDAO.ReleaseClaimAndOptionallyReassign(
+                            ReviewAssignmentDAO.TargetTypeStory, row.target_id, row.sender_id, null, null);
+                    row.status = ReviewEscalationDAO.StatusApproved;
+                    row.resolver_id = resolverId;
+                    row.resolver_note = string.IsNullOrWhiteSpace(dto.AdminNote) ? null : dto.AdminNote.Trim();
+                    row.confirmed_deadline_at = null;
+                    row.resolved_at = DateTime.UtcNow;
+                    ReviewEscalationDAO.UpdateRow(row);
+                    _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
+                    return;
+                }
+            }
+
             if (!ReviewAssignmentDAO.IsAssignedTo(row.target_type, row.target_id, row.sender_id))
                 throw InvalidOp("Assignment đã thay đổi; không thể duyệt đơn này.");
 
             if (row.request_kind == ReviewEscalationDAO.KindRelease)
             {
-                Guid? newAssignee = dto.ReassignToUserId;
-                if (newAssignee.HasValue && newAssignee.Value == Guid.Empty)
-                    newAssignee = null;
-
                 if (newAssignee.HasValue)
                 {
                     if (newAssignee.Value == row.sender_id)
@@ -286,6 +335,16 @@ namespace Services.Implementations
             var created = r.created_at.Kind == DateTimeKind.Utc ? r.created_at : r.created_at.ToUniversalTime();
             var authorSubmitted = GetAuthorSubmissionUtcForReviewTarget(r.target_type, r.target_id);
 
+            List<Guid>? releaseAffectedChapterIds = null;
+            if (string.Equals(r.status, ReviewEscalationDAO.StatusPending, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(r.request_kind, ReviewEscalationDAO.KindRelease, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(r.target_type, ReviewAssignmentDAO.TargetTypeStory, StringComparison.OrdinalIgnoreCase))
+            {
+                var claimedDesc = ReviewAssignmentDAO.GetMyClaimedChapterIdsForStoryOrderedByOrderIndexDesc(r.target_id, r.sender_id);
+                if (claimedDesc.Count > 0)
+                    releaseAffectedChapterIds = Enumerable.Reverse(claimedDesc).ToList();
+            }
+
             return new ReviewEscalationListItemDto
             {
                 Id = r.id,
@@ -307,7 +366,8 @@ namespace Services.Implementations
                 ResolverName = r.resolver_id.HasValue ? NotificationDAO.GetUserDisplayName(r.resolver_id.Value) : null,
                 ResolverNote = r.resolver_note,
                 ResolvedAt = AsUtcForJson(r.resolved_at),
-                ConfirmedDeadlineAt = AsUtcForJson(r.confirmed_deadline_at)
+                ConfirmedDeadlineAt = AsUtcForJson(r.confirmed_deadline_at),
+                ReleaseAffectedChapterIds = releaseAffectedChapterIds
             };
         }
 
@@ -360,12 +420,32 @@ namespace Services.Implementations
             return null;
         }
 
+        private static bool SenderHoldsAnyStoryOrChapterClaimOnStory(Guid storyId, Guid senderId)
+        {
+            if (ReviewAssignmentDAO.IsAssignedTo(ReviewAssignmentDAO.TargetTypeStory, storyId, senderId))
+                return true;
+            return ReviewAssignmentDAO.GetMyClaimedChapterIdsForStoryOrderedByOrderIndexDesc(storyId, senderId).Count > 0;
+        }
+
         private bool TargetStillInReviewQueue(string targetType, Guid targetId)
         {
             if (string.Equals(targetType, ReviewAssignmentDAO.TargetTypeStory, StringComparison.OrdinalIgnoreCase))
             {
                 var s = _storyRepository.GetById(targetId);
-                return s != null && string.Equals(s.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase);
+                if (s == null)
+                    return false;
+                if (string.Equals(s.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                // Truyện đã xuất bản nhưng vẫn có chương / version chờ duyệt (đơn RELEASE cấp truyện từ moderator chỉ giữ chương).
+                foreach (var ch in _chapterRepository.GetByStoryId(targetId))
+                {
+                    if (string.Equals(ch.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
+                        return true;
+                    if (_versionRepository.GetByChapterId(ch.id).Any(v =>
+                            string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase)))
+                        return true;
+                }
+                return false;
             }
             if (string.Equals(targetType, ReviewAssignmentDAO.TargetTypeChapter, StringComparison.OrdinalIgnoreCase))
             {

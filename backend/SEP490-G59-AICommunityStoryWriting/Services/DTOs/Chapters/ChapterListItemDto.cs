@@ -40,7 +40,7 @@ namespace Services.DTOs.Chapters
 
         /// <summary>Mốc tác giả gửi duyệt (submitted_for_review_at; fallback nếu cũ).</summary>
         public DateTime? PendingSince { get; set; }
-        /// <summary>Moderator queue: không dùng (null). SLA theo <see cref="PendingSince"/> + <see cref="TimeStatus"/>.</summary>
+        /// <summary>Hạn SLA duyệt (ưu tiên review_deadline_at khi đã claim; không claim thì mốc gửi + policy ngày). List chapter (GetAll/GetByStoryId) điền khi chương đang trong luồng duyệt.</summary>
         public DateTime? DeadlineAt { get; set; }
         /// <summary>Mức ưu tiên theo thời gian chờ từ mốc gửi (OnTime / Warning / Critical / Overdue).</summary>
         public string? TimeStatus { get; set; }

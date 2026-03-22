@@ -87,6 +87,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [escalateReason, setEscalateReason] = useState('');
     const [escalateProposedDeadline, setEscalateProposedDeadline] = useState('');
     const [escalateSubmitting, setEscalateSubmitting] = useState(false);
+    /** Đơn escalation gắn STORY (vd. trả cả truyện về hàng đợi) — tách khỏi assignment theo từng chương. */
+    const [storyLevelReviewAssignment, setStoryLevelReviewAssignment] = useState(null);
 
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
@@ -292,6 +294,32 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         })();
         return () => { cancelled = true; };
     }, [publication?.status, chaptersLoading, selectedChapter, chapters.length, storyId]);
+
+    /** Khối nhiều chương: đơn PENDING cấp STORY (RELEASE / gia hạn truyện) vẫn phải chặn duyệt/từ chối chương. */
+    useEffect(() => {
+        if (publication?.status !== 'pending' || !storyId) {
+            setStoryLevelReviewAssignment(null);
+            return undefined;
+        }
+        const isMultiChapterContext =
+            publication?.type === 'story_group'
+            || (Array.isArray(publication?.chapters) && publication.chapters.length > 0)
+            || chapters.length > 0;
+        if (!isMultiChapterContext) {
+            setStoryLevelReviewAssignment(null);
+            return undefined;
+        }
+        let cancelled = false;
+        (async () => {
+            try {
+                const dto = await getReviewAssignmentSelf('STORY', storyId);
+                if (!cancelled) setStoryLevelReviewAssignment(dto);
+            } catch {
+                if (!cancelled) setStoryLevelReviewAssignment(null);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [publication?.status, publication?.type, publication?.chapters?.length, storyId, chapters.length]); // eslint-disable-line react-hooks/exhaustive-deps -- tránh dependency publication.chapters (ref)
 
     const escalationTarget = () => {
         if (selectedChapter && !selectedChapter.isVersionHistory) {
@@ -541,7 +569,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const minOrderInList = chapters.length > 0 ? Math.min(...chapters.map((c) => Number(c.orderIndex ?? (c.chapterNumber != null ? c.chapterNumber - 1 : 0)))) : -1;
     const isFirstInPendingQueue = selectedOrderIndex >= 0 && minOrderInList >= 0 && selectedOrderIndex === minOrderInList;
     const ra = reviewAssignment ?? {};
-    const hasPendingEscalationBlock = Boolean(ra.hasPendingEscalation ?? ra.HasPendingEscalation);
+    const sra = storyLevelReviewAssignment ?? {};
+    const hasPendingEscalationBlock = Boolean(
+        (ra.hasPendingEscalation ?? ra.HasPendingEscalation)
+        || (sra.hasPendingEscalation ?? sra.HasPendingEscalation),
+    );
     const baseCanApproveReject = selectedChapter && !selectedChapter?.isVersionHistory && (
         selectedOrderIndex === 0
         || publishedOrderIndices.has(Number(selectedOrderIndex - 1))
@@ -551,7 +583,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const orderHint = !baseCanApproveReject && selectedChapter
         ? `Phải duyệt hoặc từ chối chương ${selectedOrderIndex} trước khi xử lý chương ${selectedOrderIndex + 1}.`
         : hasPendingEscalationBlock
-            ? 'Đã gửi đơn báo cáo lên quản trị viên — chờ quản trị viên xử lý trước khi duyệt/từ chối.'
+            ? 'Đã gửi đơn lên quản trị viên (theo truyện hoặc theo chương) — chờ xử lý xong mới được duyệt / từ chối.'
             : '';
 
     const authorSubmittedForSla = ra.authorSubmittedAtUtc ?? ra.AuthorSubmittedAtUtc;
@@ -671,7 +703,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                             color: '#991b1b',
                             fontWeight: 600,
                         }}>
-                            Bạn đã gửi đơn báo cáo lên quản trị (đang chờ xử lý). Thao tác duyệt / từ chối bị khóa cho đến khi quản trị viên xử lý xong đơn.
+                            Bạn đã gửi đơn lên quản trị viên (gia hạn, trả truyện về hàng đợi, hoặc báo cáo theo chương) — đơn đang chờ xử lý.
+                            {' '}Thao tác <strong>duyệt</strong> và <strong>từ chối</strong> chương bị khóa cho đến khi quản trị viên xử lý xong.
                         </div>
                     )}
 
@@ -1520,62 +1553,37 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         onClick={(e) => e.stopPropagation()}
                     >
                         <h3 style={{ margin: '0 0 0.75rem', fontSize: '1.125rem', fontWeight: 700, color: '#0f172a' }}>
-                            Gửi báo cáo lên quản trị
+                            Gửi báo cáo lên quản trị — xin gia hạn hạn duyệt
                         </h3>
                         <p style={{ margin: '0 0 1rem', fontSize: '0.8125rem', color: '#64748b' }}>
-                            Chọn loại đơn. Sau khi gửi, bạn không thể duyệt/từ chối cho đến khi quản trị viên xử lý.
+                            Đơn gia hạn theo từng chương (hoặc truyện nếu bạn đang xem cấp truyện). Sau khi gửi, bạn không thể duyệt/từ chối mục đó cho đến khi quản trị viên xử lý.
+                            {' '}Để hủy nhận duyệt cả truyện, dùng nút <strong>Hủy nhận duyệt</strong> cạnh &quot;Xem chi tiết&quot; trên danh sách chờ duyệt.
                         </p>
-                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
-                            {[
-                                { k: 'EXTEND_DEADLINE', label: 'Xin gia hạn hạn duyệt' },
-                                { k: 'RELEASE_ASSIGNMENT', label: 'Hủy nhận duyệt (Chuyển về hàng đợi)' },
-                            ].map((o) => (
-                                <button
-                                    key={o.k}
-                                    type="button"
-                                    onClick={() => setEscalateKind(o.k)}
-                                    style={{
-                                        padding: '0.4rem 0.65rem',
-                                        fontSize: '0.75rem',
-                                        fontWeight: 600,
-                                        borderRadius: '8px',
-                                        border: escalateKind === o.k ? '2px solid #0ea5e9' : '1px solid #e2e8f0',
-                                        backgroundColor: escalateKind === o.k ? '#e0f2fe' : '#fff',
-                                        cursor: 'pointer',
-                                        textAlign: 'left',
-                                    }}
-                                >
-                                    {o.label}
-                                </button>
-                            ))}
+                        <div style={{ marginBottom: '0.75rem' }}>
+                            <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
+                                Hạn đề xuất sau gia hạn (bắt buộc)
+                                <input
+                                    type="datetime-local"
+                                    value={escalateProposedDeadline}
+                                    onChange={(e) => setEscalateProposedDeadline(e.target.value)}
+                                    style={{ display: 'block', width: '100%', marginTop: '0.35rem', padding: '0.5rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}
+                                />
+                            </label>
+                            <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.5rem 0 0', lineHeight: 1.45 }}>
+                                {(reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt) ? (
+                                    <>
+                                        <strong>Hạn duyệt hiện tại của bạn:</strong>{' '}
+                                        {formatDate(reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt)}.
+                                        {' '}Hạn đề xuất phải <strong>muộn hơn</strong> mốc này (gia hạn = kéo dài thêm, không được chọn ngày sớm hơn).
+                                        {' '}Ngoài ra phải cách <strong>thời điểm hiện tại ít nhất 24 giờ</strong>.
+                                    </>
+                                ) : (
+                                    <>
+                                        Hạn đề xuất phải <strong>muộn hơn hạn duyệt</strong> bạn đã chọn khi nhận đơn, và cách <strong>hiện tại ít nhất 24 giờ</strong>.
+                                    </>
+                                )}
+                            </p>
                         </div>
-                        {escalateKind === 'EXTEND_DEADLINE' && (
-                            <div style={{ marginBottom: '0.75rem' }}>
-                                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
-                                    Hạn đề xuất sau gia hạn (bắt buộc)
-                                    <input
-                                        type="datetime-local"
-                                        value={escalateProposedDeadline}
-                                        onChange={(e) => setEscalateProposedDeadline(e.target.value)}
-                                        style={{ display: 'block', width: '100%', marginTop: '0.35rem', padding: '0.5rem', borderRadius: '8px', border: '1px solid #cbd5e1' }}
-                                    />
-                                </label>
-                                <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.5rem 0 0', lineHeight: 1.45 }}>
-                                    {(reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt) ? (
-                                        <>
-                                            <strong>Hạn duyệt hiện tại của bạn:</strong>{' '}
-                                            {formatDate(reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt)}.
-                                            {' '}Hạn đề xuất phải <strong>muộn hơn</strong> mốc này (gia hạn = kéo dài thêm, không được chọn ngày sớm hơn).
-                                            {' '}Ngoài ra phải cách <strong>thời điểm hiện tại ít nhất 24 giờ</strong>.
-                                        </>
-                                    ) : (
-                                        <>
-                                            Hạn đề xuất phải <strong>muộn hơn hạn duyệt</strong> bạn đã chọn khi nhận đơn, và cách <strong>hiện tại ít nhất 24 giờ</strong>.
-                                        </>
-                                    )}
-                                </p>
-                            </div>
-                        )}
                         <label style={{ display: 'block', marginBottom: '1rem', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
                             Lý do <span style={{ color: '#ef4444' }}>*</span>
                             <textarea
