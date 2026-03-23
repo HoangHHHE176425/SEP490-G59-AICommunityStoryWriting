@@ -3,6 +3,7 @@ using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Repositories;
+using Services.DTOs.Community;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 
@@ -555,6 +556,21 @@ namespace Services.Implementations
         public (string? reason, DateTime? rejectedAt) GetLatestRejectionForStory(Guid storyId)
         {
             return ModerationLogDAO.GetLatestRejection("STORY", storyId);
+        }
+
+        public CommunityStatsDto GetPublicCommunityStats()
+        {
+            var q = _storyRepository.GetAll().Where(s =>
+                !s.compliance_hidden &&
+                s.status != null &&
+                s.status.ToUpper() == "PUBLISHED");
+
+            return new CommunityStatsDto
+            {
+                PublishedStoriesCount = q.Count(),
+                AuthorsCount = q.Where(s => s.author_id.HasValue).Select(s => s.author_id!.Value).Distinct().Count(),
+                TotalViews = q.Sum(s => (long)(s.total_views ?? 0))
+            };
         }
 
         private string GenerateSlug(string title)

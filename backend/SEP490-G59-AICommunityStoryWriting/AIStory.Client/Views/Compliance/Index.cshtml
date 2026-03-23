@@ -157,6 +157,22 @@
         <div id="crTableHost" class="table-responsive cr-table-wrap">
             <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
         </div>
+
+        <div class="mt-4">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div>
+                    <strong><i class="bi bi-flag"></i> Báo cáo bình luận (comment reports)</strong>
+                    <div class="small text-muted">COMPLIANCE có thể RESOLVED (ẩn comment) / DISMISSED, và gửi BAN_USER lên admin.</div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="crCommentRefreshBtn" title="Tải lại danh sách">
+                    <i class="bi bi-arrow-clockwise"></i> Làm mới
+                </button>
+            </div>
+            <div id="crCommentError" class="alert alert-danger py-2" style="display:none;"></div>
+            <div id="crCommentTableHost" class="table-responsive cr-table-wrap">
+                <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+            </div>
+        </div>
     </div>
 
     <div id="crPanelHistory" style="display:none;">
@@ -277,13 +293,31 @@
             </div>
         </div>
     </div>
+
+    <div class="modal fade" id="crModalCommentReportDetail" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-people me-1"></i>Chi tiết report comment</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="crCommentReportDetailBody">
+                    <div class="text-muted small">Đang tải…</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 @section Scripts {
     <script>
         let crPageSize = 20;
-        let crCtx = { storyId: '', authorId: null, complianceFlagged: false };
+        let crCtx = { storyId: '', authorId: null, complianceFlagged: false, commentId: null, isCommentReport: false };
         let crViewMode = 'active';
+        let crCommentPageSize = 50;
 
         function crApplyStatusFilterForRole() {
             const sel = document.getElementById('crStatuses');
@@ -353,6 +387,15 @@
                         const stitle = x.storyTitle || x.StoryTitle || '';
                         const sid = x.storyId || x.StoryId;
                         const reason = x.reasonCode || x.ReasonCode || '';
+                        const reasonLabel = x.reasonLabelVi || x.ReasonLabelVi || reason;
+                        const reportersArr = x.reporterDisplayNames || x.ReporterDisplayNames || [];
+                        const reportersText = reportersArr && reportersArr.length
+                            ? reportersArr.map(n => crEscapeHtml(String(n))).join(', ')
+                            : '';
+                        const reasonSummaryArr = x.reasonSummaryVi || x.ReasonSummaryVi || [];
+                        const reasonSummaryText = reasonSummaryArr && reasonSummaryArr.length
+                            ? reasonSummaryArr.map(s => crEscapeHtml(String(s))).join('<br/>')
+                            : '';
                         const st = x.status || x.Status || '';
                         const ca = x.createdAtUtc || x.CreatedAtUtc;
                         const ra = x.resolvedAtUtc || x.ResolvedAtUtc;
@@ -509,6 +552,357 @@
             if (cmt) parts.push('<span class="badge bg-dark">Tắt BL</span>');
             if (!parts.length) return '<span class="text-muted small">—</span>';
             return '<div class="cr-story-badges d-flex flex-wrap gap-1">' + parts.join('') + '</div>';
+        }
+
+        async function crLoadCommentReports() {
+            const host = document.getElementById('crCommentTableHost');
+            const err = document.getElementById('crCommentError');
+            if (!host) return;
+            if (err) {
+                err.style.display = 'none';
+            }
+            const isAdm = AuthHelper.isAdmin();
+            host.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+            try {
+                const data = await ApiService.complianceGetCommentReports({ page: 1, pageSize: crCommentPageSize, status: 'NEW,IN_REVIEW' });
+                const total = data.totalCount != null ? data.totalCount : data.TotalCount;
+                const rows = data.rows || data.Rows || [];
+
+                let html = '<table class="table table-sm table-hover align-middle"><thead class="table-light"><tr>' +
+                    '<th>Ưu tiên</th><th>Sev</th><th>#BC</th><th>TW</th><th>Truyện</th><th>Bình luận</th><th>Lý do</th><th>Trạng thái</th><th>Tạo</th><th>Lock</th><th class="text-end">Thao tác</th>' +
+                    '</tr></thead><tbody>';
+
+                // Used by click handler to display full reasons + full reporters.
+                // Must be declared at function scope (not inside else-branch), otherwise click may throw ReferenceError.
+                const commentDetailByCid = {};
+
+                if (!rows.length) {
+                    html += '<tr><td colspan="11" class="text-muted text-center py-4">Không có comment report mở.</td></tr>';
+                } else {
+                    const shownClaimByComment = new Set();
+                    const shownReleaseByComment = new Set();
+                    const shownResolveAllByComment = new Set();
+                    rows.forEach(function (x) {
+                        const rid = x.reportId || x.ReportId;
+                        const cid = x.commentId || x.CommentId;
+                        const sid = x.storyId || x.StoryId;
+                        const stitle = x.storyTitle || x.StoryTitle || '';
+                        const reason = x.reasonCode || x.ReasonCode || '';
+                        const sev = x.severityScore != null ? x.severityScore : x.SeverityScore;
+                        const sevFmt = (typeof sev === 'number' && !Number.isNaN(sev)) ? sev.toFixed(1) : String(sev);
+                        const status = x.status || x.Status || '';
+                        const ca = x.createdAtUtc || x.CreatedAtUtc;
+
+                        const uName = x.commentUserDisplayName || x.CommentUserDisplayName || '';
+                        const uEmail = x.commentUserEmail || x.CommentUserEmail || '';
+                        const reporterEmail = x.reporterEmail || x.ReporterEmail || '';
+                        const cmtCell = (uName ? crEscapeHtml(String(uName)) : '') +
+                            (uEmail ? ' <span class="text-muted">(' + crEscapeHtml(String(uEmail)) + ')</span>' : '');
+                        const banTitle = 'Ban user bị report (gửi admin).';
+                        const warnText = x.adminOrModeratorReplyWarningVi || x.AdminOrModeratorReplyWarningVi || null;
+
+                        const locked = x.isComplianceLocked === true || x.IsComplianceLocked === true;
+                        const mine = x.isComplianceClaimedByMe === true || x.IsComplianceClaimedByMe === true;
+                        const hasPendingAdmin = x.hasPendingAdminActionRequest === true || x.HasPendingAdminActionRequest === true;
+                        const stUp = (status || '').toUpperCase();
+                        const isOpenTicket = stUp === 'NEW' || stUp === 'IN_REVIEW';
+
+                        const lockCell = crFormatComplianceLockSla(x);
+
+                        // Compact summary but full details shown on click.
+                        const reasonSummaryArr = x.reasonSummaryVi || x.ReasonSummaryVi || [];
+                        const topReasons = reasonSummaryArr.slice(0, 2);
+                        const moreReasonsCount = reasonSummaryArr.length - topReasons.length;
+                        const reasonsBadgesHtml = topReasons.length
+                            ? '<div class="d-flex flex-wrap gap-1 mb-1">' + topReasons.map(s =>
+                                '<span class="badge bg-light text-dark border">' + crEscapeHtml(String(s)) + '</span>').join('') + '</div>'
+                            : '';
+                        const moreReasonsHtml = moreReasonsCount > 0
+                            ? '<div class="small text-muted">+' + crEscapeHtml(String(moreReasonsCount)) + ' lý do khác</div>'
+                            : '';
+
+                        const reportersArr = x.reporterDisplayNames || x.ReporterDisplayNames || [];
+                        const topReporters = reportersArr.slice(0, 2);
+                        const moreReportersCount = reportersArr.length - topReporters.length;
+                        const reportersCompactHtml = topReporters.length
+                            ? '<div class="small mt-1"><span class="text-muted">Người báo:</span> ' + topReporters.map(n => crEscapeHtml(String(n))).join(', ') +
+                              (moreReportersCount > 0 ? ' +' + crEscapeHtml(String(moreReportersCount)) : '') + '</div>'
+                            : '';
+
+                        const detailBtnHtml = (reasonSummaryArr.length > 0 || reportersArr.length > 0)
+                            ? '<button type="button" class="btn btn-link btn-sm p-0" data-cr-open-comment-detail data-cid="' + crEscapeHtml(String(cid)) + '">Xem tất cả</button>'
+                            : '';
+
+                        commentDetailByCid[cid] = {
+                            reasonSummaryArr: reasonSummaryArr,
+                            reportersArr: reportersArr,
+                            warnText: warnText
+                        };
+
+                        let claimBtn = '';
+                        // Giống report story: Claim lock chỉ phụ thuộc lock/role, không phụ thuộc isOpenTicket của representative status.
+                        if (!locked && !isAdm && !shownClaimByComment.has(cid) && !hasPendingAdmin) {
+                            claimBtn = '<button type="button" class="btn btn-outline-primary btn-sm" data-cr-claim-comment data-cid="' + crEscapeHtml(String(cid)) + '" title="Nhận lock để xử lý ticket này"><i class="bi bi-lock"></i> Nhận</button>';
+                            shownClaimByComment.add(cid);
+                        }
+
+                        let releaseBtn = '';
+                        if (locked && isAdm && !shownReleaseByComment.has(cid) && !hasPendingAdmin) {
+                            releaseBtn = '<button type="button" class="btn btn-outline-warning btn-sm" data-cr-release-comment data-cid="' + crEscapeHtml(String(cid)) + '" title="Admin: gỡ lock comment reports"><i class="bi bi-unlock"></i> Gỡ lock</button>';
+                            shownReleaseByComment.add(cid);
+                        }
+
+                        // Resolve select (RESOLVED hides comment; choose parent-only vs include replies).
+                        const canResolve = isAdm || mine;
+                        const resolveCell = canResolve
+                            ? (hasPendingAdmin
+                                ? '<span class="text-muted small">Đang chờ admin…</span>'
+                                : '<select class="form-select form-select-sm cr-comment-resolve-sel" data-rid="' + crEscapeHtml(String(rid)) + '" data-cid="' + crEscapeHtml(String(cid)) + '">' +
+                                    '<option value="">Đánh dấu…</option>' +
+                                    '<option value="RESOLVED_ALL">RESOLVED (ẩn toàn bộ reply)</option>' +
+                                    '<option value="RESOLVED_PARENT">RESOLVED (ẩn cha)</option>' +
+                                    '<option value="DISMISSED">DISMISSED (không ẩn)</option>' +
+                                    '</select>')
+                            : '<span class="text-muted small">—</span>';
+
+                        // Giống report story: sau khi compliance đổi trạng thái, vẫn giữ các "thao tác"
+                        // (ban user, bulk close, ...), chỉ dựa vào lock/claim thay vì dựa vào isOpenTicket của
+                        // representative status.
+                        const banBtn = (!isAdm && locked && mine && !hasPendingAdmin)
+                            ? '<button type="button" class="btn btn-outline-danger btn-sm" data-cr-open-admin-act-comment data-rid="' + crEscapeHtml(String(rid)) + '" data-cid="' + crEscapeHtml(String(cid)) + '" title="' + crEscapeHtml(banTitle) + '"><i class="bi bi-person-slash"></i></button>'
+                            : '';
+
+                        let actionCell = '<div class="d-inline-flex flex-column align-items-end gap-1">';
+                        if (claimBtn) actionCell += claimBtn;
+                        if (releaseBtn) actionCell += releaseBtn;
+                        if (banBtn) actionCell += banBtn;
+                        actionCell += resolveCell;
+
+                        // Bulk close comment thread (giống report story) - do COMPLIANCE tự bấm.
+                        if (!isAdm && locked && mine && !hasPendingAdmin && !shownResolveAllByComment.has(cid)) {
+                            actionCell +=
+                                '<div class="d-flex flex-wrap gap-1 mt-2 justify-content-end">' +
+                                '<button type="button" class="btn btn-success btn-sm" data-cr-resolve-all-comment data-cid="' + crEscapeHtml(String(cid)) + '" title="Đóng hết ticket comment thread này (RESOLVED, ẩn toàn bộ reply)">Xong hết ticket</button>' +
+                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-dismiss-all-comment data-cid="' + crEscapeHtml(String(cid)) + '" title="Bác bỏ hết ticket comment thread này (DISMISSED)">Bác bỏ hết</button>' +
+                                '</div>';
+                            shownResolveAllByComment.add(cid);
+                        }
+                        actionCell += '</div>';
+
+                        const pri = x.priorityScore != null ? x.priorityScore : x.PriorityScore;
+                        const rcnt = x.reportCount != null ? x.reportCount : x.ReportCount;
+                        const tw = x.timeWeight != null ? x.timeWeight : x.TimeWeight;
+                        const priFmt = (typeof pri === 'number' && !Number.isNaN(pri)) ? pri.toFixed(1) : String(pri);
+                        html += '<tr>' +
+                            '<td class="small text-break">' + crEscapeHtml(priFmt) + '</td>' +
+                            '<td class="small">' + crEscapeHtml(sevFmt) + '</td>' +
+                            '<td class="small">' + crEscapeHtml(String(rcnt)) + '</td>' +
+                            '<td class="small">' + crEscapeHtml(String(tw)) + '</td>' +
+                            '<td><a href="/Home/Story/' + encodeURIComponent(sid) + '" target="_blank" rel="noopener">' + crEscapeHtml(stitle) + '</a></td>' +
+                            '<td class="small">' + cmtCell + '</td>' +
+                            '<td class="small">' +
+                                reasonsBadgesHtml +
+                                moreReasonsHtml +
+                                (warnText ? '<div class="text-warning small mt-1">' + crEscapeHtml(String(warnText)) + '</div>' : '') +
+                                reportersCompactHtml +
+                                detailBtnHtml +
+                            '</td>' +
+                            '<td class="small">' + crEscapeHtml(status) + '</td>' +
+                            '<td class="small">' + crEscapeHtml(ca ? Utils.formatDateUtc(ca) : '—') + '</td>' +
+                            '<td class="small">' + lockCell + '</td>' +
+                            '<td class="text-end">' + actionCell + '</td>' +
+                            '</tr>';
+                    });
+                }
+
+                html += '</tbody></table>';
+                html += '<div class="small text-muted mt-2">Tổng: ' + total + '</div>';
+                host.innerHTML = html;
+
+                host.querySelectorAll('[data-cr-claim-comment]').forEach(function (btn) {
+                    btn.addEventListener('click', async function () {
+                        const cid = btn.getAttribute('data-cid');
+                        try {
+                            const r = await ApiService.complianceClaimCommentReports(cid);
+                            Utils.showAlert((r && (r.message || r.Message)) || 'Đã nhận lock.', 'success');
+                            crLoadCommentReports();
+                        } catch (e) {
+                            Utils.showAlert(e.message || e, 'danger');
+                        }
+                    });
+                });
+
+                host.querySelectorAll('[data-cr-release-comment]').forEach(function (btn) {
+                    btn.addEventListener('click', async function () {
+                        const cid = btn.getAttribute('data-cid');
+                        if (!confirm('ADMIN: Gỡ lock comment reports?')) return;
+                        try {
+                            const r = await ApiService.adminReleaseComplianceCommentClaim(cid);
+                            Utils.showAlert((r && (r.message || r.Message)) || 'Đã gỡ lock.', 'success');
+                            crLoadCommentReports();
+                        } catch (e) {
+                            Utils.showAlert(e.message || e, 'danger');
+                        }
+                    });
+                });
+
+                host.querySelectorAll('[data-cr-resolve-all-comment]').forEach(function (btn) {
+                    btn.addEventListener('click', async function () {
+                        const cid = btn.getAttribute('data-cid');
+                        if (!confirm('Đóng hết ticket comment thread này? (RESOLVED, ẩn toàn bộ reply)')) return;
+                        try {
+                            await ApiService.complianceResolveAllOpenCommentReports(cid, { status: 'RESOLVED', HideComment: true, IncludeReplies: true });
+                            Utils.showAlert('Đã đóng hết ticket comment.', 'success');
+                            crLoadCommentReports();
+                        } catch (e) {
+                            Utils.showAlert(e.message || e, 'danger');
+                        }
+                    });
+                });
+
+                host.querySelectorAll('[data-cr-dismiss-all-comment]').forEach(function (btn) {
+                    btn.addEventListener('click', async function () {
+                        const cid = btn.getAttribute('data-cid');
+                        if (!confirm('Bác bỏ hết ticket comment thread này? (DISMISSED)')) return;
+                        try {
+                            await ApiService.complianceResolveAllOpenCommentReports(cid, { status: 'DISMISSED', HideComment: false, IncludeReplies: true });
+                            Utils.showAlert('Đã bác bỏ hết ticket comment.', 'success');
+                            crLoadCommentReports();
+                        } catch (e) {
+                            Utils.showAlert(e.message || e, 'danger');
+                        }
+                    });
+                });
+
+                // Comment report detail modal: show all reasons + all reporters.
+                host.querySelectorAll('[data-cr-open-comment-detail]').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        const cid = btn.getAttribute('data-cid');
+                        const det = commentDetailByCid[cid];
+                        const body = document.getElementById('crCommentReportDetailBody');
+                        if (!body) return;
+                        if (!det) {
+                            body.innerHTML = '<div class="text-muted small">Không có dữ liệu.</div>';
+                            new bootstrap.Modal(document.getElementById('crModalCommentReportDetail')).show();
+                            return;
+                        }
+
+                        const reasonListHtml = det.reasonSummaryArr && det.reasonSummaryArr.length
+                            ? '' : '<div class="text-muted small mb-3">—</div>';
+
+                        const reasonItems = (det.reasonSummaryArr || []).map(function (raw) {
+                            const txt = String(raw ?? '');
+                            // Backend format: "Label (count)".
+                            const m = txt.match(/^(.*)\((\d+)\)\s*$/);
+                            if (m) {
+                                return { label: m[1].trim(), count: parseInt(m[2], 10) };
+                            }
+                            return { label: txt, count: 1 };
+                        });
+
+                        function renderReasons(minCount) {
+                            const list = (reasonItems || []).filter(x => (x.count || 0) >= minCount);
+                            if (!list.length)
+                                return '<div class="text-muted small mb-3">Không có lý do phù hợp.</div>';
+                            return '<div class="d-flex flex-wrap gap-1 mb-3">' +
+                                list.map(function (x) {
+                                    return '<span class="badge bg-light text-dark border" title="Số người báo: ' + crEscapeHtml(String(x.count)) + '">' +
+                                        crEscapeHtml(String(x.label)) + ' (' + crEscapeHtml(String(x.count)) + ')' +
+                                        '</span>';
+                                }).join('') +
+                                '</div>';
+                        }
+
+                        let minCount = 1;
+                        const reasonsBlockHtml = (reasonItems && reasonItems.length)
+                            ? (
+                                '<div class="mb-2 d-flex flex-wrap gap-2 align-items-center">' +
+                                '<span class="small text-muted">Lọc theo số lượng:</span>' +
+                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-min="1">Tất cả</button>' +
+                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-min="2">>= 2</button>' +
+                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-min="3">>= 3</button>' +
+                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-min="5">>= 5</button>' +
+                                '</div>' +
+                                '<div id="crCommentReasonFilterList">' + renderReasons(minCount) + '</div>'
+                              )
+                            : '<div class="text-muted small mb-3">—</div>';
+
+                        const reportersListHtml = det.reportersArr && det.reportersArr.length
+                            ? '<ul class="list-group list-group-flush">' +
+                              det.reportersArr.map(n =>
+                                  '<li class="list-group-item small">' + crEscapeHtml(String(n)) + '</li>'
+                              ).join('') +
+                              '</ul>'
+                            : '<div class="text-muted small">—</div>';
+
+                        body.innerHTML =
+                            '<div class="mb-2"><div class="small text-muted">Tất cả lý do report + số lượng</div></div>' +
+                            reasonsBlockHtml +
+                            '<div class="mb-2"><div class="small text-muted">Tất cả người report</div></div>' +
+                            reportersListHtml +
+                            (det.warnText ? '<div class="text-warning small mt-3">' + crEscapeHtml(String(det.warnText)) + '</div>' : '');
+
+                        // Wire filter buttons inside modal (reason count).
+                        const modalEl = document.getElementById('crModalCommentReportDetail');
+                        const listEl = document.getElementById('crCommentReasonFilterList');
+                        if (modalEl && listEl) {
+                            modalEl.querySelectorAll('[data-cr-reason-min]').forEach(function (b) {
+                                b.addEventListener('click', function () {
+                                    const mc = parseInt(b.getAttribute('data-cr-reason-min') || '1', 10);
+                                    minCount = Number.isFinite(mc) ? mc : 1;
+                                    listEl.innerHTML = renderReasons(minCount);
+                                });
+                            });
+                        }
+
+                        new bootstrap.Modal(document.getElementById('crModalCommentReportDetail')).show();
+                    });
+                });
+
+                host.querySelectorAll('.cr-comment-resolve-sel').forEach(function (sel) {
+                    sel.addEventListener('change', async function () {
+                        const v = sel.value;
+                        if (!v) return;
+                        const rid = sel.getAttribute('data-rid');
+                        try {
+                            if (v === 'DISMISSED') {
+                                await ApiService.complianceResolveCommentReport(rid, { status: 'DISMISSED', HideComment: false, IncludeReplies: true });
+                            } else if (v === 'RESOLVED_PARENT') {
+                                await ApiService.complianceResolveCommentReport(rid, { status: 'RESOLVED', HideComment: true, IncludeReplies: false });
+                            } else {
+                                await ApiService.complianceResolveCommentReport(rid, { status: 'RESOLVED', HideComment: true, IncludeReplies: true });
+                            }
+                            Utils.showAlert('Đã cập nhật comment report.', 'success');
+                            sel.value = '';
+                            crLoadCommentReports();
+                        } catch (e) {
+                            Utils.showAlert(e.message || e, 'danger');
+                            sel.value = '';
+                        }
+                    });
+                });
+
+                // Open admin action modal for BAN_USER (and optionally suspend) on comment author.
+                host.querySelectorAll('[data-cr-open-admin-act-comment]').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        const cid = btn.getAttribute('data-cid');
+                        crCtx.commentId = cid || '';
+                        crCtx.isCommentReport = true;
+                        crCtx.storyId = ''; // not used for comment action
+                        crCtx.authorId = null;
+                        document.getElementById('crBanMsg').value = '';
+                        document.getElementById('crSuspendMsg').value = '';
+                        document.getElementById('crSuspendUntilLocal').value = '';
+                        new bootstrap.Modal(document.getElementById('crModalAdminAction')).show();
+                    });
+                });
+            } catch (e) {
+                if (err) {
+                    err.textContent = e.message || String(e);
+                    err.style.display = 'block';
+                }
+                host.innerHTML = '';
+            }
         }
 
         async function crLoad() {
@@ -734,6 +1128,8 @@
                 err.style.display = 'block';
                 host.innerHTML = '';
             }
+            // Always load comment reports along with story reports.
+            crLoadCommentReports();
         }
 
         document.addEventListener('DOMContentLoaded', async function () {
@@ -769,6 +1165,13 @@
                 crLoad();
             });
 
+            const rbtn = document.getElementById('crCommentRefreshBtn');
+            if (rbtn) {
+                rbtn.addEventListener('click', function () {
+                    crLoadCommentReports();
+                });
+            }
+
             document.getElementById('crTableHost').addEventListener('click', function (ev) {
                 const rel = ev.target.closest('[data-cr-open-lock-rel]');
                 if (rel) {
@@ -793,6 +1196,8 @@
                 if (adm) {
                     crCtx.storyId = adm.getAttribute('data-sid') || '';
                     crCtx.authorId = adm.getAttribute('data-aid') || null;
+                    crCtx.commentId = null;
+                    crCtx.isCommentReport = false;
                     document.getElementById('crBanMsg').value = '';
                     document.getElementById('crSuspendMsg').value = '';
                     document.getElementById('crSuspendUntilLocal').value = '';
@@ -878,21 +1283,36 @@
                 const pid = pane ? pane.id : '';
                 try {
                     if (pid === 'crActBan') {
-                        await ApiService.complianceRequestAdminAction(crCtx.storyId, {
-                            requestKind: 'BAN_USER',
-                            message: document.getElementById('crBanMsg').value.trim() || null
-                        });
+                        if (crCtx.isCommentReport && crCtx.commentId) {
+                            await ApiService.complianceRequestAdminActionOnComment(crCtx.commentId, {
+                                requestKind: 'BAN_USER',
+                                message: document.getElementById('crBanMsg').value.trim() || null
+                            });
+                        } else {
+                            await ApiService.complianceRequestAdminAction(crCtx.storyId, {
+                                requestKind: 'BAN_USER',
+                                message: document.getElementById('crBanMsg').value.trim() || null
+                            });
+                        }
                     } else {
                         const iso = crToIsoUtcFromLocal(document.getElementById('crSuspendUntilLocal').value);
                         if (!iso) {
                             Utils.showAlert('Chọn thời điểm kết thúc tạm khóa viết.', 'warning');
                             return;
                         }
-                        await ApiService.complianceRequestAdminAction(crCtx.storyId, {
-                            requestKind: 'SUSPEND_AUTHOR_WRITING',
-                            message: document.getElementById('crSuspendMsg').value.trim() || null,
-                            proposedSuspendUntilUtc: iso
-                        });
+                        if (crCtx.isCommentReport && crCtx.commentId) {
+                            await ApiService.complianceRequestAdminActionOnComment(crCtx.commentId, {
+                                requestKind: 'SUSPEND_AUTHOR_WRITING',
+                                message: document.getElementById('crSuspendMsg').value.trim() || null,
+                                proposedSuspendUntilUtc: iso
+                            });
+                        } else {
+                            await ApiService.complianceRequestAdminAction(crCtx.storyId, {
+                                requestKind: 'SUSPEND_AUTHOR_WRITING',
+                                message: document.getElementById('crSuspendMsg').value.trim() || null,
+                                proposedSuspendUntilUtc: iso
+                            });
+                        }
                     }
                     bootstrap.Modal.getInstance(document.getElementById('crModalAdminAction')).hide();
                     Utils.showAlert('Đã gửi yêu cầu lên admin.', 'success');

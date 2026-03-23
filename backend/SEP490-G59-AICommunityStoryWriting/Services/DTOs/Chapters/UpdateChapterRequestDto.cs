@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.Chapters
+namespace Services.DTOs.Chapters
 {
     public class UpdateChapterRequestDto
     {
@@ -12,5 +12,8 @@
         public bool? IsAiClean { get; set; }
         /// Mô tả ngắn thay đổi (vd: Sửa lỗi chính tả). Chỉ lưu version khi chapter đã PUBLISHED.
         public string? ChangeSummary { get; set; }
+
+        /// <summary>Tỷ lệ % giống bản AI (đồng sáng tác), gửi khi xác nhận lưu sau preview so sánh.</summary>
+        public decimal? AiSimilarityPercent { get; set; }
     }
 }

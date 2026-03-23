@@ -22,4 +22,7 @@ public class AiGeneratedContentRepository : IAiGeneratedContentRepository
 
     public void UpdateChapterId(Guid id, Guid chapterId, int chapterOrderIndex)
         => AiGeneratedContentDAO.UpdateChapterId(id, chapterId, chapterOrderIndex);
+
+    public void DeleteAllByChapterId(Guid chapterId)
+        => AiGeneratedContentDAO.DeleteAllByChapterId(chapterId);
 }

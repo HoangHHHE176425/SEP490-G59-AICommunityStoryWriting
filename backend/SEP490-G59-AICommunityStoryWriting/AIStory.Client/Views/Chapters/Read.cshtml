@@ -138,6 +138,31 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="modal fade" id="chapterCommentReportModal" tabindex="-1">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="bi bi-flag"></i> Báo cáo bình luận</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="small text-muted mb-2" id="chapterCommentReportTitle"></p>
+                                <label class="form-label small">Lý do</label>
+                                <select class="form-select form-select-sm mb-2" id="chapterCommentReportReason"></select>
+                                <label class="form-label small">Mô tả thêm (tùy chọn)</label>
+                                <textarea class="form-control form-control-sm" id="chapterCommentReportDesc" rows="3" maxlength="4000"></textarea>
+                                <div class="small text-danger mt-2" id="chapterCommentReportErr" style="display:none;"></div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Đóng</button>
+                                <button type="button" class="btn btn-danger btn-sm" id="chapterCommentReportSubmitBtn">
+                                    <i class="bi bi-send"></i> Gửi báo cáo
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -205,6 +230,8 @@
         let replyingToCommentId = null;
         let replyingToDisplayName = null;
         let isChapterUnlocked = false;
+        let chapterCommentReportCommentId = null;
+        let chapterCommentReportReportedUserName = null;
 
         const CHAPTER_COMMENT_REACTIONS = [
             { type: 'LIKE', icon: 'bi-hand-thumbs-up', label: 'Thích' },
@@ -215,6 +242,47 @@
             { type: 'LOVE', icon: 'bi-heart-fill', label: 'Yêu thích' },
             { type: 'WOW', icon: 'bi-emoji-surprise', label: 'Wow' }
         ];
+
+        async function ensureChapterCommentReportReasons() {
+            const sel = document.getElementById('chapterCommentReportReason');
+            if (!sel || sel.options.length > 0) return;
+            try {
+                const list = await ApiService.getCommentReportReasons();
+                (list || []).forEach(function (r) {
+                    const o = document.createElement('option');
+                    o.value = r.code || r.Code;
+                    o.textContent = (r.labelVi || r.LabelVi || r.label || r.Label || o.value);
+                    sel.appendChild(o);
+                });
+            } catch (e) { console.error(e); }
+        }
+
+        window.openChapterCommentReport = function (commentId, reportedUserName) {
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để báo cáo bình luận.', 'warning');
+                window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                return;
+            }
+            chapterCommentReportCommentId = commentId;
+            chapterCommentReportReportedUserName = reportedUserName || '';
+            const titleEl = document.getElementById('chapterCommentReportTitle');
+            const errEl = document.getElementById('chapterCommentReportErr');
+            const descEl = document.getElementById('chapterCommentReportDesc');
+            const reasonSel = document.getElementById('chapterCommentReportReason');
+            if (titleEl) titleEl.textContent = reportedUserName ? `Bình luận của ${reportedUserName}` : 'Bình luận';
+            if (errEl) {
+                errEl.textContent = '';
+                errEl.style.display = 'none';
+            }
+            if (descEl) descEl.value = '';
+            if (!reasonSel || !reasonSel.options || reasonSel.options.length === 0) {
+                ensureChapterCommentReportReasons().then(function () {
+                    new bootstrap.Modal(document.getElementById('chapterCommentReportModal')).show();
+                });
+                return;
+            }
+            new bootstrap.Modal(document.getElementById('chapterCommentReportModal')).show();
+        };
 
         document.addEventListener('DOMContentLoaded', function() {
             // Bắt buộc đăng nhập mới được đọc chapter
@@ -230,6 +298,50 @@
             }
 
             loadChapter();
+
+            const crSpr = document.getElementById('chapterCommentReportSubmitBtn');
+            if (crSpr) {
+                crSpr.addEventListener('click', async function () {
+                    const err = document.getElementById('chapterCommentReportErr');
+                    if (err) {
+                        err.textContent = '';
+                        err.style.display = 'none';
+                    }
+                    const commentId = chapterCommentReportCommentId;
+                    if (!commentId) {
+                        if (err) {
+                            err.textContent = 'Không xác định bình luận.';
+                            err.style.display = 'block';
+                        }
+                        return;
+                    }
+                    const reason = document.getElementById('chapterCommentReportReason')?.value;
+                    if (!reason) {
+                        if (err) {
+                            err.textContent = 'Chọn lý do.';
+                            err.style.display = 'block';
+                        }
+                        return;
+                    }
+                    const desc = document.getElementById('chapterCommentReportDesc')?.value || null;
+                    try {
+                        crSpr.disabled = true;
+                        await ApiService.reportChapterComment(chapterId, commentId, {
+                            reasonCode: reason,
+                            description: desc
+                        });
+                        bootstrap.Modal.getInstance(document.getElementById('chapterCommentReportModal')).hide();
+                        Utils.showAlert('Đã gửi báo cáo bình luận. Cảm ơn bạn.', 'success');
+                    } catch (e) {
+                        if (err) {
+                            err.textContent = e?.message || String(e);
+                            err.style.display = 'block';
+                        }
+                    } finally {
+                        crSpr.disabled = false;
+                    }
+                });
+            }
         });
 
         async function loadChapter() {
@@ -526,6 +638,8 @@
                 container.innerHTML = '<div class="text-muted">Chưa có bình luận.</div>';
                 return;
             }
+
+            const currentUserId = typeof AuthHelper !== 'undefined' && AuthHelper.getUserId ? AuthHelper.getUserId() : null;
             const byParent = new Map();
             const roots = [];
             for (const c of list) {
@@ -576,6 +690,10 @@
                 const isReplyingHere = replyingToCommentId === c.id;
                 const replyBadge = isReplyingHere ? '<span class="badge bg-info text-dark ms-2">Đang trả lời</span>' : '';
                 const replyBtn = canReply ? '<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" onclick="startReplyChapter(\'' + c.id + '\', \'' + name.replace(/'/g, "\\'") + '\')">Trả lời</button>' : '';
+
+                const reportBtn = (canReply && currentUserId && c.userId && String(c.userId).toLowerCase() !== String(currentUserId).toLowerCase())
+                    ? '<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none text-danger" onclick="openChapterCommentReport(\'' + c.id + '\', \'' + String(c.userDisplayName || '').replace(/'/g, "\\'") + '\')"><i class="bi bi-flag"></i> Báo cáo</button>'
+                    : '';
                 const reactionBtns = CHAPTER_COMMENT_REACTIONS.map(function(r) {
                     const count = reactionCounts[r.type] ?? 0;
                     const isActive = userReactionType === r.type;
@@ -592,7 +710,7 @@
                 return '<div class="py-2 comment-node" style="margin-left:' + indent + 'px;" data-comment-id="' + c.id + '">' +
                     '<div class="d-flex justify-content-between align-items-start gap-2"><div class="fw-medium">' + name + roleBadge + replyBadge + '</div><div class="text-muted small">' + time + '</div></div>' +
                     '<div class="mb-1">' + content + '</div>' +
-                    '<div class="small d-flex gap-2 align-items-center flex-wrap">' + replyBtn + '<span class="d-flex gap-1 align-items-center flex-wrap">' + reactionBtns + '</span>' + totalReactionsHtml + '</div>' +
+                    '<div class="small d-flex gap-2 align-items-center flex-wrap">' + replyBtn + reportBtn + '<span class="d-flex gap-1 align-items-center flex-wrap">' + reactionBtns + '</span>' + totalReactionsHtml + '</div>' +
                     (children.length ? children.map(function(ch) { return renderNode(ch, depth + 1); }).join('') : '') +
                     '</div>' + (depth === 0 ? '<div class="border-bottom"></div>' : '');
             }

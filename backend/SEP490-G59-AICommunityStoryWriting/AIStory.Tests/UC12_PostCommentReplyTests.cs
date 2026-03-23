@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Services.DTOs.AI;
 using Services.DTOs.Comments;
 using Services.DTOs.Chapters;
+using Services.DTOs.Community;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 using Xunit;
@@ -205,6 +206,7 @@ public class UC12_PostCommentReplyTests
         public void RecordReadChapter(Guid storyId, Guid chapterId, Guid userId, string? ipAddress = null, string? deviceInfo = null) { }
         public (decimal avgRating, int ratingCount) RateStory(Guid storyId, Guid userId, int starValue, string? reviewText) => throw new NotImplementedException();
         public (string? reason, DateTime? rejectedAt) GetLatestRejectionForStory(Guid storyId) => (null, null);
+        public CommunityStatsDto GetPublicCommunityStats() => new();
     }
 
     private sealed class FakeChapterService : IChapterService
@@ -218,7 +220,7 @@ public class UC12_PostCommentReplyTests
         public IEnumerable<ChapterListItemDto> GetByStoryId(Guid storyId) => throw new NotImplementedException();
         public ChapterResponseDto? GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex) => throw new NotImplementedException();
         public bool Update(Guid id, UpdateChapterRequestDto request) => throw new NotImplementedException();
-        public bool Delete(Guid id) => throw new NotImplementedException();
+        public bool Delete(Guid id, bool deleteIncludingVersions = false) => throw new NotImplementedException();
         public bool Publish(Guid id) => throw new NotImplementedException();
         public bool Unpublish(Guid id) => throw new NotImplementedException();
         public bool Reorder(Guid id, int newOrderIndex) => throw new NotImplementedException();

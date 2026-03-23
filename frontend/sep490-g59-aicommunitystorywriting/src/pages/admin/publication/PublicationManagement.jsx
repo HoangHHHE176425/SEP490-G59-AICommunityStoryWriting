@@ -157,22 +157,36 @@ function pickGroupAdminRejectedRelease(chapters, storyItem) {
     if (Array.isArray(chapters)) items.push(...chapters);
     let bestTime = -Infinity;
     let bestNote = null;
+    let bestCurrentFlag = null;
     for (const it of items) {
         const note = it.adminRejectedReleaseNote ?? it.AdminRejectedReleaseNote ?? null;
         const atStr = it.adminRejectedReleaseAt ?? it.AdminRejectedReleaseAt;
+        const currentFlagRaw = it.isCurrentClaimRejection ?? it.IsCurrentClaimRejection;
+        const hasCurrentFlag = typeof currentFlagRaw === 'boolean';
+        const isCurrentClaimRejection = hasCurrentFlag ? Boolean(currentFlagRaw) : null;
+        const claimedAtStr = it.claimedAt ?? it.ClaimedAt ?? null;
         const t = atStr ? new Date(atStr).getTime() : NaN;
+        const claimedAt = claimedAtStr ? new Date(claimedAtStr).getTime() : NaN;
+        // Ưu tiên cờ BE trả về. Nếu BE chưa có cờ thì fallback theo mốc claim hiện tại.
+        if (hasCurrentFlag) {
+            if (!isCurrentClaimRejection) continue;
+        } else if (Number.isFinite(t) && Number.isFinite(claimedAt) && t < claimedAt) {
+            continue;
+        }
         const hasSignal = Number.isFinite(t) || (note != null && String(note).trim() !== '');
         if (!hasSignal) continue;
         const sortKey = Number.isFinite(t) ? t : 0;
         if (sortKey >= bestTime) {
             bestTime = sortKey;
             bestNote = note;
+            bestCurrentFlag = hasCurrentFlag ? Boolean(currentFlagRaw) : null;
         }
     }
     if (bestTime === -Infinity && (bestNote == null || String(bestNote).trim() === '')) return {};
     return {
         adminRejectedReleaseNote: bestNote != null && String(bestNote).trim() !== '' ? String(bestNote).trim() : null,
         adminRejectedReleaseAt: bestTime > -Infinity ? new Date(bestTime).toISOString() : null,
+        isCurrentClaimRejection: bestCurrentFlag,
     };
 }
 
@@ -232,6 +246,7 @@ function mapPendingStoryToItem(s) {
         hasPendingEscalation: s.hasPendingEscalation ?? s.HasPendingEscalation ?? false,
         adminRejectedReleaseNote: s.adminRejectedReleaseNote ?? s.AdminRejectedReleaseNote ?? null,
         adminRejectedReleaseAt: s.adminRejectedReleaseAt ?? s.AdminRejectedReleaseAt ?? null,
+        isCurrentClaimRejection: s.isCurrentClaimRejection ?? s.IsCurrentClaimRejection ?? null,
         adminRejectedExtendNote: s.adminRejectedExtendNote ?? s.AdminRejectedExtendNote ?? null,
         adminRejectedExtendAt: s.adminRejectedExtendAt ?? s.AdminRejectedExtendAt ?? null,
     };
@@ -320,6 +335,7 @@ function mapPendingChapterToItem(c) {
         hasPendingEscalation: c.hasPendingEscalation ?? c.HasPendingEscalation ?? false,
         adminRejectedReleaseNote: c.adminRejectedReleaseNote ?? c.AdminRejectedReleaseNote ?? null,
         adminRejectedReleaseAt: c.adminRejectedReleaseAt ?? c.AdminRejectedReleaseAt ?? null,
+        isCurrentClaimRejection: c.isCurrentClaimRejection ?? c.IsCurrentClaimRejection ?? null,
         adminRejectedExtendNote: c.adminRejectedExtendNote ?? c.AdminRejectedExtendNote ?? null,
         adminRejectedExtendAt: c.adminRejectedExtendAt ?? c.AdminRejectedExtendAt ?? null,
     };

@@ -32,6 +32,23 @@ namespace DataAccessObjects.DAOs
                 .ToList();
         }
 
+        /// <summary>Lấy comment để hiển thị UI (kể cả comment cha đã bị ẩn nội dung).</summary>
+        public static IReadOnlyList<comments> GetStoryCommentsForDisplay(Guid storyId)
+        {
+            // Khi comment đã bị ẩn hoàn toàn thì không hiển thị trên story nữa.
+            // Chỉ trả về comment APPROVED để render danh sách.
+            var statuses = new[] { "APPROVED" };
+            using var context = new StoryPlatformDbContext();
+            return context.comments.AsNoTracking()
+                .Include(c => c.userNavigation)
+                .ThenInclude(u => u.user_profiles)
+                .Where(c => c.story_id == storyId
+                            && c.chapter_id == null
+                            && statuses.Contains(c.status ?? string.Empty))
+                .OrderBy(c => c.created_at)
+                .ToList();
+        }
+
         /// <summary>Lấy comment của một chapter (chapter_id = chapterId).</summary>
         public static IReadOnlyList<comments> GetChapterComments(Guid chapterId, string status = "APPROVED")
         {
@@ -40,6 +57,22 @@ namespace DataAccessObjects.DAOs
                 .Include(c => c.userNavigation)
                 .ThenInclude(u => u.user_profiles)
                 .Where(c => c.chapter_id == chapterId && c.status == status)
+                .OrderBy(c => c.created_at)
+                .ToList();
+        }
+
+        /// <summary>Lấy comment chapter để hiển thị UI (kể cả comment cha đã bị ẩn nội dung).</summary>
+        public static IReadOnlyList<comments> GetChapterCommentsForDisplay(Guid chapterId)
+        {
+            // Khi comment đã bị ẩn hoàn toàn thì không hiển thị trên chapter nữa.
+            // Chỉ trả về comment APPROVED để render danh sách.
+            var statuses = new[] { "APPROVED" };
+            using var context = new StoryPlatformDbContext();
+            return context.comments.AsNoTracking()
+                .Include(c => c.userNavigation)
+                .ThenInclude(u => u.user_profiles)
+                .Where(c => c.chapter_id == chapterId
+                            && statuses.Contains(c.status ?? string.Empty))
                 .OrderBy(c => c.created_at)
                 .ToList();
         }

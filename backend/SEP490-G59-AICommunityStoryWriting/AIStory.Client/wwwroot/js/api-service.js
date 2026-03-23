@@ -47,14 +47,18 @@ class ApiService {
                 }
 
                 let errorMessage = response.statusText;
+                let errorBody = null;
                 try {
-                    const errorBody = await response.json();
+                    errorBody = await response.json();
                     // Prefer detailed error message if backend provides `error`.
                     errorMessage = errorBody.error || errorBody.message || errorMessage;
                 } catch {
                     // If response body is not JSON, use statusText
                 }
-                throw new Error(errorMessage || `HTTP error! status: ${response.status}`);
+                const err = new Error(errorMessage || `HTTP error! status: ${response.status}`);
+                err.status = response.status;
+                err.body = errorBody;
+                throw err;
             }
 
             // Try to parse JSON, but handle empty responses gracefully
@@ -426,8 +430,13 @@ class ApiService {
         });
     }
 
-    static async deleteChapter(id) {
-        return this.request(`/chapters/${id}`, {
+    /**
+     * Xóa chapter (DRAFT). Lần đầu gọi với deleteIncludingVersions=false.
+     * Nếu API trả 409 (code CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED), hỏi user rồi gọi lại với true.
+     */
+    static async deleteChapter(id, deleteIncludingVersions = false) {
+        const q = deleteIncludingVersions ? '?deleteIncludingVersions=true' : '';
+        return this.request(`/chapters/${id}${q}`, {
             method: 'DELETE'
         });
     }
@@ -946,8 +955,26 @@ class ApiService {
         return this.request('/story-reporting/reasons');
     }
 
+    static async getCommentReportReasons() {
+        return this.request('/comment-reporting/reasons');
+    }
+
     static async reportStory(storyId, payload) {
         return this.request(`/stories/${encodeURIComponent(storyId)}/reports`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
+    static async reportStoryComment(storyId, commentId, payload) {
+        return this.request(`/stories/${encodeURIComponent(storyId)}/comments/${encodeURIComponent(commentId)}/reports`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+    }
+
+    static async reportChapterComment(chapterId, commentId, payload) {
+        return this.request(`/chapters/${encodeURIComponent(chapterId)}/comments/${encodeURIComponent(commentId)}/reports`, {
             method: 'POST',
             body: JSON.stringify(payload)
         });
@@ -979,6 +1006,19 @@ class ApiService {
         });
     }
 
+    /** COMPLIANCE: đóng mọi report comment mở của comment thread */
+    static async complianceResolveAllOpenCommentReports(commentId, body = {}) {
+        // body: { status: 'RESOLVED'|'DISMISSED', HideComment: bool, IncludeReplies: bool }
+        return this.request(`/compliance/comment-reports/comments/${encodeURIComponent(commentId)}/resolve-all-open`, {
+            method: 'POST',
+            body: JSON.stringify({
+                status: body.status || 'RESOLVED',
+                HideComment: body.HideComment ?? true,
+                IncludeReplies: body.IncludeReplies ?? true
+            })
+        });
+    }
+
     static async complianceGetMyResolvedHistory(query = {}) {
         const params = new URLSearchParams();
         if (query.page) params.append('page', query.page);
@@ -1002,6 +1042,45 @@ class ApiService {
         });
     }
 
+    static async complianceGetCommentReports(query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach((key) => {
+            const v = query[key];
+            if (v !== null && v !== undefined && v !== '') params.append(key, v);
+        });
+        const qs = params.toString();
+        return this.request(`/compliance/comment-reports${qs ? '?' + qs : ''}`);
+    }
+
+    static async complianceResolveCommentReport(reportId, body = {}) {
+        return this.request(`/compliance/comment-reports/${encodeURIComponent(reportId)}/resolve`, {
+            method: 'POST',
+            body: JSON.stringify(body || {})
+        });
+    }
+
+    /** COMPLIANCE: nhận lock / claim xử lý report comment */
+    static async complianceClaimCommentReports(commentId) {
+        return this.request(`/compliance/comment-reports/comments/${encodeURIComponent(commentId)}/claim`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        });
+    }
+
+    static async complianceRequestAdminActionOnComment(commentId, body) {
+        return this.request(`/compliance/comment-reports/comments/${encodeURIComponent(commentId)}/admin-action-requests`, {
+            method: 'POST',
+            body: JSON.stringify(body || {})
+        });
+    }
+
+    /** ADMIN: gỡ lock claim report comment */
+    static async adminReleaseComplianceCommentClaim(commentId) {
+        return this.request(`/admin/compliance-comment-reports/comments/${encodeURIComponent(commentId)}/release-claim`, {
+            method: 'POST'
+        });
+    }
+
     static async adminListComplianceLockRequests(status = 'PENDING') {
         const q = status ? `?status=${encodeURIComponent(status)}` : '';
         return this.request(`/admin/compliance-story-reports/lock-requests${q}`);
@@ -1016,6 +1095,26 @@ class ApiService {
             method: 'POST',
             body: JSON.stringify(body)
         });
+    }
+
+    static async adminGetComplianceLogs(query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach((key) => {
+            const v = query[key];
+            if (v !== null && v !== undefined && v !== '') params.append(key, v);
+        });
+        const qs = params.toString();
+        return this.request(`/admin/compliance-story-reports/compliance-logs${qs ? '?' + qs : ''}`);
+    }
+
+    static async adminGetCompliancePerformance(query = {}) {
+        const params = new URLSearchParams();
+        Object.keys(query).forEach((key) => {
+            const v = query[key];
+            if (v !== null && v !== undefined && v !== '') params.append(key, v);
+        });
+        const qs = params.toString();
+        return this.request(`/admin/compliance-story-reports/compliance-performance${qs ? '?' + qs : ''}`);
     }
 
     static async adminComplianceReleaseStoryReportClaim(storyId) {

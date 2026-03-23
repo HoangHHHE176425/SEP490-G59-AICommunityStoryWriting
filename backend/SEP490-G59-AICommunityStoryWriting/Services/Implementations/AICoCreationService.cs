@@ -269,7 +269,8 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             request.StoryId,
             authorUserId,
             hasAuthorIdea ? rawIdea! : "[AUTO] Tiếp tục theo mạch truyện (không có gợi ý tác giả)",
-            draft);
+            draft,
+            request.ChapterOrderIndex);
         return new CoCreationResponse
         {
             Outline = outlineForPrompt,
@@ -278,7 +279,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             RevisionCount = revisionCount,
             RevisionFeedbacks = revisionFeedbacks.Count > 0 ? revisionFeedbacks : null,
             ReviewFeedback = approved ? null : reviewFeedback,
-            ChapterId = saved.LinkedChapterId,
+            ChapterId = null,
             AiGeneratedContentId = saved.Id,
             ChapterIndex = saved.ChapterIndex,
             AgentDurations = durations.Count > 0 ? durations : null
@@ -288,21 +289,29 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
     private sealed record ReviewViolation(string Type, string Severity, string? Quote, string? Fix);
     private sealed record ReviewResult(bool Approved, string? Feedback, List<ReviewViolation> Violations);
 
-    /// <summary>Lưu <see cref="ai_generated_content"/> (không tạo/sửa chương). <c>chapter_index</c> = slot tiếp theo. Nếu đã có dòng <see cref="chapters"/> cùng <c>story_id</c> và <c>order_index</c> = slot đó thì gán <c>chapter_id</c>.</summary>
-    private (Guid? Id, int? ChapterIndex, Guid? LinkedChapterId) SaveAiGeneratedContentOnly(Guid storyId, Guid authorUserId, string authorIdea, string finalContent)
+    /// <summary>Chỉ lưu bản <see cref="ai_generated_content"/> (không tạo/cập nhật <see cref="chapters"/>).
+    /// <see cref="ai_generated_content.chapter_index"/> = <paramref name="targetOrderIndex"/> nếu hợp lệ; ngược lại = slot chương tiếp theo.</summary>
+    private (Guid? Id, int? ChapterIndex) SaveAiGeneratedContentOnly(
+        Guid storyId,
+        Guid authorUserId,
+        string authorIdea,
+        string finalContent,
+        int? targetOrderIndex = null)
     {
-        if (string.IsNullOrWhiteSpace(finalContent)) return (null, null, null);
+        if (string.IsNullOrWhiteSpace(finalContent)) return (null, null);
         var chaptersList = _chapterRepository.GetByStoryId(storyId).ToList();
-        var nextChapterIndex = chaptersList.Count == 0 ? 1 : chaptersList.Max(c => c.order_index) + 1;
-        var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, nextChapterIndex);
-        var linkedChapterId = existingChapter?.id;
-
+        // Khớp chapters.order_index từ FE (chương 1 → order_index 0). Ưu tiên index chương đang soạn để compare-chapter-preview khớp khi copy–paste.
+        int nextChapterIndex;
+        if (targetOrderIndex is >= 0)
+            nextChapterIndex = targetOrderIndex.Value;
+        else
+            nextChapterIndex = chaptersList.Count == 0 ? 0 : chaptersList.Max(c => c.order_index) + 1;
         var now = DateTime.UtcNow;
         var aiRecord = new ai_generated_content
         {
             id = Guid.NewGuid(),
             story_id = storyId,
-            chapter_id = linkedChapterId,
+            chapter_id = null,
             chapter_index = nextChapterIndex,
             user_id = authorUserId,
             input_prompt = authorIdea.Length > 2000 ? authorIdea[..2000] + "..." : authorIdea,
@@ -310,7 +319,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             created_at = now
         };
         _aiContentRepository.Add(aiRecord);
-        return (aiRecord.id, nextChapterIndex, linkedChapterId);
+        return (aiRecord.id, nextChapterIndex);
     }
 
     private static string GetAgent1SystemPrompt() => """

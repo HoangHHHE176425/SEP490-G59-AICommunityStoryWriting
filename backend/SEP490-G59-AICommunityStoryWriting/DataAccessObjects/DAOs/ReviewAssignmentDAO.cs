@@ -15,6 +15,9 @@ namespace DataAccessObjects.DAOs
         /// <summary>Lock nhận xử lý báo cáo truyện (COMPLIANCE) — target_id = story_id.</summary>
         public const string TargetTypeComplianceStoryReports = "COMPLIANCE_STORY_REPORTS";
 
+        /// <summary>Lock nhận xử lý report comment (COMPLIANCE) — target_id = comment_id.</summary>
+        public const string TargetTypeComplianceCommentReports = "COMPLIANCE_COMMENT_REPORTS";
+
         /// <summary>Lấy danh sách target_id đang bị lock bởi moderator KHÁC (để loại khỏi queue của moderator hiện tại).</summary>
         public static List<Guid> GetLockedTargetIdsByOthers(string targetType, Guid currentModeratorId)
         {

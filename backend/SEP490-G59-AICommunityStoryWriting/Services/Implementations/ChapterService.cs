@@ -15,6 +15,9 @@ namespace Services.Implementations
 {
     public class ChapterService : IChapterService
     {
+        /// <summary>Gắn vào <see cref="InvalidOperationException.Data"/> khi cần client xác nhận xóa kèm version (409).</summary>
+        internal const string DeleteRequiresVersionsConfirmationCode = "CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED";
+
         private readonly IChapterRepository _chapterRepository;
         private readonly IChapterVersionRepository _versionRepository;
         private readonly IAiGeneratedContentRepository _aiContentRepository;
@@ -125,6 +128,9 @@ namespace Services.Implementations
                 created_at = DateTime.Now,
                 updated_at = DateTime.Now
             };
+
+            if (request.AiSimilarityPercent.HasValue)
+                chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
 
             _chapterRepository.Add(chapter);
 
@@ -267,6 +273,7 @@ namespace Services.Implementations
             }).ToList();
 
             EnrichChapterListItemsWithReviewSla(chapterList, items);
+            EnrichModeratorRejectionHistoryForChapterList(chapterList, items);
 
             return new PagedResultDto<ChapterListItemDto>
             {
@@ -303,8 +310,19 @@ namespace Services.Implementations
                 .ToList();
 
             var storyTitle = StoryDAO.GetById(storyId)?.title;
-            var items = chapterList.Select(c => MapToListItemDto(c, storyTitle)).ToList();
+            var items = chapterList.Select(c =>
+            {
+                var dto = MapToListItemDto(c, storyTitle);
+                if (string.Equals(c.status, "REJECTED", StringComparison.OrdinalIgnoreCase))
+                {
+                    var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", c.id);
+                    dto.RejectionReason = reason;
+                    dto.RejectedAt = rejectedAt;
+                }
+                return dto;
+            }).ToList();
             EnrichChapterListItemsWithReviewSla(chapterList, items);
+            EnrichModeratorRejectionHistoryForChapterList(chapterList, items);
             return items;
         }
 
@@ -426,6 +444,9 @@ namespace Services.Implementations
             if (request.IsAiClean.HasValue)
                 chapter.is_ai_clean = request.IsAiClean.Value;
 
+            if (request.AiSimilarityPercent.HasValue)
+                chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
+
             if (request.Content != null)
             {
                 chapter.word_count = CalculateWordCount(request.Content);
@@ -469,7 +490,7 @@ namespace Services.Implementations
             return true;
         }
 
-        public bool Delete(Guid id)
+        public bool Delete(Guid id, bool deleteIncludingVersions = false)
         {
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
@@ -479,7 +500,24 @@ namespace Services.Implementations
             if (statusUpper != "DRAFT")
                 throw new InvalidOperationException("Chỉ được xóa chương khi ở trạng thái Bản nháp. Chương hiện tại: " + (chapter.status ?? "—"));
 
+            var versionCount = _versionRepository.GetByChapterId(id).Count();
+            if (versionCount > 0 && !deleteIncludingVersions)
+                ThrowRequiresVersionsDeleteConfirmation(versionCount);
+
             var storyId = chapter.story_id;
+
+            try
+            {
+                ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Complete review assignment on chapter delete failed (non-fatal). ChapterId={ChapterId}", id);
+            }
+
+            _aiContentRepository.DeleteAllByChapterId(id);
+            if (versionCount > 0)
+                _versionRepository.DeleteAllByChapterId(id);
 
             _chapterRepository.Delete(id);
 
@@ -572,6 +610,15 @@ namespace Services.Implementations
             }
 
             return true;
+        }
+
+        private static void ThrowRequiresVersionsDeleteConfirmation(int versionCount)
+        {
+            var ex = new InvalidOperationException(
+                "Chương có phiên bản (nháp / chỉnh sửa) đã lưu. Vui lòng xác nhận trên giao diện: nếu đồng ý, hệ thống sẽ xóa luôn toàn bộ phiên bản và chương.");
+            ex.Data["ErrorCode"] = DeleteRequiresVersionsConfirmationCode;
+            ex.Data["VersionCount"] = versionCount;
+            throw ex;
         }
 
         /// <summary>Tác giả chỉ được gửi xuất bản chương theo thứ tự 1, 2, 3... Chương trước phải đã gửi (PUBLISHED, PENDING_REVIEW, hoặc có ít nhất một version PENDING_REVIEW) thì mới gửi được chương tiếp theo.</summary>
@@ -709,6 +756,7 @@ namespace Services.Implementations
                 CoinPrice = chapter.coin_price,
                 WordCount = chapter.word_count,
                 AiSimilarityPercent = chapter.ai_similarity_percent,
+                AiContributionRatio = chapter.ai_contribution_ratio,
                 PublishedAt = chapter.published_at,
                 CreatedAt = chapter.created_at,
                 UpdatedAt = chapter.updated_at
@@ -772,6 +820,28 @@ namespace Services.Implementations
                 var fallbackDeadline = ResolveChapterListReviewDeadlineUtc(authorSubmitted, claim);
                 dto.DeadlineAt = fallbackDeadline;
                 dto.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
+            }
+        }
+
+        /// <summary>Gắn toàn bộ lần từ chối chương gốc từ moderation_logs (không chỉ lần mới nhất).</summary>
+        private static void EnrichModeratorRejectionHistoryForChapterList(IReadOnlyList<chapters> chapterEntities, List<ChapterListItemDto> items)
+        {
+            if (chapterEntities.Count == 0 || items.Count != chapterEntities.Count)
+                return;
+
+            var ids = chapterEntities.Select(c => c.id).ToList();
+            var map = ModerationLogDAO.GetRejectionHistoriesByTargetIds(ReviewAssignmentDAO.TargetTypeChapter, ids);
+            for (var i = 0; i < items.Count; i++)
+            {
+                var chapterId = items[i].Id;
+                if (!map.TryGetValue(chapterId, out var tuples) || tuples.Count == 0)
+                    continue;
+                items[i].ModeratorRejectionHistory = tuples.Select(t => new ChapterRejectionHistoryItemDto
+                {
+                    Reason = t.Reason,
+                    RejectedAt = t.RejectedAt,
+                    ModeratorId = t.ModeratorId
+                }).ToList();
             }
         }
 

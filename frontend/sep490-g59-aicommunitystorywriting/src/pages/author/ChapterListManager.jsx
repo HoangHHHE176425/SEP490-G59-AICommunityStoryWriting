@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Plus, Eye, MessageSquare, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle, ChevronDown, ChevronRight, GitBranch } from 'lucide-react';
+import { Plus, Eye, Book, ListOrdered, Send, Undo2, Pencil, Trash2, ArrowLeft, AlertCircle, ChevronDown, ChevronRight, GitBranch, Percent } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { getChapters, getChapterById, updateChapter, unpublishChapter, deleteChapter, getChapterRejectionReason, getChapterVersions, deleteChapterVersion, submitChapterVersion, unsubmitChapterVersion } from '../../api/chapter/chapterApi';
@@ -25,6 +25,65 @@ function getChapterStatusStyle(status) {
     return { backgroundColor: '#f3f4f6', color: '#6b7280' };
 }
 
+function parseDecimalLoose(v) {
+    if (v == null || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+}
+
+/** % đóng góp AI = ai_similarity_percent (lưu khi so sánh với bản co-create). */
+function formatAiContributionLine(chapter) {
+    const p = parseDecimalLoose(chapter.aiSimilarityPercent);
+    if (p == null) return null;
+    return `Đóng góp AI: ${p.toFixed(1)}%`;
+}
+
+function truncateText(s, max) {
+    if (s == null || s === '') return '';
+    const t = String(s).trim();
+    if (t.length <= max) return t;
+    return `${t.slice(0, max)}…`;
+}
+
+function normalizeModeratorRejectionHistory(raw) {
+    const arr = Array.isArray(raw) ? raw : [];
+    return arr.map((h) => ({
+        reason: (h.reason ?? h.Reason ?? '').toString(),
+        rejectedAt: h.rejectedAt ?? h.RejectedAt ?? null,
+        moderatorId: h.moderatorId ?? h.ModeratorId ?? null,
+    }));
+}
+
+/** Gộp lịch sử từ chối chương (moderation_logs) + phiên bản có rejection_reason; mới nhất trước. */
+function buildMergedRejectionTimeline(chapter, versions) {
+    const out = [];
+    const hist = chapter.moderatorRejectionHistory ?? [];
+    hist.forEach((h, idx) => {
+        const at = h.rejectedAt;
+        out.push({
+            key: `ch-${idx}-${at}`,
+            label: 'Chương gốc',
+            reason: (h.reason || '').trim() || '—',
+            rejectedAt: at,
+            ts: at ? new Date(at).getTime() : 0,
+        });
+    });
+    (versions || []).forEach((v) => {
+        const rr = (v.rejection_reason || '').trim();
+        if (!rr) return;
+        const at = v.reviewed_at;
+        out.push({
+            key: `ver-${v.id}`,
+            label: `Phiên bản #${v.version_number}`,
+            reason: rr,
+            rejectedAt: at,
+            ts: at ? new Date(at).getTime() : 0,
+        });
+    });
+    out.sort((a, b) => b.ts - a.ts);
+    return out;
+}
+
 function mapChapterFromApi(item) {
     const createdAt = item.createdAt ?? item.CreatedAt ?? item.publishedAt ?? item.PublishedAt;
     const updatedAt = createdAt
@@ -44,9 +103,10 @@ function mapChapterFromApi(item) {
         statusDisplay,
         accessType,
         price,
-        views: 0,
-        comments: 0,
-        likes: 0,
+        aiSimilarityPercent: item.aiSimilarityPercent ?? item.AiSimilarityPercent ?? null,
+        rejectionReason: item.rejectionReason ?? item.RejectionReason ?? null,
+        rejectedAt: item.rejectedAt ?? item.RejectedAt ?? null,
+        moderatorRejectionHistory: normalizeModeratorRejectionHistory(item.moderatorRejectionHistory ?? item.ModeratorRejectionHistory),
         updatedAt,
     };
 }
@@ -252,7 +312,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
     const [actioningChapterId, setActioningChapterId] = useState(null);
     const [actioningVersionId, setActioningVersionId] = useState(null);
     const [confirmDialog, setConfirmDialog] = useState({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
-    const [rejectionReasonModal, setRejectionReasonModal] = useState({ open: false, title: '', reason: null, rejectedAt: null, loading: false });
+    const [rejectionReasonModal, setRejectionReasonModal] = useState({
+        open: false,
+        title: '',
+        reason: null,
+        rejectedAt: null,
+        loading: false,
+        historyEntries: null,
+    });
     const [messageModal, setMessageModal] = useState({ open: false, title: '', message: '' });
 
     const handleDeleteChapter = (chapterId) => {
@@ -431,20 +498,44 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
 
     const openStoryRejectionReason = () => {
         if (!storyId) return;
-        setRejectionReasonModal({ open: true, title: 'Lý do từ chối truyện', reason: null, rejectedAt: null, loading: true });
+        setRejectionReasonModal({ open: true, title: 'Lý do từ chối truyện', reason: null, rejectedAt: null, loading: true, historyEntries: null });
         getStoryRejectionReason(storyId)
             .then((data) => setRejectionReasonModal(prev => ({ ...prev, reason: data?.reason ?? null, rejectedAt: data?.rejectedAt ?? null, loading: false })))
             .catch(() => setRejectionReasonModal(prev => ({ ...prev, reason: null, rejectedAt: null, loading: false })));
     };
 
     const openChapterRejectionReason = (chapterTitle, chapterId) => {
-        setRejectionReasonModal({ open: true, title: `Lý do từ chối: ${chapterTitle || 'Chương'}`, reason: null, rejectedAt: null, loading: true });
+        setRejectionReasonModal({
+            open: true,
+            title: `Lý do từ chối: ${chapterTitle || 'Chương'}`,
+            reason: null,
+            rejectedAt: null,
+            loading: true,
+            historyEntries: null,
+        });
         getChapterRejectionReason(chapterId)
             .then((data) => setRejectionReasonModal(prev => ({ ...prev, reason: data?.reason ?? null, rejectedAt: data?.rejectedAt ?? null, loading: false })))
             .catch(() => setRejectionReasonModal(prev => ({ ...prev, reason: null, rejectedAt: null, loading: false })));
     };
 
-    const closeRejectionReasonModal = () => setRejectionReasonModal(prev => ({ ...prev, open: false }));
+    /** Modal đầy đủ lịch sử (chương + phiên bản); nếu không có timeline thì gọi API 1 lần mới nhất. */
+    const openChapterRejectionHistoryModal = (chapterTitle, chapter, versions) => {
+        const merged = buildMergedRejectionTimeline(chapter, versions);
+        if (merged.length > 0) {
+            setRejectionReasonModal({
+                open: true,
+                title: `Lịch sử từ chối duyệt: ${chapterTitle || 'Chương'}`,
+                reason: null,
+                rejectedAt: null,
+                loading: false,
+                historyEntries: merged,
+            });
+            return;
+        }
+        openChapterRejectionReason(chapterTitle, chapter.id);
+    };
+
+    const closeRejectionReasonModal = () => setRejectionReasonModal(prev => ({ ...prev, open: false, historyEntries: null }));
     const closeMessageModal = () => setMessageModal(prev => ({ ...prev, open: false }));
 
     return (
@@ -673,6 +764,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                     const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(prevOrderIndex) || pendingOrderIndices.has(prevOrderIndex) || prevHasPendingVersion;
                                     const canSubmitVersion = canSubmitForPublish && !hasPendingVersion && !chapterIsPendingReview && !chapterIsPublished;
                                     const versionsLoading = loadingVersionsForChapterId === chapter.id;
+                                    const chapterAiContributionLine = formatAiContributionLine(chapter);
+                                    const rejectedVersionsCount = versions.filter((ver) => (ver.status ?? '').toLowerCase() === 'rejected').length;
+                                    /** Dùng cache phiên bản (nếu đã tải khi mở rộng trước đó) để lịch sử từ chối đầy đủ kể cả khi đang thu gọn. */
+                                    const rejectionTimeline = buildMergedRejectionTimeline(chapter, versions);
                                     const toggleExpand = (e) => {
                                         if (e.target.closest('button')) return;
                                         setExpandedChapterId((prev) => (prev === chapter.id ? null : chapter.id));
@@ -740,8 +835,38 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleExpand(e); } }}
                                                     style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem', minWidth: 0, cursor: 'pointer', outline: 'none' }}
                                                 >
-                                                    <div style={{ fontSize: '0.9375rem', fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                        {chapter.title}
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, width: '100%' }}>
+                                                        <span style={{
+                                                            fontSize: '0.9375rem',
+                                                            fontWeight: 600,
+                                                            color: '#1e293b',
+                                                            flex: '1 1 auto',
+                                                            minWidth: 0,
+                                                            overflow: 'hidden',
+                                                            textOverflow: 'ellipsis',
+                                                            whiteSpace: 'nowrap',
+                                                        }}>
+                                                            {chapter.title}
+                                                        </span>
+                                                        {chapterAiContributionLine && (
+                                                            <span style={{
+                                                                flexShrink: 0,
+                                                                display: 'inline-flex',
+                                                                alignItems: 'center',
+                                                                gap: '0.25rem',
+                                                                fontSize: '0.75rem',
+                                                                color: '#0e7490',
+                                                                fontWeight: 700,
+                                                                padding: '0.2rem 0.5rem',
+                                                                borderRadius: '8px',
+                                                                backgroundColor: '#ecfeff',
+                                                                border: '1px solid #a5f3fc',
+                                                                whiteSpace: 'nowrap',
+                                                            }}>
+                                                                <Percent size={12} aria-hidden />
+                                                                {chapterAiContributionLine}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                                                         <span style={{
@@ -753,10 +878,13 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                         }}>
                                                             {chapter.statusDisplay}
                                                         </span>
-                                                        {chapter.status === 'rejected' && (
+                                                        {(rejectionTimeline.length > 0 || chapter.status === 'rejected') && (
                                                             <button
                                                                 type="button"
-                                                                onClick={() => openChapterRejectionReason(chapter.title, chapter.id)}
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    openChapterRejectionHistoryModal(chapter.title, chapter, versions);
+                                                                }}
                                                                 style={{
                                                                     padding: '0.15rem 0.5rem',
                                                                     fontSize: '0.6875rem',
@@ -768,15 +896,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                     cursor: 'pointer'
                                                                 }}
                                                             >
-                                                                Lý do từ chối
+                                                                Lịch sử từ chối{rejectionTimeline.length > 0 ? ` (${rejectionTimeline.length})` : ''}
                                                             </button>
                                                         )}
                                                         <span style={{ fontSize: '0.6875rem', color: '#94a3b8' }}>{chapter.updatedAt}</span>
-                                                        <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.6875rem', color: '#64748b' }}>
-                                                            <Eye size={11} /> {chapter.views}
-                                                            <MessageSquare size={11} /> {chapter.comments}
-                                                            👍 {chapter.likes}
-                                                        </span>
                                                     </div>
                                                 </div>
 
@@ -989,9 +1112,16 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                             }}>
                                                                 <GitBranch size={18} color="#fff" />
                                                             </div>
-                                                            <span style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: '1rem', fontWeight: 700, color: '#1A2332' }}>
-                                                                Phiên bản chương
-                                                            </span>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                                                <span style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: '1rem', fontWeight: 700, color: '#1A2332' }}>
+                                                                    Phiên bản chương
+                                                                </span>
+                                                                {rejectedVersionsCount > 0 && (
+                                                                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#b45309' }}>
+                                                                        {rejectedVersionsCount} phiên bản từng bị từ chối duyệt
+                                                                    </span>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                         <button
                                                             type="button"
@@ -1051,8 +1181,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                         <div style={{ borderRadius: '8px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
                                                             <div style={{
                                                                 display: 'grid',
-                                                                gridTemplateColumns: '80px 1fr 110px 140px 320px',
-                                                                gap: '1rem',
+                                                                gridTemplateColumns: '64px minmax(0,1fr) 96px 108px minmax(180px,1fr) minmax(260px,320px)',
+                                                                gap: '0.75rem',
                                                                 padding: '0.75rem 1rem',
                                                                 backgroundColor: '#f9fafb',
                                                                 borderBottom: '1px solid #e5e7eb',
@@ -1065,6 +1195,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                 <div>Tiêu đề phiên bản</div>
                                                                 <div>Trạng thái</div>
                                                                 <div>Ngày tạo</div>
+                                                                <div>Lịch sử từ chối</div>
                                                                 <div style={{ textAlign: 'center' }}>Hành động</div>
                                                             </div>
                                                             {versions.map((v, vIndex) => {
@@ -1077,10 +1208,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                         key={v.id}
                                                                         style={{
                                                                             display: 'grid',
-                                                                            gridTemplateColumns: '80px 1fr 110px 140px 320px',
-                                                                            gap: '1rem',
+                                                                            gridTemplateColumns: '64px minmax(0,1fr) 96px 108px minmax(180px,1fr) minmax(260px,320px)',
+                                                                            gap: '0.75rem',
                                                                             padding: '0.875rem 1rem',
-                                                                            alignItems: 'center',
+                                                                            alignItems: 'start',
                                                                             borderBottom: vIndex < versions.length - 1 ? '1px solid #f3f4f6' : 'none',
                                                                             fontSize: '0.8125rem',
                                                                             color: '#334155',
@@ -1089,10 +1220,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                         onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#fafafa'; }}
                                                                         onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#fff'; }}
                                                                     >
-                                                                        <span style={{ fontWeight: 700, color: '#6366f1' }}>
+                                                                        <span style={{ fontWeight: 700, color: '#6366f1', paddingTop: '0.2rem' }}>
                                                                             #{v.version_number}
                                                                         </span>
-                                                                        <span style={{ color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                        <span style={{ color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingTop: '0.2rem' }}>
                                                                             {v.change_summary ?? '—'}
                                                                         </span>
                                                                         <span style={{
@@ -1101,12 +1232,38 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                             padding: '0.25rem 0.5rem',
                                                                             borderRadius: '9999px',
                                                                             ...vStatusStyle,
+                                                                            alignSelf: 'start',
                                                                         }}>
                                                                             {vStatusDisplay}
                                                                         </span>
-                                                                        <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                                                                        <span style={{ fontSize: '0.75rem', color: '#94a3b8', paddingTop: '0.2rem' }}>
                                                                             {v.created_at ? new Date(v.created_at).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
                                                                         </span>
+                                                                        <div style={{ fontSize: '0.72rem', color: '#475569', minWidth: 0, lineHeight: 1.4 }}>
+                                                                            {vStatusLower === 'rejected' ? (
+                                                                                <>
+                                                                                    <div style={{ color: '#b91c1c', fontWeight: 600 }}>Đã từ chối duyệt</div>
+                                                                                    <div style={{ color: '#94a3b8', fontSize: '0.68rem', marginTop: '0.125rem' }}>
+                                                                                        {v.reviewed_at ? new Date(v.reviewed_at).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                                                                                    </div>
+                                                                                    <div
+                                                                                        style={{
+                                                                                            marginTop: '0.25rem',
+                                                                                            color: '#334155',
+                                                                                            display: '-webkit-box',
+                                                                                            WebkitLineClamp: 3,
+                                                                                            WebkitBoxOrient: 'vertical',
+                                                                                            overflow: 'hidden',
+                                                                                        }}
+                                                                                        title={v.rejection_reason || ''}
+                                                                                    >
+                                                                                        {truncateText(v.rejection_reason, 200) || '—'}
+                                                                                    </div>
+                                                                                </>
+                                                                            ) : (
+                                                                                <span style={{ color: '#94a3b8' }}>—</span>
+                                                                            )}
+                                                                        </div>
                                                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                                                                             <div style={{
                                                                                 display: 'flex',
@@ -1124,17 +1281,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                             type="button"
                                                                                             onClick={(e) => {
                                                                                                 e.stopPropagation();
-                                                                                                if (v.rejection_reason) {
-                                                                                                    setRejectionReasonModal({
-                                                                                                        open: true,
-                                                                                                        title: `Lý do từ chối: ${v.title_snapshot || v.titleSnapshot || `Phiên bản #${v.version_number}`}`,
-                                                                                                        reason: v.rejection_reason,
-                                                                                                        rejectedAt: v.reviewed_at ?? null,
-                                                                                                        loading: false
-                                                                                                    });
-                                                                                                } else {
-                                                                                                    openChapterRejectionReason(v.title_snapshot || v.titleSnapshot || `Phiên bản #${v.version_number}`, chapter.id);
-                                                                                                }
+                                                                                                openChapterRejectionHistoryModal(chapter.title, chapter, versions);
                                                                                             }}
                                                                                             title="Xem lý do từ chối phiên bản"
                                                                                             style={{
@@ -1447,7 +1594,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                             backgroundColor: '#fff',
                             borderRadius: '12px',
                             padding: '1.5rem',
-                            maxWidth: '440px',
+                            maxWidth: rejectionReasonModal.historyEntries?.length ? '560px' : '440px',
                             width: '100%',
                             boxShadow: '0 20px 60px rgba(0,0,0,0.2)'
                         }}
@@ -1458,6 +1605,24 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                         </h3>
                         {rejectionReasonModal.loading ? (
                             <p style={{ margin: 0, fontSize: '0.875rem', color: '#64748b' }}>Đang tải...</p>
+                        ) : Array.isArray(rejectionReasonModal.historyEntries) && rejectionReasonModal.historyEntries.length > 0 ? (
+                            <div style={{ maxHeight: 'min(70vh, 420px)', overflowY: 'auto' }}>
+                                <ol style={{ margin: 0, paddingLeft: '1.25rem' }}>
+                                    {rejectionReasonModal.historyEntries.map((entry, hi) => (
+                                        <li key={entry.key || hi} style={{ marginBottom: '1rem' }}>
+                                            <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#0f172a' }}>{entry.label}</div>
+                                            {entry.rejectedAt && (
+                                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.125rem' }}>
+                                                    {new Date(entry.rejectedAt).toLocaleString('vi-VN')}
+                                                </div>
+                                            )}
+                                            <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.875rem', color: '#334155', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+                                                {entry.reason}
+                                            </p>
+                                        </li>
+                                    ))}
+                                </ol>
+                            </div>
                         ) : rejectionReasonModal.reason ? (
                             <>
                                 <p style={{ margin: 0, fontSize: '0.875rem', color: '#334155', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>

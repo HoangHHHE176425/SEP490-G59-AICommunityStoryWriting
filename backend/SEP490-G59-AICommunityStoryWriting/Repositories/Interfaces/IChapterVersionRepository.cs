@@ -9,5 +9,6 @@ namespace Repositories
         void Add(chapter_versions version);
         void Update(chapter_versions version);
         void Delete(Guid id);
+        void DeleteAllByChapterId(Guid chapterId);
     }
 }

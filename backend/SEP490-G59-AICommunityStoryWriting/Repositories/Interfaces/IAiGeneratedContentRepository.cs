@@ -21,4 +21,7 @@ public interface IAiGeneratedContentRepository
 
     /// <summary>Gán chapter_id (và đồng bộ chapter_index với thứ tự chương) khi tác giả tạo chương từ bản AI.</summary>
     void UpdateChapterId(Guid id, Guid chapterId, int chapterOrderIndex);
+
+    /// <summary>Xóa mọi bản ghi AI gắn chapter (khi xóa chương).</summary>
+    void DeleteAllByChapterId(Guid chapterId);
 }

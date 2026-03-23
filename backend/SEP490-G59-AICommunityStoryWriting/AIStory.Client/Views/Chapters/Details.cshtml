@@ -236,13 +236,26 @@
         }
 
         async function deleteChapter() {
-            if (!confirm('Bạn có chắc muốn xóa chapter này? Toàn bộ version cũng sẽ mất.')) return;
+            if (!confirm('Bạn có chắc muốn xóa chương này? (Chỉ chương nháp; nếu có phiên bản chỉnh sửa sẽ được hỏi thêm.)')) return;
             try {
-                await ApiService.deleteChapter(chapterId);
-                Utils.showAlert('Đã xóa chapter.', 'success');
+                await ApiService.deleteChapter(chapterId, false);
+                Utils.showAlert('Đã xóa chương.', 'success');
                 setTimeout(() => { window.location.href = '/Chapters'; }, 1000);
             } catch (e) {
-                Utils.showAlert(e.message || 'Không thể xóa chapter.', 'danger');
+                const code = e.body && e.body.code;
+                if (e.status === 409 && code === 'CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED') {
+                    const n = e.body.versionCount ?? '?';
+                    if (!confirm(`Chương có ${n} phiên bản (nháp / chỉnh sửa). Bạn có đồng ý xóa luôn tất cả các phiên bản đó không?`)) return;
+                    try {
+                        await ApiService.deleteChapter(chapterId, true);
+                        Utils.showAlert('Đã xóa chương và các phiên bản.', 'success');
+                        setTimeout(() => { window.location.href = '/Chapters'; }, 1000);
+                    } catch (e2) {
+                        Utils.showAlert(e2.message || 'Không thể xóa chương.', 'danger');
+                    }
+                    return;
+                }
+                Utils.showAlert(e.message || 'Không thể xóa chương.', 'danger');
             }
         }
     </script>
