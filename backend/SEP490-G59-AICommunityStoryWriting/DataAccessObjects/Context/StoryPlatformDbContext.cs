@@ -325,7 +325,9 @@ public partial class StoryPlatformDbContext : DbContext
                 .HasMaxLength(20)
                 .HasDefaultValue("DRAFT");
             entity.Property(e => e.title_snapshot).HasMaxLength(255);
-            entity.Property(e => e.ai_similarity_percent);
+            // DB hiện tại chưa có cột chapter_versions.ai_similarity_percent ở một số môi trường;
+            // tạm ignore để tránh runtime SqlException "Invalid column name".
+            entity.Ignore(e => e.ai_similarity_percent);
 
             entity.HasOne(d => d.author).WithMany(p => p.chapter_versions)
                 .HasForeignKey(d => d.author_id)

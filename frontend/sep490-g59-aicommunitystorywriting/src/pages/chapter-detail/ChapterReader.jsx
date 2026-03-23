@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { ChapterNavBar } from '../../components/chapter-detail/ChapterNavBar';
 import { ChapterSettings } from '../../components/chapter-detail/ChapterSettings';
 import { ChapterSidebar } from '../../components/chapter-detail/ChapterSidebar';
@@ -30,10 +30,20 @@ function formatTimeAgo(dateStr) {
 export function ChapterReader({ onBack, onNavigateToStory }) {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
-    const { user } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const { showToast, ToastContainer } = useToast();
+    const location = useLocation();
     const urlStoryId = searchParams.get('storyId');
     const urlChapterId = searchParams.get('chapterId');
+
+    // Chưa đăng nhập thì không gọi các API có `[Authorize]` (tránh 401 + trang lỗi).
+    useEffect(() => {
+        if (!urlStoryId || !urlChapterId) return;
+        if (authLoading) return;
+        if (user?.id) return;
+        const redirectTarget = `${location.pathname}${location.search}`;
+        navigate(`/login?redirect=${encodeURIComponent(redirectTarget)}`, { replace: true });
+    }, [urlStoryId, urlChapterId, authLoading, user?.id, location.pathname, location.search, navigate]);
 
     const [fontSize, setFontSize] = useState(18);
     const [fontFamily, setFontFamily] = useState('serif');
@@ -65,6 +75,10 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                 setLoading(false);
                 return;
             }
+            if (!user?.id) {
+                // Redirect effect sẽ xử lý; tạm giữ `loading` để UI không nhảy layout.
+                return;
+            }
             setLoading(true);
             setError(null);
             Promise.all([
@@ -82,7 +96,13 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                     const orderIndex = chapterRes?.orderIndex ?? chapterRes?.OrderIndex ?? 0;
                     const accessType = (chapterRes?.accessType ?? chapterRes?.AccessType ?? 'FREE').toUpperCase();
                     const coinPrice = Number(chapterRes?.coinPrice ?? chapterRes?.CoinPrice ?? 0) || 0;
-                    const isUnlocked = Boolean(chapterRes?.isUnlocked ?? chapterRes?.IsUnlocked ?? false);
+                    const isUnlocked = Boolean(
+                        chapterRes?.isUnlocked ??
+                            chapterRes?.IsUnlocked ??
+                            chapterRes?.unlocked ??
+                            chapterRes?.Unlocked ??
+                            false
+                    );
                     const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && !isUnlocked;
                     const contentRaw = chapterRes?.content ?? chapterRes?.Content ?? '';
                     const content = isPaidLocked ? '' : (contentRaw || 'Chưa có nội dung.');
@@ -100,11 +120,18 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                     setAllChapters(rawChapters.map((ch, idx) => {
                         const chAccess = (ch.accessType ?? ch.AccessType ?? 'FREE').toUpperCase();
                         const chPrice = Number(ch.coinPrice ?? ch.CoinPrice ?? 0) || 0;
+                        const chUnlocked = Boolean(
+                            ch.isUnlocked ??
+                                ch.IsUnlocked ??
+                                ch.unlocked ??
+                                ch.Unlocked ??
+                                false
+                        );
                         return {
                             number: (ch.orderIndex ?? ch.OrderIndex ?? idx) + 1,
                             title: ch.title ?? ch.Title ?? `Chương ${idx + 1}`,
                             chapterId: ch.id ?? ch.Id,
-                            isLocked: chAccess === 'PAID' && chPrice > 0,
+                            isLocked: chAccess === 'PAID' && chPrice > 0 && !chUnlocked,
                             coinPrice: chPrice,
                         };
                     }));
@@ -128,7 +155,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
             cancelled = true;
             clearTimeout(id);
         };
-    }, [urlStoryId, urlChapterId]);
+    }, [urlStoryId, urlChapterId, user?.id, authLoading]);
 
     const loadComments = useCallback(() => {
         if (!urlChapterId) return;
@@ -178,7 +205,13 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
             const orderIndex = chapterRes?.orderIndex ?? chapterRes?.OrderIndex ?? 0;
             const accessType = (chapterRes?.accessType ?? chapterRes?.AccessType ?? 'FREE').toUpperCase();
             const coinPrice = Number(chapterRes?.coinPrice ?? chapterRes?.CoinPrice ?? 0) || 0;
-            const isUnlocked = Boolean(chapterRes?.isUnlocked ?? chapterRes?.IsUnlocked ?? false);
+            const isUnlocked = Boolean(
+                chapterRes?.isUnlocked ??
+                    chapterRes?.IsUnlocked ??
+                    chapterRes?.unlocked ??
+                    chapterRes?.Unlocked ??
+                    false
+            );
             const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && !isUnlocked;
             const contentRaw = chapterRes?.content ?? chapterRes?.Content ?? '';
             const content = isPaidLocked ? '' : (contentRaw || 'Chưa có nội dung.');

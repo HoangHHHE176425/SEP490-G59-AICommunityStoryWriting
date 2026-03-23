@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Services.DTOs.AI;
+using Services.DTOs.Community;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 using Xunit;
@@ -119,6 +120,7 @@ public class UC13_RateLikeStoryTests
             return (avg, count);
         }
         public (string? reason, DateTime? rejectedAt) GetLatestRejectionForStory(Guid storyId) => (null, null);
+        public CommunityStatsDto GetPublicCommunityStats() => throw new NotImplementedException();
     }
 
     private sealed class FakeContentGuardrailService : IContentGuardrailService

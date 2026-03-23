@@ -72,12 +72,17 @@ namespace DataAccessObjects.DAOs
                 .Max(c => (DateTime?)c.updated_at);
         }
 
-        /// <summary>Xóa tất cả chapters của một story</summary>
+        /// <summary>Xóa tất cả chapters của một story (kèm version + ai_generated_content — tránh lỗi FK).</summary>
         public static void DeleteByStoryId(Guid storyId)
         {
             using var context = new StoryPlatformDbContext();
             var chapters = context.chapters.Where(c => c.story_id == storyId).ToList();
-            if (chapters.Any())
+            foreach (var c in chapters)
+            {
+                AiGeneratedContentDAO.DeleteAllByChapterId(c.id);
+                ChapterVersionDAO.DeleteAllByChapterId(c.id);
+            }
+            if (chapters.Count > 0)
             {
                 context.chapters.RemoveRange(chapters);
                 context.SaveChanges();

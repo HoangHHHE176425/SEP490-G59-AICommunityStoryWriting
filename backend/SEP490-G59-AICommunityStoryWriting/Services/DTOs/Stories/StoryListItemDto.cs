@@ -63,6 +63,8 @@ namespace Services.DTOs.Stories
         public string? AdminRejectedReleaseNote { get; set; }
         /// <summary>Thời điểm admin từ chối đơn hủy nhận duyệt.</summary>
         public DateTime? AdminRejectedReleaseAt { get; set; }
+        /// <summary>True khi bản ghi từ chối đơn hủy nhận duyệt thuộc đúng phiên claim hiện tại.</summary>
+        public bool IsCurrentClaimRejection { get; set; }
 
         /// <summary>Ghi chú admin khi từ chối đơn EXTEND_DEADLINE (xin gia hạn) do moderator hiện tại gửi.</summary>
         public string? AdminRejectedExtendNote { get; set; }

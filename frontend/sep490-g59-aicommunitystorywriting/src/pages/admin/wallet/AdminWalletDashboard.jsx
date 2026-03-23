@@ -12,6 +12,9 @@ import {
     Search,
     ChevronLeft,
     ChevronRight,
+    Info,
+    Copy,
+    FileDown,
 } from 'lucide-react';
 import { getAdminWalletSummary, getSystemCoinLedger, getTopAuthorsByIncome, getTopSpenders } from '../../../api/admin/walletApi';
 import { AdminTransactions } from '../transactions/AdminTransactions';
@@ -27,6 +30,53 @@ const LEDGER_EVENT_TYPES = [
     { value: 'UNLOCK', label: 'Mở khóa chương' },
     { value: 'DONATE', label: 'Ủng hộ (donate)' },
 ];
+
+/** Hiển thị UUID dài gọn, vẫn copy full qua clipboard. */
+function shortenGuidLike(id) {
+    if (id == null || id === '') return '';
+    const s = String(id).trim();
+    if (s.length <= 16) return s;
+    return `${s.slice(0, 8)}…${s.slice(-4)}`;
+}
+
+function CopyIdButton({ value, label }) {
+    if (!value) return null;
+    const full = String(value);
+    return (
+        <button
+            type="button"
+            title={`Sao chép ${label}`}
+            onClick={async () => {
+                try {
+                    await navigator.clipboard.writeText(full);
+                } catch {
+                    /* ignore */
+                }
+            }}
+            className="inline-flex shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            aria-label={`Sao chép ${label}`}
+        >
+            <Copy className="h-3.5 w-3.5" />
+        </button>
+    );
+}
+
+function IdLine({ roleLabel, id }) {
+    if (!id) return null;
+    const full = String(id);
+    return (
+        <div className="flex min-w-0 items-center gap-1">
+            <span className="w-[4.5rem] shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-500">{roleLabel}</span>
+            <code
+                className="min-w-0 flex-1 truncate rounded border-l-2 border-slate-300 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-800"
+                title={full}
+            >
+                {shortenGuidLike(full)}
+            </code>
+            <CopyIdButton value={full} label={roleLabel} />
+        </div>
+    );
+}
 
 // Mock summary/top lists (fallback when API unavailable)
 const MOCK_SUMMARY = {
@@ -127,6 +177,11 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
         return list;
     }, [historySearch, transactions]);
 
+    const hasAnyNote = useMemo(
+        () => filteredTransactions.some((tx) => tx.note && String(tx.note).trim()),
+        [filteredTransactions]
+    );
+
     const totalHistoryPages = Math.max(1, historyTotalPages);
     const paginatedTransactions = filteredTransactions;
 
@@ -143,10 +198,10 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
     };
     const getTypeBadgeClass = (type) => {
         const map = {
-            UNLOCK: 'bg-blue-100 text-blue-700',
-            DONATE: 'bg-fuchsia-100 text-fuchsia-800',
+            UNLOCK: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80',
+            DONATE: 'bg-fuchsia-100 text-fuchsia-800 ring-1 ring-fuchsia-200/80',
         };
-        return map[type] || 'bg-slate-100 text-slate-600';
+        return map[type] || 'bg-slate-100 text-slate-600 ring-1 ring-slate-200/80';
     };
 
     const exportHistoryCsv = () => {
@@ -194,6 +249,12 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
         const n = Number(value ?? 0);
         if (!Number.isFinite(n) || n === 0) return '0';
         return `${n > 0 ? '+' : ''}${n.toLocaleString('vi-VN', { maximumFractionDigits: 2 })}`;
+    };
+
+    const deltaToneClass = (value) => {
+        const n = Number(value ?? 0);
+        if (!Number.isFinite(n) || n === 0) return 'text-slate-600 tabular-nums';
+        return n > 0 ? 'text-emerald-600 font-semibold tabular-nums' : 'text-rose-600 font-semibold tabular-nums';
     };
 
     const handleRefreshOverview = async () => {
@@ -262,40 +323,44 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
     }, [activeTab, historyPage, historyPageSize, historyDateFrom, historyDateTo, historyTypeFilter]);
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 rounded-2xl">
             {loadError ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] font-semibold text-amber-800">
                     {loadError}
                 </div>
             ) : null}
             {/* Header + Tabs */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900">Ví hệ thống</h1>
-                    <p className="text-sm text-slate-500 mt-1">
-                        Tổng quan dòng tiền trong hệ thống: coin, thu nhập tác giả, doanh thu nền tảng.
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="border-l-4 border-slate-300 pl-4">
+                    <h1 className="text-2xl font-bold text-slate-900">
+                        Ví hệ thống
+                    </h1>
+                    <p className="mt-1 text-sm text-slate-600">
+                        Tổng quan dòng tiền: <span className="font-semibold text-slate-800">coin</span>, thu nhập tác giả, doanh thu nền tảng.
                     </p>
                 </div>
-                <div className="flex items-center gap-2 border-b border-slate-200">
+                <div className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-slate-200/90 bg-white/90 p-1 shadow-sm">
                     <button
+                        type="button"
                         onClick={() => setActiveTab('overview')}
-                        className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                        className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all ${
                             activeTab === 'overview'
-                                ? 'border-primary text-primary'
-                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                                ? 'bg-slate-900 text-white shadow-sm'
+                                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                         }`}
                     >
                         Tổng quan
                     </button>
                     <button
+                        type="button"
                         onClick={() => setActiveTab('history')}
-                        className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+                        className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all ${
                             activeTab === 'history'
-                                ? 'border-primary text-primary'
-                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                                ? 'bg-slate-900 text-white shadow-sm'
+                                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                         }`}
                     >
-                        <History className="w-4 h-4" />
+                        <History className="h-4 w-4" />
                         Lịch sử giao dịch ví
                     </button>
                 </div>
@@ -308,7 +373,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                         <button
                             onClick={handleRefreshOverview}
                             disabled={overviewLoading}
-                            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-60"
+                            className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
                         >
                             <RefreshCw className={`w-4 h-4 ${overviewLoading ? 'animate-spin' : ''}`} />
                             {overviewLoading ? 'Đang tải...' : 'Làm mới'}
@@ -317,9 +382,9 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
 
                     {/* Summary cards */}
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                        <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-start gap-3">
-                            <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center">
-                                <Wallet className="w-5 h-5 text-emerald-500" />
+                        <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50">
+                                <Wallet className="h-5 w-5 text-emerald-600" />
                             </div>
                             <div className="flex-1">
                                 <p className="text-xs font-medium text-slate-500">Tổng coin trong hệ thống</p>
@@ -388,9 +453,12 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
 
                     {/* Balances + Chart */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
-                            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-                                <h2 className="text-sm font-semibold text-slate-900">Phân bổ số dư ví</h2>
+                        <div className="lg:col-span-2 rounded-xl border border-slate-200 bg-white p-5">
+                            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                                <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                                    <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
+                                    Phân bổ số dư ví
+                                </h2>
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs text-slate-400">Thu nhập theo:</span>
                                     <select
@@ -553,123 +621,217 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
             )}
 
             {activeTab === 'history' && (
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                    <p className="px-4 pt-4 text-xs text-slate-500">
-                        Phần này chỉ hiển thị <strong>ủng hộ (donate)</strong> và <strong>mở khóa chương</strong> (chia phí nền tảng 30% / thu nhập tác giả như luồng nghiệp vụ). Nạp coin / rút tiền xem ở khối &quot;Lịch sử giao dịch (Nạp / Rút)&quot; phía dưới.
-                    </p>
+                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    {/* Phạm vi dữ liệu */}
+                    <div className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 sm:px-6">
+                        <div className="flex gap-3">
+                            <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-200 text-slate-700">
+                                <Info className="h-4 w-4" aria-hidden />
+                            </div>
+                            <div className="min-w-0 space-y-1">
+                                <p className="text-sm font-semibold text-slate-900">Phạm vi bảng này</p>
+                                <p className="text-sm leading-relaxed text-slate-600">
+                                    Chỉ <span className="font-semibold text-slate-800">ủng hộ (donate)</span> và{' '}
+                                    <span className="font-semibold text-slate-800">mở khóa chương</span> (phí nền tảng 30% / thu nhập tác giả).
+                                    Lịch <span className="font-medium text-slate-800">nạp coin / rút tiền</span> nằm ở khối{' '}
+                                    <span className="rounded-md bg-white px-1.5 py-0.5 font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200">
+                                        Lịch sử giao dịch (Nạp / Rút)
+                                    </span>{' '}
+                                    bên dưới.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Filters */}
-                    <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex flex-wrap items-end gap-3">
-                        <div className="flex items-center gap-2 min-w-[200px] flex-1">
-                            <Search className="w-4 h-4 text-slate-400" />
-                            <input
-                                type="text"
-                                placeholder="Tìm theo user, mã tham chiếu..."
-                                value={historySearch}
-                                onChange={(e) => {
-                                    setHistorySearch(e.target.value);
-                                    setHistoryPage(1);
-                                }}
-                                className="flex-1 min-w-0 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                            />
+                    <div className="border-b border-slate-200 bg-slate-50/40 px-4 py-4 sm:px-6">
+                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-end">
+                            <label className="block min-w-0 lg:col-span-4">
+                                <span className="mb-1.5 block text-xs font-semibold text-slate-500">Tìm kiếm</span>
+                                <div className="relative">
+                                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        placeholder="User, truyện, chương, mã tham chiếu..."
+                                        value={historySearch}
+                                        onChange={(e) => {
+                                            setHistorySearch(e.target.value);
+                                            setHistoryPage(1);
+                                        }}
+                                        className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm text-slate-800 shadow-sm transition placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    />
+                                </div>
+                            </label>
+                            <label className="block lg:col-span-3">
+                                <span className="mb-1.5 block text-xs font-semibold text-slate-500">Loại sự kiện</span>
+                                <select
+                                    value={historyTypeFilter}
+                                    onChange={(e) => {
+                                        setHistoryTypeFilter(e.target.value);
+                                        setHistoryPage(1);
+                                    }}
+                                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                >
+                                    {LEDGER_EVENT_TYPES.map((x) => (
+                                        <option key={x.value} value={x.value}>
+                                            {x.label}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:col-span-3">
+                                <label className="block min-w-0">
+                                    <span className="mb-1.5 block text-xs font-semibold text-slate-500">Từ ngày</span>
+                                    <input
+                                        type="date"
+                                        value={historyDateFrom}
+                                        onChange={(e) => {
+                                            setHistoryDateFrom(e.target.value);
+                                            setHistoryPage(1);
+                                        }}
+                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    />
+                                </label>
+                                <label className="block min-w-0">
+                                    <span className="mb-1.5 block text-xs font-semibold text-slate-500">Đến ngày</span>
+                                    <input
+                                        type="date"
+                                        value={historyDateTo}
+                                        onChange={(e) => {
+                                            setHistoryDateTo(e.target.value);
+                                            setHistoryPage(1);
+                                        }}
+                                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                    />
+                                </label>
+                            </div>
+                            <div className="flex lg:col-span-2 lg:justify-end">
+                                <button
+                                    type="button"
+                                    onClick={exportHistoryCsv}
+                                    disabled={filteredTransactions.length === 0}
+                                    className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold shadow-sm transition sm:w-auto ${
+                                        filteredTransactions.length === 0
+                                            ? 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400'
+                                            : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                                    }`}
+                                >
+                                    <FileDown className="h-4 w-4 shrink-0" />
+                                    Xuất CSV
+                                </button>
+                            </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-slate-500 whitespace-nowrap">Loại sự kiện</span>
-                            <select
-                                value={historyTypeFilter}
-                                onChange={(e) => {
-                                    setHistoryTypeFilter(e.target.value);
-                                    setHistoryPage(1);
-                                }}
-                                className="px-3 py-2 text-sm border border-slate-200 rounded-lg text-slate-700"
-                            >
-                                {LEDGER_EVENT_TYPES.map((x) => (
-                                    <option key={x.value} value={x.value}>{x.label}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <input
-                            type="date"
-                            value={historyDateFrom}
-                            onChange={(e) => {
-                                setHistoryDateFrom(e.target.value);
-                                setHistoryPage(1);
-                            }}
-                            className="px-3 py-2 text-sm border border-slate-200 rounded-lg text-slate-700"
-                        />
-                        <span className="text-slate-400">→</span>
-                        <input
-                            type="date"
-                            value={historyDateTo}
-                            onChange={(e) => {
-                                setHistoryDateTo(e.target.value);
-                                setHistoryPage(1);
-                            }}
-                            className="px-3 py-2 text-sm border border-slate-200 rounded-lg text-slate-700"
-                        />
-                        <button
-                            type="button"
-                            onClick={exportHistoryCsv}
-                            disabled={filteredTransactions.length === 0}
-                            className={`px-3 py-2 text-sm font-semibold rounded-lg border ${
-                                filteredTransactions.length === 0
-                                    ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
-                                    : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                            }`}
-                        >
-                            Xuất CSV
-                        </button>
                     </div>
 
                     {/* Table */}
                     <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left text-slate-700">
-                            <thead className="bg-slate-50 text-slate-600 uppercase tracking-wider">
-                                <tr>
-                                    <th className="px-4 py-3">Thời gian</th>
-                                    <th className="px-4 py-3">Loại sự kiện</th>
-                                    <th className="px-4 py-3">Delta ví hệ thống</th>
-                                    <th className="px-4 py-3">Delta độc giả</th>
-                                    <th className="px-4 py-3">Delta thu nhập tác giả</th>
-                                    <th className="px-4 py-3">Delta coin khóa</th>
-                                    <th className="px-4 py-3">Ngữ cảnh</th>
-                                    <th className="px-4 py-3">Ghi chú</th>
+                        <table className="w-full min-w-[920px] table-fixed border-collapse text-left text-sm text-slate-700">
+                            <thead>
+                                <tr className="border-b border-slate-200 bg-slate-50/90">
+                                    <th className="w-[11%] px-4 py-3.5 text-xs font-semibold text-slate-600" title="Thời điểm ghi nhận">
+                                        Thời gian
+                                    </th>
+                                    <th className="w-[12%] px-4 py-3.5 text-xs font-semibold text-slate-600">Loại</th>
+                                    <th className="w-[9%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Thay đổi ví nền tảng">
+                                        Ví HT
+                                    </th>
+                                    <th className="w-[9%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Thay đổi ví độc giả">
+                                        Độc giả
+                                    </th>
+                                    <th className="w-[9%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Thu nhập tác giả">
+                                        Tác giả
+                                    </th>
+                                    <th className="w-[8%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Coin khóa">
+                                        Khóa
+                                    </th>
+                                    <th className="w-[32%] min-w-[240px] px-4 py-3.5 text-xs font-semibold text-slate-600">Chi tiết</th>
+                                    {hasAnyNote ? (
+                                        <th className="w-[10%] px-4 py-3.5 text-xs font-semibold text-slate-600">Ghi chú</th>
+                                    ) : null}
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody className="divide-y divide-slate-100">
                                 {paginatedTransactions.length === 0 ? (
                                     <tr>
-                                        <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
-                                            {historyLoading ? 'Đang tải lịch sử...' : 'Không có giao dịch nào thỏa bộ lọc.'}
+                                        <td
+                                            colSpan={hasAnyNote ? 8 : 7}
+                                            className="px-4 py-16 text-center"
+                                        >
+                                            <div className="mx-auto max-w-sm">
+                                                <p className="text-sm font-medium text-slate-700">
+                                                    {historyLoading ? 'Đang tải lịch sử…' : 'Không có giao dịch nào'}
+                                                </p>
+                                                <p className="mt-1 text-xs text-slate-500">
+                                                    {historyLoading
+                                                        ? 'Vui lòng chờ trong giây lát.'
+                                                        : 'Thử đổi khoảng thời gian hoặc bộ lọc loại sự kiện.'}
+                                                </p>
+                                            </div>
                                         </td>
                                     </tr>
                                 ) : (
                                     paginatedTransactions.map((tx) => (
-                                        <tr key={`${tx.eventType}-${tx.eventTime}-${tx.adminId || ''}-${tx.authorUserId || ''}-${tx.buyerUserId || ''}`} className="border-b border-slate-100 hover:bg-slate-50/50">
-                                            <td className="px-4 py-3 whitespace-nowrap text-slate-600">
-                                                {formatDate(tx.eventTime)}
+                                        <tr
+                                            key={`${tx.eventType}-${tx.eventTime}-${tx.adminId || ''}-${tx.authorUserId || ''}-${tx.buyerUserId || ''}`}
+                                            className="align-top transition-colors hover:bg-slate-50/80"
+                                        >
+                                            <td className="px-4 py-3.5">
+                                                <span className="font-medium text-slate-800">{formatDate(tx.eventTime)}</span>
                                             </td>
-                                            <td className="px-4 py-3">
-                                                <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getTypeBadgeClass(tx.eventType)}`}>
+                                            <td className="px-4 py-3.5">
+                                                <span
+                                                    className={`inline-flex max-w-full items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getTypeBadgeClass(tx.eventType)}`}
+                                                >
                                                     {getTypeLabel(tx)}
                                                 </span>
                                             </td>
-                                            <td className="px-4 py-3 font-medium text-slate-700">{formatSignedCoins(tx.platformDeltaCoins)}</td>
-                                            <td className="px-4 py-3 text-slate-700">{formatSignedCoins(tx.buyerDeltaCoins)}</td>
-                                            <td className="px-4 py-3 text-slate-700">{formatSignedCoins(tx.authorIncomeDeltaCoins)}</td>
-                                            <td className="px-4 py-3 text-slate-700">{formatSignedCoins(tx.authorFrozenDeltaCoins)}</td>
-                                            <td className="px-4 py-3">
-                                                <div className="text-xs text-slate-700">
-                                                    {tx.storyTitle ? <div>Truyện: {tx.storyTitle}</div> : null}
-                                                    {tx.chapterTitle ? <div>Chương: {tx.chapterTitle}</div> : null}
-                                                    {tx.adminId ? <div>Admin: {tx.adminId}</div> : null}
-                                                    {tx.buyerUserId ? <div>Buyer: {tx.buyerUserId}</div> : null}
-                                                    {tx.authorUserId ? <div>Author: {tx.authorUserId}</div> : null}
-                                                    {!tx.storyTitle && !tx.chapterTitle && !tx.adminId && !tx.buyerUserId && !tx.authorUserId ? '—' : null}
+                                            <td className={`px-1 py-3.5 text-center text-sm ${deltaToneClass(tx.platformDeltaCoins)}`}>
+                                                {formatSignedCoins(tx.platformDeltaCoins)}
+                                            </td>
+                                            <td className={`px-1 py-3.5 text-center text-sm ${deltaToneClass(tx.buyerDeltaCoins)}`}>
+                                                {formatSignedCoins(tx.buyerDeltaCoins)}
+                                            </td>
+                                            <td className={`px-1 py-3.5 text-center text-sm ${deltaToneClass(tx.authorIncomeDeltaCoins)}`}>
+                                                {formatSignedCoins(tx.authorIncomeDeltaCoins)}
+                                            </td>
+                                            <td className={`px-1 py-3.5 text-center text-sm ${deltaToneClass(tx.authorFrozenDeltaCoins)}`}>
+                                                {formatSignedCoins(tx.authorFrozenDeltaCoins)}
+                                            </td>
+                                            <td className="px-4 py-3.5">
+                                                <div className="space-y-2">
+                                                    {(tx.storyTitle || tx.chapterTitle) && (
+                                                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm">
+                                                            {tx.storyTitle ? (
+                                                                <span className="font-semibold text-slate-900">{tx.storyTitle}</span>
+                                                            ) : null}
+                                                            {tx.chapterTitle ? (
+                                                                <span className="text-slate-600">
+                                                                    {tx.storyTitle ? '·' : ''} {tx.chapterTitle}
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+                                                    )}
+                                                    <div className="space-y-1.5">
+                                                        <IdLine roleLabel="Độc giả" id={tx.buyerUserId} />
+                                                        <IdLine roleLabel="Tác giả" id={tx.authorUserId} />
+                                                        <IdLine roleLabel="Admin" id={tx.adminId} />
+                                                    </div>
+                                                    {!tx.storyTitle &&
+                                                    !tx.chapterTitle &&
+                                                    !tx.adminId &&
+                                                    !tx.buyerUserId &&
+                                                    !tx.authorUserId ? (
+                                                        <span className="text-xs text-slate-400">—</span>
+                                                    ) : null}
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-3 text-slate-600 max-w-[220px] truncate" title={tx.note || ''}>
-                                                {tx.note || '—'}
-                                            </td>
+                                            {hasAnyNote ? (
+                                                <td className="px-4 py-3.5 text-sm text-slate-600">
+                                                    <span className="line-clamp-2" title={tx.note || ''}>
+                                                        {tx.note && String(tx.note).trim() ? tx.note : '—'}
+                                                    </span>
+                                                </td>
+                                            ) : null}
                                         </tr>
                                     ))
                                 )}
@@ -679,34 +841,41 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
 
                     {/* Pagination */}
                     {filteredTransactions.length > 0 && (
-                        <div className="px-4 py-3 border-t border-slate-200 flex items-center justify-between">
-                            <p className="text-xs text-slate-500">
-                                Hiển thị {(historyPage - 1) * historyPageSize + 1}–{Math.min(historyPage * historyPageSize, historyTotalCount)} / {historyTotalCount}
+                        <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50/30 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                            <p className="text-xs text-slate-600">
+                                Hiển thị{' '}
+                                <span className="font-semibold text-slate-700">
+                                    {(historyPage - 1) * historyPageSize + 1}–{Math.min(historyPage * historyPageSize, historyTotalCount)}
+                                </span>{' '}
+                                / <span className="font-semibold text-slate-700">{historyTotalCount}</span> bản ghi
                             </p>
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center justify-end gap-1">
                                 <button
+                                    type="button"
                                     onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
                                     disabled={historyPage <= 1}
-                                    className="p-2 rounded border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50"
+                                    className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                    aria-label="Trang trước"
                                 >
-                                    <ChevronLeft className="w-4 h-4" />
+                                    <ChevronLeft className="h-4 w-4" />
                                 </button>
-                                <span className="px-2 text-sm text-slate-600">
+                                <span className="min-w-[7rem] px-2 text-center text-sm font-semibold text-slate-700">
                                     Trang {historyPage} / {totalHistoryPages}
                                 </span>
                                 <button
+                                    type="button"
                                     onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages, p + 1))}
                                     disabled={historyPage >= totalHistoryPages}
-                                    className="p-2 rounded border border-slate-200 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50"
+                                    className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                    aria-label="Trang sau"
                                 >
-                                    <ChevronRight className="w-4 h-4" />
+                                    <ChevronRight className="h-4 w-4" />
                                 </button>
                             </div>
                         </div>
                     )}
 
-                    {/* Đẩy phần quản lý giao dịch (Nạp / Rút) sang trang Ví hệ thống */}
-                    <div className="border-t border-slate-200 p-4 bg-white">
+                    <div className="border-t border-slate-200 bg-slate-50/20 p-4 sm:p-6">
                         <AdminTransactions />
                     </div>
                 </div>

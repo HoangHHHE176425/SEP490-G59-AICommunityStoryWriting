@@ -82,10 +82,10 @@ export function worstTimeStatus(statuses) {
     }, list[0]);
 }
 
-/** Mốc kết thúc chính sách (+7 ngày từ mốc pendingSince; copy UI: từ lúc nhận duyệt đơn). */
-export function policySuggestedEndUtc(pendingSinceIso) {
-    if (!pendingSinceIso) return null;
-    const t = new Date(pendingSinceIso).getTime();
+/** Mốc kết thúc chính sách (+7 ngày từ mốc moderator nhận duyệt). */
+export function policySuggestedEndUtc(claimedAtIso) {
+    if (!claimedAtIso) return null;
+    const t = new Date(claimedAtIso).getTime();
     if (!Number.isFinite(t)) return null;
     return new Date(t + POLICY_REVIEW_DAYS * 86400000);
 }
@@ -105,11 +105,11 @@ export function getSlaBadgeStyle(timeStatus) {
 
 /**
  * Copy đếm ngược tới hạn chính sách (+7 ngày; label hiển thị: từ lúc nhận duyệt đơn).
- * @param {string|null} pendingSinceIso - mốc thời gian từ BE (UTC ISO), thường là pendingSince
+ * @param {string|null} claimedAtIso - mốc thời gian moderator nhận duyệt (UTC ISO)
  * @param {Date} [now]
  */
-export function formatPolicySlaCountdown(pendingSinceIso, now = new Date()) {
-    const end = policySuggestedEndUtc(pendingSinceIso);
+export function formatPolicySlaCountdown(claimedAtIso, now = new Date()) {
+    const end = policySuggestedEndUtc(claimedAtIso);
     if (!end) return { line: null, short: null };
     const ms = end.getTime() - now.getTime();
     if (ms <= 0) {
