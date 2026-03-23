@@ -26,6 +26,40 @@ namespace DataAccessObjects.DAOs
             return log != null ? (log.rejection_reason, log.created_at) : (null, null);
         }
 
+        /// <summary>Mọi bản ghi REJECTED cho từng target (vd. CHAPTER), sắp xếp theo thời gian tăng dần (lịch sử).</summary>
+        public static Dictionary<Guid, List<(string? Reason, DateTime? RejectedAt, Guid? ModeratorId)>> GetRejectionHistoriesByTargetIds(
+            string targetType,
+            IReadOnlyList<Guid> targetIds)
+        {
+            if (targetIds == null || targetIds.Count == 0)
+                return new Dictionary<Guid, List<(string?, DateTime?, Guid?)>>();
+
+            var idSet = targetIds.ToHashSet();
+            using var context = new StoryPlatformDbContext();
+            var logs = context.moderation_logs
+                .AsNoTracking()
+                .Where(m =>
+                    m.target_type == targetType &&
+                    m.target_id.HasValue &&
+                    idSet.Contains(m.target_id.Value) &&
+                    m.action != null &&
+                    m.action.ToUpper() == "REJECTED")
+                .OrderBy(m => m.created_at ?? DateTime.MinValue)
+                .ThenBy(m => m.id)
+                .Select(m => new { m.target_id, m.rejection_reason, m.created_at, m.moderator_id })
+                .ToList();
+
+            var dict = targetIds.Distinct().ToDictionary(id => id, _ => new List<(string?, DateTime?, Guid?)>());
+            foreach (var log in logs)
+            {
+                var tid = log.target_id!.Value;
+                if (!dict.ContainsKey(tid)) continue;
+                dict[tid].Add((log.rejection_reason, log.created_at, log.moderator_id));
+            }
+
+            return dict;
+        }
+
         /// <summary>Lấy danh sách target_id từ moderator_logs do moderator này duyệt/từ chối (action = APPROVED hoặc REJECTED).</summary>
         public static List<Guid> GetTargetIdsByModeratorAndAction(Guid moderatorId, string targetType, string action)
         {

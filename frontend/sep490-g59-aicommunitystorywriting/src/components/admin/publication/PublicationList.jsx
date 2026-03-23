@@ -94,14 +94,11 @@ export function PublicationList({
         return `${diffDays} ngày trước`;
     };
 
-    const pendingSinceForPub = (pub) => {
+    const claimedAtForPub = (pub) => {
         if (pub.type === 'story_group') {
-            return pub.slaPendingSince
-                ?? pub.representativePublication?.pendingSince
-                ?? pub.representativePublication?.submittedAt
-                ?? null;
+            return pub.representativePublication?.claimedAt ?? null;
         }
-        return pub.pendingSince ?? pub.submittedAt ?? null;
+        return pub.claimedAt ?? null;
     };
 
     const timeStatusForPub = (pub) => {
@@ -273,34 +270,46 @@ export function PublicationList({
                                         {pub.author ? <>Tác giả: <span style={{ fontWeight: 500, color: '#475569' }}>{pub.author}</span></> : null}
                                         {pub.type === 'chapter' && pub.wordCount != null ? ` • ${pub.wordCount} từ` : null}
                                     </p>
-                                    {showModeratorSla && pub.status === 'pending' && (pub.adminRejectedReleaseNote || pub.adminRejectedReleaseAt) && (
-                                        <div
-                                            style={{
-                                                marginTop: '0.75rem',
-                                                padding: '0.75rem 0.875rem',
-                                                backgroundColor: '#fff7ed',
-                                                border: '1px solid #fdba74',
-                                                borderRadius: '8px',
-                                            }}
-                                            onClick={(e) => e.stopPropagation()}
-                                        >
-                                            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#9a3412', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                                                <AlertCircle style={{ width: '14px', height: '14px', flexShrink: 0 }} />
-                                                Admin đã từ chối đơn hủy nhận duyệt
-                                            </div>
-                                            {pub.adminRejectedReleaseAt ? (
-                                                <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.35rem' }}>
-                                                    Thời điểm: {formatApiDateTimeLocalVi(pub.adminRejectedReleaseAt)}
+                                    {showModeratorSla && pub.status === 'pending' && (() => {
+                                        const atStr = pub.adminRejectedReleaseAt ?? null;
+                                        const claimedAtStr = claimedAtForPub(pub);
+                                        const currentFlagRaw = pub.isCurrentClaimRejection;
+                                        const hasCurrentFlag = typeof currentFlagRaw === 'boolean';
+                                        const at = atStr ? new Date(atStr).getTime() : NaN;
+                                        const claimedAt = claimedAtStr ? new Date(claimedAtStr).getTime() : NaN;
+                                        const hasAdminRejectInfo = !!(pub.adminRejectedReleaseNote || pub.adminRejectedReleaseAt);
+                                        const isCurrentClaimCycle = hasCurrentFlag
+                                            ? Boolean(currentFlagRaw)
+                                            : (!Number.isFinite(at) || !Number.isFinite(claimedAt) || at >= claimedAt);
+                                        return hasAdminRejectInfo && isCurrentClaimCycle;
+                                    })() && (
+                                            <div
+                                                style={{
+                                                    marginTop: '0.75rem',
+                                                    padding: '0.75rem 0.875rem',
+                                                    backgroundColor: '#fff7ed',
+                                                    border: '1px solid #fdba74',
+                                                    borderRadius: '8px',
+                                                }}
+                                                onClick={(e) => e.stopPropagation()}
+                                            >
+                                                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#9a3412', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                                    <AlertCircle style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+                                                    Quản trị viên đã từ chối đơn hủy nhận duyệt
                                                 </div>
-                                            ) : null}
-                                            <div style={{ fontSize: '0.8125rem', color: '#431407', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
-                                                <strong style={{ color: '#7c2d12' }}>Lý do / ghi chú:</strong>{' '}
-                                                {pub.adminRejectedReleaseNote && String(pub.adminRejectedReleaseNote).trim()
-                                                    ? pub.adminRejectedReleaseNote
-                                                    : 'Admin không nhập ghi chú.'}
+                                                {pub.adminRejectedReleaseAt ? (
+                                                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.35rem' }}>
+                                                        Thời điểm: {formatApiDateTimeLocalVi(pub.adminRejectedReleaseAt)}
+                                                    </div>
+                                                ) : null}
+                                                <div style={{ fontSize: '0.8125rem', color: '#431407', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                                                    <strong style={{ color: '#7c2d12' }}>Lý do / ghi chú:</strong>{' '}
+                                                    {pub.adminRejectedReleaseNote && String(pub.adminRejectedReleaseNote).trim()
+                                                        ? pub.adminRejectedReleaseNote
+                                                        : 'Quản trị viên không nhập ghi chú.'}
+                                                </div>
                                             </div>
-                                        </div>
-                                    )}
+                                        )}
                                     {/* Từ chối gia hạn: chỉ hiển thị trong dialog chi tiết, theo từng chương (không gộp trên thẻ truyện). */}
                                 </div>
 
@@ -467,8 +476,8 @@ export function PublicationList({
                                 )}
                             </div>
 
-                            {showModeratorSla && pub.status === 'pending' && pendingSinceForPub(pub) && (() => {
-                                const { line } = formatPolicySlaCountdown(pendingSinceForPub(pub));
+                            {showModeratorSla && pub.status === 'pending' && claimedAtForPub(pub) && (() => {
+                                const { line } = formatPolicySlaCountdown(claimedAtForPub(pub));
                                 if (!line) return null;
                                 return (
                                     <div style={{

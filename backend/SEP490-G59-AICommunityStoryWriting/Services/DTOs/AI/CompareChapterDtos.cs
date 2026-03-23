@@ -7,6 +7,15 @@ public class CompareChapterRequest
     public Guid ChapterId { get; set; }
 }
 
+/// <summary>So sánh trước khi lưu: nội dung đang soạn + thứ tự chương — không ghi DB.</summary>
+public class CompareChapterPreviewRequest
+{
+    public Guid StoryId { get; set; }
+    /// <summary>Khớp <c>chapters.order_index</c> (chương 1 → 0).</summary>
+    public int OrderIndex { get; set; }
+    public string? Content { get; set; }
+}
+
 /// <summary>Kết quả so sánh: độ giống (0–100) và nhận định.</summary>
 public class CompareChapterResponse
 {

@@ -670,11 +670,20 @@ export function AuthorStoryManagement({ onBack }) {
         }
     };
 
+    /** Sau khi lưu chương + (tuỳ chọn) popup so sánh AI — ChapterEditorPage gọi khi hoàn tất. */
+    const navigateAwayFromChapterEditor = () => {
+        setActiveView('chapterList');
+        setCurrentChapter(null);
+        setSourceChapterForVersion(null);
+        setEditingVersion(null);
+        setViewChapterOnly(false);
+    };
+
     const handleSaveChapter = async (chapterData) => {
         const storyId = currentStory?.id ?? currentStory?.Id;
         if (!storyId) {
             showToast('Không tìm thấy truyện', 'error');
-            return;
+            throw new Error('NO_STORY');
         }
 
         try {
@@ -699,11 +708,7 @@ export function AuthorStoryManagement({ onBack }) {
                     await submitChapterVersion(chapterId, versionId);
                 }
 
-                setActiveView('chapterList');
-                setCurrentChapter(null);
-                setSourceChapterForVersion(null);
-                setEditingVersion(null);
-                return;
+                return { chapterId: null, mode: 'version' };
             }
 
             // Map status: 'draft' -> 'DRAFT', 'published' -> 'PENDING_REVIEW'
@@ -719,7 +724,7 @@ export function AuthorStoryManagement({ onBack }) {
                 // Thêm chương mới
                 const orderIndex = (chapterData.number || 1) - 1; // number bắt đầu từ 1, orderIndex từ 0
 
-                await createChapter({
+                const created = await createChapter({
                     storyId,
                     title: chapterData.title,
                     content: chapterData.content || '',
@@ -727,45 +732,54 @@ export function AuthorStoryManagement({ onBack }) {
                     status: apiStatus,
                     accessType: apiAccessType,
                     coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
+                    aiSimilarityPercent: chapterData.aiSimilarityPercent,
                 });
 
+                const newChapterId = created?.id ?? created?.Id;
                 showToast(
                     apiStatus === 'DRAFT' ? 'Đã lưu nháp chương mới' : 'Đã xuất bản chương mới',
                     'success'
                 );
-            } else {
-                // Cập nhật chương hiện có
-                const chapterId = currentChapter.id ?? currentChapter.Id;
-                if (!chapterId) {
-                    showToast('Không tìm thấy ID chương', 'error');
-                    return;
-                }
-
-                await updateChapter(chapterId, {
-                    title: chapterData.title,
-                    content: chapterData.content || '',
-                    orderIndex: (chapterData.number || 1) - 1,
-                    status: apiStatus,
-                    accessType: apiAccessType,
-                    coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
-                    changeSummary: chapterData.changeSummary ? String(chapterData.changeSummary).trim() : undefined,
-                });
-
-                showToast(
-                    apiStatus === 'DRAFT' ? 'Đã cập nhật chương (lưu nháp)' : 'Đã cập nhật chương (xuất bản)',
-                    'success'
-                );
+                return { chapterId: newChapterId };
+            }
+            // Cập nhật chương hiện có
+            const chapterId = currentChapter.id ?? currentChapter.Id;
+            if (!chapterId) {
+                showToast('Không tìm thấy ID chương', 'error');
+                throw new Error('NO_CHAPTER_ID');
             }
 
-            // Quay về danh sách chương
-            setActiveView('chapterList');
-            setCurrentChapter(null);
-            setSourceChapterForVersion(null);
-            setEditingVersion(null);
+            await updateChapter(chapterId, {
+                title: chapterData.title,
+                content: chapterData.content || '',
+                orderIndex: (chapterData.number || 1) - 1,
+                status: apiStatus,
+                accessType: apiAccessType,
+                coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
+                changeSummary: chapterData.changeSummary ? String(chapterData.changeSummary).trim() : undefined,
+                aiSimilarityPercent: chapterData.aiSimilarityPercent,
+            });
+
+            showToast(
+                apiStatus === 'DRAFT' ? 'Đã cập nhật chương (lưu nháp)' : 'Đã cập nhật chương (xuất bản)',
+                'success'
+            );
+            return { chapterId };
         } catch (error) {
-            const errorMessage = error?.response?.data?.message || error?.message || 'Không thể lưu chương';
-            showToast(errorMessage, 'error');
+            const data = error?.response?.data;
+            const errorMessage =
+                (typeof data === 'string' && data.trim() ? data.trim() : null) ??
+                data?.message ??
+                data?.Message ??
+                data?.detail ??
+                data?.title ??
+                error?.message ??
+                'Không thể lưu chương';
+            if (error?.message !== 'NO_STORY' && error?.message !== 'NO_CHAPTER_ID') {
+                showToast(errorMessage, 'error');
+            }
             console.error('Error saving chapter:', error);
+            throw error;
         }
     };
 
@@ -937,6 +951,8 @@ export function AuthorStoryManagement({ onBack }) {
     if (activeView === 'addChapter' || activeView === 'editChapter' || activeView === 'addChapterVersion') {
         return (
             <>
+                {/* Cùng hook useToast với handleSaveChapter — bắt buộc render để toast lỗi (vd. chương trước chưa xuất bản) hiển thị khi đang sửa chương */}
+                <ToastContainer />
                 <ChapterEditorPage
                     story={currentStory}
                     chapter={activeView === 'editChapter' ? currentChapter : null}
@@ -944,6 +960,7 @@ export function AuthorStoryManagement({ onBack }) {
                     editingVersion={activeView === 'addChapterVersion' ? editingVersion : null}
                     readOnly={viewChapterOnly}
                     onSave={handleSaveChapter}
+                    onNavigateAfterSave={navigateAwayFromChapterEditor}
                     onCancel={() => {
                         setActiveView('chapterList');
                         setCurrentChapter(null);

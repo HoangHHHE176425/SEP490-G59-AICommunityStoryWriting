@@ -9,12 +9,43 @@ using AIStory.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json.Serialization;
 using Repositories;
 using Services.DTOs.AI;
 using Services.Interfaces;
 
 namespace AIStory.API.Controllers
 {
+    public sealed class AiUsageLimitItemResponse
+    {
+        [JsonPropertyName("limitPerDay")]
+        public int LimitPerDay { get; set; }
+        [JsonPropertyName("usedInWindow")]
+        public int UsedInWindow { get; set; }
+        [JsonPropertyName("remaining")]
+        public int Remaining { get; set; }
+        [JsonPropertyName("resetsAtUtc")]
+        public DateTime? ResetsAtUtc { get; set; }
+    }
+
+    public sealed class AiUsageLimitResponse
+    {
+        [JsonPropertyName("suggestNextChapter")]
+        public AiUsageLimitItemResponse SuggestNextChapter { get; set; } = new();
+        [JsonPropertyName("coCreate")]
+        public AiUsageLimitItemResponse CoCreate { get; set; } = new();
+
+        // Legacy root fields (mirror suggestNextChapter)
+        [JsonPropertyName("limitPerDay")]
+        public int LimitPerDay { get; set; }
+        [JsonPropertyName("usedInWindow")]
+        public int UsedInWindow { get; set; }
+        [JsonPropertyName("remaining")]
+        public int Remaining { get; set; }
+        [JsonPropertyName("resetsAtUtc")]
+        public DateTime? ResetsAtUtc { get; set; }
+    }
+
     /// <summary>API AI: gợi ý chương tiếp theo, đồng sáng tác (3 agent), kiểm tra nhất quán.</summary>
     [ApiController]
     [Route("api/ai")]
@@ -68,28 +99,30 @@ namespace AIStory.API.Controllers
                 return Unauthorized(new { message = "Vui lòng đăng nhập." });
             var suggest = _rateLimitService.GetDailyLimitInfo(userId, AiRateLimitKind.SuggestNextChapter);
             var coCreate = _rateLimitService.GetDailyLimitInfo(userId, AiRateLimitKind.CoCreate);
-            return Ok(new
+
+            var payload = new AiUsageLimitResponse
             {
-                suggestNextChapter = new
+                SuggestNextChapter = new AiUsageLimitItemResponse
                 {
-                    limitPerDay = suggest.LimitPerDay,
-                    usedInWindow = suggest.UsedInWindow,
-                    remaining = suggest.Remaining,
-                    resetsAtUtc = suggest.ResetsAtUtc
+                    LimitPerDay = suggest.LimitPerDay,
+                    UsedInWindow = suggest.UsedInWindow,
+                    Remaining = suggest.Remaining,
+                    ResetsAtUtc = suggest.ResetsAtUtc
                 },
-                coCreate = new
+                CoCreate = new AiUsageLimitItemResponse
                 {
-                    limitPerDay = coCreate.LimitPerDay,
-                    usedInWindow = coCreate.UsedInWindow,
-                    remaining = coCreate.Remaining,
-                    resetsAtUtc = coCreate.ResetsAtUtc
+                    LimitPerDay = coCreate.LimitPerDay,
+                    UsedInWindow = coCreate.UsedInWindow,
+                    Remaining = coCreate.Remaining,
+                    ResetsAtUtc = coCreate.ResetsAtUtc
                 },
-                // Tương thích FE cũ (đọc flat ở root): trùng với suggest-next-chapter
-                limitPerDay = suggest.LimitPerDay,
-                usedInWindow = suggest.UsedInWindow,
-                remaining = suggest.Remaining,
-                resetsAtUtc = suggest.ResetsAtUtc
-            });
+                LimitPerDay = suggest.LimitPerDay,
+                UsedInWindow = suggest.UsedInWindow,
+                Remaining = suggest.Remaining,
+                ResetsAtUtc = suggest.ResetsAtUtc
+            };
+
+            return Ok(payload);
         }
 
         /// <summary>Gợi ý 3 hướng đi khác nhau cho chương tiếp theo. Chỉ tác giả của truyện được gọi. Có giới hạn số lần gọi theo user (tránh 429).</summary>
@@ -374,7 +407,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>So sánh <c>chapters.content</c> theo <c>ChapterId</c> (BE tự lấy story + order_index) với các bản AI cùng <c>chapter_index</c>; độ giống 0–100% (lấy max). Chỉ tác giả truyện.</summary>
+        /// <summary>So sánh <c>chapters.content</c> theo <c>ChapterId</c> (BE tự lấy story + order_index) với các bản AI cùng <c>chapter_index</c>; độ giống 0–100% (lấy max). Chỉ tác giả truyện. Không ghi DB.</summary>
         [HttpPost("compare-chapter")]
         public async Task<IActionResult> CompareChapter([FromBody] CompareChapterRequest request, CancellationToken cancellationToken)
         {
@@ -401,29 +434,29 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>So sánh <c>content_snapshot</c> của phiên bản mới nhất (<c>chapter_versions</c>) với mọi <c>ai_output</c> có <c>chapter_id</c>; lưu % vào bản ghi version. Body: <c>chapterId</c>. Chỉ tác giả truyện.</summary>
-        [HttpPost("compare-chapter-version-to-ai")]
-        public async Task<IActionResult> CompareChapterVersionToAi([FromBody] CompareChapterVersionToAiRequest request, CancellationToken cancellationToken)
+        /// <summary>So sánh nội dung đang soạn với bản AI trước khi lưu (không cần <c>chapterId</c>). Không ghi DB — sau khi xác nhận lưu, FE gửi <c>aiSimilarityPercent</c> khi tạo/cập nhật chương.</summary>
+        [HttpPost("compare-chapter-preview")]
+        public async Task<IActionResult> CompareChapterPreview([FromBody] CompareChapterPreviewRequest request, CancellationToken cancellationToken)
         {
-            if (request.ChapterId == Guid.Empty)
-                return BadRequest(new { message = "ChapterId là bắt buộc." });
+            if (request.StoryId == Guid.Empty)
+                return BadRequest(new { message = "StoryId là bắt buộc." });
 
             Guid? userId = null;
             var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var uid))
                 userId = uid;
             if (!userId.HasValue)
-                return Unauthorized(new { message = "Vui lòng đăng nhập." });
+                return Unauthorized(new { message = "Vui lòng đăng nhập để so sánh chương." });
 
             try
             {
-                var response = await _chapterVersionAiCompareService.CompareVersionSnapshotToAiAsync(request, userId, cancellationToken);
+                var response = await _chapterCompareService.ComparePreviewAsync(request, userId, cancellationToken);
                 return Ok(response);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Compare chapter version to AI failed for ChapterId={ChapterId}", request.ChapterId);
-                var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi so sánh phiên bản với AI.";
+                _logger.LogError(ex, "Compare chapter preview failed for StoryId={StoryId}", request.StoryId);
+                var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi so sánh chương. Vui lòng thử lại sau.";
                 return StatusCode(500, new { message });
             }
         }

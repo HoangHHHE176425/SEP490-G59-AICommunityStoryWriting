@@ -42,6 +42,9 @@ export async function createChapter(data) {
         aiContributionRatio: data.aiContributionRatio ?? 0,
         isAiClean: data.isAiClean ?? false,
     };
+    if (data.aiSimilarityPercent != null && Number.isFinite(Number(data.aiSimilarityPercent))) {
+        body.aiSimilarityPercent = Number(data.aiSimilarityPercent);
+    }
 
     const response = await axiosInstance.post("/chapters", body);
     return response.data;
@@ -141,6 +144,9 @@ export async function updateChapter(id, data) {
     };
     if (data.changeSummary != null && String(data.changeSummary).trim() !== '') {
         body.changeSummary = String(data.changeSummary).trim();
+    }
+    if (data.aiSimilarityPercent != null && Number.isFinite(Number(data.aiSimilarityPercent))) {
+        body.aiSimilarityPercent = Number(data.aiSimilarityPercent);
     }
 
     const response = await axiosInstance.put(`/chapters/${id}`, body);

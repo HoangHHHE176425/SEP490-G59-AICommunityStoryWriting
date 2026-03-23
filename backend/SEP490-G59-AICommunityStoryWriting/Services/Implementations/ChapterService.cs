@@ -129,6 +129,9 @@ namespace Services.Implementations
                 updated_at = DateTime.Now
             };
 
+            if (request.AiSimilarityPercent.HasValue)
+                chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
+
             _chapterRepository.Add(chapter);
 
             if (request.AiGeneratedContentId.HasValue)
@@ -270,6 +273,7 @@ namespace Services.Implementations
             }).ToList();
 
             EnrichChapterListItemsWithReviewSla(chapterList, items);
+            EnrichModeratorRejectionHistoryForChapterList(chapterList, items);
 
             return new PagedResultDto<ChapterListItemDto>
             {
@@ -306,8 +310,19 @@ namespace Services.Implementations
                 .ToList();
 
             var storyTitle = StoryDAO.GetById(storyId)?.title;
-            var items = chapterList.Select(c => MapToListItemDto(c, storyTitle)).ToList();
+            var items = chapterList.Select(c =>
+            {
+                var dto = MapToListItemDto(c, storyTitle);
+                if (string.Equals(c.status, "REJECTED", StringComparison.OrdinalIgnoreCase))
+                {
+                    var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", c.id);
+                    dto.RejectionReason = reason;
+                    dto.RejectedAt = rejectedAt;
+                }
+                return dto;
+            }).ToList();
             EnrichChapterListItemsWithReviewSla(chapterList, items);
+            EnrichModeratorRejectionHistoryForChapterList(chapterList, items);
             return items;
         }
 
@@ -428,6 +443,9 @@ namespace Services.Implementations
 
             if (request.IsAiClean.HasValue)
                 chapter.is_ai_clean = request.IsAiClean.Value;
+
+            if (request.AiSimilarityPercent.HasValue)
+                chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
 
             if (request.Content != null)
             {
@@ -738,6 +756,7 @@ namespace Services.Implementations
                 CoinPrice = chapter.coin_price,
                 WordCount = chapter.word_count,
                 AiSimilarityPercent = chapter.ai_similarity_percent,
+                AiContributionRatio = chapter.ai_contribution_ratio,
                 PublishedAt = chapter.published_at,
                 CreatedAt = chapter.created_at,
                 UpdatedAt = chapter.updated_at
@@ -801,6 +820,28 @@ namespace Services.Implementations
                 var fallbackDeadline = ResolveChapterListReviewDeadlineUtc(authorSubmitted, claim);
                 dto.DeadlineAt = fallbackDeadline;
                 dto.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
+            }
+        }
+
+        /// <summary>Gắn toàn bộ lần từ chối chương gốc từ moderation_logs (không chỉ lần mới nhất).</summary>
+        private static void EnrichModeratorRejectionHistoryForChapterList(IReadOnlyList<chapters> chapterEntities, List<ChapterListItemDto> items)
+        {
+            if (chapterEntities.Count == 0 || items.Count != chapterEntities.Count)
+                return;
+
+            var ids = chapterEntities.Select(c => c.id).ToList();
+            var map = ModerationLogDAO.GetRejectionHistoriesByTargetIds(ReviewAssignmentDAO.TargetTypeChapter, ids);
+            for (var i = 0; i < items.Count; i++)
+            {
+                var chapterId = items[i].Id;
+                if (!map.TryGetValue(chapterId, out var tuples) || tuples.Count == 0)
+                    continue;
+                items[i].ModeratorRejectionHistory = tuples.Select(t => new ChapterRejectionHistoryItemDto
+                {
+                    Reason = t.Reason,
+                    RejectedAt = t.RejectedAt,
+                    ModeratorId = t.ModeratorId
+                }).ToList();
             }
         }
 
