@@ -252,6 +252,22 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         }
     };
 
+    const decrementCoCreateUsageOptimistic = () => {
+        setAiUsageLimit((prev) => {
+            if (!prev || !prev.coCreate) return prev;
+            const currentRemaining = Number(prev.coCreate.remaining ?? 0) || 0;
+            const currentUsed = Number(prev.coCreate.usedInWindow ?? 0) || 0;
+            return {
+                ...prev,
+                coCreate: {
+                    ...prev.coCreate,
+                    remaining: Math.max(0, currentRemaining - 1),
+                    usedInWindow: currentUsed + 1,
+                },
+            };
+        });
+    };
+
     // Popup đồng sáng tác (AI gợi ý chương): bước 1 = nhập ý tưởng, bước 2 = xem kết quả + đồng ý
     const [showCoCreateIdeaPopup, setShowCoCreateIdeaPopup] = useState(false);
     const [showCoCreateResultPopup, setShowCoCreateResultPopup] = useState(false);
@@ -505,6 +521,10 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         try {
             const chapterOrderIndex = (Number(chapterData.number) || 1) - 1;
             const data = await coCreate(storyId, idea || null, { chapterOrderIndex });
+            // Trừ ngay trên UI để người dùng thấy số lượt giảm tức thì.
+            decrementCoCreateUsageOptimistic();
+            // Đồng bộ lại với BE (không chặn UI).
+            loadAiUsageLimit();
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);

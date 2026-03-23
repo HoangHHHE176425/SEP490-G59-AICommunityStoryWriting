@@ -151,6 +151,22 @@ export function ChapterEditor({ chapter, onChange, story }) {
         }
     };
 
+    const decrementCoCreateUsageOptimistic = () => {
+        setAiUsageLimit((prev) => {
+            if (!prev || !prev.coCreate) return prev;
+            const currentRemaining = Number(prev.coCreate.remaining ?? 0) || 0;
+            const currentUsed = Number(prev.coCreate.usedInWindow ?? 0) || 0;
+            return {
+                ...prev,
+                coCreate: {
+                    ...prev.coCreate,
+                    remaining: Math.max(0, currentRemaining - 1),
+                    usedInWindow: currentUsed + 1,
+                },
+            };
+        });
+    };
+
     useEffect(() => {
         if (storyId) loadAiUsageLimit();
     }, [storyId]);
@@ -216,9 +232,12 @@ export function ChapterEditor({ chapter, onChange, story }) {
         try {
             const chapterOrderIndex = (Number(chapter?.number) || 1) - 1;
             const data = await coCreate(storyId, idea, { chapterOrderIndex });
+            // Trừ ngay trên UI để người dùng thấy số lượt giảm tức thì.
+            decrementCoCreateUsageOptimistic();
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);
+            // Đồng bộ lại với BE (không chặn UI).
             loadAiUsageLimit();
         } catch (err) {
             const status = err?.response?.status;
