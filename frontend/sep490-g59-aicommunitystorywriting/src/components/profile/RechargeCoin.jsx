@@ -16,13 +16,11 @@ export default function RechargeCoin() {
     const [statusMessage, setStatusMessage] = useState('');
     const [submitting, setSubmitting] = useState(false);
     const [wallet, setWallet] = useState(null);
-    const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const autoSyncRef = useRef(false);
     const autoHideTimerRef = useRef(null);
 
     const loadWallet = useCallback(async () => {
-        setLoading(true);
         setError('');
         try {
             const walletRes = await coinApi.getMyWallet();
@@ -32,8 +30,6 @@ export default function RechargeCoin() {
         } catch (e) {
             setWallet(null);
             setError(e?.message || 'Không thể tải ví coin');
-        } finally {
-            setLoading(false);
         }
     }, []);
 
@@ -141,16 +137,6 @@ export default function RechargeCoin() {
 
     const EXCHANGE_RATE = 1000; // tỉ giá tham khảo mặc định (1 Coin ≈ 1.000 VNĐ)
 
-    const formatApiDateTime = (value) => {
-        if (!value) return '';
-        const s = String(value);
-        const hasTimezone = /([zZ]|[+-]\d{2}:\d{2})$/.test(s);
-        const iso = hasTimezone ? s : `${s}Z`;
-        const d = new Date(iso);
-        if (Number.isNaN(d.getTime())) return s;
-        return d.toLocaleString();
-    };
-
     const resolvePackageId = () => {
         const id = selectedPackageId != null && selectedPackageId !== '' ? String(selectedPackageId) : null;
         if (id) return id;
@@ -168,11 +154,27 @@ export default function RechargeCoin() {
         try {
             const res = await coinApi.syncMyPayOSOrder(orderId);
             if (!res.success) throw new Error(res.message);
+            const updated = res?.data ?? {};
             await loadWallet();
             window.dispatchEvent(new Event('wallet:changed'));
-            // No success toast; just refresh silently
-            setStatus(null);
-            setStatusMessage('');
+
+            const st = String(updated?.status ?? updated?.Status ?? '').toUpperCase();
+            const granted = Number(updated?.coinsGranted ?? updated?.CoinsGranted ?? updated?.coins_granted ?? 0) || 0;
+
+            if (st === 'PAID') {
+                setStatus('success');
+                setStatusMessage(granted > 0 ? `Nạp tiền thành công (+${granted} coins)` : 'Nạp tiền thành công');
+            } else if (st === 'CANCELLED' || st === 'EXPIRED') {
+                setStatus('error');
+                setStatusMessage(st === 'CANCELLED' ? 'Giao dịch đã bị hủy' : 'Giao dịch đã hết hạn');
+            } else if (st === 'FAILED') {
+                setStatus('error');
+                setStatusMessage('Thanh toán thất bại. Vui lòng thử lại.');
+            } else {
+                // Unknown state: still show something to user.
+                setStatus('success');
+                setStatusMessage('Đã cập nhật trạng thái thanh toán.');
+            }
         } catch (e) {
             setStatus('error');
             setStatusMessage(e?.message || 'Không thể đồng bộ trạng thái giao dịch.');
@@ -242,12 +244,33 @@ export default function RechargeCoin() {
                 </div>
             </div>
 
-            {/* Status message (errors only) */}
+            {/* Status message (errors / success) */}
             {status === 'error' && (
                 <div
                     className="mt-4 mb-2 rounded-lg px-4 py-3 text-sm flex items-start gap-2 bg-red-50 text-red-700 border border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-900/60"
                 >
                     <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <p className="flex-1">{statusMessage}</p>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setStatus(null);
+                            setStatusMessage('');
+                        }}
+                        className="ml-2 text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white font-bold"
+                        aria-label="Đóng thông báo"
+                        title="Đóng"
+                    >
+                        ×
+                    </button>
+                </div>
+            )}
+
+            {status === 'success' && (
+                <div
+                    className="mt-4 mb-2 rounded-lg px-4 py-3 text-sm flex items-start gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-200 dark:border-emerald-900/60"
+                >
+                    <Coins className="w-4 h-4 mt-0.5 flex-shrink-0" />
                     <p className="flex-1">{statusMessage}</p>
                     <button
                         type="button"

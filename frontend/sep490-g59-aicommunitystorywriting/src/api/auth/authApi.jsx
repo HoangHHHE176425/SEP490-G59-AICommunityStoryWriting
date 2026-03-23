@@ -10,6 +10,10 @@ function getErrorMessage(err) {
     if (typeof raw === "string" && /email\s+already\s+exists/i.test(raw)) {
         return "Email này đã được đăng ký. Vui lòng dùng email khác hoặc đăng nhập.";
     }
+    // Login: tránh lộ email có tồn tại hay không, nhưng hiển thị message thân thiện cho user.
+    if (typeof raw === "string" && /invalid\s+email\s+or\s+password/i.test(raw)) {
+        return "Email hoặc mật khẩu không đúng. Nếu chưa có tài khoản, vui lòng đăng ký.";
+    }
     return raw;
 }
 
@@ -32,6 +36,15 @@ export async function verifyOtp({ email, otpCode }) {
             email,
             otpCode,
         });
+        return { success: true, data: res.data };
+    } catch (err) {
+        return { success: false, message: getErrorMessage(err) };
+    }
+}
+
+export async function resendOtp({ email }) {
+    try {
+        const res = await axiosInstance.post("/Auth/resend-otp", { email });
         return { success: true, data: res.data };
     } catch (err) {
         return { success: false, message: getErrorMessage(err) };

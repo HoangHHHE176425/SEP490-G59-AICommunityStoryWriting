@@ -131,6 +131,56 @@ namespace AIStory.API.Controllers
         }
 
         /// <summary>
+        /// Lịch sử donate của user (bảng donations, sender_id = user).
+        /// Dùng để hiển thị “lịch sử trừ tiền” ở màn hình ví (tab Ví của tôi > Lịch sử).
+        /// </summary>
+        [HttpGet("wallet/donate-history")]
+        [Authorize]
+        public async Task<IActionResult> GetMyDonateHistory(
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            CancellationToken cancellationToken = default)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 50);
+
+            var userId = GetUserIdFromToken();
+
+            await using var db = new StoryPlatformDbContext();
+
+            var query =
+                (
+                    from d in db.donations.AsNoTracking()
+                    where d.sender_id == userId
+                    join s in db.stories.AsNoTracking() on d.story_id equals s.id into sj
+                    from s in sj.DefaultIfEmpty() // donations hiện tại có thể không gắn story (story_id = null)
+                    orderby (d.created_at ?? DateTime.UtcNow) descending
+                    select new WalletDonateHistoryItemDto
+                    {
+                        DonationId = d.id,
+                        StoryId = s != null ? s.id : Guid.Empty,
+                        StoryTitle = s != null ? (s.title ?? string.Empty) : string.Empty,
+                        CoinsPaid = d.amount,
+                        DonatedAt = d.created_at ?? DateTime.UtcNow
+                    }
+                );
+
+            var total = await query.CountAsync(cancellationToken);
+            var items = await query
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync(cancellationToken);
+
+            return Ok(new WalletDonateHistoryResponseDto
+            {
+                TotalCount = total,
+                Page = page,
+                PageSize = pageSize,
+                Items = items
+            });
+        }
+
+        /// <summary>
         /// Lịch sử thu nhập của AUTHOR từ việc unlock chapter trả phí.
         /// Nguồn: author_income_logs.source_type = "CHAPTER_UNLOCK"
         /// </summary>
