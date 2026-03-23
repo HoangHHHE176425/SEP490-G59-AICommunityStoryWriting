@@ -183,6 +183,31 @@
             </div>
         </div>
     </div>
+
+    <div class="modal fade" id="storyCommentReportModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-flag"></i> Báo cáo bình luận</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted mb-2" id="storyCommentReportTitle"></p>
+                    <label class="form-label small">Lý do</label>
+                    <select class="form-select form-select-sm mb-2" id="storyCommentReportReason"></select>
+                    <label class="form-label small">Mô tả thêm (tùy chọn)</label>
+                    <textarea class="form-control form-control-sm" id="storyCommentReportDesc" rows="3" maxlength="4000"></textarea>
+                    <div class="small text-danger mt-2" id="storyCommentReportErr" style="display:none;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Đóng</button>
+                    <button type="button" class="btn btn-danger btn-sm" id="storyCommentReportSubmitBtn">
+                        <i class="bi bi-send"></i> Gửi báo cáo
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 @section Scripts {
@@ -194,6 +219,8 @@
         let replyingToDisplayName = null;
         let userIsFollowingAuthor = false;
         let authorFollowerCount = 0;
+        let storyCommentReportCommentId = null;
+        let storyCommentReportReportedUserName = null;
 
         async function ensureStoryPageReportReasons() {
             const sel = document.getElementById('storyPageReportReason');
@@ -208,6 +235,47 @@
                 });
             } catch (e) { console.error(e); }
         }
+
+        async function ensureStoryCommentReportReasons() {
+            const sel = document.getElementById('storyCommentReportReason');
+            if (!sel || sel.options.length > 0) return;
+            try {
+                const list = await ApiService.getCommentReportReasons();
+                (list || []).forEach(function (r) {
+                    const o = document.createElement('option');
+                    o.value = r.code || r.Code;
+                    o.textContent = (r.labelVi || r.LabelVi || r.label || r.Label || o.value);
+                    sel.appendChild(o);
+                });
+            } catch (e) { console.error(e); }
+        }
+
+        window.openStoryCommentReport = function (commentId, reportedUserName) {
+            if (!AuthHelper.isAuthenticated()) {
+                alert('Vui lòng đăng nhập để báo cáo bình luận.');
+                window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                return;
+            }
+            storyCommentReportCommentId = commentId;
+            storyCommentReportReportedUserName = reportedUserName || '';
+            const titleEl = document.getElementById('storyCommentReportTitle');
+            const errEl = document.getElementById('storyCommentReportErr');
+            const descEl = document.getElementById('storyCommentReportDesc');
+            const reasonSel = document.getElementById('storyCommentReportReason');
+            if (titleEl) titleEl.textContent = reportedUserName ? `Bình luận của ${reportedUserName}` : 'Bình luận';
+            if (errEl) {
+                errEl.textContent = '';
+                errEl.style.display = 'none';
+            }
+            if (descEl) descEl.value = '';
+            if (!reasonSel || !reasonSel.options || reasonSel.options.length === 0) {
+                ensureStoryCommentReportReasons().then(function () {
+                    new bootstrap.Modal(document.getElementById('storyCommentReportModal')).show();
+                });
+                return;
+            }
+            new bootstrap.Modal(document.getElementById('storyCommentReportModal')).show();
+        };
 
         window.openStoryPageReport = function () {
             if (!AuthHelper.isAuthenticated()) {
@@ -258,6 +326,50 @@
                         err.style.display = 'block';
                     } finally {
                         spr.disabled = false;
+                    }
+                });
+            }
+
+            const crSpr = document.getElementById('storyCommentReportSubmitBtn');
+            if (crSpr) {
+                crSpr.addEventListener('click', async function () {
+                    const err = document.getElementById('storyCommentReportErr');
+                    if (err) {
+                        err.textContent = '';
+                        err.style.display = 'none';
+                    }
+                    const commentId = storyCommentReportCommentId;
+                    if (!commentId) {
+                        if (err) {
+                            err.textContent = 'Không xác định bình luận.';
+                            err.style.display = 'block';
+                        }
+                        return;
+                    }
+                    const reason = document.getElementById('storyCommentReportReason')?.value;
+                    if (!reason) {
+                        if (err) {
+                            err.textContent = 'Chọn lý do.';
+                            err.style.display = 'block';
+                        }
+                        return;
+                    }
+                    const desc = document.getElementById('storyCommentReportDesc')?.value || null;
+                    try {
+                        crSpr.disabled = true;
+                        await ApiService.reportStoryComment(storyId, commentId, {
+                            reasonCode: reason,
+                            description: desc
+                        });
+                        bootstrap.Modal.getInstance(document.getElementById('storyCommentReportModal')).hide();
+                        Utils.showAlert('Đã gửi báo cáo bình luận. Cảm ơn bạn.', 'success');
+                    } catch (e) {
+                        if (err) {
+                            err.textContent = e?.message || String(e);
+                            err.style.display = 'block';
+                        }
+                    } finally {
+                        crSpr.disabled = false;
                     }
                 });
             }
@@ -531,6 +643,8 @@
                 return;
             }
 
+            const currentUserId = typeof AuthHelper !== 'undefined' && AuthHelper.getUserId ? AuthHelper.getUserId() : null;
+
             const byParent = new Map();
             const roots = [];
             for (const c of list) {
@@ -591,6 +705,10 @@
                     ? `<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" onclick="startReply('${c.id}', '${name.replace(/'/g, '\\&#039;')}')">Trả lời</button>`
                     : '';
 
+                const reportBtn = (canReply && currentUserId && c.userId && String(c.userId).toLowerCase() !== String(currentUserId).toLowerCase())
+                    ? `<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none text-danger" onclick="openStoryCommentReport('${c.id}', '${String(c.userDisplayName || '').replace(/'/g, "\\'")}')"><i class="bi bi-flag"></i> Báo cáo</button>`
+                    : '';
+
                 const reactionBtns = COMMENT_REACTIONS.map(r => {
                     const count = reactionCounts[r.type] ?? 0;
                     const isActive = userReactionType === r.type;
@@ -618,6 +736,7 @@
                         <div class="mb-1">${content}</div>
                         <div class="small d-flex gap-2 align-items-center flex-wrap">
                             ${replyBtn}
+                            ${reportBtn}
                             <span class="d-flex gap-1 align-items-center flex-wrap reaction-bar">${reactionBtns}</span>${totalReactionsHtml}
                         </div>
                         ${children.length ? children.map(ch => renderNode(ch, depth + 1)).join('') : ''}
