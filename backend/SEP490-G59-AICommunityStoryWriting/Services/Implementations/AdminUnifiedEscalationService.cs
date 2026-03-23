@@ -186,12 +186,6 @@ public class AdminUnifiedEscalationService : IAdminUnifiedEscalationService
             combined = combined.Where(x => x.FilterKind != null && x.FilterKind.ToUpper() == rk);
         }
 
-        if (!string.IsNullOrWhiteSpace(query.TargetType))
-        {
-            var tt = query.TargetType.Trim().ToUpperInvariant();
-            combined = combined.Where(x => x.Src != SrcReview || (x.RowTargetType != null && x.RowTargetType.ToUpper() == tt));
-        }
-
         if (query.SenderId.HasValue)
             combined = combined.Where(x => x.SenderId == query.SenderId.Value);
 
@@ -210,43 +204,76 @@ public class AdminUnifiedEscalationService : IAdminUnifiedEscalationService
         if (resolvedTo.HasValue)
             combined = combined.Where(x => x.ResolvedAt != null && x.ResolvedAt <= resolvedTo.Value);
 
+        // Materialize để có thể parse commentId từ message khi là COMPLIANCE_ADMIN_ACTION của report comment.
+        var rawRows = await combined.ToListAsync();
+
+        static Guid? ExtractCommentReportTargetId(string? msg)
+        {
+            if (string.IsNullOrWhiteSpace(msg)) return null;
+            const string marker = "[COMMENT_REPORT:";
+            var idx = msg.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return null;
+            idx += marker.Length;
+            var end = msg.IndexOf(']', idx);
+            if (end < 0) return null;
+            var chunk = msg.Substring(idx, end - idx).Trim();
+            return Guid.TryParse(chunk, out var g) ? g : null;
+        }
+
+        foreach (var r in rawRows)
+        {
+            if (!string.Equals(r.Src, SrcAction, StringComparison.OrdinalIgnoreCase)) continue;
+            var cid = ExtractCommentReportTargetId(r.Text);
+            if (!cid.HasValue) continue;
+            r.RowTargetType = "COMMENT";
+            r.RowTargetId = cid.Value;
+            r.Title = null; // UI sẽ hiển thị theo targetId khi title null.
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.TargetType))
+        {
+            var tt = query.TargetType.Trim().ToUpperInvariant();
+            rawRows = rawRows
+                .Where(x => !string.IsNullOrWhiteSpace(x.RowTargetType) && x.RowTargetType.ToUpper() == tt)
+                .ToList();
+        }
+
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
             var s = query.Search.Trim();
             if (Guid.TryParse(s, out var g))
             {
-                combined = combined.Where(x =>
-                    x.Id == g || x.RowTargetId == g || x.SenderId == g || x.ResolverId == g);
+                rawRows = rawRows
+                    .Where(x => x.Id == g || x.RowTargetId == g || x.SenderId == g || (x.ResolverId.HasValue && x.ResolverId.Value == g))
+                    .ToList();
             }
             else
             {
-                combined = combined.Where(x =>
-                    (x.Text != null && x.Text.Contains(s)) ||
-                    (x.Title != null && x.Title.Contains(s)));
+                rawRows = rawRows
+                    .Where(x =>
+                        (x.Text != null && x.Text.Contains(s)) ||
+                        (x.Title != null && x.Title.Contains(s)))
+                    .ToList();
             }
         }
 
-        var total = await combined.CountAsync();
+        var total = rawRows.Count;
 
         var sortAsc = string.Equals(query.SortOrder, "asc", StringComparison.OrdinalIgnoreCase);
-        IOrderedQueryable<LogUnionRow> ordered;
-        if (string.Equals(query.SortBy, "resolved_at", StringComparison.OrdinalIgnoreCase))
-        {
-            ordered = sortAsc
-                ? combined.OrderBy(x => x.ResolvedAt ?? DateTime.MaxValue).ThenBy(x => x.Id)
-                : combined.OrderByDescending(x => x.ResolvedAt ?? DateTime.MinValue).ThenByDescending(x => x.Id);
-        }
-        else
-        {
-            ordered = sortAsc
-                ? combined.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id)
-                : combined.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id);
-        }
+        var sortBy = (query.SortBy ?? "").Trim().ToLowerInvariant();
 
-        var rows = await ordered
+        IEnumerable<LogUnionRow> sorted = sortBy == "resolved_at"
+            ? (sortAsc
+                ? rawRows.OrderBy(x => x.ResolvedAt ?? DateTime.MaxValue).ThenBy(x => x.Id)
+                : rawRows.OrderByDescending(x => x.ResolvedAt ?? DateTime.MinValue).ThenByDescending(x => x.Id))
+            : (sortAsc
+                ? rawRows.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id)
+                : rawRows.OrderByDescending(x => x.CreatedAt).ThenByDescending(x => x.Id));
+
+        var rows = sorted
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .ToListAsync();
+            .ToList();
 
         var now = DateTime.UtcNow;
         var items = rows.Select(x =>
