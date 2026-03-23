@@ -683,9 +683,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             ? 'Đã gửi đơn lên quản trị viên (theo truyện hoặc theo chương) — chờ xử lý xong mới được duyệt / từ chối.'
             : '';
 
-    const authorSubmittedForSla = ra.authorSubmittedAtUtc ?? ra.AuthorSubmittedAtUtc;
+    const claimStartedForSla = ra.claimedAt ?? ra.ClaimedAt;
     void slaTick;
-    const policySlaLine = authorSubmittedForSla ? formatPolicySlaCountdown(authorSubmittedForSla).line : null;
+    const policySlaLine = claimStartedForSla ? formatPolicySlaCountdown(claimStartedForSla).line : null;
 
     return (
         <>
@@ -892,7 +892,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     >
                                         <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#1e40af', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                                             <AlertCircle style={{ width: '14px', height: '14px', flexShrink: 0 }} />
-                                            Admin đã từ chối đơn xin gia hạn hạn duyệt
+                                            Quản trị viên đã từ chối đơn xin gia hạn hạn duyệt
                                         </div>
                                         {extAt ? (
                                             <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.35rem' }}>
@@ -903,7 +903,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                             <strong style={{ color: '#1d4ed8' }}>Lý do / ghi chú:</strong>{' '}
                                             {extNote && String(extNote).trim()
                                                 ? extNote
-                                                : 'Admin không nhập ghi chú.'}
+                                                : 'Quản trị viên không nhập ghi chú.'}
                                         </div>
                                     </div>
                                 )}
@@ -1016,7 +1016,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                     </div>
                                                     {publication?.status === 'pending' && !chapter.isVersionHistory && (chapter.adminRejectedExtendNote || chapter.adminRejectedExtendAt || chapter.AdminRejectedExtendNote || chapter.AdminRejectedExtendAt) && (
                                                         <div style={{ fontSize: '0.6875rem', color: '#1d4ed8', marginTop: '0.35rem', fontWeight: 600, lineHeight: 1.35 }}>
-                                                            Admin đã từ chối xin gia hạn — xem lý do trên thanh hạn duyệt phía trên
+                                                            Quản trị viên đã từ chối xin gia hạn — xem lý do trên thanh hạn duyệt phía trên
                                                         </div>
                                                     )}
                                                     {publication?.status === 'approved' && chapter.publishedAt && (

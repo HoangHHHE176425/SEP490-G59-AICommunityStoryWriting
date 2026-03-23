@@ -306,7 +306,10 @@ namespace Services.Implementations
                 {
                     var at = sn.ResolvedAt.Value;
                     var stClaim = storyClaimAssignedAtByStoryId.TryGetValue(storyId.Value, out var ca) ? (DateTime?)ca : null;
-                    if (!stClaim.HasValue || at >= stClaim.Value)
+                    // Chỉ giữ note từ chối admin nếu nó thuộc phiên claim hiện tại.
+                    // Nếu không có lock STORY thì fallback theo lock CHAPTER hiện tại để tránh kéo note cũ sang đơn mới.
+                    var effectiveClaimAt = stClaim ?? chapterClaimedAt;
+                    if (effectiveClaimAt.HasValue && at >= effectiveClaimAt.Value)
                         candidates.Add((at, sn.Note));
                 }
             }
@@ -322,8 +325,21 @@ namespace Services.Implementations
             if (!rejectionResolvedAt.HasValue)
                 return true;
             if (!storyClaimedAt.HasValue)
+                return false;
+            var rejectedAtUtc = ApiDateTime.AsUtcForJson(rejectionResolvedAt.Value);
+            var claimedAtUtc = ApiDateTime.AsUtcForJson(storyClaimedAt.Value);
+            return rejectedAtUtc >= claimedAtUtc;
+        }
+
+        private static bool IsRejectionWithinCurrentPendingCycle(DateTime? rejectionResolvedAt, DateTime? pendingSinceUtc)
+        {
+            if (!rejectionResolvedAt.HasValue)
+                return false;
+            if (!pendingSinceUtc.HasValue)
                 return true;
-            return rejectionResolvedAt.Value >= storyClaimedAt.Value;
+            var rejectedAtUtc = ApiDateTime.AsUtcForJson(rejectionResolvedAt.Value);
+            var pendingAtUtc = ApiDateTime.AsUtcForJson(pendingSinceUtc.Value);
+            return rejectedAtUtc >= pendingAtUtc;
         }
 
         private void ApplyAdminRejectedEscalationNotesForStories(IReadOnlyList<StoryListItemDto> items, Guid? moderatorId)
@@ -336,12 +352,16 @@ namespace Services.Implementations
             var ext = ReviewEscalationDAO.GetLatestRejectedExtendByTargetsForSender(mid, ReviewAssignmentDAO.TargetTypeStory, ids);
             foreach (var item in items)
             {
+                var pendingSinceUtc = ModeratorReviewSlaHelper.GetAuthorSubmittedUtc(
+                    ReviewAssignmentDAO.TargetTypeStory, item.Id, _storyRepository, _chapterRepository, _versionRepository);
                 if (rel.TryGetValue(item.Id, out var r)
                     && IsAdminEscalationRejectionStillRelevantForStoryClaim(r.ResolvedAt, item.ClaimedAt)
+                    && IsRejectionWithinCurrentPendingCycle(r.ResolvedAt, pendingSinceUtc)
                     && StoryHasAnyChapterPendingModerationReview(item.Id))
                 {
                     item.AdminRejectedReleaseNote = r.Note;
-                    item.AdminRejectedReleaseAt = r.ResolvedAt;
+                    item.AdminRejectedReleaseAt = ApiDateTime.AsUtcForJson(r.ResolvedAt);
+                    item.IsCurrentClaimRejection = true;
                 }
 
                 if (ext.TryGetValue(item.Id, out var e)
@@ -385,12 +405,19 @@ namespace Services.Implementations
 
             foreach (var item in items)
             {
+                var pendingSinceUtc = ModeratorReviewSlaHelper.GetAuthorSubmittedUtc(
+                    ReviewAssignmentDAO.TargetTypeChapter, item.Id, _storyRepository, _chapterRepository, _versionRepository);
                 var rel = PickBestChapterEscalationRejectionForCurrentClaim(
                     chRel, stRel, item.Id, item.StoryId, item.ClaimedAt, storyClaimAssignedAtByStoryId, storyIdsEligibleForStoryLevelRelease);
                 if (rel.HasValue)
                 {
-                    item.AdminRejectedReleaseNote = rel.Value.Note;
-                    item.AdminRejectedReleaseAt = rel.Value.At;
+                    var atUtc = ApiDateTime.AsUtcForJson(rel.Value.At);
+                    if (IsRejectionWithinCurrentPendingCycle(atUtc, pendingSinceUtc))
+                    {
+                        item.AdminRejectedReleaseNote = rel.Value.Note;
+                        item.AdminRejectedReleaseAt = atUtc;
+                        item.IsCurrentClaimRejection = true;
+                    }
                 }
 
                 var ext = PickBestChapterEscalationRejectionForCurrentClaim(

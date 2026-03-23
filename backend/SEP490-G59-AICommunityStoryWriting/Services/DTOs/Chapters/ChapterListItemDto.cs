@@ -58,6 +58,8 @@ namespace Services.DTOs.Chapters
         public string? AdminRejectedReleaseNote { get; set; }
         /// <summary>Thời điểm admin từ chối đơn hủy nhận duyệt (theo bản ghi mới nhất áp dụng).</summary>
         public DateTime? AdminRejectedReleaseAt { get; set; }
+        /// <summary>True khi bản ghi từ chối đơn hủy nhận duyệt thuộc đúng phiên claim hiện tại.</summary>
+        public bool IsCurrentClaimRejection { get; set; }
 
         /// <summary>Ghi chú admin khi từ chối đơn EXTEND_DEADLINE (xin gia hạn).</summary>
         public string? AdminRejectedExtendNote { get; set; }
