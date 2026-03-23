@@ -54,13 +54,82 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
         }
     }, []);
 
-    // NOTE: Hiện backend đang chỉ hỗ trợ nạp coin (coin_orders) qua `getMyCoinOrders`.
-    // Các loại "mở khóa chương" và "donate cho tác giả" sẽ được hiển thị trong UI và sẵn sàng hook khi API có.
+    // Hiện wallet-mode sẽ hiển thị 3 nhóm: nạp tiền / mở khóa chương / donate.
+    // Các loại khác (mode != wallet) có thể để trống tuỳ yêu cầu.
     const loadOtherActivities = useCallback(async () => {
-        // giữ async để đồng bộ UI refresh theo một luồng
+        if (!isWalletMode) {
+            // Non-wallet mode: không hook unlock/donate.
+            setUnlockActivities([]);
+            setDonateActivities([]);
+            return;
+        }
+
         setUnlockActivities([]);
         setDonateActivities([]);
-    }, []);
+
+        const [unlockRes, donateRes] = await Promise.allSettled([
+            coinApi.getMyChapterUnlockHistory({ page: 1, pageSize: 50 }),
+            coinApi.getMyDonateHistory({ page: 1, pageSize: 50 }),
+        ]);
+
+        const unlockOk = unlockRes.status === 'fulfilled' && unlockRes.value?.success;
+        const donateOk = donateRes.status === 'fulfilled' && donateRes.value?.success;
+
+        if (unlockRes.status === 'rejected') {
+            // vẫn cho phép UI chạy với rechargeActivities
+            setUnlockActivities([]);
+        }
+        if (donateRes.status === 'rejected') {
+            setDonateActivities([]);
+        }
+
+        const unlockItems = unlockOk && Array.isArray(unlockRes.value?.data?.items) ? unlockRes.value.data.items : [];
+        const donateItems = donateOk && Array.isArray(donateRes.value?.data?.items) ? donateRes.value.data.items : [];
+
+        const mappedUnlock = unlockItems.map((o) => {
+            const unlockedAt = o?.unlockedAt ?? o?.UnlockedAt ?? o?.unlocked_at ?? null;
+            const coinsPaid = o?.coinsPaid ?? o?.CoinsPaid ?? o?.coins_paid ?? 0;
+            const chapterTitle = o?.chapterTitle ?? o?.ChapterTitle ?? o?.chapter_title ?? null;
+            const storyTitle = o?.storyTitle ?? o?.StoryTitle ?? o?.story_title ?? null;
+            const purchaseId = o?.purchaseId ?? o?.PurchaseId ?? o?.purchase_id ?? null;
+            const chapterId = o?.chapterId ?? o?.ChapterId ?? o?.chapter_id ?? null;
+
+            const { date, time } = formatApiDateTimeParts(unlockedAt);
+            return {
+                id: purchaseId ?? `${chapterId ?? ''}-${unlockedAt ?? ''}`,
+                type: 'unlock',
+                title: `Mở khóa chương (${chapterTitle || storyTitle || '—'})`,
+                amount: -(Number(coinsPaid ?? 0) || 0),
+                date,
+                time,
+                status: 'PAID',
+                createdAtTs: unlockedAt ? new Date(unlockedAt).getTime() : 0,
+            };
+        });
+
+        const mappedDonate = donateItems.map((o) => {
+            const donatedAt = o?.donatedAt ?? o?.DonatedAt ?? o?.donated_at ?? null;
+            const coinsPaid = o?.coinsPaid ?? o?.CoinsPaid ?? o?.coins_paid ?? 0;
+            const storyTitle = o?.storyTitle ?? o?.StoryTitle ?? o?.story_title ?? null;
+            const donationId = o?.donationId ?? o?.DonationId ?? o?.donation_id ?? null;
+            const storyId = o?.storyId ?? o?.StoryId ?? o?.story_id ?? null;
+
+            const { date, time } = formatApiDateTimeParts(donatedAt);
+            return {
+                id: donationId ?? `${storyId ?? ''}-${donatedAt ?? ''}`,
+                type: 'donate',
+                title: `Donate cho tác giả (${storyTitle || '—'})`,
+                amount: -(Number(coinsPaid ?? 0) || 0),
+                date,
+                time,
+                status: 'PAID',
+                createdAtTs: donatedAt ? new Date(donatedAt).getTime() : 0,
+            };
+        });
+
+        setUnlockActivities(mappedUnlock);
+        setDonateActivities(mappedDonate);
+    }, [isWalletMode]);
 
     useEffect(() => {
         let cancelled = false;
@@ -74,8 +143,7 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
                 if (cancelled) return;
                 setError(e?.message || 'Không thể tải lịch sử giao dịch');
             } finally {
-                if (cancelled) return;
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         };
         run();
@@ -101,6 +169,18 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
                 return <ArrowUp className="w-5 h-5 text-emerald-700" />;
             default:
                 return <Coins className="w-5 h-5 text-slate-400" />;
+        }
+    };
+
+    const formatStatusLabel = (status) => {
+        const s = String(status ?? '').toUpperCase();
+        switch (s) {
+            case 'PAID':
+                return 'Đã hoàn tất';
+            case 'PENDING':
+                return 'Đang chờ';
+            default:
+                return status ?? '';
         }
     };
 
@@ -281,7 +361,7 @@ export default function ActivityHistory({ mode = 'default' } = {}) {
                                                   : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
                                         }`}
                                     >
-                                        {activity.status}
+                                        {formatStatusLabel(activity.status)}
                                     </span>
                                 </div>
                                 <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">

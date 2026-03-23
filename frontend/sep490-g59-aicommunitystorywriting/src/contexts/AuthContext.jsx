@@ -113,12 +113,17 @@ export function AuthProvider({ children }) {
         return await authApi.verifyOtp({ email, otpCode });
     };
 
-    const loginWithGoogle = async () => {
-        return { success: false, message: 'Google login chưa được tích hợp ở backend.' };
+    const resendOtp = async (email) => {
+        return await authApi.resendOtp({ email });
     };
 
-    const loginWithFacebook = async () => {
-        return { success: false, message: 'Facebook login chưa được tích hợp ở backend.' };
+    const loginWithGoogle = async (returnUrl = '/home') => {
+        const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+        const ru = typeof returnUrl === 'string' && returnUrl.startsWith('/') ? returnUrl : '/home';
+        // Redirect code flow: browser will go to backend -> Google -> backend callback -> frontend callback.
+        window.location.href = `${apiBase}/Auth/google/login?returnUrl=${encodeURIComponent(ru)}`;
+        // If redirect is blocked, return success so UI won't show an error.
+        return { success: true };
     };
 
     const forgotPassword = async (email) => {
@@ -187,8 +192,8 @@ export function AuthProvider({ children }) {
         login,
         register,
         verifyOtp,
+        resendOtp,
         loginWithGoogle,
-        loginWithFacebook,
         forgotPassword,
         resetPassword,
         logout,
@@ -205,6 +210,7 @@ export function AuthProvider({ children }) {
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
     const context = useContext(AuthContext);
     if (!context) {

@@ -15,7 +15,7 @@ import {
 
 export default function Register() {
     const navigate = useNavigate();
-    const { register, loginWithGoogle, loginWithFacebook } = useAuth();
+    const { register, loginWithGoogle } = useAuth();
     const [formData, setFormData] = useState({
         name: '',
         email: '',
@@ -67,7 +67,7 @@ export default function Register() {
             } else {
                 setError(result.message || 'Đăng ký thất bại');
             }
-        } catch (err) {
+        } catch {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
         } finally {
             setLoading(false);
@@ -76,41 +76,25 @@ export default function Register() {
 
     const handleSubmit = (e) => {
         e.preventDefault();
+        // Only open policy modal if the form is already valid.
+        // Otherwise, keep user focused on the validation message.
+        if (!validateForm()) return;
         setPolicyModalOpen(true);
     };
 
-    const handlePolicyConfirm = () => {
-        doSubmit();
+    const handlePolicyConfirm = async () => {
+        // Close modal immediately so validation errors are not hidden.
+        setPolicyModalOpen(false);
+        await doSubmit();
     };
 
     const handleGoogleLogin = async () => {
         setError('');
         setLoading(true);
         try {
-            const result = await loginWithGoogle();
-            if (result.success) {
-                navigate('/home');
-            } else {
-                setError('Đăng ký Google thất bại');
-            }
-        } catch (err) {
-            setError('Đã xảy ra lỗi. Vui lòng thử lại.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleFacebookLogin = async () => {
-        setError('');
-        setLoading(true);
-        try {
-            const result = await loginWithFacebook();
-            if (result.success) {
-                navigate('/home');
-            } else {
-                setError('Đăng ký Facebook thất bại');
-            }
-        } catch (err) {
+            // Redirect code flow: loginWithGoogle will navigate away immediately.
+            await loginWithGoogle('/home');
+        } catch {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
         } finally {
             setLoading(false);
@@ -186,19 +170,6 @@ export default function Register() {
                                 Đăng ký với Google
                             </button>
 
-                            <button
-                                onClick={handleFacebookLogin}
-                                disabled={loading}
-                                className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-white border border-slate-200 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                                    <path
-                                        fill="#1877F2"
-                                        d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"
-                                    />
-                                </svg>
-                                Đăng ký với Facebook
-                            </button>
                         </div>
 
                         {/* Divider */}
