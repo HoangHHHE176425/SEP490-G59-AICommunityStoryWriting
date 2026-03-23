@@ -93,7 +93,7 @@ namespace DataAccessObjects.DAOs
                 content = content,
                 link_url = linkUrl,
                 is_read = false,
-                created_at = DateTime.Now
+                created_at = DateTime.UtcNow
             };
             Add(n);
             return n;
@@ -126,7 +126,7 @@ namespace DataAccessObjects.DAOs
                 content = content,
                 link_url = linkUrl,
                 is_read = false,
-                created_at = DateTime.Now
+                created_at = DateTime.UtcNow
             });
         }
 
@@ -155,7 +155,7 @@ namespace DataAccessObjects.DAOs
                 ? "Truyện bạn theo dõi vừa ra chương mới."
                 : $"«{storyTitle.Trim()}» vừa ra chương mới" + (string.IsNullOrWhiteSpace(chapterTitle) ? "." : $": {chapterTitle.Trim()}");
             var linkUrl = $"/Chapters/Read/{chapterId}";
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
             var created = new List<notifications>();
             using (var context = new StoryPlatformDbContext())
             {
@@ -206,7 +206,7 @@ namespace DataAccessObjects.DAOs
                 ? $"{authorName} vừa ra chương mới" + (string.IsNullOrWhiteSpace(chapterTitle) ? "." : $": {chapterTitle.Trim()}")
                 : $"{authorName} vừa ra chương mới trong «{storyTitle.Trim()}»" + (string.IsNullOrWhiteSpace(chapterTitle) ? "." : $": {chapterTitle.Trim()}");
             var linkUrl = $"/Chapters/Read/{chapterId}";
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
             var created = new List<notifications>();
             using (var context = new StoryPlatformDbContext())
             {
@@ -247,7 +247,7 @@ namespace DataAccessObjects.DAOs
                 ? $"{authorName} vừa đăng truyện mới."
                 : $"{authorName} vừa đăng truyện mới: «{storyTitle.Trim()}»";
             var linkUrl = $"/Home/Story?id={storyId}";
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
             var created = new List<notifications>();
             using (var context = new StoryPlatformDbContext())
             {
@@ -289,6 +289,37 @@ namespace DataAccessObjects.DAOs
                 title = title,
                 content = content,
                 link_url = "/wallet",
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+            Add(n);
+            return n;
+        }
+
+        /// <summary>Thông báo cho tác giả khi có độc giả mở khóa chương trả phí (trừ xu).</summary>
+        public static notifications NotifyAuthorChapterUnlocked(
+            Guid authorUserId,
+            string readerDisplayName,
+            string storyTitle,
+            string chapterTitle,
+            int coinPrice,
+            Guid storyId,
+            Guid chapterId)
+        {
+            if (string.IsNullOrWhiteSpace(readerDisplayName)) readerDisplayName = "Người đọc";
+            var safeStory = string.IsNullOrWhiteSpace(storyTitle) ? "Truyện" : storyTitle.Trim();
+            var safeChapter = string.IsNullOrWhiteSpace(chapterTitle) ? "Chương" : chapterTitle.Trim();
+            var title = "Có người mở khóa chương";
+            var content = $"{readerDisplayName} đã trả {coinPrice} xu để mở khóa \"{safeChapter}\" — {safeStory}.";
+            var linkUrl = $"/chapter?storyId={storyId}&chapterId={chapterId}";
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = authorUserId,
+                type = "CHAPTER_UNLOCK",
+                title = title,
+                content = content,
+                link_url = linkUrl,
                 is_read = false,
                 created_at = DateTime.UtcNow
             };

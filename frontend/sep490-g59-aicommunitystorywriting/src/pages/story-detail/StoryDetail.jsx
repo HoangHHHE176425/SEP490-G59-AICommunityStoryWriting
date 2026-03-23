@@ -193,7 +193,19 @@ export function StoryDetail() {
                         const updatedAt = ch.updatedAt ?? ch.UpdatedAt ?? ch.publishedAt ?? ch.PublishedAt;
                         const accessType = (ch.accessType ?? ch.AccessType ?? 'FREE').toUpperCase();
                         const coinPrice = Number(ch.coinPrice ?? ch.CoinPrice ?? 0) || 0;
-                        const isPaid = accessType === 'PAID' && coinPrice > 0;
+                        const unlockKnown =
+                            ch?.isUnlocked !== undefined ||
+                            ch?.IsUnlocked !== undefined ||
+                            ch?.unlocked !== undefined ||
+                            ch?.Unlocked !== undefined;
+                        const isUnlocked = Boolean(
+                            ch?.isUnlocked ??
+                                ch?.IsUnlocked ??
+                                ch?.unlocked ??
+                                ch?.Unlocked ??
+                                false
+                        );
+                        const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && (unlockKnown ? !isUnlocked : true);
                         return {
                             id: num,
                             chapterId: ch.id ?? ch.Id,
@@ -201,7 +213,8 @@ export function StoryDetail() {
                             time: updatedAt ? formatTimeAgo(updatedAt) : '',
                             views: Number(ch.viewCount ?? ch.ViewCount ?? ch.views ?? 0) || 0,
                             isNew: idx >= rawItems.length - newCount,
-                            isLocked: isPaid,
+                            isLocked: isPaidLocked,
+                            unlockKnown,
                             accessType,
                             coinPrice,
                         };
