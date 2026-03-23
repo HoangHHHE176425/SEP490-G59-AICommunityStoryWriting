@@ -560,16 +560,20 @@ namespace Services.Implementations
 
         public CommunityStatsDto GetPublicCommunityStats()
         {
-            var q = _storyRepository.GetAll().Where(s =>
-                !s.compliance_hidden &&
-                s.status != null &&
-                s.status.ToUpper() == "PUBLISHED");
+            var publishedVisibleStories = _storyRepository
+                .GetAll()
+                .Where(s => string.Equals(s.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
+                .Where(s => !s.compliance_hidden);
 
             return new CommunityStatsDto
             {
-                PublishedStoriesCount = q.Count(),
-                AuthorsCount = q.Where(s => s.author_id.HasValue).Select(s => s.author_id!.Value).Distinct().Count(),
-                TotalViews = q.Sum(s => (long)(s.total_views ?? 0))
+                PublishedStoriesCount = publishedVisibleStories.Count(),
+                AuthorsCount = publishedVisibleStories
+                    .Where(s => s.author_id.HasValue)
+                    .Select(s => s.author_id!.Value)
+                    .Distinct()
+                    .Count(),
+                TotalViews = publishedVisibleStories.Sum(s => (long?)(s.total_views ?? 0)) ?? 0
             };
         }
 

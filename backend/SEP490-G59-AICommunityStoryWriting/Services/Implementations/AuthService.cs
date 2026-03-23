@@ -65,13 +65,53 @@ namespace AIStory.Services.Implementations
                 otp_code = otpCode,
                 type = "EMAIL_VERIFICATION",
                 is_used = false,
-                expired_at = DateTime.UtcNow.AddMinutes(5),
+                expired_at = DateTime.UtcNow.AddMinutes(15),
                 created_at = DateTime.UtcNow
             };
             await _otpRepo.AddOtp(otp);
 
             // 4. Gửi Email (Giả lập hoặc gọi service thật)
-            await _emailService.SendEmailAsync(request.Email, "Xác thực tài khoản", $"Mã OTP của bạn: {otpCode}");
+            await _emailService.SendEmailAsync(
+                request.Email,
+                "Xác thực tài khoản",
+                $"Mã OTP của bạn là: <b>{otpCode}</b>. Mã có hiệu lực trong 15 phút kể từ khi bạn nhận được email này."
+            );
+        }
+
+        public async Task<ResendOtpResponse> ResendOtpAsync(ResendOtpRequest request)
+        {
+            var user = await _userRepo.GetUserByEmail(request.Email);
+            if (user == null) throw new Exception("User not found.");
+            if (string.Equals(user.status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+                throw new Exception("Account already active.");
+
+            const int ttlSeconds = 15 * 60;
+            const int ttlMinutes = 15;
+
+            var otpCode = new Random().Next(100000, 999999).ToString();
+            var otp = new otp_verifications
+            {
+                id = Guid.NewGuid(),
+                user_id = user.id,
+                otp_code = otpCode,
+                type = "EMAIL_VERIFICATION",
+                is_used = false,
+                expired_at = DateTime.UtcNow.AddMinutes(ttlMinutes),
+                created_at = DateTime.UtcNow
+            };
+
+            await _otpRepo.AddOtp(otp);
+            await _emailService.SendEmailAsync(
+                request.Email,
+                "Xác thực tài khoản",
+                $"Mã OTP của bạn là: <b>{otpCode}</b>. Mã có hiệu lực trong 15 phút kể từ khi bạn nhận được email này."
+            );
+
+            return new ResendOtpResponse
+            {
+                Message = "OTP mới đã được gửi. Vui lòng kiểm tra email.",
+                ExpiresInSeconds = ttlSeconds
+            };
         }
 
         private async Task<string> GenerateUniqueNicknameAsync(string baseNickname, Guid currentUserId)
@@ -124,7 +164,8 @@ namespace AIStory.Services.Implementations
             if (user.status == "ACTIVE") throw new Exception("Account already active.");
 
             var validOtp = await _otpRepo.GetValidOtp(user.id, request.OtpCode, "EMAIL_VERIFICATION");
-            if (validOtp == null) throw new Exception("Invalid or expired OTP.");
+            if (validOtp == null)
+                throw new Exception("Mã OTP không đúng hoặc đã hết hạn. Vui lòng kiểm tra lại email của bạn và thử lại (hoặc bấm \"Gửi lại OTP\").");
 
             user.status = "ACTIVE";
             user.email_verified_at = DateTime.UtcNow;
@@ -146,7 +187,7 @@ namespace AIStory.Services.Implementations
             // CHECK TRẠNG THÁI
             if (user.status != "ACTIVE")
             {
-                throw new Exception("Account is not verified. Please check email for OTP.");
+                throw new Exception("Tài khoản của bạn chưa được xác thực. Vui lòng kiểm tra email để lấy mã OTP và xác thực tài khoản.");
             }
 
             var accessToken = _jwtHelper.GenerateToken(user);
@@ -157,6 +198,89 @@ namespace AIStory.Services.Implementations
                 user_id = user.id,    
                 refresh_token = refreshTokenValue,
                 device_info = "Unknown",
+                expires_at = DateTime.UtcNow.AddDays(30),
+                created_at = DateTime.UtcNow
+            };
+
+            await _userRepo.AddRefreshToken(refreshToken);
+
+            return new AuthResponse
+            {
+                AccessToken = accessToken,
+                RefreshToken = refreshToken.refresh_token
+            };
+        }
+
+        public async Task<AuthResponse> LoginWithGoogleAsync(string email, string? fullName, string googleSubject)
+        {
+            if (string.IsNullOrWhiteSpace(email))
+                throw new ArgumentException("Email is required.", nameof(email));
+            email = email.Trim();
+
+            var user = await _userRepo.GetUserByEmail(email);
+            var isNewUser = false;
+
+            if (user == null)
+            {
+                isNewUser = true;
+                var newUserId = Guid.NewGuid();
+
+                var baseNickname =
+                    !string.IsNullOrWhiteSpace(fullName)
+                        ? fullName.Trim()
+                        : (email.Contains("@") ? email.Split('@')[0].Trim() : email);
+
+                var nickname = await GenerateUniqueNicknameAsync(baseNickname, newUserId);
+
+                // Password hash for social login (user can still be authenticated only by OAuth).
+                // We store some random value to satisfy DB non-null constraint.
+                var randomPassword = $"{googleSubject}_{Guid.NewGuid():N}";
+                var passwordHash = BCrypt.Net.BCrypt.HashPassword(randomPassword);
+
+                user = new users
+                {
+                    id = newUserId,
+                    email = email,
+                    password_hash = passwordHash,
+                    role = "USER",
+                    status = "ACTIVE",
+                    email_verified_at = DateTime.UtcNow,
+                    created_at = DateTime.UtcNow,
+                    updated_at = DateTime.UtcNow,
+                    user_profiles = new user_profiles
+                    {
+                        user_id = newUserId,
+                        nickname = nickname,
+                        settings = "{\"allow_notif\":true}",
+                        updated_at = DateTime.UtcNow
+                    }
+                };
+
+                await _userRepo.AddUser(user);
+            }
+            else
+            {
+                // Make sure the account is active if Google email is verified.
+                if (!string.Equals(user.status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+                {
+                    user.status = "ACTIVE";
+                    user.email_verified_at = DateTime.UtcNow;
+                    user.updated_at = DateTime.UtcNow;
+                    await _userRepo.UpdateUser(user);
+                }
+            }
+
+            // Generate access token
+            var accessToken = _jwtHelper.GenerateToken(user);
+
+            // Generate refresh token (stored server-side)
+            var refreshTokenValue = GenerateRefreshToken();
+            var refreshToken = new auth_tokens
+            {
+                id = Guid.NewGuid(),
+                user_id = user.id,
+                refresh_token = refreshTokenValue,
+                device_info = "Google",
                 expires_at = DateTime.UtcNow.AddDays(30),
                 created_at = DateTime.UtcNow
             };

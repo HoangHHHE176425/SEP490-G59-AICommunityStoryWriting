@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AlertCircle, CheckCircle, KeyRound, Mail, ShieldCheck } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
@@ -13,7 +13,7 @@ function useQuery() {
 export default function VerifyOtp() {
     const navigate = useNavigate();
     const query = useQuery();
-    const { verifyOtp } = useAuth();
+    const { verifyOtp, resendOtp } = useAuth();
 
     const [formData, setFormData] = useState({
         email: query.get('email') || '',
@@ -23,10 +23,36 @@ export default function VerifyOtp() {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
 
+    const OTP_TTL_SECONDS = 15 * 60; // 15p
+    const [expiresAtTs, setExpiresAtTs] = useState(Date.now() + OTP_TTL_SECONDS * 1000);
+    const [remainingSeconds, setRemainingSeconds] = useState(OTP_TTL_SECONDS);
+    const [resendLoading, setResendLoading] = useState(false);
+    const [resendMessage, setResendMessage] = useState('');
+    const isSentFromQuery = query.get('sent') === '1';
+
+    const formatMmSs = (sec) => {
+        const s = Math.max(0, Number(sec) || 0);
+        const mm = Math.floor(s / 60);
+        const ss = s % 60;
+        return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+    };
+
     const handleChange = (e) => {
         setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
         setError('');
     };
+
+    useEffect(() => {
+        if (!isSentFromQuery) return;
+
+        setError('');
+        setSuccess(false);
+        setResendMessage('Đã gửi lại OTP. Vui lòng kiểm tra email.');
+
+        const nextExpiresAt = Date.now() + OTP_TTL_SECONDS * 1000;
+        setExpiresAtTs(nextExpiresAt);
+        setRemainingSeconds(OTP_TTL_SECONDS);
+    }, [isSentFromQuery, OTP_TTL_SECONDS]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -43,7 +69,9 @@ export default function VerifyOtp() {
             const res = await verifyOtp(formData.email, formData.otpCode);
             if (res.success) {
                 setSuccess(true);
-                setTimeout(() => navigate(`/login`), 1200);
+                const email = (formData?.email || '').trim();
+                const loginUrl = email ? `/login?email=${encodeURIComponent(email)}` : '/login';
+                setTimeout(() => navigate(loginUrl), 1200);
             } else {
                 setError(res.message || 'Xác thực OTP thất bại');
             }
@@ -53,6 +81,40 @@ export default function VerifyOtp() {
             setLoading(false);
         }
     };
+
+    const handleResend = async () => {
+        if (!formData.email) {
+            setError('Vui lòng nhập email.');
+            return;
+        }
+        if (remainingSeconds > 0 || resendLoading) return;
+
+        setResendLoading(true);
+        setResendMessage('');
+        setError('');
+        try {
+            const res = await resendOtp(formData.email);
+            if (!res.success) throw new Error(res.message || 'Không thể gửi lại OTP.');
+
+            // UI đếm ngược theo TTL chuẩn 15p sau khi resend thành công.
+            const nextExpiresAt = Date.now() + OTP_TTL_SECONDS * 1000;
+            setExpiresAtTs(nextExpiresAt);
+            setRemainingSeconds(OTP_TTL_SECONDS);
+            setResendMessage('Đã gửi lại OTP. Vui lòng kiểm tra email.');
+        } catch (e) {
+            setError(e?.message || 'Không thể gửi lại OTP.');
+        } finally {
+            setResendLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            const remain = Math.floor((expiresAtTs - Date.now()) / 1000);
+            setRemainingSeconds(remain);
+        }, 500);
+        return () => clearInterval(interval);
+    }, [expiresAtTs]);
 
     return (
         <div className="min-h-screen bg-background-light dark:bg-background-dark flex flex-col">
@@ -90,6 +152,10 @@ export default function VerifyOtp() {
                                 <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
                             </div>
                         )}
+
+                        <div className="mb-4 text-center text-sm text-slate-600 dark:text-slate-400">
+                            OTP hết hạn sau <span className="font-semibold text-primary">{formatMmSs(remainingSeconds)}</span>
+                        </div>
 
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
@@ -140,6 +206,21 @@ export default function VerifyOtp() {
                                 {loading ? 'Đang xác thực...' : 'Xác thực'}
                             </button>
                         </form>
+
+                        {resendMessage && (
+                            <div className="mt-4 mb-2 text-center text-sm p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-200">
+                                {resendMessage}
+                            </div>
+                        )}
+
+                        <button
+                            type="button"
+                            onClick={handleResend}
+                            disabled={remainingSeconds > 0 || resendLoading}
+                            className="w-full mt-2 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-slate-700 dark:text-slate-200 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {resendLoading ? 'Đang gửi lại...' : remainingSeconds > 0 ? `Gửi lại OTP sau ${formatMmSs(remainingSeconds)}` : 'Gửi lại OTP'}
+                        </button>
 
                         <div className="mt-6 text-center">
                             <p className="text-sm text-slate-600 dark:text-slate-400">
