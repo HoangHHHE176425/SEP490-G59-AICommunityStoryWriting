@@ -16,8 +16,12 @@ import { ModeratorLogsManagement } from './moderation/ModeratorLogsManagement';
 export function AdminPage() {
     const { role } = useAuth();
     const roleUpper = (role ?? '').toString().toUpperCase();
-    const hasLimitedAdminMenu = roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE';
-    const [activePage, setActivePage] = useState(hasLimitedAdminMenu ? 'publication' : 'categories');
+    const defaultPage = roleUpper === 'MODERATOR'
+        ? 'publication'
+        : roleUpper === 'COMPLIANCE'
+            ? 'violations'
+            : 'categories';
+    const [activePage, setActivePage] = useState(defaultPage);
 
     const renderPage = () => {
         switch (activePage) {

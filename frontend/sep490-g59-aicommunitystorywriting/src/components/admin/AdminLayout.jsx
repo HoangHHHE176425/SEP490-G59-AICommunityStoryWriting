@@ -45,17 +45,19 @@ const ALL_MENU_ITEMS = [
     { id: 'ai-config', label: 'Cấu hình AI', icon: Brain },
 ];
 
-/** Menu giới hạn cho MODERATOR và COMPLIANCE (dashboard + xuất bản). */
-const LIMITED_ADMIN_MENU_IDS = new Set(['dashboard', 'publication']);
+/** Menu giới hạn theo vai trò. */
+const MODERATOR_MENU_IDS = new Set(['dashboard', 'publication']);
+const COMPLIANCE_MENU_IDS = new Set(['dashboard', 'publication', 'violations']);
 
 export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) {
     const navigate = useNavigate();
     const { user, logout, role } = useAuth();
     const roleUpper = (role ?? user?.role ?? user?.Role ?? '').toString().toUpperCase();
-    const hasLimitedMenu = roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE';
-    const menuItems = hasLimitedMenu
-        ? ALL_MENU_ITEMS.filter((item) => LIMITED_ADMIN_MENU_IDS.has(item.id))
-        : ALL_MENU_ITEMS;
+    const menuItems = roleUpper === 'MODERATOR'
+        ? ALL_MENU_ITEMS.filter((item) => MODERATOR_MENU_IDS.has(item.id))
+        : roleUpper === 'COMPLIANCE'
+            ? ALL_MENU_ITEMS.filter((item) => COMPLIANCE_MENU_IDS.has(item.id))
+            : ALL_MENU_ITEMS;
 
     const displayName = user?.displayName ?? user?.DisplayName ?? user?.email ?? 'Admin';
     const roleLabel = ROLE_LABELS[roleUpper] ?? 'Quản trị';
