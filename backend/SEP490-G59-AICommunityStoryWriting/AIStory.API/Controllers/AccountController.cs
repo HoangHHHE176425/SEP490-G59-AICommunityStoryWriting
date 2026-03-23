@@ -129,15 +129,33 @@ namespace AIStory.API.Controllers
             }
         }
 
+        /// <summary>Hồ sơ công khai theo userId (trang tác giả). Khách xem được; không trả email/SĐT/CCCD.</summary>
+        [AllowAnonymous]
         [HttpGet("profile/{userId:guid}")]
         public async Task<IActionResult> GetProfileByUserId(Guid userId)
         {
             try
             {
                 var profile = await _accountService.GetProfileAsync(userId);
-                if (profile == null)
-                    return NotFound(new { message = "User not found." });
+                Guid? viewerId = null;
+                if (User?.Identity?.IsAuthenticated == true)
+                {
+                    var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+                    if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var vid))
+                        viewerId = vid;
+                }
+                var isViewingSelf = viewerId.HasValue && viewerId.Value == userId;
+                if (!isViewingSelf)
+                {
+                    profile.Email = string.Empty;
+                    profile.Phone = null;
+                    profile.IdNumber = null;
+                }
                 return Ok(profile);
+            }
+            catch (Exception ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+            {
+                return NotFound(new { message = "User not found." });
             }
             catch (Exception ex)
             {

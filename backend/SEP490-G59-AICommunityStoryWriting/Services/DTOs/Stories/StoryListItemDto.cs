@@ -15,6 +15,8 @@ namespace Services.DTOs.Stories
         public string? CategoryNames { get; set; }
         public Guid? AuthorId { get; set; }
         public string? AuthorName { get; set; }
+        /// <summary>Đường dẫn avatar tác giả (user_profiles.avatar_url), ví dụ /uploads/avatars/....</summary>
+        public string? AuthorAvatarUrl { get; set; }
         /// <summary>Độ tuổi phù hợp: ALL, 13+, 16+, 18+</summary>
         public string? AgeRating { get; set; }
 
@@ -56,5 +58,17 @@ namespace Services.DTOs.Stories
         public DateTime? ReviewedAt { get; set; }
         /// <summary>Admin: tên moderator đã duyệt/từ chối.</summary>
         public string? ReviewedByModeratorName { get; set; }
+
+        /// <summary>Ghi chú admin khi từ chối đơn RELEASE_ASSIGNMENT (hủy nhận duyệt) do moderator hiện tại gửi. Chỉ điền khi truyện còn ít nhất một chương chờ duyệt (sau khi xử lý hết chương thì ẩn; nhận duyệt lại sau khi hết hạn đơn vẫn theo so sánh claim vs resolved_at).</summary>
+        public string? AdminRejectedReleaseNote { get; set; }
+        /// <summary>Thời điểm admin từ chối đơn hủy nhận duyệt.</summary>
+        public DateTime? AdminRejectedReleaseAt { get; set; }
+        /// <summary>True khi bản ghi từ chối đơn hủy nhận duyệt thuộc đúng phiên claim hiện tại.</summary>
+        public bool IsCurrentClaimRejection { get; set; }
+
+        /// <summary>Ghi chú admin khi từ chối đơn EXTEND_DEADLINE (xin gia hạn) do moderator hiện tại gửi.</summary>
+        public string? AdminRejectedExtendNote { get; set; }
+        /// <summary>Thời điểm admin từ chối đơn xin gia hạn.</summary>
+        public DateTime? AdminRejectedExtendAt { get; set; }
     }
 }

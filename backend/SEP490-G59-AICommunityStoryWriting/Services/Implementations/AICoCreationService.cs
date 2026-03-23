@@ -265,11 +265,12 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             reviewFeedback = review.Feedback;
         }
 
-        var saved = SaveDraftChapterAndAiContent(
+        var saved = SaveAiGeneratedContentOnly(
             request.StoryId,
             authorUserId,
             hasAuthorIdea ? rawIdea! : "[AUTO] Tiếp tục theo mạch truyện (không có gợi ý tác giả)",
-            draft);
+            draft,
+            request.ChapterOrderIndex);
         return new CoCreationResponse
         {
             Outline = outlineForPrompt,
@@ -278,8 +279,9 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             RevisionCount = revisionCount,
             RevisionFeedbacks = revisionFeedbacks.Count > 0 ? revisionFeedbacks : null,
             ReviewFeedback = approved ? null : reviewFeedback,
-            ChapterId = saved.ChapterId,
-            AiGeneratedContentId = saved.AiGeneratedContentId,
+            ChapterId = null,
+            AiGeneratedContentId = saved.Id,
+            ChapterIndex = saved.ChapterIndex,
             AgentDurations = durations.Count > 0 ? durations : null
         };
     }
@@ -287,68 +289,37 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
     private sealed record ReviewViolation(string Type, string Severity, string? Quote, string? Fix);
     private sealed record ReviewResult(bool Approved, string? Feedback, List<ReviewViolation> Violations);
 
-    /// <summary>Một chapter DRAFT cho "chương tiếp theo"; mỗi lần co-create chỉ thêm một bản ai_generated_content cùng chapter_id để compare-chapter so với tất cả bản và lấy max similarity (dù tác giả chọn bản 1, 2 hay 3).</summary>
-    private (Guid? ChapterId, Guid? AiGeneratedContentId) SaveDraftChapterAndAiContent(Guid storyId, Guid authorUserId, string authorIdea, string finalContent)
+    /// <summary>Chỉ lưu bản <see cref="ai_generated_content"/> (không tạo/cập nhật <see cref="chapters"/>).
+    /// <see cref="ai_generated_content.chapter_index"/> = <paramref name="targetOrderIndex"/> nếu hợp lệ; ngược lại = slot chương tiếp theo.</summary>
+    private (Guid? Id, int? ChapterIndex) SaveAiGeneratedContentOnly(
+        Guid storyId,
+        Guid authorUserId,
+        string authorIdea,
+        string finalContent,
+        int? targetOrderIndex = null)
     {
         if (string.IsNullOrWhiteSpace(finalContent)) return (null, null);
         var chaptersList = _chapterRepository.GetByStoryId(storyId).ToList();
-        var nextOrder = chaptersList.Count == 0 ? 1 : (chaptersList.Max(c => c.order_index) + 1);
+        // Khớp chapters.order_index từ FE (chương 1 → order_index 0). Ưu tiên index chương đang soạn để compare-chapter-preview khớp khi copy–paste.
+        int nextChapterIndex;
+        if (targetOrderIndex is >= 0)
+            nextChapterIndex = targetOrderIndex.Value;
+        else
+            nextChapterIndex = chaptersList.Count == 0 ? 0 : chaptersList.Max(c => c.order_index) + 1;
         var now = DateTime.UtcNow;
-
-        // Tìm chapter DRAFT đã có ít nhất một bản AI (slot "chương tiếp theo" đã được tạo bởi co-author trước đó)
-        chapters? targetChapter = chaptersList
-            .Where(c => string.Equals(c.status, "DRAFT", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(c => c.order_index)
-            .FirstOrDefault(c => _aiContentRepository.GetAllByChapterId(c.id).Count > 0);
-
-        if (targetChapter == null)
-        {
-            // Lần đầu co-author cho slot này: tạo chapter DRAFT mới
-            var chapter = new chapters
-            {
-                id = Guid.NewGuid(),
-                story_id = storyId,
-                title = $"Bản nháp AI #{nextOrder}",
-                order_index = nextOrder,
-                content = finalContent,
-                status = "DRAFT",
-                word_count = finalContent.Length,
-                created_at = now,
-                updated_at = now
-            };
-            _chapterRepository.Add(chapter);
-            var aiRecord = new ai_generated_content
-            {
-                id = Guid.NewGuid(),
-                story_id = storyId,
-                chapter_id = chapter.id,
-                user_id = authorUserId,
-                input_prompt = authorIdea.Length > 2000 ? authorIdea[..2000] + "..." : authorIdea,
-                ai_output = finalContent,
-                created_at = now
-            };
-            _aiContentRepository.Add(aiRecord);
-            return (chapter.id, aiRecord.id);
-        }
-
-        // Đã có chapter DRAFT cho slot này: chỉ thêm bản ai_generated_content mới (cùng chapter_id)
-        var aiRecordExisting = new ai_generated_content
+        var aiRecord = new ai_generated_content
         {
             id = Guid.NewGuid(),
             story_id = storyId,
-            chapter_id = targetChapter.id,
+            chapter_id = null,
+            chapter_index = nextChapterIndex,
             user_id = authorUserId,
             input_prompt = authorIdea.Length > 2000 ? authorIdea[..2000] + "..." : authorIdea,
             ai_output = finalContent,
             created_at = now
         };
-        _aiContentRepository.Add(aiRecordExisting);
-        // Cập nhật nội dung chapter = bản mới nhất để tác giả xem nhanh; khi chọn bản cũ thì UI có thể load từ ai_generated_content
-        targetChapter.content = finalContent;
-        targetChapter.updated_at = now;
-        targetChapter.word_count = finalContent.Length;
-        _chapterRepository.Update(targetChapter);
-        return (targetChapter.id, aiRecordExisting.id);
+        _aiContentRepository.Add(aiRecord);
+        return (aiRecord.id, nextChapterIndex);
     }
 
     private static string GetAgent1SystemPrompt() => """
@@ -668,12 +639,14 @@ Checklist (PHẢI tự kiểm tra trước khi trả kết quả):
 4. Nội dung đi theo đúng thứ tự outline
 5. Mọi sự kiện đều xảy ra SAU điểm kết thúc hiện tại
 6. Không lặp lại scene cũ
+7. Độ dài: ít nhất 500 từ; ưu tiên khoảng 600–700 từ (nếu chưa đủ thì mở rộng nội dung hợp lý trước khi gửi)
 
 ---
 
-Độ dài:
-Khoảng 700–900 từ (mục tiêu ~800 từ).
-Không vượt quá mức này.
+Độ dài (bắt buộc):
+- Tối thiểu 500 từ (đếm theo từ trong ngôn ngữ đang viết). Không được gửi bản nháp ngắn hơn 500 từ.
+- Mục tiêu: khoảng 600–700 từ (ưu tiên đạt khoảng này).
+- Tối đa khoảng 750 từ — tránh lan man; nếu thiếu độ dài, hãy bổ sung chi tiết, đối thoại hoặc miêu tả hợp lý thay vì kết thúc sớm.
 
 ---
 
@@ -729,6 +702,11 @@ Với mỗi violation:
 
 ---
 
+Độ dài sau khi sửa:
+- Bản đầy đủ vẫn phải đạt ít nhất 500 từ và nên nằm khoảng 600–700 từ (nếu bản gốc đã đủ dài, giữ nguyên độ dài hợp lý khi chỉ sửa từng đoạn).
+
+---
+
 Output:
 Trả về bản draft ĐÃ SỬA HOÀN CHỈNH (full text)
 
@@ -758,7 +736,7 @@ Không markdown
             $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý:\n{outline}\n\nBản nháp hiện tại:\n{currentDraft}\n\n" +
             $"Vi phạm cần sửa (JSON):\n{violationsJson}\n\n" +
             (string.IsNullOrWhiteSpace(feedback) ? "" : $"Góp ý tổng quát:\n{feedback}\n\n") +
-            $"{languageInstruction}\n\nChỉ sửa đúng các lỗi được liệt kê. Trả về toàn bộ bản nháp sau khi sửa.";
+            $"{languageInstruction}\n\nChỉ sửa đúng các lỗi được liệt kê. Trả về toàn bộ bản nháp sau khi sửa. Sau khi sửa, bản văn vẫn phải đạt ít nhất 500 từ và nên khoảng 600–700 từ (nếu bản nháp hiện tại quá ngắn, bổ sung nội dung hợp lý để đạt tối thiểu).";
 
         var messages = new List<ChatMessage>
         {
@@ -778,7 +756,7 @@ Không markdown
         var userPrompt = $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý cần viết:\n{outline}";
         if (!string.IsNullOrWhiteSpace(feedback))
             userPrompt += $"\n\n[Bản nháp trước bị đánh giá chưa đạt — sửa đúng các điểm sau rồi viết lại]\nGóp ý bắt buộc tuân thủ:\n{feedback}\n\nViết lại toàn bộ chương, sửa đúng theo góp ý trên và giữ phần logic đã đúng.";
-        userPrompt += $"\n\n{languageInstruction}\n\nViết bằng tiếng Việt nếu truyện tiếng Việt. Độ dài: khoảng 800 từ. Chỉ output nội dung chương (văn bản truyện), không markdown hay giải thích.";
+        userPrompt += $"\n\n{languageInstruction}\n\nViết bằng tiếng Việt nếu truyện tiếng Việt. Độ dài: tối thiểu 500 từ, mục tiêu 600–700 từ (tối đa khoảng 750 từ). Chỉ output nội dung chương (văn bản truyện), không markdown hay giải thích.";
 
         var messages = new List<ChatMessage>
         {

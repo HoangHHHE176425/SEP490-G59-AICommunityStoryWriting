@@ -92,6 +92,9 @@ namespace AIStory.API
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
             builder.Services.AddScoped<IModerationService, ModerationService>();
             builder.Services.AddScoped<IReviewEscalationService, ReviewEscalationService>();
+            builder.Services.AddScoped<IAdminUnifiedEscalationService, AdminUnifiedEscalationService>();
+            builder.Services.AddScoped<IStoryReportService, StoryReportService>();
+            builder.Services.AddScoped<ICommentReportService, CommentReportService>();
             builder.Services.AddSignalR();
             builder.Services.AddSingleton<IUserIdProvider, SignalRUserIdProvider>();
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
@@ -168,7 +171,7 @@ namespace AIStory.API
             {
                 options.AddPolicy("UserOnly", policy =>
                     policy.RequireAuthenticatedUser()
-                          .RequireRole("USER", "AUTHOR", "ADMIN"));
+                          .RequireRole("USER", "AUTHOR", "ADMIN", "MODERATOR", "COMPLIANCE"));
 
                 options.AddPolicy("AuthorOnly", policy =>
                     policy.RequireAuthenticatedUser()

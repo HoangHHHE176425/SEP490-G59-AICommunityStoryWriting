@@ -51,7 +51,10 @@ export function AIAssistedStoriesWidget() {
   ];
 
   return (
-    <section className="relative bg-gradient-to-br from-[#13EC5B]/10 via-white to-[#2B7FFF]/5 rounded-2xl border-2 border-[#13EC5B]/30 p-8 overflow-hidden">
+    <section
+      id="ai-assisted-stories"
+      className="relative bg-gradient-to-br from-[#13EC5B]/10 via-white to-[#2B7FFF]/5 rounded-2xl border-2 border-[#13EC5B]/30 p-8 overflow-hidden scroll-mt-24"
+    >
       {/* Decorative Elements */}
       <div className="absolute top-0 right-0 w-64 h-64 bg-[#13EC5B]/5 rounded-full blur-3xl"></div>
       <div className="absolute bottom-0 left-0 w-48 h-48 bg-[#2B7FFF]/5 rounded-full blur-3xl"></div>

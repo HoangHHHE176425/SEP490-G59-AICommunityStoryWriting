@@ -3,8 +3,10 @@ import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'luc
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
-import { indexRag, suggestNextChapter, coCreate, checkChapter, getAiUsageLimit } from '../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, checkChapter, compareChapterPreview, getAiUsageLimit } from '../../api/ai/aiApi';
 import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
+import { refresh as refreshAuth } from '../../api/auth/authApi';
+import { translateCoCreateOutlineLabels } from '../../utils/coCreateOutlineLabelsVi';
 
 // Helper function to count words
 const countWords = (text) => {
@@ -73,17 +75,23 @@ function formatOutlineForDisplay(outline) {
         const scenes = parsed?.scenes ?? parsed?.Scenes;
         if (Array.isArray(scenes) && scenes.length > 0) {
             if (isExampleOutline(scenes)) return '';
-            return scenes.map((s, i) => {
-                const title = s?.title ?? s?.Title ?? '';
-                const summary = s?.summary ?? s?.Summary ?? '';
-                const characters = s?.characters ?? s?.Characters ?? '';
-                const parts = [];
-                if (title) parts.push(title);
-                if (summary) parts.push(summary);
-                if (Array.isArray(characters) && characters.length) parts.push(`Nhân vật: ${characters.join(', ')}`);
-                else if (typeof characters === 'string' && characters.trim()) parts.push(`Nhân vật: ${characters}`);
-                return parts.length ? `Bối cảnh ${i + 1}:\n${parts.join('\n')}` : `Bối cảnh ${i + 1}`;
-            }).join('\n\n');
+            const joined = scenes
+                .map((s, i) => {
+                    const title = s?.title ?? s?.Title ?? '';
+                    const summary = s?.summary ?? s?.Summary ?? '';
+                    const characters = s?.characters ?? s?.Characters ?? '';
+                    const parts = [];
+                    if (title) parts.push(title);
+                    if (summary) parts.push(summary);
+                    if (Array.isArray(characters) && characters.length) {
+                        parts.push(`Nhân vật: ${characters.join(', ')}`);
+                    } else if (typeof characters === 'string' && characters.trim()) {
+                        parts.push(`Nhân vật: ${characters}`);
+                    }
+                    return parts.length ? `Bối cảnh ${i + 1}:\n${parts.join('\n')}` : `Bối cảnh ${i + 1}`;
+                })
+                .join('\n\n');
+            return translateCoCreateOutlineLabels(joined);
         }
     } catch {
         // Không phải JSON, xử lý plain text (chỉ phần không phải block hướng dẫn)
@@ -93,8 +101,10 @@ function formatOutlineForDisplay(outline) {
         .replace(/\*\*Trả về JSON dàn ý\*\*[\s\S]*?^\{[\s\S]*?"scenes"\s*:[\s\S]*?\}\s*\}/im, '')
         .replace(/```(?:json)?[\s\S]*?```/g, '')
         .trim();
-    if (text) return text.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1');
-    return raw.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1');
+    if (text) {
+        return translateCoCreateOutlineLabels(text.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1'));
+    }
+    return translateCoCreateOutlineLabels(raw.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1'));
 }
 
 /** Nội dung: bỏ nhãn "Scene 1:", "Scene 2:"... để ghép thành một khối văn hoàn chỉnh */
@@ -125,10 +135,19 @@ function contentOnlyForChapter(raw) {
     return s.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, editingVersion, readOnly = false, onSave, onCancel }) {
+export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, editingVersion, readOnly = false, onSave, onNavigateAfterSave, onCancel }) {
     const { showToast, ToastContainer } = useToast();
     const storyId = story?.id ?? story?.Id;
     const [chapterCheckModal, setChapterCheckModal] = useState({ open: false, loading: false, data: null, error: null });
+    /** Preview % AI trước khi lưu; chỉ khi bấm Xác nhận mới gọi onSave + ghi ai_similarity_percent */
+    const [aiCompareModal, setAiCompareModal] = useState({
+        open: false,
+        loading: false,
+        data: null,
+        error: null,
+        pendingSaveStatus: null,
+    });
+
     const [chapterData, setChapterData] = useState(() => {
         if (editingVersion) {
             return {
@@ -213,10 +232,19 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         try {
             const data = await getAiUsageLimit();
             setAiUsageLimit({
-                limitPerDay: Number(data?.limitPerDay ?? data?.LimitPerDay ?? 0) || 0,
-                usedInWindow: Number(data?.usedInWindow ?? data?.UsedInWindow ?? 0) || 0,
-                remaining: Number(data?.remaining ?? data?.Remaining ?? 0) || 0,
-                resetsAtUtc: data?.resetsAtUtc ?? data?.ResetsAtUtc ?? null,
+                suggestNextChapter: {
+                    limitPerDay: Number(data?.suggestNextChapter?.limitPerDay ?? 0) || 0,
+                    usedInWindow: Number(data?.suggestNextChapter?.usedInWindow ?? 0) || 0,
+                    remaining: Number(data?.suggestNextChapter?.remaining ?? 0) || 0,
+                    resetsAtUtc: data?.suggestNextChapter?.resetsAtUtc ?? null,
+                },
+                coCreate: {
+                    limitPerDay: Number(data?.coCreate?.limitPerDay ?? 0) || 0,
+                    usedInWindow: Number(data?.coCreate?.usedInWindow ?? 0) || 0,
+                    remaining: Number(data?.coCreate?.remaining ?? 0) || 0,
+                    resetsAtUtc: data?.coCreate?.resetsAtUtc ?? null,
+                },
+                coCreateAvailable: Boolean(data?.coCreateAvailable),
             });
         } catch {
             // ignore (user có thể chưa đăng nhập / BE lỗi)
@@ -224,9 +252,26 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         }
     };
 
+    const decrementCoCreateUsageOptimistic = () => {
+        setAiUsageLimit((prev) => {
+            if (!prev || !prev.coCreate) return prev;
+            const currentRemaining = Number(prev.coCreate.remaining ?? 0) || 0;
+            const currentUsed = Number(prev.coCreate.usedInWindow ?? 0) || 0;
+            return {
+                ...prev,
+                coCreate: {
+                    ...prev.coCreate,
+                    remaining: Math.max(0, currentRemaining - 1),
+                    usedInWindow: currentUsed + 1,
+                },
+            };
+        });
+    };
+
     // Popup đồng sáng tác (AI gợi ý chương): bước 1 = nhập ý tưởng, bước 2 = xem kết quả + đồng ý
     const [showCoCreateIdeaPopup, setShowCoCreateIdeaPopup] = useState(false);
     const [showCoCreateResultPopup, setShowCoCreateResultPopup] = useState(false);
+    const [useCoCreatePrompt, setUseCoCreatePrompt] = useState(false);
     const [coCreateIdea, setCoCreateIdea] = useState('');
     const [coCreateLoading, setCoCreateLoading] = useState(false);
     const [coCreateResult, setCoCreateResult] = useState(null);
@@ -406,43 +451,48 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         { name: 'Be', value: '#f5f5dc' },
     ];
 
+    const runSuggestIdeas = async () => {
+        const storyId = story?.id ?? story?.Id;
+        if (!storyId) {
+            showToast('Không xác định được truyện. Vui lòng thử lại.', 'error');
+            return;
+        }
+
+        setSuggestLoading(true);
+        setSuggestions([]);
+        setSuggestError(null);
+        setShowSuggestPopup(true);
+        try {
+            // Gọi index-rag nền (không chờ). Gợi ý chạy ngay; BE dùng RAG nếu đã index, không thì dùng Story Context.
+            indexRag(storyId);
+            const afterChapterId = chapter?.id ?? chapter?.Id ?? null;
+            const data = await suggestNextChapter(storyId, afterChapterId);
+            const list = data?.suggestions ?? data?.Suggestions ?? [];
+            setSuggestions(Array.isArray(list) ? list : []);
+            // Cập nhật số lượt còn lại sau khi gọi AI thành công
+            loadAiUsageLimit();
+        } catch (err) {
+            const status = err?.response?.status;
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi gợi ý AI.';
+            if (status === 429) {
+                showToast('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.', 'error');
+                setSuggestError('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.');
+            } else if (status === 403) {
+                showToast(msg || 'Chỉ tác giả của truyện mới được sử dụng tính năng này.', 'error');
+                setSuggestError(msg || 'Chỉ tác giả của truyện mới được sử dụng tính năng này.');
+            } else {
+                showToast(msg, 'error');
+                setSuggestError(msg);
+            }
+            setSuggestions([]);
+        } finally {
+            setSuggestLoading(false);
+        }
+    };
+
     const handleAISuggestion = async (type) => {
         if (type === 'paragraph') {
-            const storyId = story?.id ?? story?.Id;
-            if (!storyId) {
-                showToast('Không xác định được truyện. Vui lòng thử lại.', 'error');
-                return;
-            }
-            setSuggestLoading(true);
-            setSuggestions([]);
-            setSuggestError(null);
-            setShowSuggestPopup(true);
-            try {
-                // Gọi index-rag nền (không chờ). Gợi ý chạy ngay; BE dùng RAG nếu đã index, không thì dùng Story Context.
-                indexRag(storyId);
-                const afterChapterId = chapter?.id ?? chapter?.Id ?? null;
-                const data = await suggestNextChapter(storyId, afterChapterId);
-                const list = data?.suggestions ?? data?.Suggestions ?? [];
-                setSuggestions(Array.isArray(list) ? list : []);
-                // Cập nhật số lượt còn lại sau khi gọi AI thành công
-                loadAiUsageLimit();
-            } catch (err) {
-                const status = err?.response?.status;
-                const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi gợi ý AI.';
-                if (status === 429) {
-                    showToast('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.', 'error');
-                    setSuggestError('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.');
-                } else if (status === 403) {
-                    showToast(msg || 'Chỉ tác giả của truyện mới được sử dụng tính năng này.', 'error');
-                    setSuggestError(msg || 'Chỉ tác giả của truyện mới được sử dụng tính năng này.');
-                } else {
-                    showToast(msg, 'error');
-                    setSuggestError(msg);
-                }
-                setSuggestions([]);
-            } finally {
-                setSuggestLoading(false);
-            }
+            await runSuggestIdeas();
         } else {
             // AI gợi ý chương (đồng sáng tác): mở popup nhập ý tưởng
             const storyId = story?.id ?? story?.Id;
@@ -450,6 +500,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 showToast('Không xác định được truyện. Vui lòng thử lại.', 'error');
                 return;
             }
+            setUseCoCreatePrompt(false);
             setCoCreateIdea('');
             setCoCreateResult(null);
             setShowCoCreateResultPopup(false);
@@ -465,14 +516,15 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     const handleCoCreateSubmit = async () => {
         const storyId = story?.id ?? story?.Id;
         if (!storyId) return;
-        const idea = (coCreateIdea || '').trim();
-        if (!idea) {
-            showToast('Vui lòng nhập ý tưởng của bạn.', 'error');
-            return;
-        }
+        const idea = useCoCreatePrompt ? (coCreateIdea || '').trim() : '';
         setCoCreateLoading(true);
         try {
-            const data = await coCreate(storyId, idea);
+            const chapterOrderIndex = (Number(chapterData.number) || 1) - 1;
+            const data = await coCreate(storyId, idea || null, { chapterOrderIndex });
+            // Trừ ngay trên UI để người dùng thấy số lượt giảm tức thì.
+            decrementCoCreateUsageOptimistic();
+            // Đồng bộ lại với BE (không chặn UI).
+            loadAiUsageLimit();
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);
@@ -489,10 +541,13 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
 
     const handleCoCreateApply = () => {
         const raw = coCreateResult?.finalContent ?? coCreateResult?.FinalContent ?? '';
-        const content = contentOnlyForChapter(raw);
+        const content = contentOnlyForChapter(raw) || raw.trim();
         if (content) {
             setChapterData(prev => ({ ...prev, content, isAiClean: true }));
             showToast('Đã áp dụng nội dung. Bạn có thể chỉnh sửa và nhấn Lưu / Xuất bản.', 'success');
+        } else {
+            showToast('AI chưa trả về nội dung chương. Vui lòng thử lại với định hướng chi tiết hơn.', 'error');
+            return;
         }
         setShowCoCreateResultPopup(false);
         setCoCreateResult(null);
@@ -513,6 +568,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             (v) => (v.status ?? '').toString().toLowerCase() === 'pending_review' && (v.id ?? '') !== (editingVersion?.id ?? editingVersion?.Id ?? '')
         );
     const chapterIsPendingReviewVersion = (sourceChapterForVersion?.status ?? '').toString().toLowerCase() === 'pending_review';
+    const chapterIsPublishedVersion = (sourceChapterForVersion?.status ?? '').toString().toLowerCase() === 'published';
     /** Phiên bản đang chỉnh sửa đã ở trạng thái chờ duyệt thì không cho gửi lại. */
     const editingVersionIsPendingReview = (editingVersion?.status ?? '').toString().toLowerCase() === 'pending_review';
     const canSubmitVersion =
@@ -521,19 +577,22 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         canSubmitForPublishVersion &&
         !hasOtherPendingVersion &&
         !chapterIsPendingReviewVersion &&
-        !editingVersionIsPendingReview;
+        !editingVersionIsPendingReview &&
+        !chapterIsPublishedVersion;
     const versionPublishTooltip =
         !versionEligibilityLoaded || !versionsForChapterLoaded
             ? 'Đang kiểm tra điều kiện gửi xuất bản...'
-            : editingVersionIsPendingReview
-                ? 'Phiên bản này đang chờ duyệt, không thể gửi lại.'
-                : !canSubmitForPublishVersion
-                    ? `Phải gửi chương ${chapterNumberForVersion - 1} trước khi gửi chương ${chapterNumberForVersion}.`
-                    : chapterIsPendingReviewVersion
-                        ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.'
-                        : hasOtherPendingVersion
-                            ? 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.'
-                            : 'Gửi phiên bản lên để duyệt xuất bản';
+            : chapterIsPublishedVersion
+                ? 'Chương đã xuất bản, không thể gửi duyệt phiên bản chỉnh sửa.'
+                : editingVersionIsPendingReview
+                    ? 'Phiên bản này đang chờ duyệt, không thể gửi lại.'
+                    : !canSubmitForPublishVersion
+                        ? `Phải gửi chương ${chapterNumberForVersion - 1} trước khi gửi chương ${chapterNumberForVersion}.`
+                        : chapterIsPendingReviewVersion
+                            ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.'
+                            : hasOtherPendingVersion
+                                ? 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.'
+                                : 'Gửi phiên bản lên để duyệt xuất bản';
 
     const validateChapterNumber = (num) => {
         const n = Number(num);
@@ -554,6 +613,10 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             return;
         }
         if (isVersionMode) {
+            if (saveStatus === 'published' && chapterIsPublishedVersion) {
+                showToast('Chương đã xuất bản không còn được gửi duyệt phiên bản chỉnh sửa.', 'error');
+                return;
+            }
             const vNum = Number(chapterData.versionNumber ?? 1);
             if (!Number.isInteger(vNum) || vNum < 1) {
                 setVersionNumberError('Số phiên bản phải là số nguyên từ 1 trở lên');
@@ -626,27 +689,176 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             }
             setChapterCheckModal({ open: false, loading: false, data: null, error: null });
         } catch (err) {
-            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể kiểm tra nội dung chương.';
-            setChapterCheckModal({ open: true, loading: false, data: null, error: msg });
-            showToast(msg, 'error');
+            const status = err?.response?.status;
+            // Nếu 401: token hết hạn → refresh 1 lần rồi kiểm tra lại
+            let retrySucceeded = false;
+
+            if (status === 401) {
+                try {
+                    const refreshRes = await refreshAuth();
+                    if (refreshRes?.success) {
+                        const res2 = await checkChapter({
+                            content: chapterData.content,
+                            storyId: storyId ?? null,
+                            chapterTitle: chapterData.title ?? null,
+                        });
+                        const spellingIssues2 = res2?.spellingIssues ?? res2?.SpellingIssues ?? [];
+                        const policyViolations2 = res2?.policyViolations ?? res2?.PolicyViolations ?? [];
+                        const passed2 = Boolean(res2?.passed ?? res2?.Passed) &&
+                            Array.isArray(spellingIssues2) && spellingIssues2.length === 0 &&
+                            Array.isArray(policyViolations2) && policyViolations2.length === 0 &&
+                            !(res2?.hasInappropriateContent ?? res2?.HasInappropriateContent);
+
+                        if (!passed2) {
+                            setChapterCheckModal({
+                                open: true,
+                                loading: false,
+                                error: null,
+                                data: {
+                                    passed: Boolean(res2?.passed ?? res2?.Passed),
+                                    summary: res2?.summary ?? res2?.Summary ?? null,
+                                    hasInappropriateContent: Boolean(res2?.hasInappropriateContent ?? res2?.HasInappropriateContent),
+                                    spellingIssues: spellingIssues2,
+                                    policyViolations: policyViolations2,
+                                },
+                            });
+                            showToast('Nội dung có lỗi chính tả / từ cấm. Vui lòng sửa theo gợi ý trước khi lưu/xuất bản.', 'error');
+                            return;
+                        }
+
+                        setChapterCheckModal({ open: false, loading: false, data: null, error: null });
+                        retrySucceeded = true;
+                    }
+                } catch {
+                    // ignore, fallthrough below
+                }
+            }
+
+            if (!retrySucceeded) {
+                const data = err?.response?.data;
+                const baseMsg = err?.response?.data?.message ?? err?.response?.data?.detail ?? err?.message ?? 'Không thể kiểm tra nội dung chương.';
+                const dataJson = data
+                    ? (typeof data === 'string' ? data : (() => { try { return JSON.stringify(data); } catch { return String(data); } })())
+                    : '';
+                const msg = dataJson && dataJson !== baseMsg ? `${baseMsg}\n${dataJson}` : baseMsg;
+                setChapterCheckModal({ open: true, loading: false, data: null, error: msg });
+                showToast(msg, 'error');
+                return;
+            }
+        }
+
+        if (!isVersionMode && !storyId) {
+            showToast('Không tìm thấy truyện', 'error');
             return;
         }
 
+        // Chế độ phiên bản: lưu ngay (không so sánh AI trên chapter gốc)
+        if (isVersionMode) {
+            setIsSaving(true);
+            try {
+                const payload = {
+                    ...chapterData,
+                    status: saveStatus,
+                    updatedAt: new Date().toLocaleString('vi-VN'),
+                };
+                if (sourceChapterForVersion?.id) {
+                    payload.sourceChapterId = sourceChapterForVersion.id;
+                    payload.versionNumber = chapterData.versionNumber ?? 1;
+                    if (editingVersion?.id) payload.editingVersionId = editingVersion.id;
+                }
+                await onSave(payload);
+                onNavigateAfterSave?.();
+            } catch (error) {
+                console.error('Error saving chapter:', error);
+            } finally {
+                setIsSaving(false);
+            }
+            return;
+        }
+
+        // Chương thường: luôn gọi preview — BE tra `ai_generated_content` theo story + thứ tự chương (kể cả khi user chỉ copy–paste bản AI, không bấm «đồng ý dùng» trong UI). Không có bản ghi → lưu thẳng, không popup.
+        setIsSaving(true);
+        try {
+            const orderIndex = (Number(chapterData.number) || 1) - 1;
+            const cmp = await compareChapterPreview({
+                storyId,
+                orderIndex,
+                content: chapterData.content,
+            });
+            const hasBoth = Boolean(cmp?.hasBothContents ?? cmp?.HasBothContents);
+            const score = cmp?.similarityScore ?? cmp?.SimilarityScore;
+            const msg = (cmp?.message ?? cmp?.Message ?? '').toString();
+            // Khớp message từ ChapterCompareService khi không có ai_records cho chapter_index
+            const noAiBaselineToCompare =
+                !hasBoth && /Chưa có bản nội dung AI/i.test(msg);
+            if (noAiBaselineToCompare) {
+                const payload = {
+                    ...chapterData,
+                    status: saveStatus,
+                    updatedAt: new Date().toLocaleString('vi-VN'),
+                };
+                await onSave(payload);
+                onNavigateAfterSave?.();
+                return;
+            }
+            setAiCompareModal({
+                open: true,
+                loading: false,
+                data: {
+                    hasBothContents: hasBoth,
+                    similarityScore: typeof score === 'number' ? score : Number(score),
+                    message: msg,
+                },
+                error: null,
+                pendingSaveStatus: saveStatus,
+            });
+        } catch (cmpErr) {
+            const msg =
+                cmpErr?.response?.data?.message ??
+                cmpErr?.response?.data?.Message ??
+                cmpErr?.message ??
+                'Không thể tính độ tương đồng với bản AI.';
+            setAiCompareModal({
+                open: true,
+                loading: false,
+                data: null,
+                error: String(msg),
+                pendingSaveStatus: saveStatus,
+            });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const closeAiCompareModalOnly = () => {
+        setAiCompareModal({
+            open: false,
+            loading: false,
+            data: null,
+            error: null,
+            pendingSaveStatus: null,
+        });
+    };
+
+    const confirmAiCompareSave = async () => {
+        const status = aiCompareModal.pendingSaveStatus;
+        if (!status) return;
+        const hasPct =
+            aiCompareModal.data?.hasBothContents &&
+            Number.isFinite(Number(aiCompareModal.data?.similarityScore));
+        const pct = hasPct ? Number(aiCompareModal.data.similarityScore) : undefined;
+        closeAiCompareModalOnly();
         setIsSaving(true);
         try {
             const payload = {
                 ...chapterData,
-                status: saveStatus,
+                status,
                 updatedAt: new Date().toLocaleString('vi-VN'),
+                ...(pct != null ? { aiSimilarityPercent: pct } : {}),
             };
-            if (isVersionMode && sourceChapterForVersion?.id) {
-                payload.sourceChapterId = sourceChapterForVersion.id;
-                payload.versionNumber = chapterData.versionNumber ?? 1;
-                if (editingVersion?.id) payload.editingVersionId = editingVersion.id;
-            }
             await onSave(payload);
+            onNavigateAfterSave?.();
         } catch (error) {
-            // Error handling is done in parent component
             console.error('Error saving chapter:', error);
         } finally {
             setIsSaving(false);
@@ -860,6 +1072,79 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                     </div>
                 </div>
             )}
+            {/* Popup preview % AI — chỉ khi Xác nhận mới lưu DB + ai_similarity_percent */}
+            {aiCompareModal.open && (
+                <div
+                    className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4"
+                    onClick={() => !aiCompareModal.loading && closeAiCompareModalOnly()}
+                    role="presentation"
+                >
+                    <div
+                        className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="border-b border-slate-200 bg-slate-50/80 px-5 py-4">
+                            <h3 className="m-0 text-lg font-bold text-slate-900">
+                                Độ tương đồng với nội dung AI
+                            </h3>
+                            <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                                Xem trước mức giống giữa bản bạn viết và bản đồng sáng tác AI cho thứ tự chương này.{' '}
+                                <span className="font-semibold text-primary">
+                                    Chương chỉ được lưu / gửi xuất bản khi bạn bấm xác nhận bên dưới.
+                                </span>
+                            </p>
+                        </div>
+                        <div className="px-5 py-5">
+                            {aiCompareModal.loading ? (
+                                <p className="m-0 text-center text-sm text-slate-600">Đang tính toán độ tương đồng...</p>
+                            ) : aiCompareModal.error ? (
+                                <div className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-800 whitespace-pre-wrap">
+                                    {aiCompareModal.error}
+                                    <p className="mt-2 mb-0 text-xs text-red-700/90">
+                                        Bạn vẫn có thể xác nhận để lưu chương; phần trăm AI có thể để trống nếu không tính được.
+                                    </p>
+                                </div>
+                            ) : aiCompareModal.data?.hasBothContents ? (
+                                <div className="text-center">
+                                    <div className="text-[2.65rem] font-extrabold leading-tight text-primary tabular-nums">
+                                        {Number.isFinite(Number(aiCompareModal.data?.similarityScore))
+                                            ? `${Number(aiCompareModal.data.similarityScore).toFixed(2)}%`
+                                            : '—'}
+                                    </div>
+                                    {aiCompareModal.data?.message ? (
+                                        <p className="mt-3 text-left text-sm text-slate-600">{aiCompareModal.data.message}</p>
+                                    ) : null}
+                                </div>
+                            ) : (
+                                <p className="m-0 text-sm leading-relaxed text-slate-700 whitespace-pre-wrap">
+                                    {aiCompareModal.data?.message ||
+                                        'Chưa có đủ dữ liệu để tính % (cần ít nhất một bản AI co-create cho đúng thứ tự chương). Bạn vẫn có thể xác nhận để lưu chương.'}
+                                </p>
+                            )}
+                        </div>
+                        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/50 px-4 py-3">
+                            <button
+                                type="button"
+                                disabled={aiCompareModal.loading}
+                                onClick={closeAiCompareModalOnly}
+                                className="rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                type="button"
+                                disabled={aiCompareModal.loading}
+                                onClick={confirmAiCompareSave}
+                                className="rounded-full bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {aiCompareModal.pendingSaveStatus === 'published'
+                                    ? 'Xác nhận xuất bản'
+                                    : 'Xác nhận lưu nháp'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* Popup gợi ý chương tiếp theo (AI) */}
             {showSuggestPopup && (
                 <div
@@ -989,28 +1274,62 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 Đồng sáng tác với AI
                             </h3>
                             <p style={{ margin: '0.5rem 0 0', fontSize: '0.8125rem', color: '#6b7280' }}>
-                                Nhập ý tưởng của bạn, AI sẽ tạo dàn ý và nội dung chương.
+                                Bạn có thể chọn nhập nội dung định hướng hoặc để AI tự viết theo mạch truyện hiện tại.
                             </p>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem' }}>
+                            <div style={{ marginBottom: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: '#111827' }}>
+                                    <input
+                                        type="radio"
+                                        name="co_create_prompt_mode"
+                                        checked={!useCoCreatePrompt}
+                                        onChange={() => {
+                                            setUseCoCreatePrompt(false);
+                                            setCoCreateIdea('');
+                                        }}
+                                        disabled={coCreateLoading}
+                                    />
+                                    Không nhập định hướng (AI tự sinh theo mạch truyện)
+                                </label>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem', color: '#111827' }}>
+                                    <input
+                                        type="radio"
+                                        name="co_create_prompt_mode"
+                                        checked={useCoCreatePrompt}
+                                        onChange={() => setUseCoCreatePrompt(true)}
+                                        disabled={coCreateLoading}
+                                    />
+                                    Nhập định hướng tùy chỉnh
+                                </label>
+                            </div>
                             <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#374151', marginBottom: '0.5rem' }}>
-                                Ý TƯỞNG CỦA BẠN
+                                NỘI DUNG ĐỊNH HƯỚNG CỦA BẠN
                             </label>
-                            <textarea
-                                value={coCreateIdea}
-                                onChange={(e) => setCoCreateIdea(e.target.value)}
-                                placeholder="Ví dụ: Nhân vật A gặp lại B sau 5 năm, xung đột nổ ra..."
-                                rows={4}
-                                style={{
-                                    width: '100%',
-                                    padding: '0.75rem',
-                                    border: '1px solid #e5e7eb',
-                                    borderRadius: '8px',
-                                    fontSize: '0.875rem',
-                                    outline: 'none',
-                                    resize: 'vertical',
-                                }}
-                            />
+                            {useCoCreatePrompt ? (
+                                <textarea
+                                    value={coCreateIdea}
+                                    onChange={(e) => setCoCreateIdea(e.target.value)}
+                                    placeholder="Ví dụ: Nhân vật A gặp lại B sau 5 năm, xung đột nổ ra..."
+                                    rows={4}
+                                    style={{
+                                        width: '100%',
+                                        padding: '0.75rem',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '8px',
+                                        fontSize: '0.875rem',
+                                        outline: 'none',
+                                        resize: 'vertical',
+                                    }}
+                                />
+                            ) : (
+                                <div style={{ padding: '0.75rem', border: '1px dashed #cbd5e1', borderRadius: '8px', fontSize: '0.8125rem', color: '#64748b' }}>
+                                    Bạn đang chọn chế độ không nhập định hướng. AI sẽ tự sinh nội dung theo ngữ cảnh hiện tại của truyện.
+                                </div>
+                            )}
+                            <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', fontSize: '0.8125rem', color: '#9a3412' }}>
+                                Khi nhập định hướng tùy chỉnh, tác giả phải chịu trách nhiệm với nội dung định hướng đã nhập và nội dung AI sinh ra theo định hướng đó.
+                            </div>
                         </div>
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
                             <button
@@ -1032,16 +1351,16 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                             <button
                                 type="button"
                                 onClick={handleCoCreateSubmit}
-                                disabled={coCreateLoading || !(coCreateIdea || '').trim()}
+                                disabled={coCreateLoading}
                                 style={{
                                     padding: '0.5rem 1.25rem',
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
                                     color: '#ffffff',
-                                    backgroundColor: (coCreateLoading || !(coCreateIdea || '').trim()) ? '#9ca3af' : '#13ec5b',
+                                    backgroundColor: coCreateLoading ? '#9ca3af' : '#13ec5b',
                                     border: 'none',
                                     borderRadius: '8px',
-                                    cursor: (coCreateLoading || !(coCreateIdea || '').trim()) ? 'not-allowed' : 'pointer',
+                                    cursor: coCreateLoading ? 'not-allowed' : 'pointer',
                                 }}
                             >
                                 {coCreateLoading ? 'Đang tạo...' : 'Tạo nội dung'}
@@ -1107,21 +1426,28 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                     )}
                                     <div>
                                         <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Nội dung chương</div>
-                                        <div
-                                            style={{
-                                                fontSize: '0.875rem',
-                                                color: '#111827',
-                                                whiteSpace: 'pre-wrap',
-                                                maxHeight: '40vh',
-                                                overflowY: 'auto',
-                                                padding: '0.75rem',
-                                                border: '1px solid #e5e7eb',
-                                                borderRadius: '8px',
-                                                backgroundColor: '#f9fafb',
-                                            }}
-                                        >
-                                            {mergeContentRemoveScenes(coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '')}
-                                        </div>
+                                        {(() => {
+                                            const raw = (coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '').toString();
+                                            const normalized = mergeContentRemoveScenes(raw);
+                                            const displayContent = normalized || raw.trim();
+                                            return (
+                                                <div
+                                                    style={{
+                                                        fontSize: '0.875rem',
+                                                        color: '#111827',
+                                                        whiteSpace: 'pre-wrap',
+                                                        maxHeight: '40vh',
+                                                        overflowY: 'auto',
+                                                        padding: '0.75rem',
+                                                        border: '1px solid #e5e7eb',
+                                                        borderRadius: '8px',
+                                                        backgroundColor: '#f9fafb',
+                                                    }}
+                                                >
+                                                    {displayContent || 'AI chưa trả về nội dung chương. Bạn hãy thử lại với định hướng cụ thể hơn.'}
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 </>
                             )}
@@ -1227,15 +1553,15 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                                     <button
                                         onClick={() => handleSave('draft')}
-                                        disabled={isSaving}
+                                        disabled={isSaving || aiCompareModal.open}
                                         className="flex items-center gap-2 px-6 py-2.5 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
                                         <Save style={{ width: '16px', height: '16px' }} />
-                                        Lưu nháp
+                                        {isSaving ? 'Đang lưu...' : 'Lưu nháp'}
                                     </button>
                                     <button
                                         onClick={() => handleSave('published')}
-                                        disabled={isSaving || (isVersionMode && !canSubmitVersion)}
+                                        disabled={isSaving || aiCompareModal.open || (isVersionMode && !canSubmitVersion)}
                                         title={isVersionMode ? versionPublishTooltip : undefined}
                                         className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
@@ -1640,22 +1966,30 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                         <>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
+                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                             </span>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý chương{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
+                                                AI gợi ý chương{aiUsageLimit
+                                                    ? (aiUsageLimit.coCreateAvailable
+                                                        ? ` (${aiUsageLimit.coCreate?.remaining ?? 0}/${aiUsageLimit.coCreate?.limitPerDay ?? 0})`
+                                                        : ' (—/—)')
+                                                    : ''}
                                             </span>
                                         </>
                                     ) : (
                                         <>
                                             <button type="button" onClick={() => handleAISuggestion('paragraph')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
+                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                             </button>
                                             <button type="button" onClick={() => handleAISuggestion('chapter')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý chương{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
+                                                AI gợi ý chương{aiUsageLimit
+                                                    ? (aiUsageLimit.coCreateAvailable
+                                                        ? ` (${aiUsageLimit.coCreate?.remaining ?? 0}/${aiUsageLimit.coCreate?.limitPerDay ?? 0})`
+                                                        : ' (—/—)')
+                                                    : ''}
                                             </button>
                                         </>
                                     )}

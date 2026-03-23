@@ -1,6 +1,6 @@
 import { ChevronRight, Star } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import StoryHeader from '../../components/story-detail/StoryHeader';
 import { ChapterList } from '../../components/story-detail/ChapterList';
 import { CommentSection } from '../../components/story-detail/CommentSection';
@@ -26,6 +26,7 @@ import {
 } from '../../api/story/storyApi';
 import { getChapters } from '../../api/chapter/chapterApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
+import { getAuthorFollowersCount } from '../../api/author/authorApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -47,6 +48,7 @@ function formatTimeAgo(dateStr) {
 export function StoryDetail() {
     const { storyId } = useParams();
     const navigate = useNavigate();
+    const location = useLocation();
     const { user } = useAuth();
     const viewerKey = getViewerKeyForViewCache(user?.id ?? null);
     const [story, setStory] = useState(null);
@@ -68,6 +70,56 @@ export function StoryDetail() {
     const [reviews, setReviews] = useState([]);
     const [reviewsLoading, setReviewsLoading] = useState(false);
     const [visibleReviewsCount, setVisibleReviewsCount] = useState(3);
+
+    const svgAvatarDataUrl = (name) => {
+        const initial = (String(name || 'T').trim()[0] || 'T').toUpperCase();
+        const svg = `
+          <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">
+            <defs>
+              <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#13EC5B"/>
+                <stop offset="1" stop-color="#2B7FFF"/>
+              </linearGradient>
+            </defs>
+            <rect width="256" height="256" rx="40" fill="url(#g)"/>
+            <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
+                  font-family="Arial, Helvetica, sans-serif" font-size="120" font-weight="800" fill="white">${initial}</text>
+          </svg>
+        `.trim();
+        return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+    };
+
+    const getStoryAuthorName = (storyRes) => {
+        const name =
+            storyRes?.authorName ??
+            storyRes?.AuthorName ??
+            storyRes?.author?.name ??
+            storyRes?.author?.displayName ??
+            storyRes?.authorDisplayName ??
+            storyRes?.AuthorDisplayName ??
+            storyRes?.createdByName ??
+            storyRes?.CreatedByName ??
+            null;
+
+        return typeof name === 'string' && name.trim() ? name.trim() : 'Tác giả';
+    };
+
+    const getStoryAuthorAvatar = (storyRes, authorName) => {
+        const avatar =
+            storyRes?.authorAvatarUrl ??
+            storyRes?.AuthorAvatarUrl ??
+            storyRes?.authorAvatar ??
+            storyRes?.AuthorAvatar ??
+            storyRes?.author?.avatar ??
+            storyRes?.author?.avatarUrl ??
+            storyRes?.author?.AvatarUrl ??
+            storyRes?.avatarUrl ??
+            storyRes?.AvatarUrl ??
+            null;
+
+        if (avatar && typeof avatar === 'string' && avatar.trim()) return resolveBackendUrl(avatar.trim());
+        return svgAvatarDataUrl(authorName);
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -102,15 +154,17 @@ export function StoryDetail() {
                     const progressStatusRaw = (storyRes?.storyProgressStatus ?? storyRes?.StoryProgressStatus ?? 'ONGOING')?.toString?.() ?? 'ONGOING';
                     const progressUpper = String(progressStatusRaw).toUpperCase();
                     const progressLabel = progressUpper === 'COMPLETED' ? 'Hoàn thành' : progressUpper === 'HIATUS' ? 'Tạm dừng' : 'Đang ra';
+                    const authorName = getStoryAuthorName(storyRes);
                     const storyPayload = {
                         id: storyRes?.id ?? storyRes?.Id,
                         title: storyRes?.title ?? storyRes?.Title ?? 'Không có tiêu đề',
                         author: {
                             id: authorId,
                             userId: authorId,
-                            name: storyRes?.authorName ?? storyRes?.AuthorName ?? 'Ẩn danh',
-                            avatar: '',
-                            followers: 0
+                            name: authorName,
+                            avatar: getStoryAuthorAvatar(storyRes, authorName),
+                            // null = đang chờ GET /authors/{id}/followers-count (tránh hiển thị 0 giả)
+                            followers: authorId ? null : 0,
                         },
                         cover: coverPath ? resolveBackendUrl(coverPath) : '',
                         genre: genreArr.length ? genreArr : ['Chưa phân loại'],
@@ -139,7 +193,19 @@ export function StoryDetail() {
                         const updatedAt = ch.updatedAt ?? ch.UpdatedAt ?? ch.publishedAt ?? ch.PublishedAt;
                         const accessType = (ch.accessType ?? ch.AccessType ?? 'FREE').toUpperCase();
                         const coinPrice = Number(ch.coinPrice ?? ch.CoinPrice ?? 0) || 0;
-                        const isPaid = accessType === 'PAID' && coinPrice > 0;
+                        const unlockKnown =
+                            ch?.isUnlocked !== undefined ||
+                            ch?.IsUnlocked !== undefined ||
+                            ch?.unlocked !== undefined ||
+                            ch?.Unlocked !== undefined;
+                        const isUnlocked = Boolean(
+                            ch?.isUnlocked ??
+                                ch?.IsUnlocked ??
+                                ch?.unlocked ??
+                                ch?.Unlocked ??
+                                false
+                        );
+                        const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && (unlockKnown ? !isUnlocked : true);
                         return {
                             id: num,
                             chapterId: ch.id ?? ch.Id,
@@ -147,7 +213,8 @@ export function StoryDetail() {
                             time: updatedAt ? formatTimeAgo(updatedAt) : '',
                             views: Number(ch.viewCount ?? ch.ViewCount ?? ch.views ?? 0) || 0,
                             isNew: idx >= rawItems.length - newCount,
-                            isLocked: isPaid,
+                            isLocked: isPaidLocked,
+                            unlockKnown,
                             accessType,
                             coinPrice,
                         };
@@ -156,20 +223,36 @@ export function StoryDetail() {
                         setStory(storyPayload);
                         return;
                     }
-                    return getProfileByUserId(authorId)
-                        .then((profile) => {
+                    return Promise.all([
+                        getProfileByUserId(authorId),
+                        getAuthorFollowersCount(authorId).catch(() => 0),
+                    ])
+                        .then(([profile, followerCount]) => {
                             if (cancelled) return;
                             storyPayload.author = {
                                 id: profile.id ?? authorId,
                                 userId: profile.id ?? authorId,
                                 name: profile.displayName ?? storyPayload.author.name,
-                                avatar: profile.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '',
-                                followers: Number(profile.stats?.totalReads ?? profile.stats?.TotalReads ?? 0) || 0
+                                avatar: profile.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : storyPayload.author.avatar,
+                                followers: typeof followerCount === 'number' ? followerCount : 0,
                             };
                             setStory(storyPayload);
                         })
                         .catch(() => {
-                            if (!cancelled) setStory(storyPayload);
+                            if (cancelled) return;
+                            // Profile lỗi vẫn cố lấy số follower (public API)
+                            getAuthorFollowersCount(authorId)
+                                .then((n) => {
+                                    if (cancelled) return;
+                                    storyPayload.author.followers = typeof n === 'number' ? n : 0;
+                                    setStory({ ...storyPayload });
+                                })
+                                .catch(() => {
+                                    if (!cancelled) {
+                                        storyPayload.author.followers = 0;
+                                        setStory({ ...storyPayload });
+                                    }
+                                });
                         });
                 })
                 .catch((err) => {
@@ -205,6 +288,25 @@ export function StoryDetail() {
     useEffect(() => {
         if (storyId && activeTab === 'comments') loadComments();
     }, [storyId, activeTab, loadComments]);
+
+    // Mở tab bình luận khi vào từ thông báo (hash #comment-{guid})
+    useEffect(() => {
+        const h = location.hash || '';
+        if (h && /^#comment-/i.test(h)) {
+            setActiveTab('comments');
+        }
+    }, [location.hash]);
+
+    useEffect(() => {
+        const h = location.hash || '';
+        if (!h || !/^#comment-/i.test(h)) return;
+        if (activeTab !== 'comments' || commentsLoading) return;
+        const elId = h.slice(1);
+        const frame = requestAnimationFrame(() => {
+            document.getElementById(elId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [location.hash, activeTab, commentsLoading, comments.length]);
 
     // Load comment count sớm (silent) để tab hiển thị đúng số trước khi user click vào.
     useEffect(() => {

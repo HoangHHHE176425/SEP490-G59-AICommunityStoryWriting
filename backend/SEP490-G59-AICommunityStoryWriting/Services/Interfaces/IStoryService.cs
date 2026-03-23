@@ -1,3 +1,4 @@
+using Services.DTOs.Community;
 using Services.DTOs.Stories;
 
 public interface IStoryService
@@ -23,4 +24,9 @@ public interface IStoryService
     (decimal avgRating, int ratingCount) RateStory(Guid storyId, Guid userId, int starValue, string? reviewText);
     /// <summary>Lấy lý do từ chối gần nhất của truyện (từ moderation_logs), bất kể status hiện tại.</summary>
     (string? reason, DateTime? rejectedAt) GetLatestRejectionForStory(Guid storyId);
+
+    /// <summary>
+    /// Truyện PUBLISHED, không compliance_hidden — khớp GetAll khi guest (không gồm truyện bị ẩn compliance).
+    /// </summary>
+    CommunityStatsDto GetPublicCommunityStats();
 }

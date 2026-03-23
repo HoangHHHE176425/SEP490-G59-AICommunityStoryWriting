@@ -3,6 +3,7 @@ using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Repositories;
+using Services.DTOs.Community;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 
@@ -35,6 +36,9 @@ namespace Services.Implementations
                 throw new InvalidOperationException(
                     "AuthorId không tồn tại trong bảng users. Vui lòng kiểm tra DefaultAuthorIdForStories trong appsettings.json (dùng Guid của user có trong bảng users).");
             }
+
+            if (UserDAO.IsAuthorWritingSuspended(authorId))
+                throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
 
             if (request.CategoryIds == null || !request.CategoryIds.Any())
             {
@@ -100,6 +104,9 @@ namespace Services.Implementations
         {
             var storiesQuery = _storyRepository.GetAll();
 
+            if (!query.IncludeComplianceHiddenInLists)
+                storiesQuery = storiesQuery.Where(s => !s.compliance_hidden);
+
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
                 var searchLower = query.Search.ToLower();
@@ -136,6 +143,33 @@ namespace Services.Implementations
                 storiesQuery = storiesQuery.Where(s => s.author_id == query.AuthorId.Value);
             }
 
+            if (!string.IsNullOrWhiteSpace(query.StoryProgressStatus))
+            {
+                var ps = query.StoryProgressStatus.Trim().ToUpperInvariant();
+                storiesQuery = storiesQuery.Where(s =>
+                    s.story_progress_status != null &&
+                    string.Equals(s.story_progress_status.Trim(), ps, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(query.AgeRating))
+            {
+                var ar = query.AgeRating.Trim().ToUpperInvariant();
+                storiesQuery = storiesQuery.Where(s =>
+                    string.Equals((s.age_rating ?? "ALL").Trim(), ar, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (query.MinTotalChapters.HasValue)
+            {
+                var min = query.MinTotalChapters.Value;
+                storiesQuery = storiesQuery.Where(s => (s.total_chapters ?? 0) >= min);
+            }
+
+            if (query.MaxTotalChapters.HasValue)
+            {
+                var max = query.MaxTotalChapters.Value;
+                storiesQuery = storiesQuery.Where(s => (s.total_chapters ?? 0) <= max);
+            }
+
             if (query.StatusIn != null && query.StatusIn.Count > 0)
             {
                 var statusList = query.StatusIn.Select(s => s?.Trim().ToUpperInvariant()).Where(s => !string.IsNullOrEmpty(s)).ToList();
@@ -170,12 +204,44 @@ namespace Services.Implementations
                 .Take(query.PageSize)
                 .ToList();
 
+            var authorIdsForAvatars = stories
+                .Select(s => s.author_id)
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .Distinct()
+                .ToList();
+            var authorAvatarByUserId = UserProfileDAO.GetAvatarUrlsByUserIds(authorIdsForAvatars);
+
             return new PagedResultDto<StoryListItemDto>
             {
-                Items = stories.Select(MapToListItemDto),
+                Items = stories.Select(s => MapToListItemDto(s, authorAvatarByUserId)).ToList(),
                 TotalCount = totalCount,
                 Page = query.Page,
                 PageSize = query.PageSize
+            };
+        }
+
+        /// <inheritdoc />
+        public CommunityStatsDto GetPublicCommunityStats()
+        {
+            // Cùng tập truyện với GetAll khi guest: PUBLISHED + không compliance_hidden.
+            var q = _storyRepository.GetAll()
+                .Where(s => !s.compliance_hidden)
+                .Where(s => s.status != null && s.status.ToUpper() == "PUBLISHED");
+
+            var publishedStoriesCount = q.Count();
+            var totalViews = q.Sum(s => (long)(s.total_views ?? 0L));
+            var authorsCount = q
+                .Where(s => s.author_id != null && s.author_id != Guid.Empty)
+                .Select(s => s.author_id!.Value)
+                .Distinct()
+                .Count();
+
+            return new CommunityStatsDto
+            {
+                PublishedStoriesCount = publishedStoriesCount,
+                AuthorsCount = authorsCount,
+                TotalViews = totalViews,
             };
         }
 
@@ -245,10 +311,20 @@ namespace Services.Implementations
                 PageSize = query.PageSize,
                 Search = query.Search,
                 CategoryId = query.CategoryId,
+                CategoryIds = query.CategoryIds,
+                ExcludeStoryIds = query.ExcludeStoryIds,
+                IncludeStoryIds = query.IncludeStoryIds,
+                AlsoIncludeStoryIds = query.AlsoIncludeStoryIds,
                 AuthorId = authorId,
                 Status = query.Status,
+                StatusIn = query.StatusIn,
                 SortBy = query.SortBy,
-                SortOrder = query.SortOrder
+                SortOrder = query.SortOrder,
+                StoryProgressStatus = query.StoryProgressStatus,
+                AgeRating = query.AgeRating,
+                MinTotalChapters = query.MinTotalChapters,
+                MaxTotalChapters = query.MaxTotalChapters,
+                IncludeComplianceHiddenInLists = query.IncludeComplianceHiddenInLists,
             };
 
             return GetAll(authorQuery);
@@ -506,6 +582,21 @@ namespace Services.Implementations
             return ModerationLogDAO.GetLatestRejection("STORY", storyId);
         }
 
+        public CommunityStatsDto GetPublicCommunityStats()
+        {
+            var q = _storyRepository.GetAll().Where(s =>
+                !s.compliance_hidden &&
+                s.status != null &&
+                s.status.ToUpper() == "PUBLISHED");
+
+            return new CommunityStatsDto
+            {
+                PublishedStoriesCount = q.Count(),
+                AuthorsCount = q.Where(s => s.author_id.HasValue).Select(s => s.author_id!.Value).Distinct().Count(),
+                TotalViews = q.Sum(s => (long)(s.total_views ?? 0))
+            };
+        }
+
         private string GenerateSlug(string title)
         {
             return title
@@ -597,6 +688,7 @@ namespace Services.Implementations
                 latestUpdatedAt = latestChapterUpdatedAt;
 
             var authorName = story.author_id.HasValue ? NotificationDAO.GetUserDisplayName(story.author_id.Value) : null;
+            var authorAvatarUrl = story.author_id.HasValue ? UserProfileDAO.GetAvatarUrlForUser(story.author_id.Value) : null;
             return new StoryResponseDto
             {
                 Id = story.id,
@@ -607,6 +699,7 @@ namespace Services.Implementations
                 CategoryNames = categoryNames,
                 AuthorId = story.author_id,
                 AuthorName = authorName,
+                AuthorAvatarUrl = authorAvatarUrl,
                 CoverImage = story.cover_image,
                 Status = story.status,
                 StoryProgressStatus = story.story_progress_status,
@@ -622,11 +715,14 @@ namespace Services.Implementations
                 UpdatedAt = story.updated_at,
                 LatestUpdatedAt = latestUpdatedAt,
                 PublishedAt = story.published_at,
-                LastPublishedAt = story.last_published_at
+                LastPublishedAt = story.last_published_at,
+                CommentsDisabled = story.comments_disabled,
+                ComplianceHidden = story.compliance_hidden,
+                ComplianceFlagged = story.compliance_flagged
             };
         }
 
-        private StoryListItemDto MapToListItemDto(stories story)
+        private StoryListItemDto MapToListItemDto(stories story, IReadOnlyDictionary<Guid, string?>? authorAvatarByUserId = null)
         {
             var categories = story.category?.ToList() ?? new List<categories>();
             var categoryIds = categories.Select(c => c.id).ToList();
@@ -640,6 +736,13 @@ namespace Services.Implementations
             if (latestChapterUpdatedAt.HasValue && (!latestUpdatedAt.HasValue || latestChapterUpdatedAt > latestUpdatedAt))
                 latestUpdatedAt = latestChapterUpdatedAt;
 
+            // Tên hiển thị tác giả cho danh sách công khai (guest) — cùng nguồn với chi tiết truyện.
+            var authorName = story.author_id.HasValue ? NotificationDAO.GetUserDisplayName(story.author_id.Value) : null;
+            string? authorAvatarUrl = null;
+            if (story.author_id.HasValue && authorAvatarByUserId != null &&
+                authorAvatarByUserId.TryGetValue(story.author_id.Value, out var av))
+                authorAvatarUrl = av;
+
             return new StoryListItemDto
             {
                 Id = story.id,
@@ -652,6 +755,8 @@ namespace Services.Implementations
                 CategoryIds = categoryIds,
                 CategoryNames = categoryNames,
                 AuthorId = story.author_id,
+                AuthorName = authorName,
+                AuthorAvatarUrl = authorAvatarUrl,
                 AgeRating = story.age_rating,
                 TotalChapters = totalChapters,
                 PublishedChaptersCount = publishedChaptersCount,

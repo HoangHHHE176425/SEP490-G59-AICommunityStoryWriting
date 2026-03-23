@@ -44,6 +44,21 @@ public partial class stories
 
     public DateTime? published_at { get; set; }
 
+    /// <summary>Compliance: chặn thêm comment trên truyện (độc giả không đăng comment mới).</summary>
+    public bool comments_disabled { get; set; }
+
+    /// <summary>Compliance: ẩn truyện khỏi người xem thường (trừ tác giả / admin / compliance).</summary>
+    public bool compliance_hidden { get; set; }
+
+    /// <summary>Compliance: gắn cờ cần theo dõi / xử lý lâu hơn.</summary>
+    public bool compliance_flagged { get; set; }
+
+    public string? compliance_flag_note { get; set; }
+
+    public DateTime? compliance_flagged_at { get; set; }
+
+    public Guid? compliance_flagged_by { get; set; }
+
     public virtual users? author { get; set; }
 
     public virtual ICollection<chapters> chapters { get; set; } = new List<chapters>();

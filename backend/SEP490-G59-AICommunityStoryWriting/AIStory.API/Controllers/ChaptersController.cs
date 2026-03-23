@@ -9,6 +9,8 @@ using DataAccessObjects.DAOs;
 using BusinessObjects;
 using Services.DTOs.Chapters;
 using Services.DTOs.Comments;
+using Services.DTOs.Notifications;
+using Services.DTOs.Stories;
 using Services.Interfaces;
 
 namespace AIStory.API.Controllers
@@ -17,19 +19,85 @@ namespace AIStory.API.Controllers
     [Route("api/chapters")]
     public class ChaptersController : ControllerBase
     {
+        /// <summary>Mã lỗi 409 khi xóa chương DRAFT còn version — khớp <c>ChapterService</c>.</summary>
+        private const string ChapterDeleteVersionsConfirmCode = "CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED";
+
         private readonly IChapterService _chapterService;
         private readonly IChapterVersionService _chapterVersionService;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IStoryService _storyService;
         private readonly IContentGuardrailService _contentGuardrail;
+        private readonly INotificationHubNotifier _notificationHubNotifier;
+        private readonly ILogger<ChaptersController> _logger;
 
-        public ChaptersController(IChapterService chapterService, IChapterVersionService chapterVersionService, IServiceScopeFactory scopeFactory, IStoryService storyService, IContentGuardrailService contentGuardrail)
+        public ChaptersController(
+            IChapterService chapterService,
+            IChapterVersionService chapterVersionService,
+            IServiceScopeFactory scopeFactory,
+            IStoryService storyService,
+            IContentGuardrailService contentGuardrail,
+            INotificationHubNotifier notificationHubNotifier,
+            ILogger<ChaptersController> logger)
         {
             _chapterService = chapterService;
             _chapterVersionService = chapterVersionService;
             _scopeFactory = scopeFactory;
             _storyService = storyService;
             _contentGuardrail = contentGuardrail;
+            _notificationHubNotifier = notificationHubNotifier;
+            _logger = logger;
+        }
+
+        private static NotificationDto MapNotificationToDto(notifications n) => new()
+        {
+            Id = n.id,
+            Type = n.type,
+            Title = n.title,
+            Content = n.content,
+            LinkUrl = n.link_url,
+            IsRead = n.is_read == true,
+            CreatedAt = n.created_at
+        };
+
+        private async Task PushCommentReplyNotificationAsync(notifications n)
+        {
+            if (n.user_id == null) return;
+            try
+            {
+                await _notificationHubNotifier.NotifyUserAsync(n.user_id.Value, MapNotificationToDto(n));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Push COMMENT_REPLY (chapter) failed. UserId={UserId} NotificationId={NotificationId}", n.user_id, n.id);
+            }
+        }
+
+        /// <summary>Gửi thông báo + SignalR cho tác giả khi độc giả mở khóa chương trả phí (lỗi push không làm hỏng giao dịch unlock).</summary>
+        private async Task PushAuthorChapterUnlockNotificationAsync(
+            Guid authorId,
+            Guid buyerUserId,
+            ChapterResponseDto chapterDto,
+            StoryResponseDto storyDto,
+            int coinPrice,
+            Guid chapterId)
+        {
+            try
+            {
+                var buyerName = NotificationDAO.GetUserDisplayName(buyerUserId);
+                var notif = NotificationDAO.NotifyAuthorChapterUnlocked(
+                    authorId,
+                    buyerName,
+                    storyDto.Title ?? "Truyện",
+                    chapterDto.Title ?? "Chương",
+                    coinPrice,
+                    chapterDto.StoryId ?? Guid.Empty,
+                    chapterId);
+                await _notificationHubNotifier.NotifyUserAsync(authorId, MapNotificationToDto(notif));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Push CHAPTER_UNLOCK notification failed. AuthorId={AuthorId} ChapterId={ChapterId}", authorId, chapterId);
+            }
         }
 
         private Guid? GetCurrentUserId()
@@ -37,6 +105,14 @@ namespace AIStory.API.Controllers
             var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
                       ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             return Guid.TryParse(sub, out var id) ? id : null;
+        }
+
+        private bool CanBypassStoryComplianceHidden(StoryResponseDto? story, Guid? userId)
+        {
+            if (story == null || story.ComplianceHidden != true) return true;
+            if (User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE")) return true;
+            if (userId.HasValue && story.AuthorId.HasValue && story.AuthorId.Value == userId.Value) return true;
+            return false;
         }
 
         private bool HasUnlockedPaidChapter(Guid userId, Guid chapterId)
@@ -104,9 +180,18 @@ namespace AIStory.API.Controllers
                     return NotFound(new { message = $"Chapter with ID {id} not found" });
 
                 var userId = GetCurrentUserId();
+                if (chapter.StoryId.HasValue)
+                {
+                    var stMeta = _storyService.GetById(chapter.StoryId.Value, userId);
+                    if (stMeta == null)
+                        return NotFound(new { message = $"Chapter with ID {id} not found" });
+                    if (!CanBypassStoryComplianceHidden(stMeta, userId))
+                        return NotFound(new { message = $"Chapter with ID {id} not found" });
+                }
+
                 if (chapter.StoryId.HasValue && userId.HasValue && userId.Value != Guid.Empty)
                 {
-                    var story = _storyService.GetById(chapter.StoryId.Value);
+                    var story = _storyService.GetById(chapter.StoryId.Value, userId);
                     var isAuthor = story?.AuthorId.HasValue == true && story.AuthorId.Value == userId.Value;
                     var accessType = chapter.AccessType?.ToUpper() ?? "FREE";
                     var coinPrice = chapter.CoinPrice ?? 0;
@@ -165,9 +250,11 @@ namespace AIStory.API.Controllers
             if (!chapter.StoryId.HasValue)
                 return BadRequest(new { message = "Chapter thiếu StoryId." });
 
-            var story = _storyService.GetById(chapter.StoryId.Value);
+            var story = _storyService.GetById(chapter.StoryId.Value, userId);
             if (story?.AuthorId == null)
                 return BadRequest(new { message = "Không xác định được author của truyện." });
+            if (!CanBypassStoryComplianceHidden(story, userId))
+                return NotFound(new { message = "Chapter không tồn tại." });
 
             var authorId = story.AuthorId.Value;
             var isAuthor = authorId == userId.Value;
@@ -301,6 +388,8 @@ namespace AIStory.API.Controllers
                     await db.SaveChangesAsync(cancellationToken);
                     await tx.CommitAsync(cancellationToken);
 
+                    await PushAuthorChapterUnlockNotificationAsync(authorId, userId.Value, chapter, story, coinPrice, id);
+
                     return Ok(new { unlocked = true });
                 }
                 catch (Exception ex)
@@ -359,7 +448,7 @@ namespace AIStory.API.Controllers
                     var st = StoryDAO.GetById(chapter.StoryId.Value);
                     storyAuthorId = st?.author_id;
                 }
-                var entities = CommentDAO.GetChapterComments(id);
+                var entities = CommentDAO.GetChapterCommentsForDisplay(id);
                 var currentUserId = GetCurrentUserId();
                 var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId, storyAuthorId)).ToList();
                 return Ok(dtos);
@@ -386,7 +475,7 @@ namespace AIStory.API.Controllers
                 if (content.Length > 2000)
                     return BadRequest(new { message = "Nội dung comment tối đa 2000 ký tự." });
 
-                var guardrailResult = await _contentGuardrail.CheckAsync(Guid.Empty, content, HttpContext.RequestAborted);
+                var guardrailResult = await _contentGuardrail.CheckCommentBannedWordsAsync(content, HttpContext.RequestAborted);
                 if (!guardrailResult.Passed)
                     return BadRequest(new
                     {
@@ -419,9 +508,16 @@ namespace AIStory.API.Controllers
                         ?? entity.userNavigation?.email?.Trim() ?? "Ai đó";
                     try
                     {
-                        NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, storyId, story.title, entity.id);
+                        var chapterCommentLink = $"/chapter?storyId={storyId}&chapterId={id}#comment-{entity.id}";
+                        var chapterDescriptor = $"Chương {chapter.OrderIndex}" +
+                            (string.IsNullOrWhiteSpace(chapter.Title) ? "" : $" «{chapter.Title.Trim()}»");
+                        var notif = NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, storyId, story.title, entity.id, chapterCommentLink, chapterDescriptor);
+                        await PushCommentReplyNotificationAsync(notif);
                     }
-                    catch { /* best effort */ }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "NotifyCommentReply (chapter) failed for parent {ParentId}", parent.id);
+                    }
                 }
                 var dto = MapToStoryCommentDto(entity, userId, story.author_id);
                 return Created($"/api/chapters/{id}/comments/{dto.Id}", dto);
@@ -504,8 +600,13 @@ namespace AIStory.API.Controllers
             return r;
         }
 
-        private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null, Guid? storyAuthorId = null)
+        private static StoryCommentDto MapToStoryCommentDto(
+            comments c,
+            Guid? currentUserId = null,
+            Guid? storyAuthorId = null)
         {
+            var statusUpper = (c.status ?? "").Trim().ToUpperInvariant();
+            var content = statusUpper == "HIDDEN_PARENT" ? "Nội dung bình luận đã bị ẩn." : (c.content ?? "");
             var nickname = c.userNavigation?.user_profiles?.nickname;
             var email = c.userNavigation?.email;
             var display = !string.IsNullOrWhiteSpace(nickname) ? nickname : email;
@@ -534,7 +635,7 @@ namespace AIStory.API.Controllers
                 UserDisplayName = display,
                 UserRole = ResolveCommentDisplayUserRole(c.userNavigation?.role, c.user_id, storyAuthorId),
                 UserCreatedAt = c.userNavigation?.created_at,
-                Content = c.content ?? "",
+                Content = content,
                 LikesCount = c.likes_count ?? 0,
                 UserHasLiked = userHasLiked,
                 ReactionCounts = reactionCounts ?? new Dictionary<string, int>(),
@@ -573,18 +674,29 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Xóa chapter - Chỉ AUTHOR (chỉ được xóa chapter của chính mình)</summary>
+        /// <summary>Xóa chapter (chỉ DRAFT). Nếu có phiên bản (chapter_versions), lần đầu trả 409 với code CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED; gọi lại với deleteIncludingVersions=true sau khi user xác nhận. Nội dung ai_generated_content của chương cũng bị xóa khi xóa thành công.</summary>
         [HttpDelete("{id:guid}")]
         [Authorize(Roles = "AUTHOR")]
-        public IActionResult Delete(Guid id)
+        public IActionResult Delete(Guid id, [FromQuery] bool deleteIncludingVersions = false)
         {
             try
             {
-                var deleted = _chapterService.Delete(id);
+                var deleted = _chapterService.Delete(id, deleteIncludingVersions);
                 return deleted ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
             catch (InvalidOperationException ex)
             {
+                if (ex.Data["ErrorCode"]?.ToString() == ChapterDeleteVersionsConfirmCode
+                    && ex.Data["VersionCount"] != null)
+                {
+                    var vc = Convert.ToInt32(ex.Data["VersionCount"]);
+                    return Conflict(new
+                    {
+                        code = ChapterDeleteVersionsConfirmCode,
+                        versionCount = vc,
+                        message = ex.Message
+                    });
+                }
                 return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)

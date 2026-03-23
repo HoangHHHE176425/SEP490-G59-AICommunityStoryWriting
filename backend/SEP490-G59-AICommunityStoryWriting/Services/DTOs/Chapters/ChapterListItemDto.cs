@@ -12,8 +12,10 @@ namespace Services.DTOs.Chapters
         public string? AccessType { get; set; }
         public int? CoinPrice { get; set; }
         public int? WordCount { get; set; }
-        /// <summary>Phần trăm giống với bản AI (0–100), cập nhật khi chương PUBLISHED và gọi compare-chapter.</summary>
+        /// <summary>Phần trăm giống với bản AI (0–100) nếu đã lưu trên chương.</summary>
         public decimal? AiSimilarityPercent { get; set; }
+        /// <summary>Tỷ lệ đóng góp AI (0–100) trên chương nếu có.</summary>
+        public decimal? AiContributionRatio { get; set; }
         public DateTime? PublishedAt { get; set; }
         public DateTime? CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
@@ -33,6 +35,9 @@ namespace Services.DTOs.Chapters
         /// <summary>Thời điểm moderator từ chối.</summary>
         public DateTime? RejectedAt { get; set; }
 
+        /// <summary>Tất cả lần từ chối chương gốc (moderation_logs), cũ → mới — hiển thị cả sau khi tác giả gửi duyệt lại.</summary>
+        public List<ChapterRejectionHistoryItemDto>? ModeratorRejectionHistory { get; set; }
+
         /// <summary>Tiêu đề version chờ duyệt (khi có); dùng cho sidebar moderator hiển thị ngay không cần gọi review-content.</summary>
         public string? PendingVersionTitle { get; set; }
         /// <summary>Số từ của version chờ duyệt (khi có).</summary>
@@ -40,7 +45,7 @@ namespace Services.DTOs.Chapters
 
         /// <summary>Mốc tác giả gửi duyệt (submitted_for_review_at; fallback nếu cũ).</summary>
         public DateTime? PendingSince { get; set; }
-        /// <summary>Moderator queue: không dùng (null). SLA theo <see cref="PendingSince"/> + <see cref="TimeStatus"/>.</summary>
+        /// <summary>Hạn SLA duyệt (ưu tiên review_deadline_at khi đã claim; không claim thì mốc gửi + policy ngày). List chapter (GetAll/GetByStoryId) điền khi chương đang trong luồng duyệt.</summary>
         public DateTime? DeadlineAt { get; set; }
         /// <summary>Mức ưu tiên theo thời gian chờ từ mốc gửi (OnTime / Warning / Critical / Overdue).</summary>
         public string? TimeStatus { get; set; }
@@ -48,5 +53,17 @@ namespace Services.DTOs.Chapters
         public DateTime? ReviewedAt { get; set; }
         /// <summary>Admin: tên moderator đã duyệt/từ chối.</summary>
         public string? ReviewedByModeratorName { get; set; }
+
+        /// <summary>Ghi chú admin khi từ chối đơn RELEASE_ASSIGNMENT (hủy nhận duyệt) do moderator hiện tại gửi (chapter hoặc truyện chứa chương). Phần gộp từ cấp truyện chỉ khi truyện đó còn chương chờ duyệt.</summary>
+        public string? AdminRejectedReleaseNote { get; set; }
+        /// <summary>Thời điểm admin từ chối đơn hủy nhận duyệt (theo bản ghi mới nhất áp dụng).</summary>
+        public DateTime? AdminRejectedReleaseAt { get; set; }
+        /// <summary>True khi bản ghi từ chối đơn hủy nhận duyệt thuộc đúng phiên claim hiện tại.</summary>
+        public bool IsCurrentClaimRejection { get; set; }
+
+        /// <summary>Ghi chú admin khi từ chối đơn EXTEND_DEADLINE (xin gia hạn).</summary>
+        public string? AdminRejectedExtendNote { get; set; }
+        /// <summary>Thời điểm admin từ chối đơn xin gia hạn.</summary>
+        public DateTime? AdminRejectedExtendAt { get; set; }
     }
 }

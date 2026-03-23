@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using AIStory.API.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Services.DTOs.AI;
 using Services.DTOs.Comments;
 using Services.DTOs.Chapters;
+using Services.DTOs.Community;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 using Xunit;
@@ -17,7 +18,12 @@ public class UC12_PostCommentReplyTests
 {
     private static StoriesController CreateStoriesController(Guid? userId)
     {
-        var ctrl = new StoriesController(new FakeStoryService(), new FakeContentGuardrailService(), NullLogger<StoriesController>.Instance);
+        var ctrl = new StoriesController(
+            new FakeStoryService(),
+            new FakeContentGuardrailService(),
+            new StubStoryReportService(),
+            new NoOpNotificationHubNotifier(),
+            NullLogger<StoriesController>.Instance);
         ctrl.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -35,7 +41,9 @@ public class UC12_PostCommentReplyTests
             chapterVersionService: new FakeChapterVersionService(),
             scopeFactory: new FakeServiceScopeFactory(),
             storyService: new FakeStoryService(),
-            contentGuardrail: new FakeContentGuardrailService());
+            contentGuardrail: new FakeContentGuardrailService(),
+            notificationHubNotifier: new NoOpNotificationHubNotifier(),
+            logger: NullLogger<ChaptersController>.Instance);
 
         ctrl.ControllerContext = new ControllerContext
         {
@@ -151,7 +159,13 @@ public class UC12_PostCommentReplyTests
 
     private sealed class FakeContentGuardrailService : IContentGuardrailService
     {
-        public Task<GuardrailResult> CheckAsync(Guid storyId, string draftContent, System.Threading.CancellationToken cancellationToken = default)
+        public Task<GuardrailResult> CheckAsync(Guid storyId, string draftContent, System.Threading.CancellationToken cancellationToken = default) =>
+            EvaluateBanned(draftContent);
+
+        public Task<GuardrailResult> CheckCommentBannedWordsAsync(string content, System.Threading.CancellationToken cancellationToken = default) =>
+            EvaluateBanned(content);
+
+        private static Task<GuardrailResult> EvaluateBanned(string? draftContent)
         {
             var s = draftContent ?? string.Empty;
             var isBanned = s.Contains("bannedword", StringComparison.OrdinalIgnoreCase)
@@ -192,6 +206,7 @@ public class UC12_PostCommentReplyTests
         public void RecordReadChapter(Guid storyId, Guid chapterId, Guid userId, string? ipAddress = null, string? deviceInfo = null) { }
         public (decimal avgRating, int ratingCount) RateStory(Guid storyId, Guid userId, int starValue, string? reviewText) => throw new NotImplementedException();
         public (string? reason, DateTime? rejectedAt) GetLatestRejectionForStory(Guid storyId) => (null, null);
+        public CommunityStatsDto GetPublicCommunityStats() => throw new NotImplementedException();
     }
 
     private sealed class FakeChapterService : IChapterService
@@ -205,7 +220,7 @@ public class UC12_PostCommentReplyTests
         public IEnumerable<ChapterListItemDto> GetByStoryId(Guid storyId) => throw new NotImplementedException();
         public ChapterResponseDto? GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex) => throw new NotImplementedException();
         public bool Update(Guid id, UpdateChapterRequestDto request) => throw new NotImplementedException();
-        public bool Delete(Guid id) => throw new NotImplementedException();
+        public bool Delete(Guid id, bool deleteIncludingVersions = false) => throw new NotImplementedException();
         public bool Publish(Guid id) => throw new NotImplementedException();
         public bool Unpublish(Guid id) => throw new NotImplementedException();
         public bool Reorder(Guid id, int newOrderIndex) => throw new NotImplementedException();

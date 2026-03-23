@@ -30,6 +30,18 @@ public static class AiGeneratedContentDAO
             .ToList();
     }
 
+    /// <summary>Bản AI theo truyện + thứ tự chương (chapter_index khớp order_index của chương).</summary>
+    public static List<ai_generated_content> GetAllByStoryIdAndChapterIndex(Guid storyId, int chapterIndex, int maxCount = 50)
+    {
+        using var context = new StoryPlatformDbContext();
+        return context.ai_generated_content
+            .AsNoTracking()
+            .Where(a => a.story_id == storyId && a.chapter_index == chapterIndex && a.ai_output != null && a.ai_output.Length > 0)
+            .OrderByDescending(a => a.created_at)
+            .Take(maxCount)
+            .ToList();
+    }
+
     /// <summary>Lấy theo id.</summary>
     public static ai_generated_content? GetById(Guid id)
     {
@@ -45,15 +57,28 @@ public static class AiGeneratedContentDAO
         context.SaveChanges();
     }
 
-    /// <summary>Gán chương cho bản nháp (khi tác giả tạo chương từ bản nháp này).</summary>
-    public static void UpdateChapterId(Guid id, Guid chapterId)
+    /// <summary>Gán chương và đồng bộ chapter_index với order_index của chương vừa tạo.</summary>
+    public static void UpdateChapterId(Guid id, Guid chapterId, int chapterOrderIndex)
     {
         using var context = new StoryPlatformDbContext();
         var row = context.ai_generated_content.FirstOrDefault(a => a.id == id);
         if (row != null)
         {
             row.chapter_id = chapterId;
+            row.chapter_index = chapterOrderIndex;
             context.SaveChanges();
         }
+    }
+
+    /// <summary>Xóa mọi bản ghi AI gắn chapter (đồng bộ khi tác giả xóa chương DRAFT).</summary>
+    /// <remarks>
+    /// Dùng SQL trực tiếp để không materialize entity: DB cũ chưa chạy script thêm <c>chapter_index</c>
+    /// vẫn xóa được (tránh lỗi "Invalid column name 'chapter_index'").
+    /// </remarks>
+    public static void DeleteAllByChapterId(Guid chapterId)
+    {
+        using var context = new StoryPlatformDbContext();
+        context.Database.ExecuteSqlInterpolated(
+            $"DELETE FROM ai_generated_content WHERE chapter_id = {chapterId}");
     }
 }

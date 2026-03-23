@@ -10,6 +10,13 @@ public class CoCreationRequest
     /// Ý tưởng của tác giả (tùy chọn). Nếu để trống/null, hệ thống sẽ tự viết chương tiếp theo dựa trên mạch truyện hiện có.
     /// </summary>
     public string? AuthorIdea { get; set; }
+
+    /// <summary>
+    /// Thứ tự chương đang soạn (0-based, trùng <c>chapters.order_index</c> và <c>compare-chapter-preview</c>).
+    /// Khi có giá trị, bản <c>ai_generated_content</c> gắn đúng index này để so % khớp nội dung dán vào ô chương hiện tại (kể cả không bấm «áp dụng»).
+    /// Null = giữ hành vi cũ: gán slot chương tiếp theo (max order_index + 1).
+    /// </summary>
+    public int? ChapterOrderIndex { get; set; }
 }
 
 /// <summary>Response đồng sáng tác: dàn ý + nội dung cuối + trạng thái kiểm duyệt. Có thể kèm feedback khi ý tưởng tác giả mâu thuẫn với truyện.</summary>
@@ -36,11 +43,14 @@ public class CoCreationResponse
     /// <summary>Feedback cuối từ Agent 3 nếu vẫn chưa đạt sau tất cả vòng sửa (để tác giả tham khảo). Khi Approved=true thì thường null.</summary>
     public string? ReviewFeedback { get; set; }
 
-    /// <summary>ID chương nháp (DRAFT) vừa tạo — mỗi lần co-create thành công tạo một chương + một bản ai_generated_content.</summary>
+    /// <summary>ID chương nếu đã tồn tại <c>chapters</c> trùng <c>story_id</c> + <c>order_index</c> với slot co-create; nếu không có chương tại slot đó thì null.</summary>
     public Guid? ChapterId { get; set; }
 
-    /// <summary>ID bản ghi ai_generated_content vừa lưu (gắn với ChapterId).</summary>
+    /// <summary>ID bản ghi ai_generated_content vừa lưu (chapter_id null cho đến khi tác giả tạo chương qua API chapters).</summary>
     public Guid? AiGeneratedContentId { get; set; }
+
+    /// <summary>Thứ tự chương dự kiến (khớp <c>chapter_index</c> và sẽ khớp <c>chapters.order_index</c> khi tạo chương).</summary>
+    public int? ChapterIndex { get; set; }
 
     /// <summary>Thời gian chạy từng bước (ms): Outline, Write, Guardrail, Review; khi song song là thời gian wall-clock của mỗi phase. Null nếu không đo.</summary>
     public List<AgentDuration>? AgentDurations { get; set; }

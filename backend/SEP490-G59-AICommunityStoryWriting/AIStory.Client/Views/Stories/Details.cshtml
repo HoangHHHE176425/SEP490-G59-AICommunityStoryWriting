@@ -215,6 +215,16 @@
         let chapters = [];
         let editingChapterId = null;
 
+        // Đồng bộ với Stories/Index: gọi sau loadUserInfo (trang này không có createStoryBtn).
+        function updateAuthUI() {
+            const createStoryBtn = document.getElementById('createStoryBtn');
+            if (createStoryBtn) {
+                const isAuthenticated = typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated();
+                const isAuthor = typeof AuthHelper !== 'undefined' && AuthHelper.isAuthor();
+                createStoryBtn.style.display = (!isAuthenticated || !isAuthor) ? 'none' : 'block';
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', function() {
             // Kiểm tra authentication và role
             if (!AuthHelper.isAuthenticated()) {
@@ -647,14 +657,29 @@
                 return;
             }
 
-            if (!confirm('Bạn có chắc chắn muốn xóa chapter này?')) return;
+            if (!confirm('Bạn có chắc muốn xóa chương này? (Chỉ áp dụng chương ở trạng thái nháp.)')) return;
 
             try {
-                await ApiService.deleteChapter(id);
-                Utils.showAlert('Xóa chapter thành công!', 'success');
+                await ApiService.deleteChapter(id, false);
+                Utils.showAlert('Đã xóa chương.', 'success');
                 loadChapters();
                 loadStoryDetails(); // Reload to update stats
             } catch (error) {
+                const code = error.body && error.body.code;
+                if (error.status === 409 && code === 'CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED') {
+                    const n = error.body.versionCount ?? '?';
+                    const msg = `Chương này có ${n} phiên bản (nháp / chỉnh sửa). Bạn có đồng ý xóa luôn tất cả các phiên bản đó không? Hành động này không thể hoàn tác.`;
+                    if (!confirm(msg)) return;
+                    try {
+                        await ApiService.deleteChapter(id, true);
+                        Utils.showAlert('Đã xóa chương và các phiên bản.', 'success');
+                        loadChapters();
+                        loadStoryDetails();
+                    } catch (e2) {
+                        Utils.showAlert('Lỗi: ' + e2.message, 'danger');
+                    }
+                    return;
+                }
                 Utils.showAlert('Lỗi: ' + error.message, 'danger');
             }
         }

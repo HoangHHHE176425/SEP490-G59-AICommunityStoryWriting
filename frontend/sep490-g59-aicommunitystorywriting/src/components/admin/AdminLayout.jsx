@@ -12,7 +12,6 @@ import {
     Menu,
     LogOut,
     Bell,
-    Search,
     X,
     CheckSquare,
     Shield,
@@ -20,6 +19,7 @@ import {
     AlertTriangle,
     Wallet,
     Landmark,
+    Flag,
 } from 'lucide-react';
 
 const ROLE_LABELS = {
@@ -35,6 +35,7 @@ const ALL_MENU_ITEMS = [
     { id: 'wallet-dashboard', label: 'Ví hệ thống', icon: Wallet },
     { id: 'categories', label: 'Quản lý thể loại', icon: Bookmark },
     { id: 'publication', label: 'Quản lý xuất bản', icon: CheckSquare },
+    { id: 'review-escalations', label: 'Đơn báo cáo duyệt', icon: Flag },
     { id: 'stories', label: 'Quản lý truyện', icon: FileText },
     { id: 'violations', label: 'Quản lý vi phạm', icon: AlertTriangle },
     { id: 'users', label: 'Quản lý người dùng', icon: Users },
@@ -151,32 +152,6 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <div
-                            style={{
-                                display: window.innerWidth >= 768 ? 'flex' : 'none',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                padding: '0.5rem 1rem',
-                                backgroundColor: '#f1f5f9',
-                                borderRadius: '0.5rem'
-                            }}
-                            className="hidden md:flex"
-                        >
-                            <Search style={{ width: '16px', height: '16px', color: '#94a3b8' }} />
-                            <input
-                                type="text"
-                                placeholder="Tìm kiếm..."
-                                style={{
-                                    background: 'transparent',
-                                    border: 'none',
-                                    outline: 'none',
-                                    fontSize: '0.875rem',
-                                    color: '#1e293b',
-                                    width: '16rem'
-                                }}
-                            />
-                        </div>
-
                         {/* Icon ví hệ thống + số dư */}
                         <button
                             onClick={() => onNavigate('wallet-dashboard')}

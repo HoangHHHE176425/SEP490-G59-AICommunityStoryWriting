@@ -1,15 +1,29 @@
 import { Search, Bell, Edit, Menu, X, ChevronDown, Wallet, User, Library, LogOut } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { getAllCategories } from '../../api/category/categoryApi';
 import { getNotifications, getUnreadCount, markNotificationAsRead, markAllNotificationsAsRead } from '../../api/notification/notificationApi';
 import * as coinApi from '../../api/coins/coinApi';
 import { useToast } from '../author/story-editor/Toast';
+import { isAuthorChapterListActive } from '../../utils/authorUiFlags';
+import { normalizeNotificationTo } from '../../utils/notificationLink';
+
+/** Thông báo mới nhất trên cùng (theo createdAt). */
+function sortNotificationsNewestFirst(list) {
+    if (!Array.isArray(list)) return [];
+    return [...list].sort((a, b) => {
+        const ta = Date.parse(a.createdAt ?? a.CreatedAt ?? '') || 0;
+        const tb = Date.parse(b.createdAt ?? b.CreatedAt ?? '') || 0;
+        if (tb !== ta) return tb - ta;
+        return String(b.id ?? b.Id ?? '').localeCompare(String(a.id ?? a.Id ?? ''));
+    });
+}
 
 export function Header() {
     const navigate = useNavigate();
+    const location = useLocation();
     const { user, logout, isAuthenticated, role } = useAuth();
     const { showToast, ToastContainer } = useToast();
     const showToastRef = useRef(showToast);
@@ -44,7 +58,7 @@ export function Header() {
         setNotificationsLoading(true);
         Promise.all([getNotifications({ limit: 30 }), getUnreadCount()])
             .then(([list, countRes]) => {
-                setNotifications(Array.isArray(list) ? list : []);
+                setNotifications(sortNotificationsNewestFirst(Array.isArray(list) ? list : []));
                 setUnreadCount(countRes?.count ?? 0);
             })
             .catch(() => {
@@ -80,15 +94,22 @@ export function Header() {
                         createdAt: n.createdAt ?? n.CreatedAt,
                         type: n.type ?? n.Type,
                     };
-                    return [item, ...prev];
+                    return sortNotificationsNewestFirst([item, ...prev]);
                 });
                 setUnreadCount((c) => c + 1);
                 // Realtime toast: hiển thị popup khi có thông báo mới (vd: ủng hộ, duyệt truyện/chương)
                 const toastMsg = content || title || 'Bạn có thông báo mới';
-                const toastType = type === 'DONATION' ? 'success' : 'info';
-                showToastRef.current(toastMsg, toastType, 5000);
-                // Khi có ủng hộ (DONATION), cập nhật số dư ví ngay không cần F5
-                if (type === 'DONATION') {
+                const toastType = type === 'DONATION' || type === 'CHAPTER_UNLOCK' ? 'success' : 'info';
+                const onAuthorChapterList =
+                    isAuthor &&
+                    location.pathname.replace(/\/$/, '') === '/author' &&
+                    isAuthorChapterListActive();
+                const skipToastForChapterApproved = onAuthorChapterList && type === 'CHAPTER_APPROVED';
+                if (!skipToastForChapterApproved) {
+                    showToastRef.current(toastMsg, toastType, 5000);
+                }
+                // Khi có ủng hộ hoặc độc giả mở khóa chương (thu nhập tác giả), cập nhật ví ngay
+                if (type === 'DONATION' || type === 'CHAPTER_UNLOCK') {
                     window.dispatchEvent(new CustomEvent('wallet:changed'));
                 }
             }
@@ -96,7 +117,7 @@ export function Header() {
         };
         window.addEventListener('app:notification', handler);
         return () => window.removeEventListener('app:notification', handler);
-    }, [isAuthenticated, fetchNotifications]);
+    }, [isAuthenticated, fetchNotifications, isAuthor, location.pathname]);
 
     const fetchWallet = useCallback(async () => {
         if (!isAuthenticated) {
@@ -256,16 +277,16 @@ export function Header() {
                                     </button>
                                     {isNotificationOpen && (
                                         <div
-                                            className="absolute top-full right-0 mt-2 w-80 max-h-[400px] bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden z-50 flex flex-col"
+                                            className="absolute top-full right-0 mt-2 w-80 max-h-[min(24rem,75vh)] bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden z-50 flex flex-col"
                                             onMouseDown={(e) => e.preventDefault()}
                                         >
-                                            <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                                            <div className="shrink-0 px-4 py-3 border-b border-slate-700 flex items-center justify-between">
                                                 <span className="font-semibold text-white">Thông báo</span>
                                                 {unreadCount > 0 && (
                                                     <span className="text-xs text-slate-400">{unreadCount} chưa đọc</span>
                                                 )}
                                             </div>
-                                            <div className="overflow-y-auto flex-1">
+                                            <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain">
                                                 {notificationsLoading ? (
                                                     <div className="px-4 py-6 text-center text-slate-400 text-sm">Đang tải...</div>
                                                 ) : notifications.length === 0 ? (
@@ -274,7 +295,7 @@ export function Header() {
                                                     notifications.map((n) => (
                                                         <Link
                                                             key={n.id}
-                                                            to={n.linkUrl && n.linkUrl.startsWith('/') ? n.linkUrl : '/home'}
+                                                            to={normalizeNotificationTo(n.linkUrl)}
                                                             className="block px-4 py-3 border-b border-slate-700/50 hover:bg-slate-700/50 transition-colors"
                                                             onClick={async () => {
                                                                 if (!n.isRead) {

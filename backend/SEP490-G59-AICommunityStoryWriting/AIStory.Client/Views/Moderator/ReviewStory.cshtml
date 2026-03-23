@@ -93,6 +93,7 @@
                                 <label class="form-label small">Hạn đề xuất</label>
                                 <input type="datetime-local" class="form-control form-control-sm" id="storyEscDeadline">
                             </div>
+                            <p class="small text-muted mb-2">Mức ưu tiên admin: <strong>tự động</strong> theo loại đơn (hủy nhận = nghiêm trọng; gia hạn = chuẩn, có thể tăng theo hạn).</p>
                             <div class="mb-2">
                                 <label class="form-label small">Lý do (≥10 ký tự)</label>
                                 <textarea class="form-control form-control-sm" id="storyEscReason" rows="3"></textarea>
@@ -266,12 +267,14 @@
             if (kind === 'EXTEND_DEADLINE') {
                 var localStr = document.getElementById('storyEscDeadline').value;
                 if (!localStr) { Utils.showAlert('Chọn hạn đề xuất.', 'warning'); return; }
-                var dt = new Date(localStr);
-                if (isNaN(dt.getTime()) || dt.getTime() <= Date.now() + 86400000) {
+                var pIso = Utils.datetimeLocalToIsoUtc(localStr);
+                if (!pIso) { Utils.showAlert('Hạn đề xuất không hợp lệ.', 'warning'); return; }
+                var dt = new Date(pIso);
+                if (dt.getTime() <= Date.now() + 86400000) {
                     Utils.showAlert('Hạn đề xuất phải sau ít nhất 24 giờ.', 'warning');
                     return;
                 }
-                body.proposedDeadlineAt = dt.toISOString();
+                body.proposedDeadlineAt = pIso;
             }
             try {
                 await ApiService.moderatorSubmitReviewEscalation(body);

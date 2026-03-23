@@ -107,6 +107,8 @@ namespace Services.Implementations
             var chapterStatusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
             if (chapterStatusUpper == "PENDING_REVIEW")
                 throw new InvalidOperationException("Chương đã được gửi đi duyệt. Chỉ được gửi một bản: bản gốc chương hoặc một phiên bản.");
+            if (chapterStatusUpper == "PUBLISHED")
+                throw new InvalidOperationException("Chương đã xuất bản không còn được gửi duyệt phiên bản chỉnh sửa.");
 
             // Chỉ cho phép một version chờ duyệt tại một thời điểm. Nếu đã có version khác đang PENDING_REVIEW thì không cho gửi thêm.
             var anyOtherPending = _versionRepository.GetByChapterId(v.chapter_id.Value)
@@ -119,25 +121,18 @@ namespace Services.Implementations
 
             chapter.updated_at = DateTime.UtcNow;
             chapter.submitted_for_review_at = DateTime.UtcNow;
-            if (chapterStatusUpper == "PUBLISHED")
+            // Chapter gốc chỉ còn DRAFT/REJECTED khi gửi version (PUBLISHED đã chặn ở trên): kiểm tra thứ tự gửi.
+            if (chapter.order_index > 0 && chapter.story_id.HasValue)
             {
-                // Chapter đã xuất bản: giữ nguyên trạng thái PUBLISHED, chỉ version chuyển sang PENDING_REVIEW. Không ghi đè nội dung chapter để moderator thấy bản gốc và so sánh với version.
+                var previous = _chapterRepository.GetByStoryIdAndOrderIndex(chapter.story_id.Value, chapter.order_index - 1);
+                if (previous == null)
+                    throw new InvalidOperationException("Phải gửi xuất bản chương theo thứ tự. Chương " + chapter.order_index + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
+                var prevStatus = (previous.status ?? "").Trim().ToUpperInvariant();
+                var prevHasPendingVersion = _versionRepository.GetByChapterId(previous.id).Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+                if (prevStatus != "PUBLISHED" && prevStatus != "PENDING_REVIEW" && !prevHasPendingVersion)
+                    throw new InvalidOperationException("Phải gửi xuất bản chương theo thứ tự. Chương " + chapter.order_index + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
             }
-            else
-            {
-                // Chapter đang DRAFT: chỉ gửi phiên bản đi duyệt, giữ nguyên trạng thái chapter là Bản nháp.
-                if (chapter.order_index > 0 && chapter.story_id.HasValue)
-                {
-                    var previous = _chapterRepository.GetByStoryIdAndOrderIndex(chapter.story_id.Value, chapter.order_index - 1);
-                    if (previous == null)
-                        throw new InvalidOperationException("Phải gửi xuất bản chương theo thứ tự. Chương " + chapter.order_index + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
-                    var prevStatus = (previous.status ?? "").Trim().ToUpperInvariant();
-                    var prevHasPendingVersion = _versionRepository.GetByChapterId(previous.id).Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
-                    if (prevStatus != "PUBLISHED" && prevStatus != "PENDING_REVIEW" && !prevHasPendingVersion)
-                        throw new InvalidOperationException("Phải gửi xuất bản chương theo thứ tự. Chương " + chapter.order_index + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
-                }
-                // Không đổi chapter.status — chapter gốc vẫn là DRAFT; chỉ version chuyển sang PENDING_REVIEW.
-            }
+            // Không đổi chapter.status — chapter gốc vẫn là DRAFT; chỉ version chuyển sang PENDING_REVIEW.
 
             _chapterRepository.Update(chapter);
             return true;
@@ -207,7 +202,8 @@ namespace Services.Implementations
                 Status = v.status,
                 CreatedAt = v.created_at,
                 RejectionReason = v.rejection_reason,
-                ReviewedAt = v.reviewed_at
+                ReviewedAt = v.reviewed_at,
+                AiSimilarityPercent = v.ai_similarity_percent
             };
         }
 
@@ -221,7 +217,8 @@ namespace Services.Implementations
                 TitleSnapshot = v.title_snapshot,
                 Status = v.status,
                 CreatedAt = v.created_at,
-                ContentSnapshot = v.content_snapshot
+                ContentSnapshot = v.content_snapshot,
+                AiSimilarityPercent = v.ai_similarity_percent
             };
         }
 

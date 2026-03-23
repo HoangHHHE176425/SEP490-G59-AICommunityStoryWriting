@@ -21,6 +21,7 @@ public class PlotManagerService : IPlotManagerService
     private readonly IStoryRagService _ragService;
     private readonly IStoryRepository _storyRepository;
     private readonly IAIUsageLogRepository _aiUsageLogRepository;
+    private readonly IAiGeneratedContentRepository _aiContentRepository;
     private readonly IConfiguration _configuration;
 
     public PlotManagerService(
@@ -31,6 +32,7 @@ public class PlotManagerService : IPlotManagerService
         IStoryRagService ragService,
         IStoryRepository storyRepository,
         IAIUsageLogRepository aiUsageLogRepository,
+        IAiGeneratedContentRepository aiContentRepository,
         IConfiguration configuration)
     {
         _contextBuilder = contextBuilder;
@@ -40,6 +42,7 @@ public class PlotManagerService : IPlotManagerService
         _ragService = ragService;
         _storyRepository = storyRepository;
         _aiUsageLogRepository = aiUsageLogRepository;
+        _aiContentRepository = aiContentRepository;
         _configuration = configuration;
     }
 
@@ -57,21 +60,44 @@ public class PlotManagerService : IPlotManagerService
         var storyLanguage = StoryLanguageHelper.DetectFromStoryContext(sampleForLanguage);
         var languageInstruction = StoryLanguageHelper.GetLanguageInstruction(storyLanguage);
 
+        // Lấy mô tả/ý tưởng của tác giả (nếu chapter được tạo từ co-author).
+        // Dùng để xác định "nhân vật chính" theo mô tả của tác giả.
+        var aiRecord = _aiContentRepository.GetLatestByChapterId(chapterId);
+        var authorDescription = string.IsNullOrWhiteSpace(aiRecord?.input_prompt) ? null : aiRecord!.input_prompt!.Trim();
+
         var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentPlotManager);
         var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
 
         var systemPrompt = """
-Bạn là Plot Manager: từ ngữ cảnh truyện và nội dung chương mới, trích xuất (1) sự kiện mới cho timeline, (2) cập nhật trạng thái nhân vật, (3) cập nhật story state (thế giới, quy tắc). Trả về DUY NHẤT một JSON hợp lệ, không markdown:
+Bạn là Plot Manager: từ ngữ cảnh truyện và nội dung chương mới, trích xuất:
+(1) sự kiện mới cho timeline,
+(2) danh sách nhân vật CHÍNH theo mô tả tác giả (nếu có),
+(3) cập nhật trạng thái nhân vật,
+(4) cập nhật story state (thế giới, quy tắc).
+
+Trả về DUY NHẤT một JSON hợp lệ, không markdown:
 {
   "timelineUpdates": [ { "description": "Mô tả ngắn sự kiện" } ],
+  "mainCharacters": [ "Tên nhân vật theo context" ],
   "characterStateUpdates": [ { "characterName": "Tên nhân vật", "stateJson": "Mô tả trạng thái/tính cách" } ],
   "storyStateUpdate": "Mô tả ngắn trạng thái truyện / quy tắc thế giới (hoặc null nếu không đổi)"
 }
-Quan trọng: Với nhân vật đã chết, đã qua đời, hoặc đã rời đi/mất tích trong chương, bắt buộc ghi rõ vào characterStateUpdates (vd. stateJson: "đã chết", "đã qua đời", "đã rời đi") để lần sau AI không viết nhân vật đó xuất hiện trở lại. Sự kiện chết/qua đời cũng ghi vào timelineUpdates.
-Nếu không có gì mới: timelineUpdates/characterStateUpdates dùng [], storyStateUpdate null.
+Quy tắc nhân vật CHÍNH:
+- Nếu có Author description: mainCharacters phải là các nhân vật được tác giả nhắc đến như trọng tâm/nhân vật chính trong chương tiếp theo.
+- Nếu không có Author description: mainCharacters = [].
+
+Quy tắc cập nhật Character Memory:
+- Chỉ được đưa vào characterStateUpdates các nhân vật thuộc mainCharacters HOẶC các nhân vật có state "durable" thay đổi lâu dài (đã chết/đã qua đời/mất tích/đã rời đi/đang bị bắt/khống chế/không còn xuất hiện).
+
+Quan trọng: Với nhân vật đã chết, đã qua đời, hoặc đã rời đi/mất tích trong chương, bắt buộc ghi rõ vào characterStateUpdates (vd. stateJson: "đã chết", "đã qua đời", "đã rời đi").
+Nếu không có gì mới: timelineUpdates/characterStateUpdates dùng [], mainCharacters = [], storyStateUpdate null.
 """;
 
-        var userPrompt = $"Ngữ cảnh truyện (các chương trước + tóm tắt):\n\n{contextBlock}\n\n---\n\nNội dung chương mới cần trích xuất:\n\n{chapterContent}\n\n{languageInstruction}\n\nTrả về JSON theo đúng cấu trúc trên.";
+        var userPrompt =
+            $"Ngữ cảnh truyện (các chương trước + tóm tắt):\n\n{contextBlock}\n\n---\n" +
+            $"Author description (ý tưởng/gợi ý tác giả, có thể null):\n{(authorDescription ?? "(null)")}\n\n---\n" +
+            $"Nội dung chương mới cần trích xuất:\n\n{chapterContent}\n\n{languageInstruction}\n\n" +
+            "Trả về JSON theo đúng cấu trúc trên.";
 
         var messages = new List<ChatMessage>
         {
@@ -110,14 +136,38 @@ Nếu không có gì mới: timelineUpdates/characterStateUpdates dùng [], stor
                 }
             }
 
+            var mainCharacters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (root.TryGetProperty("mainCharacters", out var mc) && mc.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in mc.EnumerateArray())
+                {
+                    var n = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(n))
+                        mainCharacters.Add(n.Trim());
+                }
+            }
+
             if (root.TryGetProperty("characterStateUpdates", out var csu) && csu.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in csu.EnumerateArray())
                 {
                     var name = item.TryGetProperty("characterName", out var n) ? n.GetString() : null;
                     var state = item.TryGetProperty("stateJson", out var s) ? s.GetString() : null;
-                    if (!string.IsNullOrWhiteSpace(name))
-                        _characterRepo.Upsert(storyId, name.Trim(), state?.Trim());
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    var trimmedName = name.Trim();
+                    var trimmedState = state?.Trim();
+
+                    // Filter: chỉ lưu nhân vật chính theo mô tả tác giả hoặc state durable.
+                    if (mainCharacters.Count == 0)
+                    {
+                        if (IsDurableState(trimmedState))
+                            _characterRepo.Upsert(storyId, trimmedName, trimmedState);
+                    }
+                    else
+                    {
+                        if (mainCharacters.Contains(trimmedName) || IsDurableState(trimmedState))
+                            _characterRepo.Upsert(storyId, trimmedName, trimmedState);
+                    }
                 }
             }
 
@@ -149,5 +199,22 @@ Nếu không có gì mới: timelineUpdates/characterStateUpdates dùng [], stor
 
         if (reIndexRagAfter)
             await _ragService.EnsureIndexedAsync(storyId, null, cancellationToken);
+    }
+
+    private static bool IsDurableState(string? stateJson)
+    {
+        if (string.IsNullOrWhiteSpace(stateJson)) return false;
+        var s = stateJson.Trim();
+        // Heuristic: từ khóa biểu thị thay đổi lâu dài.
+        return s.Contains("đã chết", StringComparison.OrdinalIgnoreCase)
+               || s.Contains("đã qua đời", StringComparison.OrdinalIgnoreCase)
+               || s.Contains("mất tích", StringComparison.OrdinalIgnoreCase)
+               || s.Contains("đã rời đi", StringComparison.OrdinalIgnoreCase)
+               || s.Contains("rời đi", StringComparison.OrdinalIgnoreCase)
+               || s.Contains("biến mất", StringComparison.OrdinalIgnoreCase)
+               || s.Contains("dead", StringComparison.OrdinalIgnoreCase)
+               || s.Contains("missing", StringComparison.OrdinalIgnoreCase)
+               || s.Contains("captured", StringComparison.OrdinalIgnoreCase)
+               || s.Contains("không còn xuất hiện", StringComparison.OrdinalIgnoreCase);
     }
 }

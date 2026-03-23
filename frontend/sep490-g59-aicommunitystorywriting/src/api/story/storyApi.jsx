@@ -108,7 +108,7 @@ export async function createStory(data) {
 
 /**
  * Lấy danh sách truyện có phân trang và lọc.
- * @param {Object} params - { page?, pageSize?, search?, categoryId?, authorId?, status?, sortBy?, sortOrder? }
+ * @param {Object} params - { page?, pageSize?, search?, categoryId?, categoryIds?, authorId?, status?, sortBy?, sortOrder?, includeStoryIds?, storyProgressStatus?, ageRating?, minTotalChapters?, maxTotalChapters? }
  * @returns {Promise} - PagedResultDto
  */
 export async function getStories(params = {}) {
@@ -117,10 +117,26 @@ export async function getStories(params = {}) {
     if (params.pageSize != null) q.append("pageSize", params.pageSize);
     if (params.search) q.append("search", params.search);
     if (params.categoryId) q.append("categoryId", params.categoryId);
+    const catIds = params.categoryIds;
+    if (Array.isArray(catIds) && catIds.length > 0) {
+        catIds.forEach((id) => {
+            if (id != null && String(id).trim() !== "") q.append("categoryIds", String(id).trim());
+        });
+    }
     if (params.authorId) q.append("authorId", params.authorId);
     if (params.status) q.append("status", params.status);
     if (params.sortBy) q.append("sortBy", params.sortBy);
     if (params.sortOrder) q.append("sortOrder", params.sortOrder);
+    if (params.storyProgressStatus) q.append("storyProgressStatus", String(params.storyProgressStatus).trim());
+    if (params.ageRating) q.append("ageRating", String(params.ageRating).trim());
+    if (params.minTotalChapters != null) q.append("minTotalChapters", String(params.minTotalChapters));
+    if (params.maxTotalChapters != null) q.append("maxTotalChapters", String(params.maxTotalChapters));
+    const inc = params.includeStoryIds;
+    if (Array.isArray(inc) && inc.length > 0) {
+        inc.forEach((id) => {
+            if (id != null && String(id).trim() !== "") q.append("includeStoryIds", String(id).trim());
+        });
+    }
 
     const url = q.toString() ? `/stories?${q}` : "/stories";
     const response = await axiosInstance.get(url);

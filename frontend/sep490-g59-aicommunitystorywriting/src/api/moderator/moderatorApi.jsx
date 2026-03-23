@@ -93,17 +93,37 @@ export async function getModeratorChapterVersion(chapterId, versionId) {
 }
 
 /**
- * Moderator nhận duyệt truyện (claim). 1 item chỉ 1 moderator; đã nhận thì người khác không thấy trong queue unclaimed.
+ * Moderator nhận duyệt truyện (claim). Body bắt buộc: reviewDeadlineAt (UTC ISO).
  */
-export async function claimStory(storyId) {
-    await axiosInstance.post(`/moderator/stories/${storyId}/claim`);
+export async function claimStory(storyId, reviewDeadlineAt) {
+    await axiosInstance.post(`/moderator/stories/${storyId}/claim`, { reviewDeadlineAt });
 }
 
 /**
- * Moderator nhận duyệt chương (claim).
+ * Moderator nhận duyệt chương (claim). Body bắt buộc: reviewDeadlineAt (UTC ISO).
  */
-export async function claimChapter(chapterId) {
-    await axiosInstance.post(`/moderator/chapters/${chapterId}/claim`);
+export async function claimChapter(chapterId, reviewDeadlineAt) {
+    await axiosInstance.post(`/moderator/chapters/${chapterId}/claim`, { reviewDeadlineAt });
+}
+
+/**
+ * Thông tin assignment hiện tại của moderator cho mục (deadline, đơn escalation, SLA).
+ * @param {'STORY'|'CHAPTER'} targetType
+ * @param {string} targetId - Guid
+ */
+export async function getReviewAssignmentSelf(targetType, targetId) {
+    const q = new URLSearchParams({ targetType, targetId: String(targetId) });
+    const res = await axiosInstance.get(`/moderator/review-assignment/self?${q}`);
+    return res.data;
+}
+
+/**
+ * Gửi đơn báo cáo lên admin (gia hạn hạn duyệt / hủy nhận duyệt RELEASE_ASSIGNMENT).
+ * @param {{ targetType: string, targetId: string, requestKind: string, reason: string, proposedDeadlineAt?: string|null }} dto
+ */
+export async function submitReviewEscalation(dto) {
+    const res = await axiosInstance.post('/moderator/review-escalations', dto);
+    return res.data;
 }
 
 /**

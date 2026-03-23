@@ -1,8 +1,9 @@
-﻿using System.Linq;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
-using System.Collections.Generic;
 
 namespace DataAccessObjects.DAOs
 {
@@ -184,5 +185,59 @@ namespace DataAccessObjects.DAOs
             var items = ordered.Skip((page - 1) * pageSize).Take(pageSize).ToList();
             return (items, total);
         }
+
+        /// <summary>
+        /// Batch: REJECTED + <paramref name="requestKind"/> gần nhất theo target (moderator là sender).
+        /// </summary>
+        public static Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> GetLatestRejectedByTargetsForSenderAndRequestKind(
+            Guid senderId,
+            string targetType,
+            IReadOnlyCollection<Guid> targetIds,
+            string requestKind)
+        {
+            var result = new Dictionary<Guid, (string? Note, DateTime? ResolvedAt)>();
+            if (targetIds == null || targetIds.Count == 0)
+                return result;
+
+            var set = targetIds as HashSet<Guid> ?? targetIds.ToHashSet();
+            using var context = new StoryPlatformDbContext();
+            var rows = context.review_escalation_requests
+                .AsNoTracking()
+                .Where(r =>
+                    r.sender_id == senderId
+                    && r.target_type == targetType
+                    && r.status == StatusRejected
+                    && r.request_kind == requestKind
+                    && set.Contains(r.target_id))
+                .Select(r => new { r.target_id, r.resolver_note, r.resolved_at, r.created_at })
+                .ToList();
+
+            foreach (var g in rows.GroupBy(r => r.target_id))
+            {
+                var top = g.OrderByDescending(x => x.resolved_at ?? x.created_at).First();
+                var at = top.resolved_at ?? top.created_at;
+                result[g.Key] = (top.resolver_note, at);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Batch: RELEASE_ASSIGNMENT + REJECTED — lý do admin từ chối đơn hủy nhận duyệt.
+        /// </summary>
+        public static Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> GetLatestRejectedReleaseByTargetsForSender(
+            Guid senderId,
+            string targetType,
+            IReadOnlyCollection<Guid> targetIds) =>
+            GetLatestRejectedByTargetsForSenderAndRequestKind(senderId, targetType, targetIds, KindRelease);
+
+        /// <summary>
+        /// Batch: EXTEND_DEADLINE + REJECTED — lý do admin từ chối đơn xin gia hạn.
+        /// </summary>
+        public static Dictionary<Guid, (string? Note, DateTime? ResolvedAt)> GetLatestRejectedExtendByTargetsForSender(
+            Guid senderId,
+            string targetType,
+            IReadOnlyCollection<Guid> targetIds) =>
+            GetLatestRejectedByTargetsForSenderAndRequestKind(senderId, targetType, targetIds, KindExtend);
     }
 }

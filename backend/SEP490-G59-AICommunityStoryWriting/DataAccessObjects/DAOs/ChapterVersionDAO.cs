@@ -50,6 +50,30 @@ namespace DataAccessObjects.DAOs
                 .ToList();
         }
 
+        /// <summary>Batch: mỗi chapter_id → max(created_at) của version PENDING_REVIEW (cho SLA / mốc gửi chỉnh sửa).</summary>
+        public static Dictionary<Guid, DateTime> GetMaxPendingReviewCreatedAtByChapterIds(IReadOnlyList<Guid> chapterIds)
+        {
+            var result = new Dictionary<Guid, DateTime>();
+            if (chapterIds == null || chapterIds.Count == 0)
+                return result;
+
+            var idSet = chapterIds.ToHashSet();
+            using var context = new StoryPlatformDbContext();
+            var rows = context.chapter_versions
+                .AsNoTracking()
+                .Where(v => v.chapter_id != null && v.status == "PENDING_REVIEW" && idSet.Contains(v.chapter_id.Value))
+                .Select(v => new { v.chapter_id, v.created_at })
+                .ToList();
+
+            foreach (var g in rows.Where(r => r.chapter_id.HasValue && r.created_at.HasValue).GroupBy(r => r.chapter_id!.Value))
+            {
+                var max = g.Max(x => x.created_at!.Value);
+                result[g.Key] = max;
+            }
+
+            return result;
+        }
+
         /// <summary>
         /// Lịch sử version đã từng bị từ chối: có rejection_reason (reviewed_at có thể null ở dữ liệu cũ).
         /// Dùng cho màn quản lý xuất bản (tab Từ chối).
@@ -97,6 +121,17 @@ namespace DataAccessObjects.DAOs
                 context.chapter_versions.Remove(v);
                 context.SaveChanges();
             }
+        }
+
+        /// <summary>Xóa mọi version gắn với chapter (trước khi xóa chapter — tránh lỗi FK).</summary>
+        public static void DeleteAllByChapterId(Guid chapterId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var rows = context.chapter_versions.Where(v => v.chapter_id == chapterId).ToList();
+            if (rows.Count == 0)
+                return;
+            context.chapter_versions.RemoveRange(rows);
+            context.SaveChanges();
         }
 
         /// <summary>Lấy số version tiếp theo cho chapter (max version_number + 1).</summary>

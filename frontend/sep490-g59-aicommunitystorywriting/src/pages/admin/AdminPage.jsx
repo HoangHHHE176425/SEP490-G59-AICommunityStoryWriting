@@ -10,6 +10,7 @@ import { AiConfig } from './ai/AiConfig';
 import ViolationManagement from './violation/ViolationManagement';
 import { AdminTransactions } from './transactions/AdminTransactions';
 import { AdminWalletDashboard } from './wallet/AdminWalletDashboard';
+import { ReviewEscalationsManagement } from './moderation/ReviewEscalationsManagement';
 
 export function AdminPage() {
     const { role } = useAuth();
@@ -25,6 +26,8 @@ export function AdminPage() {
                 return <CategoryManagement />;
             case 'publication':
                 return <PublicationManagement />;
+            case 'review-escalations':
+                return <ReviewEscalationsManagement />;
             case 'stories':
                 return (
                     <div className="text-center py-12">

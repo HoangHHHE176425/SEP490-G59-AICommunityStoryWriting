@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Sparkles, Settings, X, Lock, Unlock, Coins } from 'lucide-react';
 import { useToast } from './Toast';
-import { indexRag, suggestNextChapter, coCreate } from '../../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, getAiUsageLimit } from '../../../api/ai/aiApi';
+import { translateCoCreateOutlineLabels } from '../../../utils/coCreateOutlineLabelsVi';
 
 const countWords = (text) => {
     if (!text || !text.trim()) return 0;
@@ -55,22 +56,28 @@ function formatOutlineForDisplay(outline) {
         const parsed = JSON.parse(toParse);
         const scenes = parsed?.scenes ?? parsed?.Scenes;
         if (Array.isArray(scenes) && scenes.length > 0 && !isExampleOutline(scenes)) {
-            return scenes.map((s, i) => {
-                const title = s?.title ?? s?.Title ?? '';
-                const summary = s?.summary ?? s?.Summary ?? '';
-                const characters = s?.characters ?? s?.Characters ?? '';
-                const parts = [];
-                if (title) parts.push(title);
-                if (summary) parts.push(summary);
-                if (Array.isArray(characters) && characters.length) parts.push(`Nhân vật: ${characters.join(', ')}`);
-                else if (typeof characters === 'string' && characters.trim()) parts.push(`Nhân vật: ${characters}`);
-                return parts.length ? `Bối cảnh ${i + 1}:\n${parts.join('\n')}` : `Bối cảnh ${i + 1}`;
-            }).join('\n\n');
+            const joined = scenes
+                .map((s, i) => {
+                    const title = s?.title ?? s?.Title ?? '';
+                    const summary = s?.summary ?? s?.Summary ?? '';
+                    const characters = s?.characters ?? s?.Characters ?? '';
+                    const parts = [];
+                    if (title) parts.push(title);
+                    if (summary) parts.push(summary);
+                    if (Array.isArray(characters) && characters.length) {
+                        parts.push(`Nhân vật: ${characters.join(', ')}`);
+                    } else if (typeof characters === 'string' && characters.trim()) {
+                        parts.push(`Nhân vật: ${characters}`);
+                    }
+                    return parts.length ? `Bối cảnh ${i + 1}:\n${parts.join('\n')}` : `Bối cảnh ${i + 1}`;
+                })
+                .join('\n\n');
+            return translateCoCreateOutlineLabels(joined);
         }
     } catch {
         // ignore
     }
-    return raw.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1');
+    return translateCoCreateOutlineLabels(raw.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1'));
 }
 
 function mergeContentRemoveScenes(content) {
@@ -95,6 +102,10 @@ function contentOnlyForChapter(raw) {
 
 const NO_STORY_MESSAGE = 'Tính năng AI chỉ khả dụng sau khi tạo truyện. Hãy hoàn thành các bước và nhấn Lưu nháp hoặc Xuất bản, sau đó vào truyện → Thêm chương để dùng AI gợi ý.';
 
+/** Hiển thị trong thanh công cụ bước 2 (tạo truyện) khi chưa có truyện đã lưu — đồng bộ UX với màn soạn chương. */
+const AI_DISABLED_BEFORE_STORY_SAVED =
+    'Bạn phải hoàn tất tạo truyện (lưu nháp hoặc gửi duyệt) trước. Sau đó mở truyện → Thêm/Sửa chương để dùng gợi ý AI.';
+
 export function ChapterEditor({ chapter, onChange, story }) {
     const { showToast, ToastContainer } = useToast();
     const [showSettings, setShowSettings] = useState(false);
@@ -111,8 +122,54 @@ export function ChapterEditor({ chapter, onChange, story }) {
     const [coCreateIdea, setCoCreateIdea] = useState('');
     const [coCreateLoading, setCoCreateLoading] = useState(false);
     const [coCreateResult, setCoCreateResult] = useState(null);
+    const [aiUsageLimit, setAiUsageLimit] = useState(null);
 
     const storyId = story?.id ?? story?.Id ?? null;
+    /** Bước 2 tạo truyện mới: chưa có storyId → không gọi API AI; hiển thị nút giống màn chương nhưng khóa. */
+    const aiLocked = !storyId;
+
+    const loadAiUsageLimit = async () => {
+        try {
+            const data = await getAiUsageLimit();
+            setAiUsageLimit({
+                suggestNextChapter: {
+                    limitPerDay: Number(data?.suggestNextChapter?.limitPerDay ?? 0) || 0,
+                    usedInWindow: Number(data?.suggestNextChapter?.usedInWindow ?? 0) || 0,
+                    remaining: Number(data?.suggestNextChapter?.remaining ?? 0) || 0,
+                    resetsAtUtc: data?.suggestNextChapter?.resetsAtUtc ?? null,
+                },
+                coCreate: {
+                    limitPerDay: Number(data?.coCreate?.limitPerDay ?? 0) || 0,
+                    usedInWindow: Number(data?.coCreate?.usedInWindow ?? 0) || 0,
+                    remaining: Number(data?.coCreate?.remaining ?? 0) || 0,
+                    resetsAtUtc: data?.coCreate?.resetsAtUtc ?? null,
+                },
+                coCreateAvailable: Boolean(data?.coCreateAvailable),
+            });
+        } catch {
+            setAiUsageLimit(null);
+        }
+    };
+
+    const decrementCoCreateUsageOptimistic = () => {
+        setAiUsageLimit((prev) => {
+            if (!prev || !prev.coCreate) return prev;
+            const currentRemaining = Number(prev.coCreate.remaining ?? 0) || 0;
+            const currentUsed = Number(prev.coCreate.usedInWindow ?? 0) || 0;
+            return {
+                ...prev,
+                coCreate: {
+                    ...prev.coCreate,
+                    remaining: Math.max(0, currentRemaining - 1),
+                    usedInWindow: currentUsed + 1,
+                },
+            };
+        });
+    };
+
+    useEffect(() => {
+        if (storyId) loadAiUsageLimit();
+    }, [storyId]);
 
     const fontFamilies = [
         { name: 'Arial', value: 'Arial, sans-serif' },
@@ -129,19 +186,20 @@ export function ChapterEditor({ chapter, onChange, story }) {
     ];
 
     const handleAISuggestion = async (type) => {
+        if (aiLocked) {
+            showToast(AI_DISABLED_BEFORE_STORY_SAVED, 'info');
+            return;
+        }
         if (type === 'paragraph') {
             setSuggestions([]);
             setShowSuggestPopup(true);
-            if (!storyId) {
-                setSuggestLoading(false);
-                return;
-            }
             setSuggestLoading(true);
             try {
                 indexRag(storyId);
                 const data = await suggestNextChapter(storyId, null);
                 const list = data?.suggestions ?? data?.Suggestions ?? [];
                 setSuggestions(Array.isArray(list) ? list : []);
+                loadAiUsageLimit();
             } catch (err) {
                 const status = err?.response?.status;
                 const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi gợi ý AI.';
@@ -172,10 +230,15 @@ export function ChapterEditor({ chapter, onChange, story }) {
         }
         setCoCreateLoading(true);
         try {
-            const data = await coCreate(storyId, idea);
+            const chapterOrderIndex = (Number(chapter?.number) || 1) - 1;
+            const data = await coCreate(storyId, idea, { chapterOrderIndex });
+            // Trừ ngay trên UI để người dùng thấy số lượt giảm tức thì.
+            decrementCoCreateUsageOptimistic();
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);
+            // Đồng bộ lại với BE (không chặn UI).
+            loadAiUsageLimit();
         } catch (err) {
             const status = err?.response?.status;
             const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi đồng sáng tác với AI.';
@@ -649,85 +712,91 @@ export function ChapterEditor({ chapter, onChange, story }) {
                         )}
                     </div>
 
-                    {/* Toolbar - giống màn tạo chương: 2 nút AI + Tùy chỉnh hiển thị */}
-                    <div style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '0.75rem 1rem',
-                        backgroundColor: '#f9fafb',
-                        borderRadius: '8px',
-                        border: '1px solid #e5e7eb'
-                    }}>
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                            <button
-                                type="button"
-                                onClick={() => handleAISuggestion('paragraph')}
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    padding: '0.5rem 1rem',
-                                    backgroundColor: 'rgba(19, 236, 91, 0.1)',
-                                    color: '#13ec5b',
-                                    fontSize: '0.875rem',
-                                    fontWeight: 700,
-                                    borderRadius: '9999px',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s'
-                                }}
-                                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(19, 236, 91, 0.2)'; }}
-                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(19, 236, 91, 0.1)'; }}
-                            >
-                                <Sparkles style={{ width: '14px', height: '14px' }} />
-                                AI gợi ý đoạn văn
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => handleAISuggestion('chapter')}
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    padding: '0.5rem 1rem',
-                                    backgroundColor: 'rgba(19, 236, 91, 0.1)',
-                                    color: '#13ec5b',
-                                    fontSize: '0.875rem',
-                                    fontWeight: 700,
-                                    borderRadius: '9999px',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.2s'
-                                }}
-                                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(19, 236, 91, 0.2)'; }}
-                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(19, 236, 91, 0.1)'; }}
-                            >
-                                <Sparkles style={{ width: '14px', height: '14px' }} />
-                                AI gợi ý chương
-                            </button>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={() => setShowSettings(!showSettings)}
+                    {/* Toolbar — giống ChapterEditorPage: 2 nút AI + Tùy chỉnh; khi chưa có truyện đã lưu: nút khóa + thông báo trong khung */}
+                    <div
+                        className="rounded-lg border border-slate-200 bg-slate-50 p-3 sm:p-4"
+                        style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: aiLocked ? '0.75rem' : '0',
+                        }}
+                    >
+                        <div
                             style={{
                                 display: 'flex',
+                                justifyContent: 'space-between',
                                 alignItems: 'center',
+                                flexWrap: 'wrap',
                                 gap: '0.5rem',
-                                padding: '0.5rem 1rem',
-                                backgroundColor: showSettings ? '#13ec5b' : '#f1f5f9',
-                                color: showSettings ? '#ffffff' : '#334155',
-                                fontSize: '0.875rem',
-                                fontWeight: 700,
-                                borderRadius: '9999px',
-                                border: 'none',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s'
                             }}
                         >
-                            <Settings style={{ width: '14px', height: '14px' }} />
-                            Tùy chỉnh hiển thị
-                        </button>
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                {aiLocked ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            disabled
+                                            title={AI_DISABLED_BEFORE_STORY_SAVED}
+                                            className="flex cursor-not-allowed items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary/50 opacity-70"
+                                        >
+                                            <Sparkles style={{ width: '14px', height: '14px' }} />
+                                            AI gợi ý ý tưởng
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled
+                                            title={AI_DISABLED_BEFORE_STORY_SAVED}
+                                            className="flex cursor-not-allowed items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary/50 opacity-70"
+                                        >
+                                            <Sparkles style={{ width: '14px', height: '14px' }} />
+                                            AI gợi ý chương
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAISuggestion('paragraph')}
+                                            className="flex items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary transition-all hover:bg-primary/20"
+                                        >
+                                            <Sparkles style={{ width: '14px', height: '14px' }} />
+                                            AI gợi ý ý tưởng
+                                            {aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleAISuggestion('chapter')}
+                                            className="flex items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary transition-all hover:bg-primary/20"
+                                        >
+                                            <Sparkles style={{ width: '14px', height: '14px' }} />
+                                            AI gợi ý chương
+                                            {aiUsageLimit
+                                                ? (aiUsageLimit.coCreateAvailable
+                                                    ? ` (${aiUsageLimit.coCreate?.remaining ?? 0}/${aiUsageLimit.coCreate?.limitPerDay ?? 0})`
+                                                    : ' (—/—)')
+                                                : ''}
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setShowSettings(!showSettings)}
+                                className={`flex items-center gap-2 rounded-full border-0 px-4 py-2 text-sm font-bold transition-all ${showSettings ? 'bg-primary text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                    }`}
+                            >
+                                <Settings style={{ width: '14px', height: '14px' }} />
+                                Tùy chỉnh hiển thị
+                            </button>
+                        </div>
+                        {aiLocked && (
+                            <p
+                                className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-950"
+                                role="status"
+                            >
+                                {AI_DISABLED_BEFORE_STORY_SAVED}
+                            </p>
+                        )}
                     </div>
 
                     {/* Settings Panel */}
