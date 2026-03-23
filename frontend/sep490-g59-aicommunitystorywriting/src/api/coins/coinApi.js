@@ -36,6 +36,36 @@ export async function getMyCoinOrders({ take = 20 } = {}) {
   }
 }
 
+/**
+ * Lịch sử mở khóa chương trả phí của user (trừ tiền).
+ * @param {{ page?: number, pageSize?: number }} params
+ */
+export async function getMyChapterUnlockHistory({ page = 1, pageSize = 20 } = {}) {
+  try {
+    const res = await axiosInstance.get("/coins/wallet/unlock-history", {
+      params: { page, pageSize },
+    });
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, message: getErrorMessage(err) };
+  }
+}
+
+/**
+ * Lịch sử donate của user (sender_id = user, trừ tiền).
+ * @param {{ page?: number, pageSize?: number }} params
+ */
+export async function getMyDonateHistory({ page = 1, pageSize = 20 } = {}) {
+  try {
+    const res = await axiosInstance.get("/coins/wallet/donate-history", {
+      params: { page, pageSize },
+    });
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, message: getErrorMessage(err) };
+  }
+}
+
 export async function createPayOSPayment({ packageId, returnUrl, cancelUrl }) {
   try {
     const res = await axiosInstance.post("/coins/payos/create", {

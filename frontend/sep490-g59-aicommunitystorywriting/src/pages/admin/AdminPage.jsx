@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { AdminDashboard } from '../../components/admin/AdminDashboard';
@@ -16,21 +16,46 @@ import { ModeratorLogsManagement } from './moderation/ModeratorLogsManagement';
 export function AdminPage() {
     const { role } = useAuth();
     const roleUpper = (role ?? '').toString().toUpperCase();
-    const defaultPage = roleUpper === 'MODERATOR'
-        ? 'publication'
-        : roleUpper === 'COMPLIANCE'
-            ? 'violations'
-            : 'categories';
-    const [activePage, setActivePage] = useState(defaultPage);
+    const allowedPages = useMemo(() => {
+        if (roleUpper === 'MODERATOR') return new Set(['dashboard', 'publication']);
+        if (roleUpper === 'COMPLIANCE') return new Set(['violations']);
+        return null; // ADMIN: full
+    }, [roleUpper]);
+
+    const getDefaultPageByRole = () => {
+        if (roleUpper === 'MODERATOR') return 'dashboard';
+        if (roleUpper === 'COMPLIANCE') return 'violations';
+        return 'dashboard';
+    };
+
+    const [activePage, setActivePage] = useState(getDefaultPageByRole());
+    const [publicationInitialStatus, setPublicationInitialStatus] = useState('pending'); // pending | approved | rejected
+
+    // Khi role thay đổi hoặc reload, luôn kéo về màn mặc định của role đó.
+    useEffect(() => {
+        setActivePage((prev) => {
+            const nextDefault = getDefaultPageByRole();
+            if (!allowedPages) return prev || nextDefault;
+            return allowedPages.has(prev) ? prev : nextDefault;
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [roleUpper]);
 
     const renderPage = () => {
         switch (activePage) {
             case 'dashboard':
-                return <AdminDashboard />;
+                return (
+                    <AdminDashboard
+                        onNavigatePublicationStatus={(status) => {
+                            setPublicationInitialStatus(status);
+                            setActivePage('publication');
+                        }}
+                    />
+                );
             case 'categories':
                 return <CategoryManagement />;
             case 'publication':
-                return <PublicationManagement />;
+                return <PublicationManagement initialFilterStatus={publicationInitialStatus} />;
             case 'review-escalations':
                 return <ReviewEscalationsManagement />;
             case 'moderator-logs':
@@ -74,8 +99,17 @@ export function AdminPage() {
         }
     };
 
+    const handleNavigate = (pageId) => {
+        if (allowedPages && !allowedPages.has(pageId)) {
+            setActivePage(getDefaultPageByRole());
+            return;
+        }
+        setActivePage(pageId);
+        if (pageId === 'publication') setPublicationInitialStatus('pending');
+    };
+
     return (
-        <AdminLayout activePage={activePage} onNavigate={setActivePage}>
+        <AdminLayout activePage={activePage} onNavigate={handleNavigate}>
             {renderPage()}
         </AdminLayout>
     );

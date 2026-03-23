@@ -45,27 +45,30 @@ const ALL_MENU_ITEMS = [
     { id: 'ai-config', label: 'Cấu hình AI', icon: Brain },
 ];
 
-/** Menu giới hạn theo vai trò. */
-const MODERATOR_MENU_IDS = new Set(['dashboard', 'publication']);
-const COMPLIANCE_MENU_IDS = new Set(['dashboard', 'publication', 'violations']);
+/** Menu theo role để tách rõ màn Admin / Moderator / Compliance. */
+const ROLE_MENU_IDS = {
+    ADMIN: null, // null = full menu
+    MODERATOR: new Set(['dashboard', 'publication']),
+    COMPLIANCE: new Set(['violations']),
+};
 
 export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) {
     const navigate = useNavigate();
     const { user, logout, role } = useAuth();
     const roleUpper = (role ?? user?.role ?? user?.Role ?? '').toString().toUpperCase();
-    const menuItems = roleUpper === 'MODERATOR'
-        ? ALL_MENU_ITEMS.filter((item) => MODERATOR_MENU_IDS.has(item.id))
-        : roleUpper === 'COMPLIANCE'
-            ? ALL_MENU_ITEMS.filter((item) => COMPLIANCE_MENU_IDS.has(item.id))
-            : ALL_MENU_ITEMS;
+    const roleMenuIds = ROLE_MENU_IDS[roleUpper] ?? ROLE_MENU_IDS.ADMIN;
+    const hasLimitedMenu = !!roleMenuIds;
+    const menuItems = roleMenuIds ? ALL_MENU_ITEMS.filter((item) => roleMenuIds.has(item.id)) : ALL_MENU_ITEMS;
 
     const displayName = user?.displayName ?? user?.DisplayName ?? user?.email ?? 'Admin';
     const roleLabel = ROLE_LABELS[roleUpper] ?? 'Quản trị';
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
     // Số dư ví hệ thống (API: GET /api/admin/wallet/balance)
+    // MODERATOR / COMPLIANCE: không xem ví hệ thống -> không gọi API.
     const [systemWalletBalance, setSystemWalletBalance] = useState(null);
     useEffect(() => {
+        if (hasLimitedMenu) return;
         let cancelled = false;
         (async () => {
             try {
@@ -79,15 +82,16 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [hasLimitedMenu]);
     useEffect(() => {
+        if (hasLimitedMenu) return;
         const handler = (evt) => {
             const next = evt?.detail?.balance;
             if (typeof next === 'number' && Number.isFinite(next)) setSystemWalletBalance(next);
         };
         window.addEventListener('system-wallet:balance', handler);
         return () => window.removeEventListener('system-wallet:balance', handler);
-    }, []);
+    }, [hasLimitedMenu]);
 
     const handleLogout = async () => {
         try {
@@ -150,40 +154,43 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                             <Menu style={{ width: '20px', height: '20px', color: '#1e293b' }} />
                         </button>
                         <h1 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1e293b', margin: 0 }}>
-                            Admin <span style={{ color: '#13ec5b' }}>Panel</span>
+                            {roleUpper === 'MODERATOR' ? 'Moderator' : roleUpper === 'COMPLIANCE' ? 'Compliance' : 'Admin'}{' '}
+                            <span style={{ color: '#13ec5b' }}>Panel</span>
                         </h1>
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        {/* Icon ví hệ thống + số dư */}
-                        <button
-                            onClick={() => onNavigate('wallet-dashboard')}
-                            title="Ví hệ thống"
-                            style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                padding: '0.5rem 0.75rem',
-                                border: '1px solid #e2e8f0',
-                                borderRadius: '0.5rem',
-                                backgroundColor: '#f0fdf4',
-                                cursor: 'pointer',
-                                transition: 'background-color 0.2s'
-                            }}
-                            onMouseEnter={(e) => {
-                                e.currentTarget.style.backgroundColor = '#dcfce7';
-                            }}
-                            onMouseLeave={(e) => {
-                                e.currentTarget.style.backgroundColor = '#f0fdf4';
-                            }}
-                        >
-                            <Wallet style={{ width: '18px', height: '18px', color: '#16a34a' }} />
-                            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#166534' }}>
-                                {systemWalletBalance != null
-                                    ? `${Number(systemWalletBalance).toLocaleString('vi-VN')} Coin`
-                                    : '...'}
-                            </span>
-                        </button>
+                        {/* Icon ví hệ thống + số dư (không hiển thị cho MODERATOR/COMPLIANCE) */}
+                        {!hasLimitedMenu && (
+                            <button
+                                onClick={() => onNavigate('wallet-dashboard')}
+                                title="Ví hệ thống"
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    padding: '0.5rem 0.75rem',
+                                    border: '1px solid #e2e8f0',
+                                    borderRadius: '0.5rem',
+                                    backgroundColor: '#f0fdf4',
+                                    cursor: 'pointer',
+                                    transition: 'background-color 0.2s'
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#dcfce7';
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.backgroundColor = '#f0fdf4';
+                                }}
+                            >
+                                <Wallet style={{ width: '18px', height: '18px', color: '#16a34a' }} />
+                                <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#166534' }}>
+                                    {systemWalletBalance != null
+                                        ? `${Number(systemWalletBalance).toLocaleString('vi-VN')} Coin`
+                                        : '...'}
+                                </span>
+                            </button>
+                        )}
 
                         <button
                             style={{

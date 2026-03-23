@@ -33,3 +33,7 @@ backend/SEP490-G59-AICommunityStoryWriting/DataAccessObjects/Context/StoryPlatfo
 
 # Docs (không đẩy lên GitHub)
 docs/
+
+# AI vector index artifacts (FAISS)
+backend/SEP490-G59-AICommunityStoryWriting/AIStory.API/Data/faiss/
+**/*.faiss.bin
