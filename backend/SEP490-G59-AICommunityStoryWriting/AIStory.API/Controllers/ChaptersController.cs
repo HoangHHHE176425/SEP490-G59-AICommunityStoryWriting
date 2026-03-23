@@ -19,6 +19,9 @@ namespace AIStory.API.Controllers
     [Route("api/chapters")]
     public class ChaptersController : ControllerBase
     {
+        /// <summary>Mã lỗi 409 khi xóa chương DRAFT còn version — khớp <c>ChapterService</c>.</summary>
+        private const string ChapterDeleteVersionsConfirmCode = "CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED";
+
         private readonly IChapterService _chapterService;
         private readonly IChapterVersionService _chapterVersionService;
         private readonly IServiceScopeFactory _scopeFactory;
@@ -636,18 +639,29 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Xóa chapter - Chỉ AUTHOR (chỉ được xóa chapter của chính mình)</summary>
+        /// <summary>Xóa chapter (chỉ DRAFT). Nếu có phiên bản (chapter_versions), lần đầu trả 409 với code CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED; gọi lại với deleteIncludingVersions=true sau khi user xác nhận. Nội dung ai_generated_content của chương cũng bị xóa khi xóa thành công.</summary>
         [HttpDelete("{id:guid}")]
         [Authorize(Roles = "AUTHOR")]
-        public IActionResult Delete(Guid id)
+        public IActionResult Delete(Guid id, [FromQuery] bool deleteIncludingVersions = false)
         {
             try
             {
-                var deleted = _chapterService.Delete(id);
+                var deleted = _chapterService.Delete(id, deleteIncludingVersions);
                 return deleted ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
             catch (InvalidOperationException ex)
             {
+                if (ex.Data["ErrorCode"]?.ToString() == ChapterDeleteVersionsConfirmCode
+                    && ex.Data["VersionCount"] != null)
+                {
+                    var vc = Convert.ToInt32(ex.Data["VersionCount"]);
+                    return Conflict(new
+                    {
+                        code = ChapterDeleteVersionsConfirmCode,
+                        versionCount = vc,
+                        message = ex.Message
+                    });
+                }
                 return BadRequest(new { message = ex.Message });
             }
             catch (Exception ex)

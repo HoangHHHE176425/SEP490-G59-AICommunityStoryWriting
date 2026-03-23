@@ -47,14 +47,18 @@ class ApiService {
                 }
 
                 let errorMessage = response.statusText;
+                let errorBody = null;
                 try {
-                    const errorBody = await response.json();
+                    errorBody = await response.json();
                     // Prefer detailed error message if backend provides `error`.
                     errorMessage = errorBody.error || errorBody.message || errorMessage;
                 } catch {
                     // If response body is not JSON, use statusText
                 }
-                throw new Error(errorMessage || `HTTP error! status: ${response.status}`);
+                const err = new Error(errorMessage || `HTTP error! status: ${response.status}`);
+                err.status = response.status;
+                err.body = errorBody;
+                throw err;
             }
 
             // Try to parse JSON, but handle empty responses gracefully
@@ -426,8 +430,13 @@ class ApiService {
         });
     }
 
-    static async deleteChapter(id) {
-        return this.request(`/chapters/${id}`, {
+    /**
+     * Xóa chapter (DRAFT). Lần đầu gọi với deleteIncludingVersions=false.
+     * Nếu API trả 409 (code CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED), hỏi user rồi gọi lại với true.
+     */
+    static async deleteChapter(id, deleteIncludingVersions = false) {
+        const q = deleteIncludingVersions ? '?deleteIncludingVersions=true' : '';
+        return this.request(`/chapters/${id}${q}`, {
             method: 'DELETE'
         });
     }
