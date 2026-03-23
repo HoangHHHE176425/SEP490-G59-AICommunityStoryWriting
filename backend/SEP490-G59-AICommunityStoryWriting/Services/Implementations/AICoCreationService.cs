@@ -269,7 +269,8 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             request.StoryId,
             authorUserId,
             hasAuthorIdea ? rawIdea! : "[AUTO] Tiếp tục theo mạch truyện (không có gợi ý tác giả)",
-            draft);
+            draft,
+            request.ChapterOrderIndex);
         return new CoCreationResponse
         {
             Outline = outlineForPrompt,
@@ -288,13 +289,23 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
     private sealed record ReviewViolation(string Type, string Severity, string? Quote, string? Fix);
     private sealed record ReviewResult(bool Approved, string? Feedback, List<ReviewViolation> Violations);
 
-    /// <summary>Chỉ lưu bản <see cref="ai_generated_content"/> (không tạo/cập nhật <see cref="chapters"/>). <see cref="ai_generated_content.chapter_index"/> = slot chương tiếp theo (như <c>order_index</c> khi tạo chương).</summary>
-    private (Guid? Id, int? ChapterIndex) SaveAiGeneratedContentOnly(Guid storyId, Guid authorUserId, string authorIdea, string finalContent)
+    /// <summary>Chỉ lưu bản <see cref="ai_generated_content"/> (không tạo/cập nhật <see cref="chapters"/>).
+    /// <see cref="ai_generated_content.chapter_index"/> = <paramref name="targetOrderIndex"/> nếu hợp lệ; ngược lại = slot chương tiếp theo.</summary>
+    private (Guid? Id, int? ChapterIndex) SaveAiGeneratedContentOnly(
+        Guid storyId,
+        Guid authorUserId,
+        string authorIdea,
+        string finalContent,
+        int? targetOrderIndex = null)
     {
         if (string.IsNullOrWhiteSpace(finalContent)) return (null, null);
         var chaptersList = _chapterRepository.GetByStoryId(storyId).ToList();
-        // Khớp chapters.order_index từ FE (chương 1 → order_index 0)
-        var nextChapterIndex = chaptersList.Count == 0 ? 0 : chaptersList.Max(c => c.order_index) + 1;
+        // Khớp chapters.order_index từ FE (chương 1 → order_index 0). Ưu tiên index chương đang soạn để compare-chapter-preview khớp khi copy–paste.
+        int nextChapterIndex;
+        if (targetOrderIndex is >= 0)
+            nextChapterIndex = targetOrderIndex.Value;
+        else
+            nextChapterIndex = chaptersList.Count == 0 ? 0 : chaptersList.Max(c => c.order_index) + 1;
         var now = DateTime.UtcNow;
         var aiRecord = new ai_generated_content
         {

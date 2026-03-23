@@ -766,7 +766,15 @@ export function AuthorStoryManagement({ onBack }) {
             );
             return { chapterId };
         } catch (error) {
-            const errorMessage = error?.response?.data?.message || error?.message || 'Không thể lưu chương';
+            const data = error?.response?.data;
+            const errorMessage =
+                (typeof data === 'string' && data.trim() ? data.trim() : null) ??
+                data?.message ??
+                data?.Message ??
+                data?.detail ??
+                data?.title ??
+                error?.message ??
+                'Không thể lưu chương';
             if (error?.message !== 'NO_STORY' && error?.message !== 'NO_CHAPTER_ID') {
                 showToast(errorMessage, 'error');
             }
@@ -943,6 +951,8 @@ export function AuthorStoryManagement({ onBack }) {
     if (activeView === 'addChapter' || activeView === 'editChapter' || activeView === 'addChapterVersion') {
         return (
             <>
+                {/* Cùng hook useToast với handleSaveChapter — bắt buộc render để toast lỗi (vd. chương trước chưa xuất bản) hiển thị khi đang sửa chương */}
+                <ToastContainer />
                 <ChapterEditorPage
                     story={currentStory}
                     chapter={activeView === 'editChapter' ? currentChapter : null}

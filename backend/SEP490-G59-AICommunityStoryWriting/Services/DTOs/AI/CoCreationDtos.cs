@@ -10,6 +10,13 @@ public class CoCreationRequest
     /// Ý tưởng của tác giả (tùy chọn). Nếu để trống/null, hệ thống sẽ tự viết chương tiếp theo dựa trên mạch truyện hiện có.
     /// </summary>
     public string? AuthorIdea { get; set; }
+
+    /// <summary>
+    /// Thứ tự chương đang soạn (0-based, trùng <c>chapters.order_index</c> và <c>compare-chapter-preview</c>).
+    /// Khi có giá trị, bản <c>ai_generated_content</c> gắn đúng index này để so % khớp nội dung dán vào ô chương hiện tại (kể cả không bấm «áp dụng»).
+    /// Null = giữ hành vi cũ: gán slot chương tiếp theo (max order_index + 1).
+    /// </summary>
+    public int? ChapterOrderIndex { get; set; }
 }
 
 /// <summary>Response đồng sáng tác: dàn ý + nội dung cuối + trạng thái kiểm duyệt. Có thể kèm feedback khi ý tưởng tác giả mâu thuẫn với truyện.</summary>

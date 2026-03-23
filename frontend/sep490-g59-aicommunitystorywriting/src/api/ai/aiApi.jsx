@@ -88,19 +88,25 @@ function parseCoCreateSseResponse(rawText) {
  * Đồng sáng tác: ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → Guardrail → Agent 3 (kiểm duyệt). Có rate limit.
  * BE trả về SSE (không phải JSON thuần) — axios phải đọc text rồi parse sự kiện `result`.
  * @param {string} storyId - ID truyện (Guid)
- * @param {string} authorIdea - Ý tưởng của tác giả (1–2 câu hoặc đoạn ngắn)
+ * @param {string|null|undefined} authorIdea - Ý tưởng của tác giả (có thể null khi BE cho phép auto)
+ * @param {{ chapterOrderIndex?: number }} [options] - order_index chương đang soạn (0-based), để lưu ai_generated_content đúng slot và so % khi copy–paste
  * @returns {Promise<{ ideaContradictionFeedback?: string, outline: string, finalContent: string, approved: boolean, revisionCount: number, reviewFeedback?: string }>}
  */
-export async function coCreate(storyId, authorIdea) {
+export async function coCreate(storyId, authorIdea, options = {}) {
     if (!storyId) throw new Error("StoryId là bắt buộc.");
     const trimmed = (authorIdea || "").trim();
+    const rawIdx = options?.chapterOrderIndex ?? options?.ChapterOrderIndex;
+    const payload = {
+        storyId,
+        authorIdea: trimmed || null,
+        saveAsDraft: false,
+    };
+    if (rawIdx !== undefined && rawIdx !== null && Number.isFinite(Number(rawIdx))) {
+        payload.chapterOrderIndex = Math.max(0, Math.floor(Number(rawIdx)));
+    }
     const response = await axiosInstance.post(
         "ai/co-create",
-        {
-            storyId,
-            authorIdea: trimmed || null,
-            saveAsDraft: false,
-        },
+        payload,
         {
             responseType: "text",
             validateStatus: (status) => status < 600,

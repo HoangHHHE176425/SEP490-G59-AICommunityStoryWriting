@@ -147,6 +147,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         error: null,
         pendingSaveStatus: null,
     });
+
     const [chapterData, setChapterData] = useState(() => {
         if (editingVersion) {
             return {
@@ -493,7 +494,8 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         const idea = useCoCreatePrompt ? (coCreateIdea || '').trim() : '';
         setCoCreateLoading(true);
         try {
-            const data = await coCreate(storyId, idea || null);
+            const chapterOrderIndex = (Number(chapterData.number) || 1) - 1;
+            const data = await coCreate(storyId, idea || null, { chapterOrderIndex });
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);
@@ -745,17 +747,10 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             return;
         }
 
-        // Chương thường: preview % AI → popup → user xác nhận mới lưu / xuất bản + ghi ai_similarity_percent
+        // Chương thường: luôn gọi preview — BE tra `ai_generated_content` theo story + thứ tự chương (kể cả khi user chỉ copy–paste bản AI, không bấm «đồng ý dùng» trong UI). Không có bản ghi → lưu thẳng, không popup.
         setIsSaving(true);
         try {
             const orderIndex = (Number(chapterData.number) || 1) - 1;
-            setAiCompareModal({
-                open: true,
-                loading: true,
-                data: null,
-                error: null,
-                pendingSaveStatus: saveStatus,
-            });
             const cmp = await compareChapterPreview({
                 storyId,
                 orderIndex,
@@ -764,6 +759,19 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             const hasBoth = Boolean(cmp?.hasBothContents ?? cmp?.HasBothContents);
             const score = cmp?.similarityScore ?? cmp?.SimilarityScore;
             const msg = (cmp?.message ?? cmp?.Message ?? '').toString();
+            // Khớp message từ ChapterCompareService khi không có ai_records cho chapter_index
+            const noAiBaselineToCompare =
+                !hasBoth && /Chưa có bản nội dung AI/i.test(msg);
+            if (noAiBaselineToCompare) {
+                const payload = {
+                    ...chapterData,
+                    status: saveStatus,
+                    updatedAt: new Date().toLocaleString('vi-VN'),
+                };
+                await onSave(payload);
+                onNavigateAfterSave?.();
+                return;
+            }
             setAiCompareModal({
                 open: true,
                 loading: false,

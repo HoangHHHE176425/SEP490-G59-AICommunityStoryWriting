@@ -14,6 +14,8 @@ namespace Services.DTOs.Chapters
         public int? WordCount { get; set; }
         /// <summary>Phần trăm giống với bản AI (0–100) nếu đã lưu trên chương.</summary>
         public decimal? AiSimilarityPercent { get; set; }
+        /// <summary>Tỷ lệ đóng góp AI (0–100) trên chương nếu có.</summary>
+        public decimal? AiContributionRatio { get; set; }
         public DateTime? PublishedAt { get; set; }
         public DateTime? CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
@@ -32,6 +34,9 @@ namespace Services.DTOs.Chapters
         public string? RejectionReason { get; set; }
         /// <summary>Thời điểm moderator từ chối.</summary>
         public DateTime? RejectedAt { get; set; }
+
+        /// <summary>Tất cả lần từ chối chương gốc (moderation_logs), cũ → mới — hiển thị cả sau khi tác giả gửi duyệt lại.</summary>
+        public List<ChapterRejectionHistoryItemDto>? ModeratorRejectionHistory { get; set; }
 
         /// <summary>Tiêu đề version chờ duyệt (khi có); dùng cho sidebar moderator hiển thị ngay không cần gọi review-content.</summary>
         public string? PendingVersionTitle { get; set; }
