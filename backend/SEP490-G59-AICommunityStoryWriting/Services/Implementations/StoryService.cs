@@ -221,30 +221,6 @@ namespace Services.Implementations
             };
         }
 
-        /// <inheritdoc />
-        public CommunityStatsDto GetPublicCommunityStats()
-        {
-            // Cùng tập truyện với GetAll khi guest: PUBLISHED + không compliance_hidden.
-            var q = _storyRepository.GetAll()
-                .Where(s => !s.compliance_hidden)
-                .Where(s => s.status != null && s.status.ToUpper() == "PUBLISHED");
-
-            var publishedStoriesCount = q.Count();
-            var totalViews = q.Sum(s => (long)(s.total_views ?? 0L));
-            var authorsCount = q
-                .Where(s => s.author_id != null && s.author_id != Guid.Empty)
-                .Select(s => s.author_id!.Value)
-                .Distinct()
-                .Count();
-
-            return new CommunityStatsDto
-            {
-                PublishedStoriesCount = publishedStoriesCount,
-                AuthorsCount = authorsCount,
-                TotalViews = totalViews,
-            };
-        }
-
         public StoryResponseDto? GetById(Guid id, Guid? userId = null)
         {
             var story = _storyRepository.GetById(id);
