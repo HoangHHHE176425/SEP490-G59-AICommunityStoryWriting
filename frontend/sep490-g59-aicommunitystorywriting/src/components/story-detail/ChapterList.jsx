@@ -26,7 +26,11 @@ export function ChapterList({ chapters, storyId, lastReadChapterId }) {
                         ? `/chapter?storyId=${encodeURIComponent(storyId)}&chapterId=${encodeURIComponent(chapter.chapterId)}`
                         : '#';
                     const isLocked = chapter.isLocked === true;
-                    const isLink = !!to && to !== '#' && !isLocked;
+                    // Chỉ chặn bằng modal khi FE chắc chắn trạng thái khóa từ API.
+                    // Không hiển thị modal thanh toán ở danh sách chương.
+                    // ChapterReader sẽ tự quyết định hiển thị nội dung hay phần thanh toán theo trạng thái mở khóa thật từ API.
+                    const shouldBlockByModal = false;
+                    const isLink = !!to && to !== '#';
                     const Wrapper = isLink ? Link : 'div';
                     const wrapperProps = isLink ? { to } : {};
                     const isLastRead = !!lastReadChapterId && chapter.chapterId === lastReadChapterId;
@@ -34,7 +38,7 @@ export function ChapterList({ chapters, storyId, lastReadChapterId }) {
                         <Wrapper
                             key={chapter.id}
                             {...wrapperProps}
-                            onClick={isLocked ? (e) => handleLockedClick(e, chapter) : undefined}
+                            onClick={shouldBlockByModal ? (e) => handleLockedClick(e, chapter) : undefined}
                             className={`flex items-center justify-between p-4 rounded-lg transition-colors group cursor-pointer ${isLastRead ? 'bg-primary/10 dark:bg-primary/20 border border-primary/30 dark:border-primary/40' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                         >
                             <div className="flex items-center gap-3 flex-1 min-w-0">

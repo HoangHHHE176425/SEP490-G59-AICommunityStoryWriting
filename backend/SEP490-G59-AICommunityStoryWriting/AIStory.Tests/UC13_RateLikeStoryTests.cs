@@ -120,7 +120,7 @@ public class UC13_RateLikeStoryTests
             return (avg, count);
         }
         public (string? reason, DateTime? rejectedAt) GetLatestRejectionForStory(Guid storyId) => (null, null);
-        public CommunityStatsDto GetPublicCommunityStats() => new();
+        public CommunityStatsDto GetPublicCommunityStats() => throw new NotImplementedException();
     }
 
     private sealed class FakeContentGuardrailService : IContentGuardrailService

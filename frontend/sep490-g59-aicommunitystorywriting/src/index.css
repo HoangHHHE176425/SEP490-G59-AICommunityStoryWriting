@@ -8,6 +8,8 @@
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
     --primary: 142 86% 50%;
+    /* Chữ / icon trên nền primary (nút, badge đặc) */
+    --primary-foreground: 0 0% 100%;
     --radius: 0.5rem;
 
     --background-light: #f6f8f6;

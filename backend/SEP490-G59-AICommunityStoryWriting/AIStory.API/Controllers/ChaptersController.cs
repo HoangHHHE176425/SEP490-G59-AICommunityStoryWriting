@@ -72,6 +72,34 @@ namespace AIStory.API.Controllers
             }
         }
 
+        /// <summary>Gửi thông báo + SignalR cho tác giả khi độc giả mở khóa chương trả phí (lỗi push không làm hỏng giao dịch unlock).</summary>
+        private async Task PushAuthorChapterUnlockNotificationAsync(
+            Guid authorId,
+            Guid buyerUserId,
+            ChapterResponseDto chapterDto,
+            StoryResponseDto storyDto,
+            int coinPrice,
+            Guid chapterId)
+        {
+            try
+            {
+                var buyerName = NotificationDAO.GetUserDisplayName(buyerUserId);
+                var notif = NotificationDAO.NotifyAuthorChapterUnlocked(
+                    authorId,
+                    buyerName,
+                    storyDto.Title ?? "Truyện",
+                    chapterDto.Title ?? "Chương",
+                    coinPrice,
+                    chapterDto.StoryId ?? Guid.Empty,
+                    chapterId);
+                await _notificationHubNotifier.NotifyUserAsync(authorId, MapNotificationToDto(notif));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Push CHAPTER_UNLOCK notification failed. AuthorId={AuthorId} ChapterId={ChapterId}", authorId, chapterId);
+            }
+        }
+
         private Guid? GetCurrentUserId()
         {
             var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
@@ -359,6 +387,8 @@ namespace AIStory.API.Controllers
 
                     await db.SaveChangesAsync(cancellationToken);
                     await tx.CommitAsync(cancellationToken);
+
+                    await PushAuthorChapterUnlockNotificationAsync(authorId, userId.Value, chapter, story, coinPrice, id);
 
                     return Ok(new { unlocked = true });
                 }

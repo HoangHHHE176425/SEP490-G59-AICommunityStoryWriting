@@ -206,7 +206,7 @@ public class UC12_PostCommentReplyTests
         public void RecordReadChapter(Guid storyId, Guid chapterId, Guid userId, string? ipAddress = null, string? deviceInfo = null) { }
         public (decimal avgRating, int ratingCount) RateStory(Guid storyId, Guid userId, int starValue, string? reviewText) => throw new NotImplementedException();
         public (string? reason, DateTime? rejectedAt) GetLatestRejectionForStory(Guid storyId) => (null, null);
-        public CommunityStatsDto GetPublicCommunityStats() => new();
+        public CommunityStatsDto GetPublicCommunityStats() => throw new NotImplementedException();
     }
 
     private sealed class FakeChapterService : IChapterService
