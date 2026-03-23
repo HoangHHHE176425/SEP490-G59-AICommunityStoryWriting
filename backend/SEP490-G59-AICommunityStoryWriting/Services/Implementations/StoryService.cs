@@ -558,6 +558,28 @@ namespace Services.Implementations
             return ModerationLogDAO.GetLatestRejection("STORY", storyId);
         }
 
+        public CommunityStatsDto GetPublicCommunityStats()
+        {
+            // Match guest-visible story list: only published and not compliance hidden.
+            var publicStories = _storyRepository.GetAll()
+                .Where(s => s.status == "PUBLISHED" && !s.compliance_hidden);
+
+            var publishedStoriesCount = publicStories.Count();
+            var authorsCount = publicStories
+                .Where(s => s.author_id.HasValue)
+                .Select(s => s.author_id!.Value)
+                .Distinct()
+                .Count();
+            var totalViews = publicStories.Sum(s => (long?)(s.total_views ?? 0)) ?? 0L;
+
+            return new CommunityStatsDto
+            {
+                PublishedStoriesCount = publishedStoriesCount,
+                AuthorsCount = authorsCount,
+                TotalViews = totalViews
+            };
+        }
+
         private string GenerateSlug(string title)
         {
             return title
