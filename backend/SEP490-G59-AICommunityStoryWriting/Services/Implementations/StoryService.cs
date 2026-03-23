@@ -3,6 +3,7 @@ using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Repositories;
+using Services.DTOs.Community;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 
@@ -679,6 +680,20 @@ namespace Services.Implementations
                 CommentsDisabled = story.comments_disabled,
                 ComplianceHidden = story.compliance_hidden,
                 ComplianceFlagged = story.compliance_flagged
+            };
+        }
+
+        /// <inheritdoc />
+        public CommunityStatsDto GetPublicCommunityStats()
+        {
+            var q = _storyRepository.GetAll()
+                .Where(s => !s.compliance_hidden &&
+                    string.Equals((s.status ?? "").Trim(), "PUBLISHED", StringComparison.OrdinalIgnoreCase));
+            return new CommunityStatsDto
+            {
+                PublishedStoriesCount = q.Count(),
+                AuthorsCount = q.Where(s => s.author_id.HasValue).Select(s => s.author_id!.Value).Distinct().Count(),
+                TotalViews = q.Sum(s => (long)(s.total_views ?? 0)),
             };
         }
 

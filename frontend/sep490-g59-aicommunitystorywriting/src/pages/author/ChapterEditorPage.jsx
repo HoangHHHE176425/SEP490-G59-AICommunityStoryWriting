@@ -3,9 +3,10 @@ import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'luc
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
-import { indexRag, suggestNextChapter, coCreate, checkChapter, getAiUsageLimit } from '../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, checkChapter, compareChapterPreview, getAiUsageLimit } from '../../api/ai/aiApi';
 import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 import { refresh as refreshAuth } from '../../api/auth/authApi';
+import { translateCoCreateOutlineLabels } from '../../utils/coCreateOutlineLabelsVi';
 
 // Helper function to count words
 const countWords = (text) => {
@@ -74,17 +75,23 @@ function formatOutlineForDisplay(outline) {
         const scenes = parsed?.scenes ?? parsed?.Scenes;
         if (Array.isArray(scenes) && scenes.length > 0) {
             if (isExampleOutline(scenes)) return '';
-            return scenes.map((s, i) => {
-                const title = s?.title ?? s?.Title ?? '';
-                const summary = s?.summary ?? s?.Summary ?? '';
-                const characters = s?.characters ?? s?.Characters ?? '';
-                const parts = [];
-                if (title) parts.push(title);
-                if (summary) parts.push(summary);
-                if (Array.isArray(characters) && characters.length) parts.push(`Nhân vật: ${characters.join(', ')}`);
-                else if (typeof characters === 'string' && characters.trim()) parts.push(`Nhân vật: ${characters}`);
-                return parts.length ? `Bối cảnh ${i + 1}:\n${parts.join('\n')}` : `Bối cảnh ${i + 1}`;
-            }).join('\n\n');
+            const joined = scenes
+                .map((s, i) => {
+                    const title = s?.title ?? s?.Title ?? '';
+                    const summary = s?.summary ?? s?.Summary ?? '';
+                    const characters = s?.characters ?? s?.Characters ?? '';
+                    const parts = [];
+                    if (title) parts.push(title);
+                    if (summary) parts.push(summary);
+                    if (Array.isArray(characters) && characters.length) {
+                        parts.push(`Nhân vật: ${characters.join(', ')}`);
+                    } else if (typeof characters === 'string' && characters.trim()) {
+                        parts.push(`Nhân vật: ${characters}`);
+                    }
+                    return parts.length ? `Bối cảnh ${i + 1}:\n${parts.join('\n')}` : `Bối cảnh ${i + 1}`;
+                })
+                .join('\n\n');
+            return translateCoCreateOutlineLabels(joined);
         }
     } catch {
         // Không phải JSON, xử lý plain text (chỉ phần không phải block hướng dẫn)
@@ -94,8 +101,10 @@ function formatOutlineForDisplay(outline) {
         .replace(/\*\*Trả về JSON dàn ý\*\*[\s\S]*?^\{[\s\S]*?"scenes"\s*:[\s\S]*?\}\s*\}/im, '')
         .replace(/```(?:json)?[\s\S]*?```/g, '')
         .trim();
-    if (text) return text.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1');
-    return raw.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1');
+    if (text) {
+        return translateCoCreateOutlineLabels(text.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1'));
+    }
+    return translateCoCreateOutlineLabels(raw.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1'));
 }
 
 /** Nội dung: bỏ nhãn "Scene 1:", "Scene 2:"... để ghép thành một khối văn hoàn chỉnh */
@@ -126,10 +135,18 @@ function contentOnlyForChapter(raw) {
     return s.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, editingVersion, readOnly = false, onSave, onCancel }) {
+export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, editingVersion, readOnly = false, onSave, onNavigateAfterSave, onCancel }) {
     const { showToast, ToastContainer } = useToast();
     const storyId = story?.id ?? story?.Id;
     const [chapterCheckModal, setChapterCheckModal] = useState({ open: false, loading: false, data: null, error: null });
+    /** Preview % AI trước khi lưu; chỉ khi bấm Xác nhận mới gọi onSave + ghi ai_similarity_percent */
+    const [aiCompareModal, setAiCompareModal] = useState({
+        open: false,
+        loading: false,
+        data: null,
+        error: null,
+        pendingSaveStatus: null,
+    });
     const [chapterData, setChapterData] = useState(() => {
         if (editingVersion) {
             return {
@@ -699,21 +716,112 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             }
         }
 
+        if (!isVersionMode && !storyId) {
+            showToast('Không tìm thấy truyện', 'error');
+            return;
+        }
+
+        // Chế độ phiên bản: lưu ngay (không so sánh AI trên chapter gốc)
+        if (isVersionMode) {
+            setIsSaving(true);
+            try {
+                const payload = {
+                    ...chapterData,
+                    status: saveStatus,
+                    updatedAt: new Date().toLocaleString('vi-VN'),
+                };
+                if (sourceChapterForVersion?.id) {
+                    payload.sourceChapterId = sourceChapterForVersion.id;
+                    payload.versionNumber = chapterData.versionNumber ?? 1;
+                    if (editingVersion?.id) payload.editingVersionId = editingVersion.id;
+                }
+                await onSave(payload);
+                onNavigateAfterSave?.();
+            } catch (error) {
+                console.error('Error saving chapter:', error);
+            } finally {
+                setIsSaving(false);
+            }
+            return;
+        }
+
+        // Chương thường: preview % AI → popup → user xác nhận mới lưu / xuất bản + ghi ai_similarity_percent
+        setIsSaving(true);
+        try {
+            const orderIndex = (Number(chapterData.number) || 1) - 1;
+            setAiCompareModal({
+                open: true,
+                loading: true,
+                data: null,
+                error: null,
+                pendingSaveStatus: saveStatus,
+            });
+            const cmp = await compareChapterPreview({
+                storyId,
+                orderIndex,
+                content: chapterData.content,
+            });
+            const hasBoth = Boolean(cmp?.hasBothContents ?? cmp?.HasBothContents);
+            const score = cmp?.similarityScore ?? cmp?.SimilarityScore;
+            const msg = (cmp?.message ?? cmp?.Message ?? '').toString();
+            setAiCompareModal({
+                open: true,
+                loading: false,
+                data: {
+                    hasBothContents: hasBoth,
+                    similarityScore: typeof score === 'number' ? score : Number(score),
+                    message: msg,
+                },
+                error: null,
+                pendingSaveStatus: saveStatus,
+            });
+        } catch (cmpErr) {
+            const msg =
+                cmpErr?.response?.data?.message ??
+                cmpErr?.response?.data?.Message ??
+                cmpErr?.message ??
+                'Không thể tính độ tương đồng với bản AI.';
+            setAiCompareModal({
+                open: true,
+                loading: false,
+                data: null,
+                error: String(msg),
+                pendingSaveStatus: saveStatus,
+            });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const closeAiCompareModalOnly = () => {
+        setAiCompareModal({
+            open: false,
+            loading: false,
+            data: null,
+            error: null,
+            pendingSaveStatus: null,
+        });
+    };
+
+    const confirmAiCompareSave = async () => {
+        const status = aiCompareModal.pendingSaveStatus;
+        if (!status) return;
+        const hasPct =
+            aiCompareModal.data?.hasBothContents &&
+            Number.isFinite(Number(aiCompareModal.data?.similarityScore));
+        const pct = hasPct ? Number(aiCompareModal.data.similarityScore) : undefined;
+        closeAiCompareModalOnly();
         setIsSaving(true);
         try {
             const payload = {
                 ...chapterData,
-                status: saveStatus,
+                status,
                 updatedAt: new Date().toLocaleString('vi-VN'),
+                ...(pct != null ? { aiSimilarityPercent: pct } : {}),
             };
-            if (isVersionMode && sourceChapterForVersion?.id) {
-                payload.sourceChapterId = sourceChapterForVersion.id;
-                payload.versionNumber = chapterData.versionNumber ?? 1;
-                if (editingVersion?.id) payload.editingVersionId = editingVersion.id;
-            }
             await onSave(payload);
+            onNavigateAfterSave?.();
         } catch (error) {
-            // Error handling is done in parent component
             console.error('Error saving chapter:', error);
         } finally {
             setIsSaving(false);
@@ -922,6 +1030,79 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 }}
                             >
                                 Đóng
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Popup preview % AI — chỉ khi Xác nhận mới lưu DB + ai_similarity_percent */}
+            {aiCompareModal.open && (
+                <div
+                    className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4"
+                    onClick={() => !aiCompareModal.loading && closeAiCompareModalOnly()}
+                    role="presentation"
+                >
+                    <div
+                        className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="border-b border-slate-200 bg-slate-50/80 px-5 py-4">
+                            <h3 className="m-0 text-lg font-bold text-slate-900">
+                                Độ tương đồng với nội dung AI
+                            </h3>
+                            <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                                Xem trước mức giống giữa bản bạn viết và bản đồng sáng tác AI cho thứ tự chương này.{' '}
+                                <span className="font-semibold text-primary">
+                                    Chương chỉ được lưu / gửi xuất bản khi bạn bấm xác nhận bên dưới.
+                                </span>
+                            </p>
+                        </div>
+                        <div className="px-5 py-5">
+                            {aiCompareModal.loading ? (
+                                <p className="m-0 text-center text-sm text-slate-600">Đang tính toán độ tương đồng...</p>
+                            ) : aiCompareModal.error ? (
+                                <div className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-800 whitespace-pre-wrap">
+                                    {aiCompareModal.error}
+                                    <p className="mt-2 mb-0 text-xs text-red-700/90">
+                                        Bạn vẫn có thể xác nhận để lưu chương; phần trăm AI có thể để trống nếu không tính được.
+                                    </p>
+                                </div>
+                            ) : aiCompareModal.data?.hasBothContents ? (
+                                <div className="text-center">
+                                    <div className="text-[2.65rem] font-extrabold leading-tight text-primary tabular-nums">
+                                        {Number.isFinite(Number(aiCompareModal.data?.similarityScore))
+                                            ? `${Number(aiCompareModal.data.similarityScore).toFixed(2)}%`
+                                            : '—'}
+                                    </div>
+                                    {aiCompareModal.data?.message ? (
+                                        <p className="mt-3 text-left text-sm text-slate-600">{aiCompareModal.data.message}</p>
+                                    ) : null}
+                                </div>
+                            ) : (
+                                <p className="m-0 text-sm leading-relaxed text-slate-700 whitespace-pre-wrap">
+                                    {aiCompareModal.data?.message ||
+                                        'Chưa có đủ dữ liệu để tính % (cần ít nhất một bản AI co-create cho đúng thứ tự chương). Bạn vẫn có thể xác nhận để lưu chương.'}
+                                </p>
+                            )}
+                        </div>
+                        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/50 px-4 py-3">
+                            <button
+                                type="button"
+                                disabled={aiCompareModal.loading}
+                                onClick={closeAiCompareModalOnly}
+                                className="rounded-full border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                type="button"
+                                disabled={aiCompareModal.loading}
+                                onClick={confirmAiCompareSave}
+                                className="rounded-full bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground shadow-sm transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                {aiCompareModal.pendingSaveStatus === 'published'
+                                    ? 'Xác nhận xuất bản'
+                                    : 'Xác nhận lưu nháp'}
                             </button>
                         </div>
                     </div>
@@ -1335,15 +1516,15 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                                     <button
                                         onClick={() => handleSave('draft')}
-                                        disabled={isSaving}
+                                        disabled={isSaving || aiCompareModal.open}
                                         className="flex items-center gap-2 px-6 py-2.5 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
                                         <Save style={{ width: '16px', height: '16px' }} />
-                                        Lưu nháp
+                                        {isSaving ? 'Đang lưu...' : 'Lưu nháp'}
                                     </button>
                                     <button
                                         onClick={() => handleSave('published')}
-                                        disabled={isSaving || (isVersionMode && !canSubmitVersion)}
+                                        disabled={isSaving || aiCompareModal.open || (isVersionMode && !canSubmitVersion)}
                                         title={isVersionMode ? versionPublishTooltip : undefined}
                                         className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                                     >

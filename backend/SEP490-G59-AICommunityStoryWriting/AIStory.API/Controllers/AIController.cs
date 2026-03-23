@@ -363,7 +363,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>So sánh <c>chapters.content</c> theo <c>ChapterId</c> (BE tự lấy story + order_index) với các bản AI cùng <c>chapter_index</c>; độ giống 0–100% (lấy max). Chỉ tác giả truyện.</summary>
+        /// <summary>So sánh <c>chapters.content</c> theo <c>ChapterId</c> (BE tự lấy story + order_index) với các bản AI cùng <c>chapter_index</c>; độ giống 0–100% (lấy max). Chỉ tác giả truyện. Không ghi DB.</summary>
         [HttpPost("compare-chapter")]
         public async Task<IActionResult> CompareChapter([FromBody] CompareChapterRequest request, CancellationToken cancellationToken)
         {
@@ -385,6 +385,33 @@ namespace AIStory.API.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Compare chapter failed for ChapterId={ChapterId}", request.ChapterId);
+                var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi so sánh chương. Vui lòng thử lại sau.";
+                return StatusCode(500, new { message });
+            }
+        }
+
+        /// <summary>So sánh nội dung đang soạn với bản AI trước khi lưu (không cần <c>chapterId</c>). Không ghi DB — sau khi xác nhận lưu, FE gửi <c>aiSimilarityPercent</c> khi tạo/cập nhật chương.</summary>
+        [HttpPost("compare-chapter-preview")]
+        public async Task<IActionResult> CompareChapterPreview([FromBody] CompareChapterPreviewRequest request, CancellationToken cancellationToken)
+        {
+            if (request.StoryId == Guid.Empty)
+                return BadRequest(new { message = "StoryId là bắt buộc." });
+
+            Guid? userId = null;
+            var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var uid))
+                userId = uid;
+            if (!userId.HasValue)
+                return Unauthorized(new { message = "Vui lòng đăng nhập để so sánh chương." });
+
+            try
+            {
+                var response = await _chapterCompareService.ComparePreviewAsync(request, userId, cancellationToken);
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Compare chapter preview failed for StoryId={StoryId}", request.StoryId);
                 var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi so sánh chương. Vui lòng thử lại sau.";
                 return StatusCode(500, new { message });
             }

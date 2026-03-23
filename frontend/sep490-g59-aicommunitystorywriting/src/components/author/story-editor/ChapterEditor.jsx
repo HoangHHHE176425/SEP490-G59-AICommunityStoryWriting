@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Sparkles, Settings, X, Lock, Unlock, Coins } from 'lucide-react';
 import { useToast } from './Toast';
 import { indexRag, suggestNextChapter, coCreate } from '../../../api/ai/aiApi';
+import { translateCoCreateOutlineLabels } from '../../../utils/coCreateOutlineLabelsVi';
 
 const countWords = (text) => {
     if (!text || !text.trim()) return 0;
@@ -55,22 +56,28 @@ function formatOutlineForDisplay(outline) {
         const parsed = JSON.parse(toParse);
         const scenes = parsed?.scenes ?? parsed?.Scenes;
         if (Array.isArray(scenes) && scenes.length > 0 && !isExampleOutline(scenes)) {
-            return scenes.map((s, i) => {
-                const title = s?.title ?? s?.Title ?? '';
-                const summary = s?.summary ?? s?.Summary ?? '';
-                const characters = s?.characters ?? s?.Characters ?? '';
-                const parts = [];
-                if (title) parts.push(title);
-                if (summary) parts.push(summary);
-                if (Array.isArray(characters) && characters.length) parts.push(`Nhân vật: ${characters.join(', ')}`);
-                else if (typeof characters === 'string' && characters.trim()) parts.push(`Nhân vật: ${characters}`);
-                return parts.length ? `Bối cảnh ${i + 1}:\n${parts.join('\n')}` : `Bối cảnh ${i + 1}`;
-            }).join('\n\n');
+            const joined = scenes
+                .map((s, i) => {
+                    const title = s?.title ?? s?.Title ?? '';
+                    const summary = s?.summary ?? s?.Summary ?? '';
+                    const characters = s?.characters ?? s?.Characters ?? '';
+                    const parts = [];
+                    if (title) parts.push(title);
+                    if (summary) parts.push(summary);
+                    if (Array.isArray(characters) && characters.length) {
+                        parts.push(`Nhân vật: ${characters.join(', ')}`);
+                    } else if (typeof characters === 'string' && characters.trim()) {
+                        parts.push(`Nhân vật: ${characters}`);
+                    }
+                    return parts.length ? `Bối cảnh ${i + 1}:\n${parts.join('\n')}` : `Bối cảnh ${i + 1}`;
+                })
+                .join('\n\n');
+            return translateCoCreateOutlineLabels(joined);
         }
     } catch {
         // ignore
     }
-    return raw.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1');
+    return translateCoCreateOutlineLabels(raw.replace(/\bScene\s*(\d+)\b/gi, 'Bối cảnh $1'));
 }
 
 function mergeContentRemoveScenes(content) {

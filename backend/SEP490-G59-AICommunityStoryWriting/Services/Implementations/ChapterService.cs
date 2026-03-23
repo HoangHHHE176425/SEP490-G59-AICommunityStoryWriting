@@ -126,6 +126,9 @@ namespace Services.Implementations
                 updated_at = DateTime.Now
             };
 
+            if (request.AiSimilarityPercent.HasValue)
+                chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
+
             _chapterRepository.Add(chapter);
 
             if (request.AiGeneratedContentId.HasValue)
@@ -425,6 +428,9 @@ namespace Services.Implementations
 
             if (request.IsAiClean.HasValue)
                 chapter.is_ai_clean = request.IsAiClean.Value;
+
+            if (request.AiSimilarityPercent.HasValue)
+                chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
 
             if (request.Content != null)
             {

@@ -293,7 +293,8 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
     {
         if (string.IsNullOrWhiteSpace(finalContent)) return (null, null);
         var chaptersList = _chapterRepository.GetByStoryId(storyId).ToList();
-        var nextChapterIndex = chaptersList.Count == 0 ? 1 : chaptersList.Max(c => c.order_index) + 1;
+        // Khớp chapters.order_index từ FE (chương 1 → order_index 0)
+        var nextChapterIndex = chaptersList.Count == 0 ? 0 : chaptersList.Max(c => c.order_index) + 1;
         var now = DateTime.UtcNow;
         var aiRecord = new ai_generated_content
         {
