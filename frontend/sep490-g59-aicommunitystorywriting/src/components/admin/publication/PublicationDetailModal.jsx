@@ -53,6 +53,91 @@ function mapStoryGroupChapterToModal(ch) {
     };
 }
 
+/**
+ * Tab Từ chối (moderator): gộp timeline lý do từ chối của chương gốc + các version cùng chương.
+ * Hiển thị mới nhất trước, tương tự màn danh sách chương của author.
+ */
+function normalizeModeratorRejectionHistory(raw) {
+    const arr = Array.isArray(raw) ? raw : [];
+    return arr.map((h) => ({
+        reason: (h.reason ?? h.Reason ?? '').toString(),
+        rejectedAt: h.rejectedAt ?? h.RejectedAt ?? null,
+        moderatorId: h.moderatorId ?? h.ModeratorId ?? null,
+    }));
+}
+
+function buildRejectedHistoryTimeline(selectedChapter, chapters, fetchedRejectionByChapter, chapterHistoryMap) {
+    if (!selectedChapter) return [];
+    const chapterId = selectedChapter.chapterId ?? selectedChapter.id ?? null;
+    if (!chapterId) return [];
+
+    const list = [];
+    const chapterItems = (Array.isArray(chapters) ? chapters : []).filter((c) => {
+        const cid = c.chapterId ?? c.id ?? null;
+        return cid && String(cid) === String(chapterId);
+    });
+
+    for (const item of chapterItems) {
+        const isVersion = !!item.isVersionHistory;
+        const fallback = !isVersion ? (fetchedRejectionByChapter?.[item.id] ?? null) : null;
+        const reasonRaw = item.rejectionReason ?? fallback?.reason ?? '';
+        const atRaw = item.rejectedAt ?? fallback?.rejectedAt ?? null;
+        const reason = String(reasonRaw || '').trim();
+        if (!reason && !atRaw) continue;
+        list.push({
+            key: `${isVersion ? 'ver' : 'ch'}-${item.id ?? item.versionId ?? item.chapterId}`,
+            label: isVersion ? `Phiên bản #${item.versionNumber ?? ''}`.trim() : 'Chương gốc',
+            reason: reason || '—',
+            rejectedAt: atRaw,
+            ts: atRaw ? new Date(atRaw).getTime() : 0,
+        });
+    }
+
+    // Bổ sung toàn bộ lịch sử từ chối chương gốc (moderation_logs) nếu backend đã trả về.
+    const chapterHistory = chapterHistoryMap?.[String(chapterId)] ?? [];
+    for (let i = 0; i < chapterHistory.length; i += 1) {
+        const h = chapterHistory[i];
+        const reason = String(h?.reason || '').trim();
+        const atRaw = h?.rejectedAt ?? null;
+        if (!reason && !atRaw) continue;
+        list.push({
+            key: `ch-hist-${chapterId}-${i}`,
+            label: 'Chương gốc',
+            reason: reason || '—',
+            rejectedAt: atRaw,
+            ts: atRaw ? new Date(atRaw).getTime() : 0,
+        });
+    }
+
+    // Nếu list chưa có chương gốc nhưng selectedChapter là chương gốc và vừa fetch fallback thì bổ sung.
+    if (!selectedChapter.isVersionHistory) {
+        const hasChapterRoot = list.some((x) => x.label === 'Chương gốc');
+        const fallback = fetchedRejectionByChapter?.[selectedChapter.id];
+        if (!hasChapterRoot && fallback && (fallback.reason || fallback.rejectedAt)) {
+            list.push({
+                key: `ch-fallback-${selectedChapter.id}`,
+                label: 'Chương gốc',
+                reason: String(fallback.reason || '').trim() || '—',
+                rejectedAt: fallback.rejectedAt ?? null,
+                ts: fallback.rejectedAt ? new Date(fallback.rejectedAt).getTime() : 0,
+            });
+        }
+    }
+
+    // Dedupe để tránh trùng giữa "latest reason" và history từ moderation_logs.
+    const deduped = [];
+    const seen = new Set();
+    for (const item of list) {
+        const token = `${item.label}|${item.reason}|${item.rejectedAt ?? ''}`;
+        if (seen.has(token)) continue;
+        seen.add(token);
+        deduped.push(item);
+    }
+
+    deduped.sort((a, b) => b.ts - a.ts);
+    return deduped;
+}
+
 export function PublicationDetailModal({ publication, onClose, onApprove, onReject, onRefresh }) {
     const { showToast, ToastContainer } = useToast();
     const [chapters, setChapters] = useState([]);
@@ -66,12 +151,15 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [showApproveConfirm, setShowApproveConfirm] = useState(false);
     const [rejectionReason, setRejectionReason] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isRejectedHistoryExpanded, setIsRejectedHistoryExpanded] = useState(false);
     /** Sau khi duyệt chương 1 đã gọi approveStory rồi thì không gọi lại khi duyệt chương 2, 3... (publication.status không đổi trong modal) */
     const storyApprovedInSessionRef = useRef(false);
     /** Vừa từ chối trong phiên này → không hiển thị khối "Đã từ chối xuất bản" / "Lý do từ chối" để moderator duyệt liên tiếp thoải mái */
     const justRejectedInSessionRef = useRef(false);
     /** Lý do từ chối lấy từ API GET /chapters/:id/rejection-reason khi chưa có trong danh sách (tab Từ chối). */
     const [fetchedRejectionByChapter, setFetchedRejectionByChapter] = useState({});
+    /** Toàn bộ lịch sử từ chối chương gốc theo chapterId (để hiển thị giống màn author). */
+    const [chapterRejectionHistoryMap, setChapterRejectionHistoryMap] = useState({});
     /** Set orderIndex (0-based) các chương đã PUBLISHED — để chỉ cho phép duyệt/từ chối theo thứ tự 1,2,3... */
     const [publishedOrderIndices, setPublishedOrderIndices] = useState(new Set());
     /** Tab nội dung khi xem 2 phiên bản (gốc / version): 'original' | 'version' */
@@ -184,11 +272,13 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             storyApprovedInSessionRef.current = false;
             justRejectedInSessionRef.current = false;
             setFetchedRejectionByChapter({});
+            setChapterRejectionHistoryMap({});
             setPublishedOrderIndices(new Set());
             setChapters([]);
             setSelectedChapter(null);
             setChapterContents({});
             setChapterReviewContent({});
+            setIsRejectedHistoryExpanded(false);
             // Tab Đã duyệt / Từ chối: story_group dùng danh sách chương gắn sẵn (không gọi pending API).
             // Tab Chờ duyệt + story_group: vẫn gọi API pending (CLAIMED) để có AdminRejectedExtendNote/At đúng từng chương.
             if (publication?.type === 'story_group' && Array.isArray(publication?.chapters) && publication.chapters.length > 0 && publication?.status !== 'pending') {
@@ -447,6 +537,29 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             })
             .catch(() => { });
     }, [publication?.status, selectedChapter?.id, selectedChapter?.rejectionReason, selectedChapter?.isVersionHistory]);
+
+    /** Tab Từ chối: nạp full moderatorRejectionHistory theo story để có timeline đầy đủ như màn author. */
+    useEffect(() => {
+        if (publication?.status !== 'rejected' || !storyId) return;
+        let cancelled = false;
+        getChapters({ storyId, page: 1, pageSize: 500 })
+            .then((res) => {
+                if (cancelled) return;
+                const items = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
+                const next = {};
+                (Array.isArray(items) ? items : []).forEach((item) => {
+                    const cid = item?.id ?? item?.Id;
+                    if (!cid) return;
+                    const hist = normalizeModeratorRejectionHistory(item?.moderatorRejectionHistory ?? item?.ModeratorRejectionHistory);
+                    if (hist.length > 0) next[String(cid)] = hist;
+                });
+                setChapterRejectionHistoryMap(next);
+            })
+            .catch(() => {
+                if (!cancelled) setChapterRejectionHistoryMap({});
+            });
+        return () => { cancelled = true; };
+    }, [publication?.status, storyId]);
 
     const openApproveConfirm = () => {
         if (selectedChapter) setShowApproveConfirm(true);
@@ -1075,9 +1188,14 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                     </div>
                                                 )}
                                                 {publication?.status === 'rejected' && (() => {
-                                                    const displayReason = selectedChapter?.rejectionReason ?? fetchedRejectionByChapter[selectedChapter?.id]?.reason;
-                                                    const displayRejectedAt = selectedChapter?.rejectedAt ?? fetchedRejectionByChapter[selectedChapter?.id]?.rejectedAt;
-                                                    if (!displayReason && !displayRejectedAt) return null;
+                                                    const timeline = buildRejectedHistoryTimeline(
+                                                        selectedChapter,
+                                                        chapters,
+                                                        fetchedRejectionByChapter,
+                                                        chapterRejectionHistoryMap
+                                                    );
+                                                    if (!timeline.length) return null;
+                                                    const visibleTimeline = isRejectedHistoryExpanded ? timeline : timeline.slice(0, 1);
                                                     return (
                                                         <div style={{
                                                             marginTop: '1rem',
@@ -1086,19 +1204,52 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                             borderLeft: '4px solid #ef4444',
                                                             borderRadius: '0.5rem'
                                                         }}>
-                                                            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991b1b', marginBottom: '0.25rem' }}>
-                                                                Lý do từ chối (đã nhập trước đó):
+                                                            <div style={{
+                                                                display: 'flex',
+                                                                alignItems: 'center',
+                                                                justifyContent: 'space-between',
+                                                                gap: '0.75rem',
+                                                                marginBottom: '0.25rem'
+                                                            }}>
+                                                                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#991b1b' }}>
+                                                                    Lịch sử lý do từ chối:
+                                                                </div>
+                                                                {timeline.length > 1 && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setIsRejectedHistoryExpanded((prev) => !prev)}
+                                                                        style={{
+                                                                            border: '1px solid #fecaca',
+                                                                            backgroundColor: '#fff',
+                                                                            color: '#b91c1c',
+                                                                            borderRadius: '9999px',
+                                                                            padding: '0.2rem 0.55rem',
+                                                                            fontSize: '0.72rem',
+                                                                            fontWeight: 600,
+                                                                            cursor: 'pointer'
+                                                                        }}
+                                                                    >
+                                                                        {isRejectedHistoryExpanded ? 'Thu gọn' : `Mở rộng (${timeline.length})`}
+                                                                    </button>
+                                                                )}
                                                             </div>
-                                                            {displayReason && (
-                                                                <div style={{ fontSize: '0.875rem', color: '#991b1b', whiteSpace: 'pre-wrap' }}>
-                                                                    {displayReason}
-                                                                </div>
-                                                            )}
-                                                            {displayRejectedAt && (
-                                                                <div style={{ fontSize: '0.75rem', color: '#b91c1c', marginTop: displayReason ? '0.5rem' : 0 }}>
-                                                                    Từ chối lúc: {formatDate(displayRejectedAt)}
-                                                                </div>
-                                                            )}
+                                                            <div style={{ display: 'grid', gap: '0.5rem' }}>
+                                                                {visibleTimeline.map((entry) => (
+                                                                    <div key={entry.key} style={{ borderTop: '1px dashed #fecaca', paddingTop: '0.5rem' }}>
+                                                                        <div style={{ fontSize: '0.75rem', color: '#b91c1c', fontWeight: 700, marginBottom: '0.2rem' }}>
+                                                                            {entry.label}
+                                                                        </div>
+                                                                        <div style={{ fontSize: '0.875rem', color: '#991b1b', whiteSpace: 'pre-wrap' }}>
+                                                                            {entry.reason}
+                                                                        </div>
+                                                                        {entry.rejectedAt && (
+                                                                            <div style={{ fontSize: '0.75rem', color: '#b91c1c', marginTop: '0.35rem' }}>
+                                                                                Từ chối lúc: {formatDate(entry.rejectedAt)}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                ))}
+                                                            </div>
                                                         </div>
                                                     );
                                                 })()}
