@@ -519,7 +519,7 @@ namespace AIStory.API.Controllers
                 var story = StoryDAO.GetById(id);
                 if (story == null)
                     return NotFound(new { message = $"Story with ID {id} not found" });
-                var entities = CommentDAO.GetStoryComments(id);
+                var entities = CommentDAO.GetStoryCommentsForDisplay(id);
                 var currentUserId = GetCurrentUserId();
                 var storyAuthorId = story.author_id;
                 var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId, storyAuthorId)).ToList();
@@ -623,6 +623,8 @@ namespace AIStory.API.Controllers
 
         private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null, Guid? storyAuthorId = null)
         {
+            var statusUpper = (c.status ?? "").Trim().ToUpperInvariant();
+            var content = statusUpper == "HIDDEN_PARENT" ? "Nội dung bình luận đã bị ẩn." : (c.content ?? "");
             var nickname = c.userNavigation?.user_profiles?.nickname;
             var email = c.userNavigation?.email;
             var display = !string.IsNullOrWhiteSpace(nickname) ? nickname : email;
@@ -654,7 +656,7 @@ namespace AIStory.API.Controllers
                 UserDisplayName = display,
                 UserRole = ResolveCommentDisplayUserRole(c.userNavigation?.role, c.user_id, storyAuthorId),
                 UserCreatedAt = c.userNavigation?.created_at,
-                Content = c.content,
+                Content = content,
                 LikesCount = c.likes_count ?? 0,
                 UserHasLiked = userHasLiked,
                 ReactionCounts = reactionCounts,

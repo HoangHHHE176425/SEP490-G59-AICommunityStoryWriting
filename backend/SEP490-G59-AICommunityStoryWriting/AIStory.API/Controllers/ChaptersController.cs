@@ -72,6 +72,34 @@ namespace AIStory.API.Controllers
             }
         }
 
+        /// <summary>Gửi thông báo + SignalR cho tác giả khi độc giả mở khóa chương trả phí (lỗi push không làm hỏng giao dịch unlock).</summary>
+        private async Task PushAuthorChapterUnlockNotificationAsync(
+            Guid authorId,
+            Guid buyerUserId,
+            ChapterResponseDto chapterDto,
+            StoryResponseDto storyDto,
+            int coinPrice,
+            Guid chapterId)
+        {
+            try
+            {
+                var buyerName = NotificationDAO.GetUserDisplayName(buyerUserId);
+                var notif = NotificationDAO.NotifyAuthorChapterUnlocked(
+                    authorId,
+                    buyerName,
+                    storyDto.Title ?? "Truyện",
+                    chapterDto.Title ?? "Chương",
+                    coinPrice,
+                    chapterDto.StoryId ?? Guid.Empty,
+                    chapterId);
+                await _notificationHubNotifier.NotifyUserAsync(authorId, MapNotificationToDto(notif));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Push CHAPTER_UNLOCK notification failed. AuthorId={AuthorId} ChapterId={ChapterId}", authorId, chapterId);
+            }
+        }
+
         private Guid? GetCurrentUserId()
         {
             var sub = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value
@@ -360,6 +388,8 @@ namespace AIStory.API.Controllers
                     await db.SaveChangesAsync(cancellationToken);
                     await tx.CommitAsync(cancellationToken);
 
+                    await PushAuthorChapterUnlockNotificationAsync(authorId, userId.Value, chapter, story, coinPrice, id);
+
                     return Ok(new { unlocked = true });
                 }
                 catch (Exception ex)
@@ -418,7 +448,7 @@ namespace AIStory.API.Controllers
                     var st = StoryDAO.GetById(chapter.StoryId.Value);
                     storyAuthorId = st?.author_id;
                 }
-                var entities = CommentDAO.GetChapterComments(id);
+                var entities = CommentDAO.GetChapterCommentsForDisplay(id);
                 var currentUserId = GetCurrentUserId();
                 var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId, storyAuthorId)).ToList();
                 return Ok(dtos);
@@ -570,8 +600,13 @@ namespace AIStory.API.Controllers
             return r;
         }
 
-        private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null, Guid? storyAuthorId = null)
+        private static StoryCommentDto MapToStoryCommentDto(
+            comments c,
+            Guid? currentUserId = null,
+            Guid? storyAuthorId = null)
         {
+            var statusUpper = (c.status ?? "").Trim().ToUpperInvariant();
+            var content = statusUpper == "HIDDEN_PARENT" ? "Nội dung bình luận đã bị ẩn." : (c.content ?? "");
             var nickname = c.userNavigation?.user_profiles?.nickname;
             var email = c.userNavigation?.email;
             var display = !string.IsNullOrWhiteSpace(nickname) ? nickname : email;
@@ -600,7 +635,7 @@ namespace AIStory.API.Controllers
                 UserDisplayName = display,
                 UserRole = ResolveCommentDisplayUserRole(c.userNavigation?.role, c.user_id, storyAuthorId),
                 UserCreatedAt = c.userNavigation?.created_at,
-                Content = c.content ?? "",
+                Content = content,
                 LikesCount = c.likes_count ?? 0,
                 UserHasLiked = userHasLiked,
                 ReactionCounts = reactionCounts ?? new Dictionary<string, int>(),

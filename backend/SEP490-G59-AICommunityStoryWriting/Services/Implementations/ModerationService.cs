@@ -1091,7 +1091,7 @@ namespace Services.Implementations
                 content = content,
                 link_url = linkUrl,
                 is_read = false,
-                created_at = DateTime.Now
+                created_at = DateTime.UtcNow
             };
             NotificationDAO.Add(n);
             return n;
@@ -1118,7 +1118,7 @@ namespace Services.Implementations
                 content = content,
                 link_url = linkUrl,
                 is_read = false,
-                created_at = DateTime.Now
+                created_at = DateTime.UtcNow
             };
             NotificationDAO.Add(n);
             return n;

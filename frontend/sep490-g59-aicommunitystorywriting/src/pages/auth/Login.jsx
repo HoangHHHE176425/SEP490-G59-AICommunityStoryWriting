@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, BookOpen } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
@@ -8,6 +8,7 @@ import { Footer } from '../../components/homepage/Footer';
 export default function Login() {
     const navigate = useNavigate();
     const { login, loginWithGoogle, loginWithFacebook } = useAuth();
+    const location = useLocation();
     const [formData, setFormData] = useState({
         email: '',
         password: '',
@@ -15,6 +16,16 @@ export default function Login() {
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+
+    const redirect = (() => {
+        const q = new URLSearchParams(location.search);
+        const r = q.get('redirect');
+        // Chỉ cho phép redirect nội bộ để tránh mở URL ngoài ý muốn.
+        if (typeof r !== 'string' || !r.trim()) return null;
+        const rr = r.trim();
+        return rr.startsWith('/') ? rr : null;
+    })();
+    const navigateTarget = redirect || '/home';
 
     const handleChange = (e) => {
         setFormData({
@@ -38,7 +49,7 @@ export default function Login() {
         try {
             const result = await login(formData.email, formData.password);
             if (result.success) {
-                navigate('/home');
+                navigate(navigateTarget, { replace: true });
             } else {
                 setError(result.message || 'Đăng nhập thất bại');
             }
@@ -55,7 +66,7 @@ export default function Login() {
         try {
             const result = await loginWithGoogle();
             if (result.success) {
-                navigate('/home');
+                navigate(navigateTarget, { replace: true });
             } else {
                 setError(result.message || 'Đăng nhập Google thất bại');
             }
@@ -72,7 +83,7 @@ export default function Login() {
         try {
             const result = await loginWithFacebook();
             if (result.success) {
-                navigate('/home');
+                navigate(navigateTarget, { replace: true });
             } else {
                 setError(result.message || 'Đăng nhập Facebook thất bại');
             }
