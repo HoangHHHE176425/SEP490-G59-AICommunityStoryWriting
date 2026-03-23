@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using BusinessObjects.StoryReporting;
 using Microsoft.EntityFrameworkCore;
@@ -266,7 +266,10 @@ public static class StoryReportDAO
                 r.target_type == StoryTargetType
                 && r.target_id == storyId
                 && r.status != null
-                && (r.status == "NEW" || r.status == "IN_REVIEW"))
+                && (
+                    r.status.Trim().ToUpper().StartsWith("NEW")
+                    || r.status.Trim().ToUpper().StartsWith("IN_REVIEW")
+                ))
             .ToList();
         if (rows.Count == 0) return 0;
         var now = DateTime.UtcNow;
@@ -288,7 +291,10 @@ public static class StoryReportDAO
             r.target_type == StoryTargetType
             && r.target_id == storyId
             && r.status != null
-            && (r.status == "NEW" || r.status == "IN_REVIEW"));
+            && (
+                r.status.Trim().ToUpper().StartsWith("NEW")
+                || r.status.Trim().ToUpper().StartsWith("IN_REVIEW")
+            ));
     }
 
     public static int ReopenInReviewReportsForAssignee(Guid storyId, Guid assigneeId)
@@ -298,7 +304,8 @@ public static class StoryReportDAO
             .Where(r =>
                 r.target_type == StoryTargetType
                 && r.target_id == storyId
-                && r.status == "IN_REVIEW"
+                && r.status != null
+                && r.status.Trim().ToUpper().StartsWith("IN_REVIEW")
                 && r.assigned_to == assigneeId)
             .ToList();
         foreach (var r in list)

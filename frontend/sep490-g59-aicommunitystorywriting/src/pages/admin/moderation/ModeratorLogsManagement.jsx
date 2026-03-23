@@ -181,30 +181,37 @@ export function ModeratorLogsManagement() {
     };
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                    <h2 style={{ margin: 0, fontSize: '1.1rem', color: '#0f172a' }}>Nhật ký kiểm duyệt của kiểm duyệt viên</h2>
-                    <span style={{ fontSize: '0.85rem', color: '#64748b' }}>Tổng: {totalCount}</span>
+        <div className="p-8 space-y-6">
+            <div>
+                <h1 className="text-2xl font-bold text-slate-900 mb-1">Nhật ký kiểm duyệt</h1>
+                <p className="text-sm text-slate-500">
+                    Theo dõi lịch sử duyệt/từ chối của kiểm duyệt viên theo thời gian thực.
+                </p>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+                <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-lg font-bold text-slate-900 m-0">Nhật ký kiểm duyệt của kiểm duyệt viên</h2>
+                    <span className="text-sm text-slate-500">Tổng: {totalCount}</span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', gap: '0.6rem' }}>
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
                     <input
                         value={filters.search}
                         onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
                         placeholder="Tìm theo moderator, lý do, tiêu đề truyện/chương..."
-                        style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.55rem 0.7rem', fontSize: '0.875rem' }}
+                        style={inputStyle}
                     />
                     <select
                         value={filters.action}
                         onChange={(e) => setFilters((p) => ({ ...p, action: e.target.value }))}
-                        style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.55rem 0.7rem', fontSize: '0.875rem' }}
+                        style={inputStyle}
                     >
                         {ACTION_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
                     </select>
                     <select
                         value={filters.targetType}
                         onChange={(e) => setFilters((p) => ({ ...p, targetType: e.target.value }))}
-                        style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.55rem 0.7rem', fontSize: '0.875rem' }}
+                        style={inputStyle}
                     >
                         {TARGET_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
                     </select>
@@ -214,7 +221,7 @@ export function ModeratorLogsManagement() {
                             type="date"
                             value={filters.dateFrom}
                             onChange={(e) => setFilters((p) => ({ ...p, dateFrom: e.target.value }))}
-                            style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.55rem 0.7rem', fontSize: '0.875rem' }}
+                            style={inputStyle}
                         />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
@@ -223,14 +230,14 @@ export function ModeratorLogsManagement() {
                             type="date"
                             value={filters.dateTo}
                             onChange={(e) => setFilters((p) => ({ ...p, dateTo: e.target.value }))}
-                            style={{ border: '1px solid #cbd5e1', borderRadius: '8px', padding: '0.55rem 0.7rem', fontSize: '0.875rem' }}
+                            style={inputStyle}
                         />
                     </div>
                 </div>
-                <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <div className="mt-3 flex justify-end">
                     <button
                         onClick={onResetFilters}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', border: '1px solid #cbd5e1', background: '#fff', color: '#334155', borderRadius: '8px', padding: '0.45rem 0.75rem', cursor: 'pointer' }}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"
                     >
                         <RotateCcw style={{ width: 14, height: 14 }} />
                         Đặt lại
@@ -238,33 +245,33 @@ export function ModeratorLogsManagement() {
                 </div>
             </div>
 
-            <div style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden' }}>
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 {loading ? (
-                    <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải log kiểm duyệt...</div>
+                    <div className="p-8 text-center text-slate-500 text-sm">Đang tải log kiểm duyệt...</div>
                 ) : error ? (
-                    <div style={{ padding: '1rem', color: '#b91c1c' }}>{error}</div>
+                    <div className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
                 ) : rows.length === 0 ? (
-                    <div style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Không có dữ liệu.</div>
+                    <div className="p-8 text-center text-slate-500 text-sm">Không có dữ liệu.</div>
                 ) : (
-                    <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <div className="overflow-x-auto">
+                        <table className="w-full border-collapse">
                             <thead>
-                                <tr style={{ backgroundColor: '#f8fafc' }}>
-                                    <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Thời điểm</th>
-                                    <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Moderator</th>
-                                    <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Đối tượng</th>
-                                    <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Tiêu đề</th>
-                                    <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Hành động</th>
-                                    <th style={{ textAlign: 'left', padding: '0.75rem', borderBottom: '1px solid #e2e8f0' }}>Lý do từ chối</th>
+                                <tr className="bg-slate-50">
+                                    <th style={th}>THỜI ĐIỂM</th>
+                                    <th style={th}>MODERATOR</th>
+                                    <th style={th}>ĐỐI TƯỢNG</th>
+                                    <th style={th}>TIÊU ĐỀ</th>
+                                    <th style={th}>HÀNH ĐỘNG</th>
+                                    <th style={th}>LÝ DO</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {rows.map((r) => (
-                                    <tr key={r.id ?? `${r.targetId}-${r.createdAt}`} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                                        <td style={{ padding: '0.75rem', color: '#334155', whiteSpace: 'nowrap' }}>{formatDate(r.createdAt)}</td>
-                                        <td style={{ padding: '0.75rem', color: '#334155' }}>{r.moderatorName || '—'}</td>
-                                        <td style={{ padding: '0.75rem', color: '#334155' }}>{targetLabel(r)}</td>
-                                        <td style={{ padding: '0.75rem', color: '#334155' }}>{r.targetTitle || '—'}</td>
+                                    <tr key={r.id ?? `${r.targetId}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
+                                        <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDate(r.createdAt)}</td>
+                                        <td style={td}>{r.moderatorName || '—'}</td>
+                                        <td style={td}>{targetLabel(r)}</td>
+                                        <td style={td}>{r.targetTitle || '—'}</td>
                                         <td style={{ padding: '0.75rem', color: String(r.action || '').toUpperCase() === 'REJECTED' ? '#b91c1c' : '#065f46', fontWeight: 600 }}>
                                             {actionLabel(r)}
                                         </td>
@@ -291,3 +298,28 @@ export function ModeratorLogsManagement() {
         </div>
     );
 }
+
+const inputStyle = {
+    border: '1px solid #e2e8f0',
+    borderRadius: '8px',
+    padding: '0.6rem 0.75rem',
+    fontSize: '0.875rem',
+    color: '#0f172a',
+    background: '#f8fafc',
+};
+
+const th = {
+    textAlign: 'left',
+    padding: '0.75rem',
+    borderBottom: '1px solid #e2e8f0',
+    fontSize: '0.72rem',
+    letterSpacing: '0.02em',
+    color: '#64748b',
+    fontWeight: 700,
+};
+
+const td = {
+    padding: '0.75rem',
+    color: '#334155',
+    fontSize: '0.875rem',
+};

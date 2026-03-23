@@ -7,6 +7,10 @@ import {
     getReviewEscalationHistory,
     getReviewEscalationLog,
 } from '../../../api/admin/adminModerationApi';
+import {
+    getAdminComplianceLockRequests,
+    resolveAdminComplianceLockRequest,
+} from '../../../api/admin/adminComplianceApi';
 import { getChapterReviewContent } from '../../../api/moderator/moderatorApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
 import { localDateTimeInputToIsoUtc } from '../../../utils/moderatorReviewSla';
@@ -243,6 +247,7 @@ const inputBase = {
 export function ReviewEscalationsManagement() {
     /** Hai vùng chính (cùng cấu trúc màn Admin Client): đơn moderator vs log escalation. */
     const [mainTab, setMainTab] = useState('orders');
+    const [orderSourceTab, setOrderSourceTab] = useState('moderator'); // moderator | compliance
     const [listMode, setListMode] = useState('pending');
     const [tier, setTier] = useState('');
     const [loading, setLoading] = useState(true);
@@ -261,6 +266,10 @@ export function ReviewEscalationsManagement() {
     /** { loading, error, items } | null — metadata các chương khi target STORY (không nội dung) */
     const [resolveStoryChaptersPreview, setResolveStoryChaptersPreview] = useState(null);
     const [resolving, setResolving] = useState(false);
+    const [complianceResolveRow, setComplianceResolveRow] = useState(null);
+    const [complianceDecision, setComplianceDecision] = useState('APPROVE_UNLOCK');
+    const [complianceAdminNote, setComplianceAdminNote] = useState('');
+    const [complianceResolving, setComplianceResolving] = useState(false);
 
     /** Log tab */
     const [logLoading, setLogLoading] = useState(false);
@@ -286,6 +295,30 @@ export function ReviewEscalationsManagement() {
         setLoading(true);
         setError(null);
         try {
+            if (orderSourceTab === 'compliance') {
+                if (listMode === 'history') {
+                    const [approvedRes, rejectedRes] = await Promise.all([
+                        getAdminComplianceLockRequests({ status: 'APPROVED' }),
+                        getAdminComplianceLockRequests({ status: 'REJECTED' }),
+                    ]);
+                    const approved = Array.isArray(approvedRes) ? approvedRes : [];
+                    const rejected = Array.isArray(rejectedRes) ? rejectedRes : [];
+                    const merged = [...approved, ...rejected].sort((a, b) => {
+                        const ta = new Date(a?.resolvedAtUtc ?? a?.resolved_at ?? a?.createdAtUtc ?? a?.created_at ?? 0).getTime();
+                        const tb = new Date(b?.resolvedAtUtc ?? b?.resolved_at ?? b?.createdAtUtc ?? b?.created_at ?? 0).getTime();
+                        return tb - ta;
+                    });
+                    setItems(merged);
+                    setHistoryTotal(merged.length);
+                    setCounts({ critical: 0, high: 0, standard: 0 });
+                    return;
+                }
+                const pendingRes = await getAdminComplianceLockRequests({ status: 'PENDING' });
+                const pending = Array.isArray(pendingRes) ? pendingRes : [];
+                setItems(pending);
+                setCounts({ critical: 0, high: 0, standard: 0 });
+                return;
+            }
             if (listMode === 'history') {
                 const rh = await getReviewEscalationHistory(0, 200);
                 const hist = rh?.items ?? rh?.Items ?? [];
@@ -309,7 +342,7 @@ export function ReviewEscalationsManagement() {
         } finally {
             setLoading(false);
         }
-    }, [listMode, tier]);
+    }, [listMode, tier, orderSourceTab]);
 
     const loadLog = useCallback(async (pageOverride) => {
         const page = typeof pageOverride === 'number' && pageOverride >= 1 ? pageOverride : logPage;
@@ -534,6 +567,41 @@ export function ReviewEscalationsManagement() {
         }
     };
 
+    const openComplianceResolve = (row) => {
+        setComplianceResolveRow(row);
+        setComplianceDecision('APPROVE_UNLOCK');
+        setComplianceAdminNote('');
+        setResolveApiError(null);
+    };
+
+    const closeComplianceResolve = () => {
+        if (complianceResolving) return;
+        setComplianceResolveRow(null);
+        setResolveApiError(null);
+    };
+
+    const submitComplianceResolve = async () => {
+        if (!complianceResolveRow) return;
+        const id = complianceResolveRow.id ?? complianceResolveRow.Id;
+        setComplianceResolving(true);
+        setResolveApiError(null);
+        try {
+            await resolveAdminComplianceLockRequest(id, {
+                decision: complianceDecision,
+                adminNote: complianceAdminNote.trim() || undefined,
+            });
+            setComplianceResolveRow(null);
+            await loadOrders();
+        } catch (e) {
+            setResolveApiError({
+                title: 'Không thể xử lý đơn compliance',
+                message: getEscalationResolveErrorMessage(e),
+            });
+        } finally {
+            setComplianceResolving(false);
+        }
+    };
+
     const applyLogFilters = () => {
         setLogPage(1);
         loadLog(1);
@@ -564,12 +632,12 @@ export function ReviewEscalationsManagement() {
             >
                 <button
                     type="button"
-                    onClick={() => setMainTab('orders')}
+                    onClick={() => { setMainTab('orders'); setOrderSourceTab('moderator'); }}
                     style={pubTabStyle(mainTab === 'orders', T.sky)}
                     {...pillHoverHandlers(mainTab === 'orders')}
                 >
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        Đơn moderator
+                        Đơn xử lý
                         {counts.critical > 0 && mainTab === 'orders' && listMode === 'pending' && (
                             <span
                                 style={{
@@ -591,6 +659,18 @@ export function ReviewEscalationsManagement() {
                         )}
                     </span>
                 </button>
+                {mainTab === 'orders' && (
+                    <div style={{ marginLeft: 4, display: 'flex', gap: 8 }}>
+                        <button
+                            type="button"
+                            onClick={() => setOrderSourceTab('compliance')}
+                            style={pubTabStyle(orderSourceTab === 'compliance', '#7c3aed')}
+                            {...pillHoverHandlers(orderSourceTab === 'compliance')}
+                        >
+                            Đơn compliance
+                        </button>
+                    </div>
+                )}
                 <button
                     type="button"
                     onClick={() => setMainTab('log')}
@@ -605,7 +685,9 @@ export function ReviewEscalationsManagement() {
                 <div style={{ backgroundColor: T.card, borderRadius: '12px', border: `1px solid ${T.border}`, overflow: 'hidden' }}>
                     <div style={{ padding: '1.25rem 1.5rem' }}>
                         <h2 style={{ margin: '0 0 1rem', fontSize: '1.125rem', fontWeight: 600, color: T.title }}>
-                            Đơn escalation — moderator báo không kịp hạn duyệt
+                            {orderSourceTab === 'compliance'
+                                ? 'Đơn từ Compliance officer — yêu cầu gỡ lock xử lý vi phạm'
+                                : 'Đơn escalation — moderator báo không kịp hạn duyệt'}
                         </h2>
 
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.25rem' }}>
@@ -627,7 +709,7 @@ export function ReviewEscalationsManagement() {
                             </button>
                         </div>
 
-                        {listMode === 'pending' && (
+                        {listMode === 'pending' && orderSourceTab === 'moderator' && (
                             <div style={{ marginBottom: '1.25rem' }}>
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
                                     <div style={{ borderRadius: '12px', border: `1px solid ${T.critical.border}`, background: T.critical.bg, padding: '1rem' }}>
@@ -669,7 +751,9 @@ export function ReviewEscalationsManagement() {
 
                         {listMode === 'history' && (
                             <p style={{ fontSize: '0.875rem', color: T.slate, margin: '0 0 1rem', lineHeight: 1.5 }}>
-                                Các đơn đã chấp nhận hoặc từ chối — dữ liệu lưu trong hệ thống để tra cứu.
+                                {orderSourceTab === 'compliance'
+                                    ? 'Các đơn gỡ lock compliance đã xử lý (APPROVED/REJECTED).'
+                                    : 'Các đơn đã chấp nhận hoặc từ chối — dữ liệu lưu trong hệ thống để tra cứu.'}
                             </p>
                         )}
 
@@ -708,41 +792,75 @@ export function ReviewEscalationsManagement() {
                                 </p>
                             ) : (
                                 <>
-                                    <p style={{ fontSize: '0.8125rem', color: T.slate, marginBottom: 8 }}>
-                                        Tổng đơn đã xử lý: <strong>{historyTotal}</strong> — hiển thị <strong>200</strong> bản ghi mới nhất.
-                                    </p>
-                                    <div style={{ overflowX: 'auto', border: `1px solid ${T.border}`, borderRadius: '12px' }}>
-                                        <table style={tableBase}>
-                                            <thead>
-                                                <tr>
-                                                    {['Kết quả', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Người xử lý', 'Xử lý lúc', 'Hạn xác nhận', 'Ghi chú admin', 'Lý do'].map((h) => (
-                                                        <th key={h} style={thBase}>{h}</th>
-                                                    ))}
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {items.map((row) => {
-                                                    const id = row.id ?? row.Id;
-                                                    const note = truncate(row.resolverNote ?? row.ResolverNote ?? '—', 160);
-                                                    const reason = truncate(row.reason ?? row.Reason ?? '', 160);
-                                                    return (
-                                                        <tr key={id}>
-                                                            <td style={tdBase}>{historyResultBadge(row.status ?? row.Status)}</td>
-                                                            <td style={tdBase}>{row.targetType ?? row.TargetType}</td>
-                                                            <td style={tdBase}><TargetTitleCell row={row} /></td>
-                                                            <td style={tdBase}>{row.senderName ?? row.SenderName ?? '—'}</td>
-                                                            <td style={tdBase}>{kindShort(row.requestKind ?? row.RequestKind)}</td>
-                                                            <td style={tdBase}>{row.resolverName ?? row.ResolverName ?? '—'}</td>
-                                                            <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeLocalVi(row.resolvedAt ?? row.ResolvedAt)}</td>
-                                                            <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeLocalVi(row.confirmedDeadlineAt ?? row.ConfirmedDeadlineAt)}</td>
-                                                            <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{note}</td>
-                                                            <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{reason || '—'}</td>
+                                    {orderSourceTab === 'compliance' ? (
+                                        <div style={{ overflowX: 'auto', border: `1px solid ${T.border}`, borderRadius: '12px' }}>
+                                            <table style={tableBase}>
+                                                <thead>
+                                                    <tr>
+                                                        {['Kết quả', 'Truyện', 'Người gửi', 'Lý do', 'Tạo lúc', 'Xử lý lúc', 'Ghi chú admin'].map((h) => (
+                                                            <th key={h} style={thBase}>{h}</th>
+                                                        ))}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {items.map((row) => {
+                                                        const id = row.id ?? row.Id;
+                                                        const status = row.status ?? row.Status;
+                                                        const note = row.resolutionNote ?? row.resolution_note ?? '—';
+                                                        return (
+                                                            <tr key={id}>
+                                                                <td style={tdBase}>{historyResultBadge(status)}</td>
+                                                                <td style={tdBase}>{row.storyTitle ?? row.story?.title ?? '—'}</td>
+                                                                <td style={tdBase}>{row.requesterDisplayName ?? row.requesterEmail ?? '—'}</td>
+                                                                <td style={{ ...tdBase, maxWidth: 260, fontSize: '0.75rem' }}>{truncate(row.message ?? '', 180) || '—'}</td>
+                                                                <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.createdAtUtc ?? row.created_at)}</td>
+                                                                <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.resolvedAtUtc ?? row.resolved_at)}</td>
+                                                                <td style={{ ...tdBase, maxWidth: 240, fontSize: '0.75rem' }}>{truncate(note, 180) || '—'}</td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <p style={{ fontSize: '0.8125rem', color: T.slate, marginBottom: 8 }}>
+                                                Tổng đơn đã xử lý: <strong>{historyTotal}</strong> — hiển thị <strong>200</strong> bản ghi mới nhất.
+                                            </p>
+                                            <div style={{ overflowX: 'auto', border: `1px solid ${T.border}`, borderRadius: '12px' }}>
+                                                <table style={tableBase}>
+                                                    <thead>
+                                                        <tr>
+                                                            {['Kết quả', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Người xử lý', 'Xử lý lúc', 'Hạn xác nhận', 'Ghi chú admin', 'Lý do'].map((h) => (
+                                                                <th key={h} style={thBase}>{h}</th>
+                                                            ))}
                                                         </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                                    </thead>
+                                                    <tbody>
+                                                        {items.map((row) => {
+                                                            const id = row.id ?? row.Id;
+                                                            const note = truncate(row.resolverNote ?? row.ResolverNote ?? '—', 160);
+                                                            const reason = truncate(row.reason ?? row.Reason ?? '', 160);
+                                                            return (
+                                                                <tr key={id}>
+                                                                    <td style={tdBase}>{historyResultBadge(row.status ?? row.Status)}</td>
+                                                                    <td style={tdBase}>{row.targetType ?? row.TargetType}</td>
+                                                                    <td style={tdBase}><TargetTitleCell row={row} /></td>
+                                                                    <td style={tdBase}>{row.senderName ?? row.SenderName ?? '—'}</td>
+                                                                    <td style={tdBase}>{kindShort(row.requestKind ?? row.RequestKind)}</td>
+                                                                    <td style={tdBase}>{row.resolverName ?? row.ResolverName ?? '—'}</td>
+                                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeLocalVi(row.resolvedAt ?? row.ResolvedAt)}</td>
+                                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeLocalVi(row.confirmedDeadlineAt ?? row.ConfirmedDeadlineAt)}</td>
+                                                                    <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{note}</td>
+                                                                    <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{reason || '—'}</td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </>
+                                    )}
                                 </>
                             )
                         ) : items.length === 0 ? (
@@ -752,7 +870,10 @@ export function ReviewEscalationsManagement() {
                                 <table style={tableBase}>
                                     <thead>
                                         <tr>
-                                            {['Mức độ', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Hạn hiện tại', 'Hạn đề xuất', 'Lý do', ''].map((h) => (
+                                            {(orderSourceTab === 'compliance'
+                                                ? ['Trạng thái', 'Truyện', 'Người gửi', 'Lý do', 'Tạo lúc', '']
+                                                : ['Mức độ', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Hạn hiện tại', 'Hạn đề xuất', 'Lý do', '']
+                                            ).map((h) => (
                                                 <th key={h || 'a'} style={thBase}>{h}</th>
                                             ))}
                                         </tr>
@@ -760,6 +881,39 @@ export function ReviewEscalationsManagement() {
                                     <tbody>
                                         {items.map((row) => {
                                             const id = row.id ?? row.Id;
+                                            if (orderSourceTab === 'compliance') {
+                                                return (
+                                                    <tr key={id}>
+                                                        <td style={tdBase}>{logStatusBadge(row.status ?? row.Status)}</td>
+                                                        <td style={tdBase}>{row.storyTitle ?? row.story?.title ?? '—'}</td>
+                                                        <td style={tdBase}>{row.requesterDisplayName ?? row.requesterEmail ?? '—'}</td>
+                                                        <td style={{ ...tdBase, maxWidth: 280, wordBreak: 'break-word', fontSize: '0.75rem' }}>
+                                                            {row.message || '—'}
+                                                        </td>
+                                                        <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+                                                            {formatApiDateTimeLocalVi(row.createdAtUtc ?? row.created_at)}
+                                                        </td>
+                                                        <td style={tdBase}>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openComplianceResolve(row)}
+                                                                style={{
+                                                                    padding: '0.5rem 0.875rem',
+                                                                    fontSize: '0.8125rem',
+                                                                    fontWeight: 600,
+                                                                    background: '#7c3aed',
+                                                                    color: '#fff',
+                                                                    border: 'none',
+                                                                    borderRadius: 8,
+                                                                    cursor: 'pointer',
+                                                                }}
+                                                            >
+                                                                Xử lý
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            }
                                             return (
                                                 <tr key={id}>
                                                     <td style={tdBase}>{urgencyBadge(row.urgencyTier ?? row.UrgencyTier)}</td>
@@ -1383,6 +1537,72 @@ export function ReviewEscalationsManagement() {
                                 onMouseLeave={(e) => { e.currentTarget.style.background = T.green; }}
                             >
                                 Chấp nhận
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {complianceResolveRow && (
+                <div
+                    style={{
+                        position: 'fixed', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 10050,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem',
+                    }}
+                    onClick={() => !complianceResolving && closeComplianceResolve()}
+                >
+                    <div
+                        style={{
+                            background: T.card, borderRadius: '12px', maxWidth: 620, width: '100%', maxHeight: '85vh',
+                            overflow: 'auto', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 40px rgba(0,0,0,0.15)', border: `1px solid ${T.border}`,
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1rem 1.25rem', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: T.title }}>Xử lý đơn gỡ lock từ compliance</h3>
+                            <button type="button" onClick={closeComplianceResolve} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
+                        </div>
+                        <div style={{ padding: '1rem 1.25rem', display: 'grid', gap: 10 }}>
+                            <div style={{ fontSize: '0.875rem', color: T.slateDark, lineHeight: 1.5 }}>
+                                <div><strong>Truyện:</strong> {complianceResolveRow.storyTitle ?? complianceResolveRow.story?.title ?? '—'}</div>
+                                <div><strong>Người gửi:</strong> {complianceResolveRow.requesterDisplayName ?? complianceResolveRow.requesterEmail ?? '—'}</div>
+                                <div><strong>Lý do:</strong> {complianceResolveRow.message || '—'}</div>
+                            </div>
+                            {resolveApiError ? (
+                                <div role="alert" style={{ padding: '0.75rem 1rem', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2' }}>
+                                    <div style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>{resolveApiError.title}</div>
+                                    <div style={{ fontSize: '0.8125rem', color: '#7f1d1d', lineHeight: 1.45 }}>{resolveApiError.message}</div>
+                                </div>
+                            ) : null}
+                            <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                Quyết định
+                                <select value={complianceDecision} onChange={(e) => setComplianceDecision(e.target.value)} style={inputBase}>
+                                    <option value="APPROVE_UNLOCK">APPROVE_UNLOCK (Chấp nhận trả hàng đợi)</option>
+                                    <option value="REJECT">REJECT (Từ chối)</option>
+                                </select>
+                            </label>
+                            <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                Ghi chú admin
+                                <textarea
+                                    value={complianceAdminNote}
+                                    onChange={(e) => setComplianceAdminNote(e.target.value)}
+                                    rows={3}
+                                    placeholder="Nhập ghi chú xử lý..."
+                                    style={{ ...inputBase, marginTop: 6, fontFamily: 'inherit', minHeight: '4.5rem' }}
+                                />
+                            </label>
+                        </div>
+                        <div style={{ padding: '0.75rem 1.25rem 1.25rem', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${T.border}`, background: T.bg }}>
+                            <button type="button" disabled={complianceResolving} onClick={closeComplianceResolve} style={{ padding: '0.5rem 1rem', borderRadius: 8, border: `1px solid ${T.border}`, background: T.card, fontWeight: 600, cursor: 'pointer', color: T.title }}>
+                                Đóng
+                            </button>
+                            <button
+                                type="button"
+                                disabled={complianceResolving}
+                                onClick={submitComplianceResolve}
+                                style={{ padding: '0.5rem 1rem', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                {complianceResolving ? 'Đang xử lý...' : 'Xác nhận xử lý'}
                             </button>
                         </div>
                     </div>

@@ -24,8 +24,19 @@ export async function getComplianceStoryReports(params = {}) {
     return res.data;
 }
 
-export async function claimComplianceStoryReports(storyId) {
-    const res = await axiosInstance.post(`/compliance/story-reports/stories/${storyId}/claim`);
+export async function claimComplianceStoryReports(storyId, body) {
+    const payload = body && Object.keys(body).length > 0 ? body : undefined;
+    const res = await axiosInstance.post(`/compliance/story-reports/stories/${storyId}/claim`, payload);
+    return res.data;
+}
+
+export async function releaseComplianceStoryClaim(storyId) {
+    const res = await axiosInstance.post(`/compliance/story-reports/stories/${storyId}/release-claim`);
+    return res.data;
+}
+
+export async function requestComplianceStoryRelease(storyId, body) {
+    const res = await axiosInstance.post(`/compliance/story-reports/stories/${storyId}/request-release`, body);
     return res.data;
 }
 
