@@ -220,9 +220,80 @@ export async function checkChapter(payload) {
 
 /**
  * Xem giới hạn sử dụng AI của user hiện tại (số lần/24h).
- * @returns {Promise<{ limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string }>}
+ * @returns {Promise<{
+ *   suggestNextChapter: { limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string|null },
+ *   coCreate: { limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string|null },
+ *   // legacy root (mirror suggest)
+ *   limitPerDay: number, usedInWindow: number, remaining: number, resetsAtUtc: string|null
+ * }>}
  */
 export async function getAiUsageLimit() {
     const response = await axiosInstance.get("ai/usage-limit");
-    return response.data;
+    const raw = response?.data ?? {};
+    // DEBUG tạm: in payload usage-limit đúng 1 lần để đối chiếu BE runtime.
+    if (typeof window !== "undefined" && !window.__aiUsageLimitLoggedOnce) {
+        window.__aiUsageLimitLoggedOnce = true;
+        console.log("[AI usage-limit raw payload]", raw);
+    }
+    const payload = raw?.data ?? raw?.Data ?? raw;
+    const suggestRaw =
+        payload?.suggestNextChapter ??
+        payload?.SuggestNextChapter ??
+        payload?.suggest_next_chapter ??
+        payload?.suggest ??
+        {};
+    const coCreateRaw =
+        payload?.coCreate ??
+        payload?.CoCreate ??
+        payload?.co_create ??
+        payload?.coCreateLimit ??
+        payload?.coCreateUsage ??
+        {};
+
+    const pickNum = (obj, keys, fallback = 0) => {
+        for (const k of keys) {
+            const v = obj?.[k];
+            if (v != null && Number.isFinite(Number(v))) return Number(v);
+        }
+        return Number.isFinite(Number(fallback)) ? Number(fallback) : 0;
+    };
+    const pickVal = (obj, keys, fallback = null) => {
+        for (const k of keys) {
+            const v = obj?.[k];
+            if (v != null) return v;
+        }
+        return fallback;
+    };
+
+    // Legacy root vẫn dùng cho suggest.
+    const rootLimit = pickNum(payload, ["limitPerDay", "LimitPerDay", "limit_per_day"], 0);
+    const rootUsed = pickNum(payload, ["usedInWindow", "UsedInWindow", "used_in_window"], 0);
+    const rootRemaining = pickNum(payload, ["remaining", "Remaining"], 0);
+    const rootResets = pickVal(payload, ["resetsAtUtc", "ResetsAtUtc", "resets_at_utc"], null);
+
+    const suggest = {
+        limitPerDay: pickNum(suggestRaw, ["limitPerDay", "LimitPerDay", "limit_per_day"], rootLimit),
+        usedInWindow: pickNum(suggestRaw, ["usedInWindow", "UsedInWindow", "used_in_window"], rootUsed),
+        remaining: pickNum(suggestRaw, ["remaining", "Remaining"], rootRemaining),
+        resetsAtUtc: pickVal(suggestRaw, ["resetsAtUtc", "ResetsAtUtc", "resets_at_utc"], rootResets),
+    };
+
+    // Co-create: chỉ dùng object riêng. Nếu BE runtime chưa trả object này thì đánh dấu unavailable.
+    const hasCoCreateObject = Object.keys(coCreateRaw || {}).length > 0;
+    const coCreate = {
+        limitPerDay: hasCoCreateObject ? pickNum(coCreateRaw, ["limitPerDay", "LimitPerDay", "limit_per_day"], 0) : null,
+        usedInWindow: hasCoCreateObject ? pickNum(coCreateRaw, ["usedInWindow", "UsedInWindow", "used_in_window"], 0) : null,
+        remaining: hasCoCreateObject ? pickNum(coCreateRaw, ["remaining", "Remaining"], 0) : null,
+        resetsAtUtc: hasCoCreateObject ? pickVal(coCreateRaw, ["resetsAtUtc", "ResetsAtUtc", "resets_at_utc"], null) : null,
+    };
+
+    return {
+        suggestNextChapter: suggest,
+        coCreate,
+        coCreateAvailable: hasCoCreateObject,
+        limitPerDay: suggest.limitPerDay,
+        usedInWindow: suggest.usedInWindow,
+        remaining: suggest.remaining,
+        resetsAtUtc: suggest.resetsAtUtc,
+    };
 }

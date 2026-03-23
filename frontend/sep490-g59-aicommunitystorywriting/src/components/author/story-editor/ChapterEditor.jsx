@@ -132,10 +132,19 @@ export function ChapterEditor({ chapter, onChange, story }) {
         try {
             const data = await getAiUsageLimit();
             setAiUsageLimit({
-                limitPerDay: Number(data?.limitPerDay ?? data?.LimitPerDay ?? 0) || 0,
-                usedInWindow: Number(data?.usedInWindow ?? data?.UsedInWindow ?? 0) || 0,
-                remaining: Number(data?.remaining ?? data?.Remaining ?? 0) || 0,
-                resetsAtUtc: data?.resetsAtUtc ?? data?.ResetsAtUtc ?? null,
+                suggestNextChapter: {
+                    limitPerDay: Number(data?.suggestNextChapter?.limitPerDay ?? 0) || 0,
+                    usedInWindow: Number(data?.suggestNextChapter?.usedInWindow ?? 0) || 0,
+                    remaining: Number(data?.suggestNextChapter?.remaining ?? 0) || 0,
+                    resetsAtUtc: data?.suggestNextChapter?.resetsAtUtc ?? null,
+                },
+                coCreate: {
+                    limitPerDay: Number(data?.coCreate?.limitPerDay ?? 0) || 0,
+                    usedInWindow: Number(data?.coCreate?.usedInWindow ?? 0) || 0,
+                    remaining: Number(data?.coCreate?.remaining ?? 0) || 0,
+                    resetsAtUtc: data?.coCreate?.resetsAtUtc ?? null,
+                },
+                coCreateAvailable: Boolean(data?.coCreateAvailable),
             });
         } catch {
             setAiUsageLimit(null);
@@ -733,7 +742,7 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
                                             AI gợi ý ý tưởng
-                                            {aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
+                                            {aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                         </button>
                                         <button
                                             type="button"
@@ -742,7 +751,11 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
                                             AI gợi ý chương
-                                            {aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
+                                            {aiUsageLimit
+                                                ? (aiUsageLimit.coCreateAvailable
+                                                    ? ` (${aiUsageLimit.coCreate?.remaining ?? 0}/${aiUsageLimit.coCreate?.limitPerDay ?? 0})`
+                                                    : ' (—/—)')
+                                                : ''}
                                         </button>
                                     </>
                                 )}

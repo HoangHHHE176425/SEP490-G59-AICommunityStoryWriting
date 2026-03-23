@@ -279,7 +279,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             RevisionCount = revisionCount,
             RevisionFeedbacks = revisionFeedbacks.Count > 0 ? revisionFeedbacks : null,
             ReviewFeedback = approved ? null : reviewFeedback,
-            ChapterId = saved.LinkedChapterId,
+            ChapterId = null,
             AiGeneratedContentId = saved.Id,
             ChapterIndex = saved.ChapterIndex,
             AgentDurations = durations.Count > 0 ? durations : null
@@ -298,7 +298,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         string finalContent,
         int? targetOrderIndex = null)
     {
-        if (string.IsNullOrWhiteSpace(finalContent)) return (null, null, null);
+        if (string.IsNullOrWhiteSpace(finalContent)) return (null, null);
         var chaptersList = _chapterRepository.GetByStoryId(storyId).ToList();
         // Khớp chapters.order_index từ FE (chương 1 → order_index 0). Ưu tiên index chương đang soạn để compare-chapter-preview khớp khi copy–paste.
         int nextChapterIndex;
@@ -311,7 +311,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         {
             id = Guid.NewGuid(),
             story_id = storyId,
-            chapter_id = linkedChapterId,
+            chapter_id = null,
             chapter_index = nextChapterIndex,
             user_id = authorUserId,
             input_prompt = authorIdea.Length > 2000 ? authorIdea[..2000] + "..." : authorIdea,
@@ -319,7 +319,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             created_at = now
         };
         _aiContentRepository.Add(aiRecord);
-        return (aiRecord.id, nextChapterIndex, linkedChapterId);
+        return (aiRecord.id, nextChapterIndex);
     }
 
     private static string GetAgent1SystemPrompt() => """

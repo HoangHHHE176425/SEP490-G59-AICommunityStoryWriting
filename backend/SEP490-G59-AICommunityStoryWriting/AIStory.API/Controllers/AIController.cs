@@ -9,12 +9,43 @@ using AIStory.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json.Serialization;
 using Repositories;
 using Services.DTOs.AI;
 using Services.Interfaces;
 
 namespace AIStory.API.Controllers
 {
+    public sealed class AiUsageLimitItemResponse
+    {
+        [JsonPropertyName("limitPerDay")]
+        public int LimitPerDay { get; set; }
+        [JsonPropertyName("usedInWindow")]
+        public int UsedInWindow { get; set; }
+        [JsonPropertyName("remaining")]
+        public int Remaining { get; set; }
+        [JsonPropertyName("resetsAtUtc")]
+        public DateTime? ResetsAtUtc { get; set; }
+    }
+
+    public sealed class AiUsageLimitResponse
+    {
+        [JsonPropertyName("suggestNextChapter")]
+        public AiUsageLimitItemResponse SuggestNextChapter { get; set; } = new();
+        [JsonPropertyName("coCreate")]
+        public AiUsageLimitItemResponse CoCreate { get; set; } = new();
+
+        // Legacy root fields (mirror suggestNextChapter)
+        [JsonPropertyName("limitPerDay")]
+        public int LimitPerDay { get; set; }
+        [JsonPropertyName("usedInWindow")]
+        public int UsedInWindow { get; set; }
+        [JsonPropertyName("remaining")]
+        public int Remaining { get; set; }
+        [JsonPropertyName("resetsAtUtc")]
+        public DateTime? ResetsAtUtc { get; set; }
+    }
+
     /// <summary>API AI: gợi ý chương tiếp theo, đồng sáng tác (3 agent), kiểm tra nhất quán.</summary>
     [ApiController]
     [Route("api/ai")]
@@ -68,28 +99,30 @@ namespace AIStory.API.Controllers
                 return Unauthorized(new { message = "Vui lòng đăng nhập." });
             var suggest = _rateLimitService.GetDailyLimitInfo(userId, AiRateLimitKind.SuggestNextChapter);
             var coCreate = _rateLimitService.GetDailyLimitInfo(userId, AiRateLimitKind.CoCreate);
-            return Ok(new
+
+            var payload = new AiUsageLimitResponse
             {
-                suggestNextChapter = new
+                SuggestNextChapter = new AiUsageLimitItemResponse
                 {
-                    limitPerDay = suggest.LimitPerDay,
-                    usedInWindow = suggest.UsedInWindow,
-                    remaining = suggest.Remaining,
-                    resetsAtUtc = suggest.ResetsAtUtc
+                    LimitPerDay = suggest.LimitPerDay,
+                    UsedInWindow = suggest.UsedInWindow,
+                    Remaining = suggest.Remaining,
+                    ResetsAtUtc = suggest.ResetsAtUtc
                 },
-                coCreate = new
+                CoCreate = new AiUsageLimitItemResponse
                 {
-                    limitPerDay = coCreate.LimitPerDay,
-                    usedInWindow = coCreate.UsedInWindow,
-                    remaining = coCreate.Remaining,
-                    resetsAtUtc = coCreate.ResetsAtUtc
+                    LimitPerDay = coCreate.LimitPerDay,
+                    UsedInWindow = coCreate.UsedInWindow,
+                    Remaining = coCreate.Remaining,
+                    ResetsAtUtc = coCreate.ResetsAtUtc
                 },
-                // Tương thích FE cũ (đọc flat ở root): trùng với suggest-next-chapter
-                limitPerDay = suggest.LimitPerDay,
-                usedInWindow = suggest.UsedInWindow,
-                remaining = suggest.Remaining,
-                resetsAtUtc = suggest.ResetsAtUtc
-            });
+                LimitPerDay = suggest.LimitPerDay,
+                UsedInWindow = suggest.UsedInWindow,
+                Remaining = suggest.Remaining,
+                ResetsAtUtc = suggest.ResetsAtUtc
+            };
+
+            return Ok(payload);
         }
 
         /// <summary>Gợi ý 3 hướng đi khác nhau cho chương tiếp theo. Chỉ tác giả của truyện được gọi. Có giới hạn số lần gọi theo user (tránh 429).</summary>

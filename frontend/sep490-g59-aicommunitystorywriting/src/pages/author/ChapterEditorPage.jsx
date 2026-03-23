@@ -232,10 +232,19 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         try {
             const data = await getAiUsageLimit();
             setAiUsageLimit({
-                limitPerDay: Number(data?.limitPerDay ?? data?.LimitPerDay ?? 0) || 0,
-                usedInWindow: Number(data?.usedInWindow ?? data?.UsedInWindow ?? 0) || 0,
-                remaining: Number(data?.remaining ?? data?.Remaining ?? 0) || 0,
-                resetsAtUtc: data?.resetsAtUtc ?? data?.ResetsAtUtc ?? null,
+                suggestNextChapter: {
+                    limitPerDay: Number(data?.suggestNextChapter?.limitPerDay ?? 0) || 0,
+                    usedInWindow: Number(data?.suggestNextChapter?.usedInWindow ?? 0) || 0,
+                    remaining: Number(data?.suggestNextChapter?.remaining ?? 0) || 0,
+                    resetsAtUtc: data?.suggestNextChapter?.resetsAtUtc ?? null,
+                },
+                coCreate: {
+                    limitPerDay: Number(data?.coCreate?.limitPerDay ?? 0) || 0,
+                    usedInWindow: Number(data?.coCreate?.usedInWindow ?? 0) || 0,
+                    remaining: Number(data?.coCreate?.remaining ?? 0) || 0,
+                    resetsAtUtc: data?.coCreate?.resetsAtUtc ?? null,
+                },
+                coCreateAvailable: Boolean(data?.coCreateAvailable),
             });
         } catch {
             // ignore (user có thể chưa đăng nhập / BE lỗi)
@@ -1937,22 +1946,30 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                         <>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
+                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                             </span>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý chương{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
+                                                AI gợi ý chương{aiUsageLimit
+                                                    ? (aiUsageLimit.coCreateAvailable
+                                                        ? ` (${aiUsageLimit.coCreate?.remaining ?? 0}/${aiUsageLimit.coCreate?.limitPerDay ?? 0})`
+                                                        : ' (—/—)')
+                                                    : ''}
                                             </span>
                                         </>
                                     ) : (
                                         <>
                                             <button type="button" onClick={() => handleAISuggestion('paragraph')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
+                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                             </button>
                                             <button type="button" onClick={() => handleAISuggestion('chapter')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý chương{aiUsageLimit ? ` (${aiUsageLimit.remaining}/${aiUsageLimit.limitPerDay})` : ''}
+                                                AI gợi ý chương{aiUsageLimit
+                                                    ? (aiUsageLimit.coCreateAvailable
+                                                        ? ` (${aiUsageLimit.coCreate?.remaining ?? 0}/${aiUsageLimit.coCreate?.limitPerDay ?? 0})`
+                                                        : ' (—/—)')
+                                                    : ''}
                                             </button>
                                         </>
                                     )}

@@ -698,20 +698,6 @@ namespace Services.Implementations
             };
         }
 
-        /// <inheritdoc />
-        public CommunityStatsDto GetPublicCommunityStats()
-        {
-            var q = _storyRepository.GetAll()
-                .Where(s => !s.compliance_hidden &&
-                    string.Equals((s.status ?? "").Trim(), "PUBLISHED", StringComparison.OrdinalIgnoreCase));
-            return new CommunityStatsDto
-            {
-                PublishedStoriesCount = q.Count(),
-                AuthorsCount = q.Where(s => s.author_id.HasValue).Select(s => s.author_id!.Value).Distinct().Count(),
-                TotalViews = q.Sum(s => (long)(s.total_views ?? 0)),
-            };
-        }
-
         private StoryListItemDto MapToListItemDto(stories story, IReadOnlyDictionary<Guid, string?>? authorAvatarByUserId = null)
         {
             var categories = story.category?.ToList() ?? new List<categories>();
