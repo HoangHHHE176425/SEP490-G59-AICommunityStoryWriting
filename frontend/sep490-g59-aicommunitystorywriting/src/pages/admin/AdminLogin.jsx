@@ -28,7 +28,13 @@ export function AdminLogin() {
         try {
             const result = await login(formData.email, formData.password);
             if (result.success) {
-                navigate('/admin', { replace: true });
+                const roleUpper = (result?.user?.role ?? result?.user?.Role ?? '').toString().toUpperCase();
+                // Điều hướng chung /admin; AdminPage tự tách màn theo role.
+                if (roleUpper === 'ADMIN' || roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE') {
+                    navigate('/admin', { replace: true });
+                } else {
+                    navigate('/home', { replace: true });
+                }
             } else {
                 setError(result.message || 'Đăng nhập thất bại. Kiểm tra lại email và mật khẩu.');
             }
