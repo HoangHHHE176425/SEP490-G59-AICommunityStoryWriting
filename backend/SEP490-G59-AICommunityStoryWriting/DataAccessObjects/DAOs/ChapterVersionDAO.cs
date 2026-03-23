@@ -123,6 +123,17 @@ namespace DataAccessObjects.DAOs
             }
         }
 
+        /// <summary>Xóa mọi version gắn với chapter (trước khi xóa chapter — tránh lỗi FK).</summary>
+        public static void DeleteAllByChapterId(Guid chapterId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var rows = context.chapter_versions.Where(v => v.chapter_id == chapterId).ToList();
+            if (rows.Count == 0)
+                return;
+            context.chapter_versions.RemoveRange(rows);
+            context.SaveChanges();
+        }
+
         /// <summary>Lấy số version tiếp theo cho chapter (max version_number + 1).</summary>
         public static int GetNextVersionNumber(Guid chapterId)
         {
