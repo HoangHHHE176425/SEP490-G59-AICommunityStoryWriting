@@ -3,16 +3,11 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace AIStory.API.Services
 {
-    /// <summary>Giới hạn số lần gọi AI theo user (mặc định 3 lần/ngày, admin chỉnh qua API).</summary>
+    /// <summary>Giới hạn số lần gọi AI theo user và loại API (suggest vs co-create tách biệt). N đọc từ ai_configs.</summary>
     public interface IAISuggestRateLimitService
     {
-        /// <summary>Kiểm tra và ghi nhận một lần gọi. Trả về true nếu được phép, false nếu vượt giới hạn.</summary>
-        /// <param name="userId">ID user (tác giả).</param>
-        /// <param name="retryAfterSeconds">Số giây nên chờ trước khi gọi lại (khi bị từ chối).</param>
-        bool TryAcquire(Guid userId, out int retryAfterSeconds);
-
-        /// <summary>Thông tin giới hạn sử dụng AI trong 24h (rolling): limit, đã dùng, còn lại, thời điểm reset.</summary>
-        AIUsageLimitInfo GetDailyLimitInfo(Guid userId);
+        bool TryAcquire(Guid userId, AiRateLimitKind kind, out int retryAfterSeconds);
+        AIUsageLimitInfo GetDailyLimitInfo(Guid userId, AiRateLimitKind kind);
     }
 
     /// <summary>Thông tin giới hạn AI (rolling 24h).</summary>
@@ -24,36 +19,41 @@ namespace AIStory.API.Services
         public DateTime? ResetsAtUtc { get; set; }
     }
 
-    /// <summary>Rate limit in-memory: N request / 24h (rolling) theo user. N đọc từ ai_configs qua IAIUsageLimitConfigService, admin chỉnh qua API.</summary>
+    /// <summary>Rate limit in-memory: N request / 24h (rolling) theo user và loại API.</summary>
     public class AISuggestRateLimitService : IAISuggestRateLimitService
     {
         private const int SecondsPerDay = 86400;
 
         private readonly IServiceScopeFactory _scopeFactory;
-        private readonly ConcurrentDictionary<Guid, object> _locks = new();
-        private readonly ConcurrentDictionary<Guid, List<DateTime>> _requestsByUser = new();
+        private readonly ConcurrentDictionary<string, object> _locks = new();
+        /// <summary>Key: "{kind}:{userId}" → timestamps trong cửa sổ 24h.</summary>
+        private readonly ConcurrentDictionary<string, List<DateTime>> _requestsByUserAndKind = new();
 
         public AISuggestRateLimitService(IServiceScopeFactory scopeFactory)
         {
             _scopeFactory = scopeFactory;
         }
 
-        private int GetMaxRequestsPerDay()
+        private static string StorageKey(AiRateLimitKind kind, Guid userId)
+            => $"{(int)kind}:{userId:N}";
+
+        private int GetMaxRequestsPerDay(AiRateLimitKind kind)
         {
             using var scope = _scopeFactory.CreateScope();
-            return scope.ServiceProvider.GetRequiredService<IAIUsageLimitConfigService>().GetMaxRequestsPerDay();
+            return scope.ServiceProvider.GetRequiredService<IAIUsageLimitConfigService>().GetMaxRequestsPerDay(kind);
         }
 
-        public bool TryAcquire(Guid userId, out int retryAfterSeconds)
+        public bool TryAcquire(Guid userId, AiRateLimitKind kind, out int retryAfterSeconds)
         {
             retryAfterSeconds = 0;
-            var maxRequests = GetMaxRequestsPerDay();
-            var lockObj = _locks.GetOrAdd(userId, _ => new object());
+            var maxRequests = GetMaxRequestsPerDay(kind);
+            var sKey = StorageKey(kind, userId);
+            var lockObj = _locks.GetOrAdd(sKey, _ => new object());
             lock (lockObj)
             {
                 var now = DateTime.UtcNow;
                 var windowStart = now.AddSeconds(-SecondsPerDay);
-                var list = _requestsByUser.GetOrAdd(userId, _ => new List<DateTime>());
+                var list = _requestsByUserAndKind.GetOrAdd(sKey, _ => new List<DateTime>());
 
                 list.RemoveAll(t => t < windowStart);
 
@@ -70,15 +70,16 @@ namespace AIStory.API.Services
             }
         }
 
-        public AIUsageLimitInfo GetDailyLimitInfo(Guid userId)
+        public AIUsageLimitInfo GetDailyLimitInfo(Guid userId, AiRateLimitKind kind)
         {
-            var maxRequests = GetMaxRequestsPerDay();
-            var lockObj = _locks.GetOrAdd(userId, _ => new object());
+            var maxRequests = GetMaxRequestsPerDay(kind);
+            var sKey = StorageKey(kind, userId);
+            var lockObj = _locks.GetOrAdd(sKey, _ => new object());
             lock (lockObj)
             {
                 var now = DateTime.UtcNow;
                 var windowStart = now.AddSeconds(-SecondsPerDay);
-                var list = _requestsByUser.GetOrAdd(userId, _ => new List<DateTime>());
+                var list = _requestsByUserAndKind.GetOrAdd(sKey, _ => new List<DateTime>());
                 list.RemoveAll(t => t < windowStart);
                 var used = list.Count;
                 DateTime? resetsAt = null;

@@ -202,7 +202,8 @@ namespace Services.Implementations
                 Status = v.status,
                 CreatedAt = v.created_at,
                 RejectionReason = v.rejection_reason,
-                ReviewedAt = v.reviewed_at
+                ReviewedAt = v.reviewed_at,
+                AiSimilarityPercent = v.ai_similarity_percent
             };
         }
 
@@ -216,7 +217,8 @@ namespace Services.Implementations
                 TitleSnapshot = v.title_snapshot,
                 Status = v.status,
                 CreatedAt = v.created_at,
-                ContentSnapshot = v.content_snapshot
+                ContentSnapshot = v.content_snapshot,
+                AiSimilarityPercent = v.ai_similarity_percent
             };
         }
 
