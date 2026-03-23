@@ -325,6 +325,7 @@ public partial class StoryPlatformDbContext : DbContext
                 .HasMaxLength(20)
                 .HasDefaultValue("DRAFT");
             entity.Property(e => e.title_snapshot).HasMaxLength(255);
+            entity.Property(e => e.ai_similarity_percent);
 
             entity.HasOne(d => d.author).WithMany(p => p.chapter_versions)
                 .HasForeignKey(d => d.author_id)

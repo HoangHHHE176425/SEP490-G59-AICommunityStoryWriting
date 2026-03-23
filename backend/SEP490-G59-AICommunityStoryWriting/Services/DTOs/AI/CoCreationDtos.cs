@@ -36,7 +36,7 @@ public class CoCreationResponse
     /// <summary>Feedback cuối từ Agent 3 nếu vẫn chưa đạt sau tất cả vòng sửa (để tác giả tham khảo). Khi Approved=true thì thường null.</summary>
     public string? ReviewFeedback { get; set; }
 
-    /// <summary>Luôn null: co-create không còn tạo chương DRAFT trong bảng chapters.</summary>
+    /// <summary>ID chương nếu đã tồn tại <c>chapters</c> trùng <c>story_id</c> + <c>order_index</c> với slot co-create; nếu không có chương tại slot đó thì null.</summary>
     public Guid? ChapterId { get; set; }
 
     /// <summary>ID bản ghi ai_generated_content vừa lưu (chapter_id null cho đến khi tác giả tạo chương qua API chapters).</summary>
