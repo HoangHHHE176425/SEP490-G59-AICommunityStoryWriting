@@ -10,5 +10,8 @@ namespace Services.DTOs.Chapters
         public DateTime? CreatedAt { get; set; }
         public string? RejectionReason { get; set; }
         public DateTime? ReviewedAt { get; set; }
+
+        /// <summary>% giống AI (0–100) sau khi gọi API so sánh version snapshot.</summary>
+        public decimal? AiSimilarityPercent { get; set; }
     }
 }

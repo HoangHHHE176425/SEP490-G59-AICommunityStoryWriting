@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace BusinessObjects.Entities;
@@ -28,6 +28,9 @@ public partial class chapter_versions
     public string? rejection_reason { get; set; }
 
     public string? title_snapshot { get; set; }
+
+    /// <summary>% giống nội dung AI (0–100), cập nhật khi gọi API so sánh snapshot với ai_generated_content.</summary>
+    public decimal? ai_similarity_percent { get; set; }
 
     public virtual users? author { get; set; }
 

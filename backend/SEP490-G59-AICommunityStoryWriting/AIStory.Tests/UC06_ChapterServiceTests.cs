@@ -216,6 +216,39 @@ public class UC06_ChapterServiceTests
         Assert.Contains("already exists", ex.Message);
     }
 
+    [Fact]
+    public void DeleteChapter_WithVersions_WithoutConfirm_ThrowsConfirmationException()
+    {
+        var repo = new FakeChapterRepository();
+        var ver = new FakeChapterVersionRepository();
+        var chapterId = Guid.NewGuid();
+        repo.Seed(new chapters { id = chapterId, story_id = Guid.NewGuid(), title = "C", order_index = 1, status = "DRAFT", access_type = "FREE", coin_price = 0 });
+        ver.Seed(new chapter_versions { id = Guid.NewGuid(), chapter_id = chapterId, version_number = 1, status = "DRAFT" });
+        var sut = CreateSut(repo, ver);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => sut.Delete(chapterId, deleteIncludingVersions: false));
+        Assert.Equal("CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED", ex.Data["ErrorCode"]?.ToString());
+        Assert.Equal(1, Convert.ToInt32(ex.Data["VersionCount"]));
+        Assert.True(repo.GetById(chapterId) != null);
+    }
+
+    [Fact]
+    public void DeleteChapter_WithVersions_WithConfirm_RemovesChapterAndVersions()
+    {
+        var repo = new FakeChapterRepository();
+        var ver = new FakeChapterVersionRepository();
+        var chapterId = Guid.NewGuid();
+        var versionId = Guid.NewGuid();
+        repo.Seed(new chapters { id = chapterId, story_id = Guid.NewGuid(), title = "C", order_index = 1, status = "DRAFT", access_type = "FREE", coin_price = 0 });
+        ver.Seed(new chapter_versions { id = versionId, chapter_id = chapterId, version_number = 1, status = "DRAFT" });
+        var sut = CreateSut(repo, ver);
+
+        var ok = sut.Delete(chapterId, deleteIncludingVersions: true);
+        Assert.True(ok);
+        Assert.Null(repo.GetById(chapterId));
+        Assert.Empty(ver.GetByChapterId(chapterId));
+    }
+
     private sealed class FakeChapterRepository : IChapterRepository
     {
         private readonly Dictionary<Guid, chapters> _store = new();
@@ -246,11 +279,24 @@ public class UC06_ChapterServiceTests
 
     private sealed class FakeChapterVersionRepository : IChapterVersionRepository
     {
-        public IEnumerable<chapter_versions> GetByChapterId(Guid chapterId) => Array.Empty<chapter_versions>();
-        public chapter_versions? GetById(Guid id) => null;
-        public void Add(chapter_versions version) { }
-        public void Update(chapter_versions version) { }
-        public void Delete(Guid id) { }
+        private readonly List<chapter_versions> _rows = new();
+
+        public void Seed(chapter_versions v) => _rows.Add(v);
+
+        public IEnumerable<chapter_versions> GetByChapterId(Guid chapterId)
+            => _rows.Where(v => v.chapter_id == chapterId).ToList();
+
+        public chapter_versions? GetById(Guid id) => _rows.FirstOrDefault(v => v.id == id);
+        public void Add(chapter_versions version) => _rows.Add(version);
+        public void Update(chapter_versions version)
+        {
+            var i = _rows.FindIndex(v => v.id == version.id);
+            if (i >= 0) _rows[i] = version;
+        }
+
+        public void Delete(Guid id) => _rows.RemoveAll(v => v.id == id);
+
+        public void DeleteAllByChapterId(Guid chapterId) => _rows.RemoveAll(v => v.chapter_id == chapterId);
     }
 
     private sealed class FakeAiGeneratedContentRepository : IAiGeneratedContentRepository
@@ -261,6 +307,7 @@ public class UC06_ChapterServiceTests
         public ai_generated_content? GetById(Guid id) => null;
         public void Add(ai_generated_content entity) { }
         public void UpdateChapterId(Guid id, Guid chapterId, int chapterOrderIndex) { }
+        public void DeleteAllByChapterId(Guid chapterId) { }
     }
 
     private sealed class FakeServiceScopeFactory : IServiceScopeFactory
