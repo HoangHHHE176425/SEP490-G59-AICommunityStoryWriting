@@ -15,6 +15,9 @@ namespace Services.Implementations
 {
     public class ChapterService : IChapterService
     {
+        /// <summary>Gắn vào <see cref="InvalidOperationException.Data"/> khi cần client xác nhận xóa kèm version (409).</summary>
+        internal const string DeleteRequiresVersionsConfirmationCode = "CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED";
+
         private readonly IChapterRepository _chapterRepository;
         private readonly IChapterVersionRepository _versionRepository;
         private readonly IAiGeneratedContentRepository _aiContentRepository;
@@ -469,7 +472,7 @@ namespace Services.Implementations
             return true;
         }
 
-        public bool Delete(Guid id)
+        public bool Delete(Guid id, bool deleteIncludingVersions = false)
         {
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
@@ -479,7 +482,24 @@ namespace Services.Implementations
             if (statusUpper != "DRAFT")
                 throw new InvalidOperationException("Chỉ được xóa chương khi ở trạng thái Bản nháp. Chương hiện tại: " + (chapter.status ?? "—"));
 
+            var versionCount = _versionRepository.GetByChapterId(id).Count();
+            if (versionCount > 0 && !deleteIncludingVersions)
+                ThrowRequiresVersionsDeleteConfirmation(versionCount);
+
             var storyId = chapter.story_id;
+
+            try
+            {
+                ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Complete review assignment on chapter delete failed (non-fatal). ChapterId={ChapterId}", id);
+            }
+
+            _aiContentRepository.DeleteAllByChapterId(id);
+            if (versionCount > 0)
+                _versionRepository.DeleteAllByChapterId(id);
 
             _chapterRepository.Delete(id);
 
@@ -572,6 +592,15 @@ namespace Services.Implementations
             }
 
             return true;
+        }
+
+        private static void ThrowRequiresVersionsDeleteConfirmation(int versionCount)
+        {
+            var ex = new InvalidOperationException(
+                "Chương có phiên bản (nháp / chỉnh sửa) đã lưu. Vui lòng xác nhận trên giao diện: nếu đồng ý, hệ thống sẽ xóa luôn toàn bộ phiên bản và chương.");
+            ex.Data["ErrorCode"] = DeleteRequiresVersionsConfirmationCode;
+            ex.Data["VersionCount"] = versionCount;
+            throw ex;
         }
 
         /// <summary>Tác giả chỉ được gửi xuất bản chương theo thứ tự 1, 2, 3... Chương trước phải đã gửi (PUBLISHED, PENDING_REVIEW, hoặc có ít nhất một version PENDING_REVIEW) thì mới gửi được chương tiếp theo.</summary>

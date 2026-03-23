@@ -19,5 +19,8 @@ namespace Repositories
 
         public void Delete(Guid id)
             => ChapterVersionDAO.Delete(id);
+
+        public void DeleteAllByChapterId(Guid chapterId)
+            => ChapterVersionDAO.DeleteAllByChapterId(chapterId);
     }
 }

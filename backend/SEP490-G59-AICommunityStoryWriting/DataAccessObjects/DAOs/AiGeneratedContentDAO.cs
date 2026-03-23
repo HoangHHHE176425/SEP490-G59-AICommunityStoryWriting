@@ -69,4 +69,16 @@ public static class AiGeneratedContentDAO
             context.SaveChanges();
         }
     }
+
+    /// <summary>Xóa mọi bản ghi AI gắn chapter (đồng bộ khi tác giả xóa chương DRAFT).</summary>
+    /// <remarks>
+    /// Dùng SQL trực tiếp để không materialize entity: DB cũ chưa chạy script thêm <c>chapter_index</c>
+    /// vẫn xóa được (tránh lỗi "Invalid column name 'chapter_index'").
+    /// </remarks>
+    public static void DeleteAllByChapterId(Guid chapterId)
+    {
+        using var context = new StoryPlatformDbContext();
+        context.Database.ExecuteSqlInterpolated(
+            $"DELETE FROM ai_generated_content WHERE chapter_id = {chapterId}");
+    }
 }
