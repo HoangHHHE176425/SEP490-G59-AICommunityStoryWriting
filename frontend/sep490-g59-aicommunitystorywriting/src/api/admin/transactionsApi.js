@@ -26,3 +26,8 @@ export async function rejectWithdraw(withdrawId, adminNote) {
     return res.data;
 }
 
+export async function syncWithdrawStatus(withdrawId) {
+    const res = await axiosInstance.post(`/admin/transactions/withdraw/${withdrawId}/sync`);
+    return res.data;
+}
+

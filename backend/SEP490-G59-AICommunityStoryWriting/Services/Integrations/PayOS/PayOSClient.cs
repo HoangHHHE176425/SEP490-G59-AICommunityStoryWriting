@@ -287,22 +287,35 @@ namespace Services.Integrations.PayOS
                 }).ToList<object?>()
             };
 
-            // PayOS uses x-signature computed from the request body payload.
-            var signature = CreateRequestSignature(checksumKey, body);
-            var signaturePreview = signature.Length <= 12 ? signature : $"{signature[..6]}...{signature[^6..]}";
-
             var resolvedIdempotencyKey = idempotencyKey ?? Guid.NewGuid().ToString();
 
-            var candidateUrls = new List<string>
+            var candidateRequests = new List<(string Url, Dictionary<string, object?> Body, string Mode)>
             {
-                $"{rootUrl}/v1/payouts/batch",
-                $"{rootUrl}/v2/payouts/batch",
+                ($"{rootUrl}/v1/payouts/batch", body, "batch"),
             };
 
-            string? lastError = null;
-            for (var i = 0; i < candidateUrls.Count; i++)
+            // Official SDK also supports single payout endpoint (/v1/payouts/).
+            // Some merchant accounts may not expose /batch, so we fallback when there's only 1 payout item.
+            if (request.Payouts.Count == 1)
             {
-                var url = candidateUrls[i];
+                var p = request.Payouts[0];
+                var singleBody = new Dictionary<string, object?>
+                {
+                    ["referenceId"] = p.ReferenceId,
+                    ["amount"] = p.Amount,
+                    ["description"] = p.Description,
+                    ["toBin"] = p.ToBin,
+                    ["toAccountNumber"] = p.ToAccountNumber,
+                    ["category"] = request.Category
+                };
+                candidateRequests.Add(($"{rootUrl}/v1/payouts/", singleBody, "single"));
+            }
+
+            string? lastError = null;
+            for (var i = 0; i < candidateRequests.Count; i++)
+            {
+                var candidate = candidateRequests[i];
+                var url = candidate.Url;
 
                 // PayOS may rate-limit batch payouts; wait+retry a couple of times.
                 const int max429Retries = 2;
@@ -310,13 +323,17 @@ namespace Services.Integrations.PayOS
 
                 while (true)
                 {
+                    // PayOS uses x-signature computed from the request body payload.
+                    var signature = CreateRequestSignature(checksumKey, candidate.Body);
+                    var signaturePreview = signature.Length <= 12 ? signature : $"{signature[..6]}...{signature[^6..]}";
+
                     using var httpReq = new HttpRequestMessage(HttpMethod.Post, url);
                     httpReq.Headers.Add("x-client-id", clientId);
                     httpReq.Headers.Add("x-api-key", apiKey);
                     httpReq.Headers.Add("x-idempotency-key", resolvedIdempotencyKey);
                     httpReq.Headers.Add("x-signature", signature);
                     httpReq.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-                    httpReq.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+                    httpReq.Content = new StringContent(JsonSerializer.Serialize(candidate.Body), Encoding.UTF8, "application/json");
 
                     using var httpRes = await _http.SendAsync(httpReq, cancellationToken);
                     var text = await httpRes.Content.ReadAsStringAsync(cancellationToken);
@@ -333,12 +350,12 @@ namespace Services.Integrations.PayOS
                             var dataKind = root.TryGetProperty("data", out var dEl2) ? dEl2.ValueKind : JsonValueKind.Undefined;
                             if (dataKind != JsonValueKind.Object)
                                 throw new InvalidOperationException(
-                                    $"PayOS payout failed. code={code}, desc={desc}, url={url}, clientId={Mask(clientId)}, apiKey={Mask(apiKey)}, x-signature={signaturePreview}");
+                                    $"PayOS payout failed. code={code}, desc={desc}, mode={candidate.Mode}, url={url}, clientId={Mask(clientId)}, apiKey={Mask(apiKey)}, x-signature={signaturePreview}");
                         }
 
                         if (!root.TryGetProperty("data", out var dataEl) || dataEl.ValueKind != JsonValueKind.Object)
                             throw new InvalidOperationException(
-                                $"PayOS response missing data: url={url}, clientId={Mask(clientId)}, apiKey={Mask(apiKey)}, x-signature={signaturePreview}, body={text}");
+                                $"PayOS response missing data: mode={candidate.Mode}, url={url}, clientId={Mask(clientId)}, apiKey={Mask(apiKey)}, x-signature={signaturePreview}, body={text}");
 
                         var payoutId = dataEl.TryGetProperty("id", out var idEl) ? idEl.ToString() : null;
                         var referenceId = dataEl.TryGetProperty("referenceId", out var refEl) ? refEl.ToString() : request.ReferenceId;
@@ -350,7 +367,7 @@ namespace Services.Integrations.PayOS
                         return new CreatePayoutBatchResult(payoutId!, referenceId ?? request.ReferenceId, approvalState ?? "UNKNOWN", text);
                     }
 
-                    lastError = $"PayOS error {(int)httpRes.StatusCode} for {url}: {text}";
+                    lastError = $"PayOS error {(int)httpRes.StatusCode} for {url} (mode={candidate.Mode}): {text}";
 
                     // Handle rate-limiting: 429
                     if (httpRes.StatusCode == (System.Net.HttpStatusCode)429 && retry429Count < max429Retries)
@@ -377,7 +394,7 @@ namespace Services.Integrations.PayOS
                 }
             }
 
-            throw new InvalidOperationException(lastError ?? $"PayOS payout batch failed. x-signature={signaturePreview}");
+            throw new InvalidOperationException(lastError ?? "PayOS payout batch failed.");
         }
 
         public async Task<GetPayoutResult> GetPayoutInfoAsync(string payoutId, CancellationToken cancellationToken = default)
