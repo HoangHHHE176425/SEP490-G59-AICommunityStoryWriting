@@ -28,7 +28,6 @@ import {
     getAdminComplianceLockRequests,
     getAdminComplianceLogs,
     getAdminComplianceOfficers,
-    getAdminCompliancePerformance,
     getComplianceCommentReports,
     getComplianceStoryReports,
     getComplianceUserViolations,
@@ -40,7 +39,6 @@ import {
     resolveAdminComplianceLockRequest,
     resolveAllOpenComplianceCommentReports,
     resolveAllOpenComplianceStoryReports,
-    resolveComplianceCommentReport,
     setComplianceCommentThreadHidden,
     setComplianceStoryCommentsDisabled,
     setComplianceStoryFlag,
@@ -190,11 +188,26 @@ function normalizeCommentQueueItem(x) {
     return {
         reportId: pick(x, 'reportId', 'ReportId'),
         commentId: pick(x, 'commentId', 'CommentId'),
+        storyId: pick(x, 'storyId', 'StoryId'),
         storyTitle: pick(x, 'storyTitle', 'StoryTitle'),
+        commentUserId: pick(x, 'commentUserId', 'CommentUserId') ?? null,
+        commentUserDisplayName: pick(x, 'commentUserDisplayName', 'CommentUserDisplayName'),
+        commentContent: pick(x, 'commentContent', 'CommentContent'),
+        isCommentThreadHidden: coerceBool(pick(x, 'isCommentThreadHidden', 'IsCommentThreadHidden')),
         priorityScore: Number(pick(x, 'priorityScore', 'PriorityScore') ?? 0) || 0,
+        maxSeverityScore: Number(pick(x, 'severityScore', 'SeverityScore') ?? 0) || 0,
+        timeWeight: Number(pick(x, 'timeWeight', 'TimeWeight') ?? 0) || 0,
+        reportCount: Number(pick(x, 'reportCount', 'ReportCount') ?? 0) || 0,
         status: pick(x, 'status', 'Status'),
-        adminOrModeratorReplyWarningVi: pick(x, 'adminOrModeratorReplyWarningVi', 'AdminOrModeratorReplyWarningVi'),
         reasonCode: pick(x, 'reasonCode', 'ReasonCode'),
+        reasonLabelVi: pick(x, 'reasonLabelVi', 'ReasonLabelVi'),
+        adminOrModeratorReplyWarningVi: pick(x, 'adminOrModeratorReplyWarningVi', 'AdminOrModeratorReplyWarningVi'),
+        isComplianceLocked: coerceBool(pick(x, 'isComplianceLocked', 'IsComplianceLocked')),
+        isComplianceClaimedByMe: coerceBool(pick(x, 'isComplianceClaimedByMe', 'IsComplianceClaimedByMe')),
+        complianceClaimedByDisplayName: pick(x, 'complianceClaimedByDisplayName', 'ComplianceClaimedByDisplayName'),
+        hasPendingAdminActionRequest: coerceBool(pick(x, 'hasPendingAdminActionRequest', 'HasPendingAdminActionRequest')),
+        reporterDisplayNames: Array.isArray(pick(x, 'reporterDisplayNames', 'ReporterDisplayNames')) ? pick(x, 'reporterDisplayNames', 'ReporterDisplayNames') : [],
+        reporterDetails: Array.isArray(pick(x, 'reporterDetails', 'ReporterDetails')) ? pick(x, 'reporterDetails', 'ReporterDetails') : [],
     };
 }
 
@@ -277,14 +290,38 @@ function statusViLabel(status) {
 function penaltyTypeVi(p) {
     const u = String(p ?? '').trim().toUpperCase();
     const map = {
-        COMMENTS_DISABLED: 'Khóa bình luận',
-        COMMENTS_ENABLED: 'Mở bình luận',
-        STORY_HIDDEN_COMPLIANCE: 'Ẩn truyện (compliance)',
-        STORY_UNHIDDEN_COMPLIANCE: 'Hiện lại truyện',
-        BAN: 'Chặn tài khoản (admin)',
+        COMMENTS_DISABLED: 'Tắt bình luận truyện',
+        COMMENTS_ENABLED: 'Bật lại bình luận truyện',
+        STORY_HIDDEN_COMPLIANCE: 'Ẩn truyện khỏi công khai',
+        STORY_UNHIDDEN_COMPLIANCE: 'Hiện lại truyện công khai',
+        COMMENT_HIDDEN: 'Ẩn bình luận',
+        COMMENT_UNHIDDEN: 'Hiện lại bình luận',
+        BAN: 'Chặn tài khoản',
         SUSPEND_AUTHOR_WRITING: 'Tạm đình chỉ quyền viết',
     };
     return map[u] || (p || '—');
+}
+
+/** Chuẩn hóa mô tả bản ghi cũ (DB) từng lưu cả từ tiếng Anh. */
+function violationReasonDisplayVi(text) {
+    const s = String(text ?? '').trim();
+    if (!s) return '—';
+    const legacy = [
+        [/Compliance\s+tắt\s+comment\s+truyện\.?/i, 'Đã tắt bình luận truyện (xử lý vi phạm).'],
+        [/Compliance\s+bật\s+lại\s+comment\s+truyện\.?/i, 'Đã bật lại bình luận truyện.'],
+        [/Compliance\s+ẩn\s+truyện\s+khỏi\s+công\s+khai\.?/i, 'Đã ẩn truyện khỏi danh sách công khai (xử lý vi phạm).'],
+        [/Compliance\s+hiện\s+lại\s+truyện\.?/i, 'Đã hiện lại truyện trên danh sách công khai.'],
+        [/Compliance\s+ẩn\s+comment\.?/i, 'Đã ẩn bình luận (xử lý vi phạm).'],
+        [/Compliance\s+hiện\s+lại\s+comment\.?/i, 'Đã hiện lại bình luận.'],
+    ];
+    let out = s;
+    for (const [re, vi] of legacy) {
+        if (re.test(out)) {
+            out = out.replace(re, vi);
+            break;
+        }
+    }
+    return out;
 }
 
 function complianceRequestStatusVi(s) {
@@ -324,12 +361,13 @@ export default function ViolationManagement() {
     const isAdmin = roleUpper === 'ADMIN';
     const tabs = useMemo(() => {
         const base = [
-            { id: 'story-reports', label: 'Report truyện' },
-            { id: 'comment-reports', label: 'Report bình luận' },
-            { id: 'compliance-logs', label: 'Compliance log' },
-            { id: 'compliance-performance', label: 'Hiệu suất compliance' },
+            { id: 'story-reports', label: 'Báo cáo vi phạm truyện' },
+            { id: 'comment-reports', label: 'Báo cáo vi phạm bình luận' },
         ];
-        if (isAdmin) base.splice(2, 0, { id: 'lock-requests', label: 'Yêu cầu gỡ lock' });
+        if (isAdmin) {
+            base.push({ id: 'lock-requests', label: 'Yêu cầu gỡ khóa đơn' });
+            base.push({ id: 'compliance-logs', label: 'Nhật ký hoạt động kiểm duyệt' });
+        }
         return base;
     }, [isAdmin]);
 
@@ -363,6 +401,9 @@ export default function ViolationManagement() {
     const [pendingReleaseByStory, setPendingReleaseByStory] = useState({});
     const [storyActionConfirm, setStoryActionConfirm] = useState(null);
     const [storyActionBusy, setStoryActionBusy] = useState(false);
+    const [bulkResolveModal, setBulkResolveModal] = useState(null);
+    const [bulkResolveStatus, setBulkResolveStatus] = useState('RESOLVED');
+    const [bulkResolveBusy, setBulkResolveBusy] = useState(false);
     const [accountViolationModal, setAccountViolationModal] = useState(null);
     const [accountViolationRows, setAccountViolationRows] = useState([]);
     const [accountViolationLoading, setAccountViolationLoading] = useState(false);
@@ -370,6 +411,12 @@ export default function ViolationManagement() {
     const [myLockRequests, setMyLockRequests] = useState([]);
     const [myAdminRequests, setMyAdminRequests] = useState([]);
     const [myRequestsLoading, setMyRequestsLoading] = useState(false);
+    const [showClaimedCommentList, setShowClaimedCommentList] = useState(false);
+    const [isCommentClaimPickerOpen, setIsCommentClaimPickerOpen] = useState(false);
+    const [commentClaimPickerRows, setCommentClaimPickerRows] = useState([]);
+    const [commentClaimPickerLoading, setCommentClaimPickerLoading] = useState(false);
+    const [commentClaimPickerStoryMeta, setCommentClaimPickerStoryMeta] = useState({});
+    const [infoModal, setInfoModal] = useState(null);
 
     const currentUserId = user?.id ?? user?.Id ?? null;
     const releaseStorageKey = useMemo(
@@ -379,14 +426,14 @@ export default function ViolationManagement() {
 
     const totalPages = useMemo(() => Math.max(1, Math.ceil(totalCount / PAGE_SIZE)), [totalCount]);
 
-    const loadData = useCallback(async (page = 1) => {
+    const loadData = useCallback(async (page = 1, opts = {}) => {
+        const afterClaim = opts.afterClaim === true;
         setLoading(true);
         setError(null);
         try {
             let data;
             if (activeTab === 'story-reports') {
-                if (!showClaimedStoryList) {
-                    // Auto-restore: nếu compliance đã nhận đơn trước đó thì tự hiển thị lại danh sách của tôi.
+                if (!showClaimedStoryList && !afterClaim) {
                     const mineProbe = await getComplianceStoryReports({
                         page: 1,
                         pageSize: 1,
@@ -411,13 +458,41 @@ export default function ViolationManagement() {
                     statuses: filters.statuses || undefined, search: filters.search || undefined, flaggedOnly: filters.flaggedOnly ? true : undefined,
                 });
             } else if (activeTab === 'comment-reports') {
-                data = await getComplianceCommentReports({ page, pageSize: PAGE_SIZE, status: filters.statuses || undefined, search: filters.search || undefined });
+                if (!showClaimedCommentList && !afterClaim) {
+                    const mineProbe = await getComplianceCommentReports({
+                        page: 1,
+                        pageSize: 1,
+                        claimFilter: 'mine',
+                        status: filters.statuses || 'NEW,IN_REVIEW',
+                    });
+                    const mineProbeItems = readPaged(mineProbe).items;
+                    if (Array.isArray(mineProbeItems) && mineProbeItems.length > 0) {
+                        setShowClaimedCommentList(true);
+                    } else {
+                        setRows([]);
+                        setTotalCount(0);
+                        setCurrentPage(1);
+                        setLoading(false);
+                        return;
+                    }
+                }
+                data = await getComplianceCommentReports({
+                    page,
+                    pageSize: PAGE_SIZE,
+                    claimFilter: 'mine',
+                    status: filters.statuses || undefined,
+                    search: filters.search || undefined,
+                });
             } else if (activeTab === 'lock-requests') {
                 data = await getAdminComplianceLockRequests({ status: 'PENDING' });
             } else if (activeTab === 'compliance-logs') {
                 data = await getAdminComplianceLogs({ page, pageSize: PAGE_SIZE, search: filters.search || undefined, sortBy: 'created_at', sortOrder: 'desc' });
             } else {
-                data = await getAdminCompliancePerformance({ page, pageSize: PAGE_SIZE, search: filters.search || undefined, sortBy: 'total', sortOrder: 'desc' });
+                setRows([]);
+                setTotalCount(0);
+                setCurrentPage(1);
+                setLoading(false);
+                return;
             }
             const paged = readPaged(data);
             const sourceItems = Array.isArray(paged.items) ? paged.items : [];
@@ -453,7 +528,9 @@ export default function ViolationManagement() {
         } finally {
             setLoading(false);
         }
-    }, [activeTab, filters.flaggedOnly, filters.search, filters.statuses, showClaimedStoryList]);
+    }, [activeTab, filters.flaggedOnly, filters.search, filters.statuses, showClaimedStoryList, showClaimedCommentList]);
+
+    const isReportTab = activeTab === 'story-reports' || activeTab === 'comment-reports';
 
     useEffect(() => { loadData(1); }, [activeTab, loadData]);
     useEffect(() => {
@@ -496,6 +573,26 @@ export default function ViolationManagement() {
         return () => { cancelled = true; };
     }, [isClaimPickerOpen, claimPickerRows]);
 
+    useEffect(() => {
+        if (!isCommentClaimPickerOpen || commentClaimPickerRows.length === 0) return;
+        let cancelled = false;
+        const storyIds = Array.from(new Set(commentClaimPickerRows.map((x) => x.storyId).filter(Boolean)));
+        Promise.all(storyIds.map(async (id) => {
+            try {
+                const s = await getStoryById(id, { recordView: false });
+                const cover = s?.coverImage ?? s?.CoverImage ?? s?.coverImageUrl ?? s?.cover_url ?? s?.coverUrl ?? s?.thumbnailUrl ?? s?.CoverImageUrl ?? null;
+                const author = s?.authorName ?? s?.authorDisplayName ?? s?.AuthorName ?? s?.AuthorDisplayName ?? null;
+                return [id, { coverUrl: cover ? resolveBackendUrl(cover) : null, authorName: author }];
+            } catch {
+                return [id, { coverUrl: null, authorName: null }];
+            }
+        })).then((entries) => {
+            if (cancelled) return;
+            setCommentClaimPickerStoryMeta((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+        });
+        return () => { cancelled = true; };
+    }, [isCommentClaimPickerOpen, commentClaimPickerRows]);
+
     const actionWithReload = async (fn) => {
         try {
             await fn();
@@ -506,14 +603,14 @@ export default function ViolationManagement() {
     };
 
     const openAccountViolationHistory = async (row) => {
-        const userId = row?.authorId;
+        const userId = row?.authorId ?? row?.commentUserId;
         if (!userId) {
-            alert('Chưa có định danh tác giả trên dòng này; không thể tải lịch sử vi phạm.');
+            setInfoModal({ title: 'Không thể tải lịch sử', message: 'Chưa có định danh người dùng trên dòng này.' });
             return;
         }
         setAccountViolationModal({
             userId,
-            displayName: row.authorDisplayName || 'Tác giả',
+            displayName: row.authorDisplayName || row.commentUserDisplayName || 'Người dùng',
         });
         setAccountViolationLoading(true);
         setAccountViolationRows([]);
@@ -579,7 +676,7 @@ export default function ViolationManagement() {
             setStoryTickets((Array.isArray(list) ? list : []).map(normalizeStoryTicketRow));
         } catch (e) {
             setStoryTickets([]);
-            alert(e?.response?.data?.message ?? e?.message ?? 'Không tải được ticket chi tiết.');
+            alert(e?.response?.data?.message ?? e?.message ?? 'Không tải được chi tiết phiếu báo cáo.');
         } finally {
             setStoryTicketLoading(false);
         }
@@ -588,10 +685,12 @@ export default function ViolationManagement() {
     const submitAdminAction = async () => {
         if (!actionModal) return;
         setAdminActionError('');
+        const isCommentTarget = actionModal.type === 'comment';
+        const requestKind = isCommentTarget ? 'BAN_USER' : adminActionForm.requestKind;
         const payload = {
-            requestKind: adminActionForm.requestKind,
+            requestKind,
             message: adminActionForm.message || undefined,
-            proposedSuspendUntilUtc: adminActionForm.requestKind === 'SUSPEND_AUTHOR_WRITING' && adminActionForm.proposedSuspendUntilUtc
+            proposedSuspendUntilUtc: !isCommentTarget && requestKind === 'SUSPEND_AUTHOR_WRITING' && adminActionForm.proposedSuspendUntilUtc
                 ? new Date(adminActionForm.proposedSuspendUntilUtc).toISOString()
                 : undefined,
         };
@@ -660,9 +759,56 @@ export default function ViolationManagement() {
         }
     };
 
+    const openBulkResolveModal = (payload) => {
+        setBulkResolveStatus('RESOLVED');
+        setBulkResolveModal(payload);
+    };
+
+    const submitBulkResolve = async () => {
+        if (!bulkResolveModal) return;
+        setBulkResolveBusy(true);
+        try {
+            if (bulkResolveModal.type === 'story') {
+                await actionWithReload(() => resolveAllOpenComplianceStoryReports(
+                    bulkResolveModal.targetId,
+                    { status: bulkResolveStatus },
+                ));
+            } else {
+                const isResolved = bulkResolveStatus === 'RESOLVED';
+                await actionWithReload(() => resolveAllOpenComplianceCommentReports(
+                    bulkResolveModal.targetId,
+                    {
+                        status: bulkResolveStatus,
+                        hideComment: isResolved,
+                        includeReplies: isResolved,
+                    },
+                ));
+            }
+            setBulkResolveModal(null);
+        } finally {
+            setBulkResolveBusy(false);
+        }
+    };
+
     const loadClaimableStories = async () => {
+        /** Chỉ truyện chưa ai lock; tránh hiển thị nhầm đơn đã được compliance khác nhận. */
+        const onlyUnclaimedPickerRows = (rows) => (Array.isArray(rows) ? rows : []).filter((r) => !coerceBool(r.isComplianceLocked));
+
         try {
             setClaimPickerLoading(true);
+            const mine = await getComplianceStoryReports({
+                page: 1,
+                pageSize: 1,
+                groupByStory: true,
+                claimFilter: 'mine',
+                statuses: 'NEW,IN_REVIEW',
+            });
+            const mineItems = readPaged(mine).items;
+            if (Array.isArray(mineItems) && mineItems.length > 0) {
+                setShowClaimedStoryList(true);
+                await loadData(1, { afterClaim: true });
+                return;
+            }
             const queue = await getComplianceStoryReports({
                 page: 1,
                 pageSize: 50,
@@ -671,32 +817,84 @@ export default function ViolationManagement() {
                 sortBy: 'priority_desc',
                 statuses: 'NEW,IN_REVIEW',
             });
-            const grouped = (queue?.items ?? queue?.Items ?? queue?.queueItems ?? queue?.QueueItems ?? []).map(normalizeStoryQueueItem);
+            const paged = readPaged(queue);
+            let grouped = onlyUnclaimedPickerRows(paged.items.map(normalizeStoryQueueItem));
             if (grouped.length > 0) {
                 setClaimPickerRows(grouped);
                 setIsClaimPickerOpen(true);
                 return;
             }
-            // fallback if grouped empty
+            // Fallback khi runtime trả về cấu trúc lệch — vẫn phải lọc unclaimed (trước đây thiếu claimFilter nên lộ cả truyện đã lock).
             const rawRes = await getComplianceStoryReports({
                 page: 1,
                 pageSize: 300,
                 groupByStory: false,
+                claimFilter: 'unclaimed',
                 statuses: 'NEW,IN_REVIEW',
                 sortBy: 'newest',
             });
-            const rawItems = rawRes?.items ?? rawRes?.Items ?? rawRes?.rows ?? rawRes?.Rows ?? [];
-            const groupedFromRows = groupStoryRows(rawItems.map(normalizeStoryReportRow));
-            if (groupedFromRows.length > 0) {
-                setClaimPickerRows(groupedFromRows);
+            const rawPaged = readPaged(rawRes);
+            const flat = Array.isArray(rawPaged.items) ? rawPaged.items : [];
+            grouped = onlyUnclaimedPickerRows(groupStoryRows(flat.map(normalizeStoryReportRow)));
+            if (grouped.length > 0) {
+                setClaimPickerRows(grouped);
                 setIsClaimPickerOpen(true);
                 return;
             }
-            alert('Hiện không có đơn report truyện nào chờ nhận duyệt.');
+            setInfoModal({
+                title: 'Không có đơn chờ nhận',
+                message: 'Hiện không có báo cáo truyện nào đang chờ compliance nhận duyệt.',
+            });
         } catch (e) {
-            alert(e?.response?.data?.message ?? e?.message ?? 'Không thể nhận duyệt đơn.');
+            setInfoModal({
+                title: 'Không thể tải danh sách',
+                message: e?.response?.data?.message ?? e?.message ?? 'Không thể tải danh sách báo cáo truyện.',
+            });
         } finally {
             setClaimPickerLoading(false);
+        }
+    };
+
+    const loadClaimableComments = async () => {
+        const onlyUnclaimedPickerRows = (list) => (Array.isArray(list) ? list : []).filter((r) => !coerceBool(r.isComplianceLocked));
+        try {
+            setCommentClaimPickerLoading(true);
+            const mine = await getComplianceCommentReports({
+                page: 1,
+                pageSize: 1,
+                claimFilter: 'mine',
+                status: 'NEW,IN_REVIEW',
+            });
+            const mineItems = readPaged(mine).items;
+            if (Array.isArray(mineItems) && mineItems.length > 0) {
+                setShowClaimedCommentList(true);
+                await loadData(1, { afterClaim: true });
+                return;
+            }
+            const res = await getComplianceCommentReports({
+                page: 1,
+                pageSize: 80,
+                claimFilter: 'unclaimed',
+                status: 'NEW,IN_REVIEW',
+            });
+            const paged = readPaged(res);
+            const rows = onlyUnclaimedPickerRows(paged.items.map(normalizeCommentQueueItem));
+            if (rows.length > 0) {
+                setCommentClaimPickerRows(rows);
+                setIsCommentClaimPickerOpen(true);
+                return;
+            }
+            setInfoModal({
+                title: 'Không có đơn chờ nhận',
+                message: 'Hiện không có báo cáo bình luận nào đang chờ compliance nhận duyệt.',
+            });
+        } catch (e) {
+            setInfoModal({
+                title: 'Không thể tải danh sách',
+                message: e?.response?.data?.message ?? e?.message ?? 'Không thể tải danh sách báo cáo bình luận.',
+            });
+        } finally {
+            setCommentClaimPickerLoading(false);
         }
     };
 
@@ -707,9 +905,28 @@ export default function ViolationManagement() {
             await claimComplianceStoryReports(storyId);
             setIsClaimPickerOpen(false);
             setShowClaimedStoryList(true);
-            await loadData(1);
+            await loadData(1, { afterClaim: true });
         } catch (e) {
-            alert(e?.response?.data?.message ?? e?.message ?? 'Không thể nhận duyệt đơn.');
+            setInfoModal({
+                title: 'Không thể nhận duyệt',
+                message: e?.response?.data?.message ?? e?.message ?? 'Không thể nhận duyệt đơn.',
+            });
+        }
+    };
+
+    const handleClaimCommentFromPicker = async (row) => {
+        const commentId = row?.commentId;
+        if (!commentId) return;
+        try {
+            await claimComplianceCommentReports(commentId);
+            setIsCommentClaimPickerOpen(false);
+            setShowClaimedCommentList(true);
+            await loadData(1, { afterClaim: true });
+        } catch (e) {
+            setInfoModal({
+                title: 'Không thể nhận duyệt',
+                message: e?.response?.data?.message ?? e?.message ?? 'Không thể nhận duyệt đơn.',
+            });
         }
     };
 
@@ -720,13 +937,13 @@ export default function ViolationManagement() {
                     <th style={th}>Ưu tiên</th>
                     <th style={th}>Mức độ</th>
                     <th style={th}>Số báo cáo</th>
-                    <th style={th}>TW</th>
+                    <th style={th}>Trọng số thời gian</th>
                     <th style={th}>Truyện</th>
                     <th style={th}>Tác giả</th>
-                    <th style={th}>Vi phạm / mod</th>
+                    <th style={th}>Vi phạm / điều hành</th>
                     <th style={th}>Người báo</th>
-                    <th style={th}>Ticket</th>
-                    <th style={th}>Lock</th>
+                    <th style={th}>Số phiếu mở</th>
+                    <th style={th}>Khóa đơn</th>
                     <th style={th}>Thao tác</th>
                 </tr></thead>
                 <tbody>
@@ -757,14 +974,14 @@ export default function ViolationManagement() {
                                             })()}
                                         </td>
                                         <td style={td}>{(r.openReportIds ?? []).length || (r.reportCount ?? 0)}</td>
-                                        <td style={td}>{r.isComplianceLocked ? `Đã lock - ${r.complianceClaimedByDisplayName || '—'}` : 'Chưa lock'}</td>
+                                        <td style={td}>{r.isComplianceLocked ? `Đã khóa — ${r.complianceClaimedByDisplayName || '—'}` : 'Chưa khóa'}</td>
                                         <td style={td}>
-                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
                                                 <button style={iconBtn} title="Xem chi tiết báo cáo" onClick={() => openStoryTicketsModal(r)}><Info size={16} /></button>
                                                 <button
                                                     type="button"
                                                     style={!r.authorId ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn}
-                                                    title={r.authorId ? 'Lịch sử vi phạm tài khoản tác giả' : 'Chưa có id tác giả'}
+                                                    title={r.authorId ? 'Lịch sử vi phạm tài khoản tác giả' : 'Chưa có mã định danh tác giả'}
                                                     onClick={() => openAccountViolationHistory(r)}
                                                     disabled={!r.authorId}
                                                 >
@@ -772,23 +989,18 @@ export default function ViolationManagement() {
                                                 </button>
                                                 <button
                                                     style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn}
-                                                    title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : 'Trả đơn về hàng đợi'}
+                                                    title={hasPendingReleaseRequest ? 'Đang chờ quản trị viên xử lý yêu cầu hủy nhận duyệt' : 'Trả đơn về hàng đợi'}
                                                     onClick={() => openReleaseRequestModal(r)}
                                                     disabled={hasPendingReleaseRequest}
                                                 >
                                                     <Undo2 size={16} />
                                                 </button>
-                                                {isAdmin && <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : 'Admin gỡ khóa đơn'} onClick={() => openStoryActionConfirm({
+                                                {isAdmin && <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ quản trị viên xử lý yêu cầu hủy nhận duyệt' : 'Quản trị viên gỡ khóa đơn'} onClick={() => openStoryActionConfirm({
                                                     title: 'Xác nhận gỡ khóa đơn',
-                                                    message: 'Bạn có chắc muốn admin gỡ khóa đơn và trả các ticket về hàng đợi?',
+                                                    message: 'Bạn có chắc muốn quản trị viên gỡ khóa đơn và trả các phiếu báo cáo về hàng đợi?',
                                                     run: () => actionWithReload(() => adminReleaseComplianceStoryClaim(r.storyId)),
                                                 })} disabled={hasPendingReleaseRequest}><LockOpen size={16} /></button>}
-                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : 'Xử lý toàn bộ ticket mở'} onClick={() => openStoryActionConfirm({
-                                                    title: 'Xác nhận xử lý toàn bộ',
-                                                    message: 'Bạn có chắc muốn đánh dấu xử lý toàn bộ ticket mở của truyện này?',
-                                                    run: () => actionWithReload(() => resolveAllOpenComplianceStoryReports(r.storyId, { status: 'RESOLVED' })),
-                                                })} disabled={hasPendingReleaseRequest}><CheckCheck size={16} /></button>
-                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : (r.complianceFlagged ? 'Bỏ gắn cờ vi phạm' : 'Gắn cờ vi phạm')} onClick={() => openStoryActionConfirm({
+                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ quản trị viên xử lý yêu cầu hủy nhận duyệt' : (r.complianceFlagged ? 'Bỏ gắn cờ vi phạm' : 'Gắn cờ vi phạm')} onClick={() => openStoryActionConfirm({
                                                     title: r.complianceFlagged ? 'Xác nhận bỏ gắn cờ' : 'Xác nhận gắn cờ vi phạm',
                                                     message: r.complianceFlagged
                                                         ? 'Bạn có chắc muốn bỏ gắn cờ vi phạm cho truyện này?'
@@ -797,7 +1009,7 @@ export default function ViolationManagement() {
                                                 })} disabled={hasPendingReleaseRequest}>
                                                     {r.complianceFlagged ? <FlagOff size={16} /> : <Flag size={16} />}
                                                 </button>
-                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : (r.commentsDisabled ? 'Mở lại bình luận' : 'Khóa bình luận')} onClick={() => openStoryActionConfirm({
+                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ quản trị viên xử lý yêu cầu hủy nhận duyệt' : (r.commentsDisabled ? 'Mở lại bình luận' : 'Khóa bình luận')} onClick={() => openStoryActionConfirm({
                                                     title: r.commentsDisabled ? 'Xác nhận mở lại bình luận' : 'Xác nhận khóa bình luận',
                                                     message: r.commentsDisabled
                                                         ? 'Bạn có chắc muốn mở lại bình luận cho truyện này?'
@@ -806,7 +1018,7 @@ export default function ViolationManagement() {
                                                 })} disabled={hasPendingReleaseRequest}>
                                                     {r.commentsDisabled ? <MessageSquareOff size={16} /> : <MessageSquare size={16} />}
                                                 </button>
-                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : (r.complianceHidden ? 'Hiển thị lại truyện' : 'Ẩn truyện khỏi người dùng thường')} onClick={() => openStoryActionConfirm({
+                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ quản trị viên xử lý yêu cầu hủy nhận duyệt' : (r.complianceHidden ? 'Hiển thị lại truyện' : 'Ẩn truyện khỏi người dùng thường')} onClick={() => openStoryActionConfirm({
                                                     title: r.complianceHidden ? 'Xác nhận hiển thị lại truyện' : 'Xác nhận ẩn truyện',
                                                     message: r.complianceHidden
                                                         ? 'Bạn có chắc muốn hiển thị lại truyện cho người dùng thường?'
@@ -817,13 +1029,27 @@ export default function ViolationManagement() {
                                                 </button>
                                                 <button
                                                     style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn}
-                                                    title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : 'Yêu cầu chặn tài khoản / tạm đình chỉ'}
+                                                    title={hasPendingReleaseRequest ? 'Đang chờ quản trị viên xử lý yêu cầu hủy nhận duyệt' : 'Yêu cầu chặn tài khoản / tạm đình chỉ'}
                                                     onClick={() => { setAdminActionForm({ requestKind: 'BAN_USER', message: '', proposedSuspendUntilUtc: '' }); setAdminActionError(''); setActionModal({ type: 'story', targetId: r.storyId }); }}
                                                     disabled={hasPendingReleaseRequest}
                                                 ><ShieldAlert size={16} /></button>
                                             </div>
+                                            <div style={{ marginTop: 8 }}>
+                                                <button
+                                                    style={hasPendingReleaseRequest ? { ...btn, opacity: 0.45, cursor: 'not-allowed' } : btn}
+                                                    title={hasPendingReleaseRequest ? 'Đang chờ quản trị viên xử lý yêu cầu hủy nhận duyệt' : 'Xử lý toàn bộ phiếu báo cáo đang mở'}
+                                                    onClick={() => openBulkResolveModal({
+                                                        type: 'story',
+                                                        targetId: r.storyId,
+                                                        targetLabel: r.storyTitle || r.storyId,
+                                                    })}
+                                                    disabled={hasPendingReleaseRequest}
+                                                >
+                                                    <CheckCheck size={16} />
+                                                </button>
+                                            </div>
                                             {hasPendingReleaseRequest ? (
-                                                <div className="text-xs text-amber-700 mt-1">Đang chờ admin xử lý đơn hủy nhận duyệt.</div>
+                                                <div className="text-xs text-amber-700 mt-1">Đang chờ quản trị viên xử lý đơn hủy nhận duyệt.</div>
                                             ) : null}
                                         </td>
                                     </>
@@ -838,33 +1064,130 @@ export default function ViolationManagement() {
 
     const renderCommentReports = () => (
         <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
+            <table className="w-full border-collapse" style={{ minWidth: 1480 }}>
                 <thead><tr className="bg-slate-50">
-                    <th style={th}>Ticket</th><th style={th}>Truyện</th><th style={th}>Ưu tiên</th><th style={th}>Trạng thái</th><th style={th}>Cảnh báo</th><th style={th}>Thao tác</th>
+                    <th style={th}>Ưu tiên</th>
+                    <th style={th}>Mức độ</th>
+                    <th style={th}>Số báo cáo</th>
+                    <th style={th}>Trọng số thời gian</th>
+                    <th style={th}>Truyện</th>
+                    <th style={th}>Người bình luận</th>
+                    <th style={th}>Vi phạm / điều hành</th>
+                    <th style={th}>Người báo</th>
+                    <th style={th}>Mã phiếu</th>
+                    <th style={th}>Khóa đơn</th>
+                    <th style={th}>Cảnh báo</th>
+                    <th style={th}>Thao tác</th>
                 </tr></thead>
                 <tbody>
                     {rows.length === 0 && (
                         <tr>
-                            <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                            <td colSpan={12} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                         </tr>
                     )}
                     {rows.map((r) => (
-                        <tr key={r.reportId} className="border-t border-slate-200 hover:bg-slate-50/70">
-                            <td style={td}><div style={{ fontWeight: 600 }}>{r.reportId}</div><div style={{ color: '#64748b', fontSize: 12 }}>Comment: {r.commentId}</div></td>
-                            <td style={td}>{r.storyTitle || '—'}</td>
-                            <td style={td}>{(r.priorityScore ?? 0).toFixed?.(1) ?? r.priorityScore}</td>
-                            <td style={td}>{r.status || '—'}</td>
-                            <td style={td}>{r.adminOrModeratorReplyWarningVi || '—'}</td>
-                            <td style={td}>
-                                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                    <button style={btn} onClick={() => setSelectedComment(r)}>Chi tiết ticket</button>
-                                    <button style={btn} onClick={() => actionWithReload(() => claimComplianceCommentReports(r.commentId))}>Claim</button>
-                                    {isAdmin && <button style={btn} onClick={() => actionWithReload(() => adminReleaseComplianceCommentClaim(r.commentId))}>Admin release claim</button>}
-                                    <button style={btn} onClick={() => actionWithReload(() => resolveAllOpenComplianceCommentReports(r.commentId, { status: 'RESOLVED', hideComment: true, includeReplies: true }))}>Resolve all</button>
-                                    <button style={btn} onClick={() => actionWithReload(() => setComplianceCommentThreadHidden(r.commentId, { value: true, includeReplies: true }))}>Ẩn thread</button>
-                                    <button style={btn} onClick={() => { setAdminActionForm({ requestKind: 'BAN_USER', message: '', proposedSuspendUntilUtc: '' }); setAdminActionError(''); setActionModal({ type: 'comment', targetId: r.commentId }); }}>Yêu cầu chặn / đình chỉ</button>
-                                </div>
-                            </td>
+                        <tr key={r.commentId} className="border-t border-slate-200 hover:bg-slate-50/70">
+                            {(() => {
+                                const hasPending = !!r.hasPendingAdminActionRequest;
+                                const reporters = Array.isArray(r.reporterDisplayNames) ? r.reporterDisplayNames : [];
+                                const reporterLabel = reporters.length === 0 ? '—' : reporters.length > 1 ? `${reporters[0]} +${reporters.length - 1}` : reporters[0];
+                                return (
+                                    <>
+                                        <td style={td}>{Number(r.priorityScore ?? 0).toFixed(1)}</td>
+                                        <td style={td}>{Number(r.maxSeverityScore ?? 0).toFixed(1)}</td>
+                                        <td style={td}>{r.reportCount ?? 0}</td>
+                                        <td style={td}>{r.timeWeight ?? 0}</td>
+                                        <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
+                                        <td style={td}>{r.commentUserDisplayName || '—'}</td>
+                                        <td style={td}>{r.reasonLabelVi || reasonCodeToViLabel(r.reasonCode) || '—'}</td>
+                                        <td style={td}>{reporterLabel}</td>
+                                        <td style={td}><div style={{ fontWeight: 600 }}>{r.reportId}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.commentId}</div></td>
+                                        <td style={td}>{r.isComplianceLocked ? `Đã khóa — ${r.complianceClaimedByDisplayName || '—'}` : 'Chưa khóa'}</td>
+                                        <td style={td}>
+                                            <div className="text-xs text-slate-700 max-w-[200px]">{r.adminOrModeratorReplyWarningVi || '—'}</div>
+                                        </td>
+                                        <td style={td}>
+                                            <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                                                <button type="button" style={hasPending ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPending ? 'Đang chờ quản trị viên xử lý yêu cầu liên quan tài khoản' : 'Xem chi tiết phiếu báo cáo'} onClick={() => setSelectedComment(r)} disabled={hasPending}><Info size={16} /></button>
+                                                <button
+                                                    type="button"
+                                                    style={!r.commentUserId || hasPending ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn}
+                                                    title={r.commentUserId ? 'Lịch sử vi phạm tài khoản người bình luận' : 'Chưa có mã định danh người bình luận'}
+                                                    onClick={() => openAccountViolationHistory(r)}
+                                                    disabled={!r.commentUserId || hasPending}
+                                                >
+                                                    <History size={16} />
+                                                </button>
+                                                {isAdmin && (
+                                                    <button
+                                                        type="button"
+                                                        style={hasPending ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn}
+                                                        title={hasPending ? 'Đang chờ quản trị viên' : 'Quản trị viên gỡ khóa bình luận'}
+                                                        onClick={() => openStoryActionConfirm({
+                                                            title: 'Xác nhận gỡ khóa bình luận',
+                                                            message: 'Gỡ khóa và trả phiếu báo cáo về hàng đợi (nếu có)?',
+                                                            run: () => actionWithReload(() => adminReleaseComplianceCommentClaim(r.commentId)),
+                                                        })}
+                                                        disabled={hasPending}
+                                                    >
+                                                        <LockOpen size={16} />
+                                                    </button>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    style={
+                                                        hasPending
+                                                            ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' }
+                                                            : r.isCommentThreadHidden
+                                                                ? { ...iconBtn, color: '#f59e0b', borderColor: '#f59e0b', background: '#fffbeb', boxShadow: '0 0 0 2px rgba(245, 158, 11, 0.2)' }
+                                                                : iconBtn
+                                                    }
+                                                    title={hasPending ? 'Đang chờ quản trị viên' : (r.isCommentThreadHidden ? 'Chuỗi bình luận đã được ẩn' : 'Ẩn chuỗi bình luận')}
+                                                    onClick={() => {
+                                                        if (r.isCommentThreadHidden) {
+                                                            setInfoModal({ title: 'Thông báo', message: 'Chuỗi bình luận này đã được ẩn trước đó.' });
+                                                            return;
+                                                        }
+                                                        openStoryActionConfirm({
+                                                            title: 'Xác nhận ẩn chuỗi bình luận',
+                                                            message: 'Ẩn toàn bộ chuỗi bình luận này (kèm phản hồi)?',
+                                                            run: () => actionWithReload(() => setComplianceCommentThreadHidden(r.commentId, { value: true, includeReplies: true })),
+                                                        });
+                                                    }}
+                                                    disabled={hasPending}
+                                                >
+                                                    <MessageSquareOff size={16} />
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    style={hasPending ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn}
+                                                    title={hasPending ? 'Đang chờ quản trị viên' : 'Gửi yêu cầu chặn / đình chỉ'}
+                                                    onClick={() => { setAdminActionForm({ requestKind: 'BAN_USER', message: '', proposedSuspendUntilUtc: '' }); setAdminActionError(''); setActionModal({ type: 'comment', targetId: r.commentId }); }}
+                                                    disabled={hasPending}
+                                                >
+                                                    <ShieldAlert size={16} />
+                                                </button>
+                                            </div>
+                                            <div style={{ marginTop: 8 }}>
+                                                <button
+                                                    type="button"
+                                                    style={hasPending ? { ...btn, opacity: 0.45, cursor: 'not-allowed' } : btn}
+                                                    title={hasPending ? 'Đang chờ quản trị viên' : 'Xử lý toàn bộ phiếu báo cáo đang mở'}
+                                                    onClick={() => openBulkResolveModal({
+                                                        type: 'comment',
+                                                        targetId: r.commentId,
+                                                        targetLabel: r.commentId,
+                                                    })}
+                                                    disabled={hasPending}
+                                                >
+                                                    <CheckCheck size={16} />
+                                                </button>
+                                            </div>
+                                            {hasPending ? <div className="text-xs text-amber-700 mt-1">Đang chờ quản trị viên xử lý yêu cầu liên quan tài khoản.</div> : null}
+                                        </td>
+                                    </>
+                                );
+                            })()}
                         </tr>
                     ))}
                 </tbody>
@@ -876,7 +1199,7 @@ export default function ViolationManagement() {
         <div className="overflow-x-auto">
             <table className="w-full border-collapse">
                 <thead><tr className="bg-slate-50">
-                    <th style={th}>Truyện</th><th style={th}>Người gửi</th><th style={th}>Message</th><th style={th}>Thời điểm</th><th style={th}>Thao tác admin</th>
+                    <th style={th}>Truyện</th><th style={th}>Người gửi</th><th style={th}>Nội dung</th><th style={th}>Thời điểm</th><th style={th}>Thao tác quản trị</th>
                 </tr></thead>
                 <tbody>{rows.map((r) => (
                     <tr key={r.id} className="border-t border-slate-200 hover:bg-slate-50/70">
@@ -886,8 +1209,8 @@ export default function ViolationManagement() {
                         <td style={td}>{formatDate(r.createdAtUtc)}</td>
                         <td style={td}>
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                <button style={btn} onClick={() => { setLockResolveForm({ decision: 'APPROVE_UNLOCK', newAssigneeId: '', adminNote: '' }); setActionModal({ type: 'lock', targetId: r.id }); }}>Resolve</button>
-                                <button style={btn} onClick={() => actionWithReload(() => adminReleaseComplianceStoryClaim(r.storyId))}>Gỡ lock trực tiếp</button>
+                                <button style={btn} onClick={() => { setLockResolveForm({ decision: 'APPROVE_UNLOCK', newAssigneeId: '', adminNote: '' }); setActionModal({ type: 'lock', targetId: r.id }); }}>Xử lý yêu cầu</button>
+                                <button style={btn} onClick={() => actionWithReload(() => adminReleaseComplianceStoryClaim(r.storyId))}>Gỡ khóa trực tiếp</button>
                             </div>
                         </td>
                     </tr>
@@ -901,21 +1224,31 @@ export default function ViolationManagement() {
             <div>
                 <h1 className="text-2xl font-bold text-slate-900 mb-1">Xử lý báo cáo vi phạm</h1>
                 <p className="text-sm text-slate-500">
-                    Quản lý hàng đợi report truyện/bình luận, lock claim và hành động compliance.
+                    Quản lý hàng đợi báo cáo truyện và bình luận, nhận đơn kiểm duyệt và các thao tác xử lý vi phạm.
                 </p>
             </div>
 
             <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <h2 className="text-lg font-bold text-slate-900 mb-3">Bộ lọc và điều hướng</h2>
-                {activeTab === 'story-reports' && (
+                {(activeTab === 'story-reports' || activeTab === 'comment-reports') && (
                     <div className="mb-3 flex flex-wrap gap-2 items-center">
-                        <button
-                            type="button"
-                            onClick={loadClaimableStories}
-                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sky-500 text-white text-sm font-semibold hover:bg-sky-600"
-                        >
-                            {claimPickerLoading ? 'Đang tải...' : 'Nhận duyệt đơn'}
-                        </button>
+                        {activeTab === 'story-reports' ? (
+                            <button
+                                type="button"
+                                onClick={loadClaimableStories}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sky-500 text-white text-sm font-semibold hover:bg-sky-600"
+                            >
+                                {claimPickerLoading ? 'Đang tải...' : 'Nhận duyệt đơn'}
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={loadClaimableComments}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sky-500 text-white text-sm font-semibold hover:bg-sky-600"
+                            >
+                                {commentClaimPickerLoading ? 'Đang tải...' : 'Nhận duyệt đơn'}
+                            </button>
+                        )}
                         <button
                             type="button"
                             onClick={openMyRequestsModal}
@@ -940,16 +1273,20 @@ export default function ViolationManagement() {
                         </button>
                     ))}
                 </div>
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
-                    <input value={filters.search} onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))} placeholder="Tìm kiếm..." style={input} />
-                    <input value={filters.statuses} onChange={(e) => setFilters((p) => ({ ...p, statuses: e.target.value }))} placeholder="Statuses (VD: NEW,IN_REVIEW)" style={input} />
-                    <button onClick={() => setFilters({ search: '', statuses: 'NEW,IN_REVIEW', flaggedOnly: false })} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"><RotateCcw style={{ width: 14, height: 14 }} /> Đặt lại</button>
-                </div>
-                {activeTab === 'story-reports' && (
-                    <label className="inline-flex gap-2 mt-2 text-sm text-slate-700">
-                        <input type="checkbox" checked={filters.flaggedOnly} onChange={(e) => setFilters((p) => ({ ...p, flaggedOnly: e.target.checked }))} />
-                        Chỉ hiển thị truyện đã gắn cờ
-                    </label>
+                {isReportTab && (
+                    <>
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
+                            <input value={filters.search} onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))} placeholder="Tìm theo mã, tên truyện, người báo cáo..." style={input} />
+                            <input value={filters.statuses} onChange={(e) => setFilters((p) => ({ ...p, statuses: e.target.value }))} placeholder="Trạng thái báo cáo (vd: NEW,IN_REVIEW)" style={input} />
+                            <button onClick={() => setFilters({ search: '', statuses: 'NEW,IN_REVIEW', flaggedOnly: false })} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"><RotateCcw style={{ width: 14, height: 14 }} /> Đặt lại</button>
+                        </div>
+                        {activeTab === 'story-reports' && (
+                            <label className="inline-flex gap-2 mt-2 text-sm text-slate-700">
+                                <input type="checkbox" checked={filters.flaggedOnly} onChange={(e) => setFilters((p) => ({ ...p, flaggedOnly: e.target.checked }))} />
+                                Chỉ hiển thị truyện đã gắn cờ
+                            </label>
+                        )}
+                    </>
                 )}
             </div>
 
@@ -958,23 +1295,26 @@ export default function ViolationManagement() {
                     activeTab === 'story-reports'
                         ? (showClaimedStoryList
                             ? renderStoryReports()
-                            : <div className="p-8 text-center text-slate-500 text-sm">Bấm "Nhận duyệt đơn" để bắt đầu xử lý và hiển thị danh sách.</div>)
-                        : activeTab === 'comment-reports' ? renderCommentReports()
+                            : <div className="p-8 text-center text-slate-500 text-sm">Bấm &quot;Nhận duyệt đơn&quot; để bắt đầu xử lý và hiển thị danh sách.</div>)
+                        : activeTab === 'comment-reports'
+                            ? (showClaimedCommentList
+                                ? renderCommentReports()
+                                : <div className="p-8 text-center text-slate-500 text-sm">Bấm &quot;Nhận duyệt đơn&quot; để bắt đầu xử lý báo cáo bình luận và hiển thị danh sách.</div>)
                             : activeTab === 'lock-requests' ? renderLockRequests()
                                 : activeTab === 'compliance-logs' ? (
-                                    <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-slate-50"><th style={th}>Thời điểm</th><th style={th}>Compliance</th><th style={th}>Nguồn</th><th style={th}>Action</th><th style={th}>Status</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-slate-200 hover:bg-slate-50/70"><td style={td}>{formatDate(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
+                                    <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-slate-50"><th style={th}>Thời điểm</th><th style={th}>Nhân viên kiểm duyệt</th><th style={th}>Nguồn</th><th style={th}>Hành động</th><th style={th}>Trạng thái</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-slate-200 hover:bg-slate-50/70"><td style={td}>{formatDate(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
                                 ) : (
-                                    <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-slate-50"><th style={th}>Compliance</th><th style={th}>Resolved</th><th style={th}>Dismissed</th><th style={th}>Story</th><th style={th}>Comment</th><th style={th}>Tổng</th></tr></thead><tbody>{rows.map((r) => <tr key={r.complianceUserId} className="border-t border-slate-200 hover:bg-slate-50/70"><td style={td}>{r.complianceUserName || r.complianceUserId}</td><td style={td}>{r.resolvedCount ?? 0}</td><td style={td}>{r.dismissedCount ?? 0}</td><td style={td}>{r.storyReportResolvedCount ?? 0}</td><td style={td}>{r.commentReportResolvedCount ?? 0}</td><td style={td}>{r.total ?? 0}</td></tr>)}</tbody></table></div>
+                                    <div className="p-8 text-center text-slate-500 text-sm">Không có dữ liệu hiển thị.</div>
                                 )
                 )}
-                {activeTab !== 'lock-requests' && !(activeTab === 'story-reports' && !showClaimedStoryList) && (
+                {activeTab !== 'lock-requests' && !(activeTab === 'story-reports' && !showClaimedStoryList) && !(activeTab === 'comment-reports' && !showClaimedCommentList) && (
                     <Pagination currentPage={currentPage} totalPages={totalPages} totalItems={totalCount} itemsPerPage={PAGE_SIZE} onPageChange={(p) => loadData(p)} itemLabel="bản ghi" />
                 )}
             </div>
 
             {selectedStory && (
-                <Modal title={`Ticket chi tiết - ${selectedStory.storyTitle || selectedStory.storyId}`} onClose={() => setSelectedStory(null)}>
-                    {storyTicketLoading ? <div>Đang tải ticket...</div> : (
+                <Modal title={`Chi tiết phiếu báo cáo — ${selectedStory.storyTitle || selectedStory.storyId}`} onClose={() => setSelectedStory(null)}>
+                    {storyTicketLoading ? <div>Đang tải phiếu báo cáo...</div> : (
                         <div className="space-y-4">
                             <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-4">
                                 <div className="text-sm font-semibold text-slate-900 mb-1">Thông tin đơn</div>
@@ -982,11 +1322,11 @@ export default function ViolationManagement() {
                                     {storyMetaMap[selectedStory.storyId]?.coverUrl ? (
                                         <img
                                             src={storyMetaMap[selectedStory.storyId].coverUrl}
-                                            alt={selectedStory.storyTitle || 'story-cover'}
+                                            alt={selectedStory.storyTitle || 'Ảnh bìa truyện'}
                                             className="w-14 h-20 rounded-lg object-cover border border-slate-200"
                                         />
                                     ) : (
-                                        <div className="w-14 h-20 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-xs">No cover</div>
+                                        <div className="w-14 h-20 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-xs">Chưa có ảnh bìa</div>
                                     )}
                                     <div className="min-w-0">
                                         <div className="text-lg font-bold text-slate-900">{selectedStory.storyTitle || '—'}</div>
@@ -1050,9 +1390,9 @@ export default function ViolationManagement() {
                                 <div key={r.storyId} className="border border-slate-200 rounded-xl p-3 bg-white hover:bg-slate-50/50 transition-colors">
                                     <div className="flex items-center gap-3">
                                         {cover ? (
-                                            <img src={cover} alt={r.storyTitle || 'story-cover'} className="w-14 h-20 rounded-lg object-cover border border-slate-200" />
+                                            <img src={cover} alt={r.storyTitle || 'Ảnh bìa truyện'} className="w-14 h-20 rounded-lg object-cover border border-slate-200" />
                                         ) : (
-                                            <div className="w-14 h-20 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-xs">No cover</div>
+                                            <div className="w-14 h-20 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-xs">Chưa có ảnh bìa</div>
                                         )}
                                         <div className="min-w-0 flex-1">
                                             <div className="font-semibold text-slate-900 truncate">{r.storyTitle || '—'}</div>
@@ -1079,16 +1419,95 @@ export default function ViolationManagement() {
                 </Modal>
             )}
 
+            {isCommentClaimPickerOpen && (
+                <Modal title="Báo cáo vi phạm bình luận chờ nhận duyệt" onClose={() => setIsCommentClaimPickerOpen(false)}>
+                    <div className="grid gap-3">
+                        {commentClaimPickerRows.length === 0 && (
+                            <div className="p-6 text-center text-sm text-slate-500">Không có đơn chờ nhận.</div>
+                        )}
+                        {commentClaimPickerRows.map((r) => {
+                            const meta = commentClaimPickerStoryMeta[r.storyId] || {};
+                            const cover = meta.coverUrl;
+                            return (
+                                <div key={r.commentId} className="border border-slate-200 rounded-xl p-3 bg-white hover:bg-slate-50/50 transition-colors">
+                                    <div className="flex items-center gap-3">
+                                        {cover ? (
+                                            <img src={cover} alt={r.storyTitle || 'Ảnh bìa truyện'} className="w-14 h-20 rounded-lg object-cover border border-slate-200" />
+                                        ) : (
+                                            <div className="w-14 h-20 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 text-xs">Chưa có ảnh bìa</div>
+                                        )}
+                                        <div className="min-w-0 flex-1">
+                                            <div className="font-semibold text-slate-900 truncate">{r.storyTitle || '—'}</div>
+                                            <div className="text-xs text-slate-500 truncate">{meta.authorName ? `Truyện — ${meta.authorName}` : (r.storyId || '')}</div>
+                                            <div className="text-xs text-slate-600 truncate">Bình luận: {r.commentUserDisplayName || '—'} · {r.commentId}</div>
+                                            <div className="flex items-center gap-2 mt-2 overflow-x-auto whitespace-nowrap">
+                                                <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-50 text-emerald-700 border border-emerald-100">Ưu tiên: {Number(r.priorityScore ?? 0).toFixed(1)}</span>
+                                                <span className="px-2 py-0.5 rounded-full text-xs bg-amber-50 text-amber-700 border border-amber-100">Mức độ: {Number(r.maxSeverityScore ?? 0).toFixed(1)}</span>
+                                                <span className="px-2 py-0.5 rounded-full text-xs bg-sky-50 text-sky-700 border border-sky-100">Số báo cáo: {r.reportCount ?? 0}</span>
+                                                <span className="px-2 py-0.5 rounded-full text-xs bg-slate-50 text-slate-700 border border-slate-200">Vi phạm: {r.reasonLabelVi || reasonCodeToViLabel(r.reasonCode) || 'Khác'}</span>
+                                            </div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleClaimCommentFromPicker(r)}
+                                            className="px-4 py-2 rounded-lg bg-sky-500 text-white text-sm font-semibold hover:bg-sky-600 shrink-0"
+                                        >
+                                            Nhận
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </Modal>
+            )}
+
             {selectedComment && (
-                <Modal title={`Ticket comment - ${selectedComment.reportId}`} onClose={() => setSelectedComment(null)}>
-                    <div style={{ display: 'grid', gap: 8 }}>
-                        <div><b>CommentId:</b> {selectedComment.commentId}</div>
-                        <div><b>Story:</b> {selectedComment.storyTitle || '—'}</div>
-                        <div><b>Reason:</b> {selectedComment.reasonCode || '—'}</div>
-                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                            <button style={btn} onClick={() => actionWithReload(() => resolveComplianceCommentReport(selectedComment.reportId, { status: 'RESOLVED', hideComment: true, includeReplies: true }))}>Resolve ticket</button>
-                            <button style={btn} onClick={() => actionWithReload(() => resolveComplianceCommentReport(selectedComment.reportId, { status: 'DISMISSED' }))}>Dismiss ticket</button>
-                            <button style={btn} onClick={() => actionWithReload(() => setComplianceCommentThreadHidden(selectedComment.commentId, { value: true, includeReplies: true }))}>Ẩn thread</button>
+                <Modal title="Chi tiết báo cáo bình luận" maxWidth={760} onClose={() => setSelectedComment(null)}>
+                    <div className="space-y-4">
+                        <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-4">
+                            <div className="text-sm font-semibold text-slate-900 mb-2">Thông tin chung</div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-slate-700">
+                                <div><span className="font-semibold">Truyện:</span> {selectedComment.storyTitle || '—'}</div>
+                                <div><span className="font-semibold">Người bình luận:</span> {selectedComment.commentUserDisplayName || '—'}</div>
+                                <div><span className="font-semibold">Lý do vi phạm:</span> {reasonCodeToViLabel(selectedComment.reasonCode) || selectedComment.reasonCode || '—'}</div>
+                                <div><span className="font-semibold">Số báo cáo:</span> {selectedComment.reportCount ?? 0}</div>
+                            </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="text-sm font-semibold text-slate-900 mb-2">Nội dung bình luận</div>
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 whitespace-pre-wrap">
+                                {String(selectedComment.commentContent ?? '').trim() || 'Không lấy được nội dung bình luận từ hệ thống.'}
+                            </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="text-sm font-semibold text-slate-900 mb-2">Danh sách người báo cáo</div>
+                            {Array.isArray(selectedComment.reporterDetails) && selectedComment.reporterDetails.length > 0 ? (
+                                <div className="grid gap-2">
+                                    {selectedComment.reporterDetails.map((item, idx) => (
+                                        <div key={`${item?.reporterDisplayName || 'nguoi-bao-cao'}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                            <div className="flex items-center justify-between gap-3 flex-wrap">
+                                                <div className="font-semibold">{idx + 1}. {item?.reporterDisplayName || 'Ẩn danh'}</div>
+                                                <div className="text-xs text-slate-500">{formatDate(item?.reportedAtUtc)}</div>
+                                            </div>
+                                            <div className="mt-1 whitespace-pre-wrap">{String(item?.description ?? '').trim() || 'Không có mô tả.'}</div>
+                                            <div className="mt-2">
+                                                <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border border-slate-200">{item?.reasonLabelVi || 'Khác'}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : Array.isArray(selectedComment.reporterDisplayNames) && selectedComment.reporterDisplayNames.length > 0 ? (
+                                <div className="grid gap-2">
+                                    {selectedComment.reporterDisplayNames.map((name, idx) => (
+                                        <div key={`${name || 'nguoi-bao-cao'}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                                            {idx + 1}. {name || 'Ẩn danh'}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-sm text-slate-500">Chưa có thông tin người báo cáo.</div>
+                            )}
                         </div>
                     </div>
                 </Modal>
@@ -1098,23 +1517,31 @@ export default function ViolationManagement() {
                 <Modal title="Gửi yêu cầu xử lý lên quản trị viên" onClose={() => setActionModal(null)} maxWidth={620}>
                     <div className="space-y-4">
                         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                            Chọn hình thức xử lý phù hợp và mô tả rõ lý do để quản trị viên xem xét.
+                            {actionModal?.type === 'comment'
+                                ? 'Đối với báo cáo bình luận, chỉ hỗ trợ gửi yêu cầu chặn tài khoản. Vui lòng mô tả rõ lý do để quản trị viên xem xét.'
+                                : 'Chọn hình thức xử lý phù hợp và mô tả rõ lý do để quản trị viên xem xét.'}
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <label className="text-sm font-semibold text-slate-700">
-                                Hình thức xử lý
-                                <select value={adminActionForm.requestKind} onChange={(e) => setAdminActionForm((p) => ({ ...p, requestKind: e.target.value }))} style={{ ...input, width: '100%', marginTop: 6 }}>
-                                    <option value="BAN_USER">Chặn tài khoản</option>
-                                    <option value="SUSPEND_AUTHOR_WRITING">Tạm đình chỉ quyền viết</option>
-                                </select>
-                            </label>
-                            {adminActionForm.requestKind === 'SUSPEND_AUTHOR_WRITING' && (
+                        {actionModal?.type === 'comment' ? (
+                            <div className="text-sm text-slate-700">
+                                <span className="font-semibold">Hình thức xử lý:</span> Chặn tài khoản
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <label className="text-sm font-semibold text-slate-700">
-                                    Thời hạn đình chỉ
-                                    <input type="datetime-local" value={adminActionForm.proposedSuspendUntilUtc} onChange={(e) => setAdminActionForm((p) => ({ ...p, proposedSuspendUntilUtc: e.target.value }))} style={{ ...input, width: '100%', marginTop: 6 }} />
+                                    Hình thức xử lý
+                                    <select value={adminActionForm.requestKind} onChange={(e) => setAdminActionForm((p) => ({ ...p, requestKind: e.target.value }))} style={{ ...input, width: '100%', marginTop: 6 }}>
+                                        <option value="BAN_USER">Chặn tài khoản</option>
+                                        <option value="SUSPEND_AUTHOR_WRITING">Tạm đình chỉ quyền viết</option>
+                                    </select>
                                 </label>
-                            )}
-                        </div>
+                                {adminActionForm.requestKind === 'SUSPEND_AUTHOR_WRITING' && (
+                                    <label className="text-sm font-semibold text-slate-700">
+                                        Thời hạn đình chỉ
+                                        <input type="datetime-local" value={adminActionForm.proposedSuspendUntilUtc} onChange={(e) => setAdminActionForm((p) => ({ ...p, proposedSuspendUntilUtc: e.target.value }))} style={{ ...input, width: '100%', marginTop: 6 }} />
+                                    </label>
+                                )}
+                            </div>
+                        )}
                         <label className="text-sm font-semibold text-slate-700">
                             Lý do đề xuất
                             <textarea value={adminActionForm.message} onChange={(e) => setAdminActionForm((p) => ({ ...p, message: e.target.value }))} placeholder="Mô tả ngắn gọn lý do đề xuất xử lý..." style={{ ...input, width: '100%', marginTop: 6, minHeight: 110, resize: 'vertical' }} />
@@ -1132,20 +1559,20 @@ export default function ViolationManagement() {
             ) : null}
 
             {actionModal?.type === 'lock' && (
-                <Modal title="Admin xử lý yêu cầu gỡ lock" onClose={() => setActionModal(null)}>
+                <Modal title="Quản trị viên xử lý yêu cầu gỡ khóa đơn" onClose={() => setActionModal(null)}>
                     <div style={{ display: 'grid', gap: 8 }}>
                         <select value={lockResolveForm.decision} onChange={(e) => setLockResolveForm((p) => ({ ...p, decision: e.target.value }))} style={input}>
-                            <option value="APPROVE_UNLOCK">APPROVE_UNLOCK</option>
-                            <option value="APPROVE_REASSIGN">APPROVE_REASSIGN</option>
-                            <option value="REJECT">REJECT</option>
+                            <option value="APPROVE_UNLOCK">Duyệt gỡ khóa</option>
+                            <option value="APPROVE_REASSIGN">Duyệt giao lại cho người khác</option>
+                            <option value="REJECT">Từ chối</option>
                         </select>
                         {lockResolveForm.decision === 'APPROVE_REASSIGN' && (
                             <select value={lockResolveForm.newAssigneeId} onChange={(e) => setLockResolveForm((p) => ({ ...p, newAssigneeId: e.target.value }))} style={input}>
-                                <option value="">Chọn compliance mới</option>
+                                <option value="">Chọn nhân viên kiểm duyệt mới</option>
                                 {officers.map((o) => <option key={o.id} value={o.id}>{o.displayName || o.email || o.id}</option>)}
                             </select>
                         )}
-                        <textarea value={lockResolveForm.adminNote} onChange={(e) => setLockResolveForm((p) => ({ ...p, adminNote: e.target.value }))} placeholder="Ghi chú admin..." style={{ ...input, minHeight: 90 }} />
+                        <textarea value={lockResolveForm.adminNote} onChange={(e) => setLockResolveForm((p) => ({ ...p, adminNote: e.target.value }))} placeholder="Ghi chú của quản trị viên..." style={{ ...input, minHeight: 90 }} />
                         <div>
                             <button style={btn} onClick={async () => {
                                 await actionWithReload(() => resolveAdminComplianceLockRequest(actionModal.targetId, {
@@ -1185,7 +1612,7 @@ export default function ViolationManagement() {
                                     if (releaseFormError) setReleaseFormError('');
                                 }}
                                 rows={4}
-                                placeholder="Ví dụ: Tôi đang quá tải ticket, đề nghị trả truyện về hàng đợi để phân công lại."
+                                placeholder="Ví dụ: Tôi đang quá tải phiếu báo cáo, đề nghị trả truyện về hàng đợi để phân công lại."
                                 disabled={!!releasingStoryId}
                                 style={{ ...input, width: '100%', marginTop: 6, minHeight: 96, resize: 'vertical' }}
                             />
@@ -1247,6 +1674,81 @@ export default function ViolationManagement() {
                 </Modal>
             )}
 
+            {bulkResolveModal && (
+                <Modal
+                    title="Xử lý toàn bộ phiếu báo cáo đang mở"
+                    maxWidth={560}
+                    onClose={() => {
+                        if (bulkResolveBusy) return;
+                        setBulkResolveModal(null);
+                    }}
+                >
+                    <div className="space-y-4">
+                        <p className="text-sm text-slate-700 m-0">
+                            Chọn kết quả xử lý cho toàn bộ phiếu báo cáo đang mở của mục này.
+                        </p>
+                        <div className="text-sm text-slate-600">
+                            <span className="font-semibold">Đối tượng:</span> {bulkResolveModal.targetLabel || '—'}
+                        </div>
+                        <div className="grid gap-2">
+                            <label className="inline-flex items-start gap-2 text-sm text-slate-700">
+                                <input
+                                    type="radio"
+                                    name="bulkResolveStatus"
+                                    checked={bulkResolveStatus === 'RESOLVED'}
+                                    onChange={() => setBulkResolveStatus('RESOLVED')}
+                                    disabled={bulkResolveBusy}
+                                />
+                                <span>
+                                    <span className="font-semibold">Đã xử lý thành công</span>
+                                    <span className="block text-xs text-slate-500">Đánh dấu các phiếu là RESOLVED.</span>
+                                </span>
+                            </label>
+                            <label className="inline-flex items-start gap-2 text-sm text-slate-700">
+                                <input
+                                    type="radio"
+                                    name="bulkResolveStatus"
+                                    checked={bulkResolveStatus === 'DISMISSED'}
+                                    onChange={() => setBulkResolveStatus('DISMISSED')}
+                                    disabled={bulkResolveBusy}
+                                />
+                                <span>
+                                    <span className="font-semibold">Không xử lý được (không đủ bằng chứng)</span>
+                                    <span className="block text-xs text-slate-500">Đánh dấu các phiếu là DISMISSED.</span>
+                                </span>
+                            </label>
+                        </div>
+                        <div className="flex justify-end gap-2">
+                            <button style={btn} disabled={bulkResolveBusy} onClick={() => setBulkResolveModal(null)}>
+                                Hủy
+                            </button>
+                            <button
+                                style={{ ...btn, background: '#0ea5e9', color: '#fff', borderColor: '#0ea5e9' }}
+                                disabled={bulkResolveBusy}
+                                onClick={submitBulkResolve}
+                            >
+                                {bulkResolveBusy ? 'Đang xử lý...' : 'Xác nhận'}
+                            </button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+
+            {infoModal && (
+                <Modal
+                    title={infoModal.title || 'Thông báo'}
+                    maxWidth={440}
+                    onClose={() => setInfoModal(null)}
+                >
+                    <p className="text-sm text-slate-700 m-0 whitespace-pre-wrap">{infoModal.message || ''}</p>
+                    <div className="flex justify-end mt-4">
+                        <button type="button" style={{ ...btn, background: '#0ea5e9', color: '#fff', borderColor: '#0ea5e9' }} onClick={() => setInfoModal(null)}>
+                            Đóng
+                        </button>
+                    </div>
+                </Modal>
+            )}
+
             {accountViolationModal && (
                 <Modal
                     title={`Lịch sử vi phạm — ${accountViolationModal.displayName}`}
@@ -1272,14 +1774,14 @@ export default function ViolationManagement() {
                                 <tbody>
                                     {accountViolationRows.length === 0 ? (
                                         <tr>
-                                            <td colSpan={4} className="p-4 text-center text-slate-500">Chưa có bản ghi violation_logs cho tài khoản này.</td>
+                                            <td colSpan={4} className="p-4 text-center text-slate-500">Chưa có bản ghi nhật ký vi phạm cho tài khoản này.</td>
                                         </tr>
                                     ) : (
                                         accountViolationRows.map((row) => (
                                             <tr key={String(row.id ?? row.Id)} className="border-t border-slate-200">
                                                 <td style={td}>{formatDate(row.createdAtUtc ?? row.CreatedAtUtc)}</td>
                                                 <td style={td}>{penaltyTypeVi(row.penaltyType ?? row.PenaltyType)}</td>
-                                                <td style={td}>{row.reason ?? row.Reason ?? '—'}</td>
+                                                <td style={td}>{violationReasonDisplayVi(row.reason ?? row.Reason)}</td>
                                                 <td style={td}>{row.complianceOfficerDisplayName ?? row.ComplianceOfficerDisplayName ?? '—'}</td>
                                             </tr>
                                         ))
@@ -1298,7 +1800,7 @@ export default function ViolationManagement() {
                     ) : (
                         <div className="space-y-8">
                             <section>
-                                <h4 className="text-base font-bold text-slate-900 mb-2">Yêu cầu gỡ lock / giao lại</h4>
+                                <h4 className="text-base font-bold text-slate-900 mb-2">Yêu cầu gỡ khóa / giao lại</h4>
                                 <div className="overflow-x-auto">
                                     <table className="w-full border-collapse text-sm">
                                         <thead>

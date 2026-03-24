@@ -1,7 +1,10 @@
 using BusinessObjects.Entities;
 using BusinessObjects.StoryReporting;
+using BusinessObjects;
 using DataAccessObjects.DAOs;
+using Microsoft.EntityFrameworkCore;
 using Services;
+using Services.DTOs.Notifications;
 using Services.DTOs.StoryReports;
 using Services.Interfaces;
 using Services.StoryReporting;
@@ -11,6 +14,12 @@ namespace Services.Implementations;
 public class StoryReportService : IStoryReportService
 {
     private static readonly string ComplianceTargetType = ReviewAssignmentDAO.TargetTypeComplianceStoryReports;
+    private readonly INotificationHubNotifier? _notificationHubNotifier;
+
+    public StoryReportService(INotificationHubNotifier? notificationHubNotifier = null)
+    {
+        _notificationHubNotifier = notificationHubNotifier;
+    }
 
     public IReadOnlyList<StoryReportReasonOptionDto> GetReasonOptions()
     {
@@ -610,7 +619,7 @@ public class StoryReportService : IStoryReportService
         StoryDAO.SetCommentsDisabled(storyId, disabled);
         ViolationLogDAO.Insert(actorId, st.author_id, "STORY", storyId,
             disabled ? "COMMENTS_DISABLED" : "COMMENTS_ENABLED",
-            disabled ? "Compliance tắt comment truyện." : "Compliance bật lại comment truyện.", null);
+            disabled ? "Đã tắt bình luận truyện (xử lý vi phạm)." : "Đã bật lại bình luận truyện.", null);
         return Task.CompletedTask;
     }
 
@@ -621,7 +630,7 @@ public class StoryReportService : IStoryReportService
         StoryDAO.SetComplianceHidden(storyId, hidden);
         ViolationLogDAO.Insert(actorId, st.author_id, "STORY", storyId,
             hidden ? "STORY_HIDDEN_COMPLIANCE" : "STORY_UNHIDDEN_COMPLIANCE",
-            hidden ? "Compliance ẩn truyện khỏi công khai." : "Compliance hiện lại truyện.", null);
+            hidden ? "Đã ẩn truyện khỏi danh sách công khai (xử lý vi phạm)." : "Đã hiện lại truyện trên danh sách công khai.", null);
         return Task.CompletedTask;
     }
 
@@ -847,9 +856,76 @@ public class StoryReportService : IStoryReportService
         if (!ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, storyId, complianceUserId))
             throw new InvalidOperationException("Bạn phải đang nhận (lock) truyện này.");
         var st = NormalizeComplianceResolveStatus(dto?.Status);
+        List<Guid> reporterIds;
+        using (var context = new StoryPlatformDbContext())
+        {
+            reporterIds = context.reports.AsNoTracking()
+                .Where(r =>
+                    (r.target_type ?? "") == StoryReportDAO.StoryTargetType
+                    && r.target_id == storyId
+                    && r.status != null
+                    && (r.status.Trim().ToUpper() == "NEW" || r.status.Trim().ToUpper() == "IN_REVIEW")
+                    && r.reporter_id != null
+                    && r.reporter_id != Guid.Empty)
+                .Select(r => r.reporter_id!.Value)
+                .Distinct()
+                .ToList();
+        }
+        var contributorMap = StoryReportDAO.GetContributorsByStoryIds(new[] { storyId });
+        if (contributorMap.TryGetValue(storyId, out var contributors) && contributors != null)
+        {
+            reporterIds.AddRange(contributors
+                .Select(x => x.UserId)
+                .Where(x => x != Guid.Empty));
+            reporterIds = reporterIds.Distinct().ToList();
+        }
         var n = StoryReportDAO.ResolveOpenStoryReportsForCompliance(storyId, complianceUserId, st);
         MaybeCompleteComplianceLockWhenNoOpenReports(storyId);
+        _ = NotifyReportersBulkResolvedAsync(reporterIds, storyId, st);
         return Task.FromResult(n);
+    }
+
+    private async Task NotifyReportersBulkResolvedAsync(IReadOnlyCollection<Guid> reporterIds, Guid storyId, string status)
+    {
+        if (reporterIds == null || reporterIds.Count == 0 || _notificationHubNotifier == null) return;
+        var success = string.Equals(status, "RESOLVED", StringComparison.OrdinalIgnoreCase);
+        var title = success ? "Báo cáo truyện đã được xử lý" : "Báo cáo truyện đã được cập nhật";
+        var content = success
+            ? "Đơn báo cáo truyện bạn đã gửi đã được xử lý bởi xử lý vi phạm viên thành công."
+            : "Đơn báo cáo truyện bạn đã gửi được đánh dấu không đủ bằng chứng để xử lý.";
+
+        foreach (var userId in reporterIds.Distinct())
+        {
+            try
+            {
+                var n = new notifications
+                {
+                    id = Guid.NewGuid(),
+                    user_id = userId,
+                    type = "COMPLIANCE_STORY_REPORT_BULK_RESOLVED",
+                    title = title,
+                    content = content,
+                    link_url = $"/story/{storyId}",
+                    is_read = false,
+                    created_at = DateTime.UtcNow
+                };
+                NotificationDAO.Add(n);
+                await _notificationHubNotifier.NotifyUserAsync(userId, new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = false,
+                    CreatedAt = n.created_at
+                });
+            }
+            catch
+            {
+                // best effort push; không làm fail nghiệp vụ chính.
+            }
+        }
     }
 
     public Task<PagedComplianceStoryReportsDto> QueryMyResolvedComplianceReportsAsync(int page, int pageSize, Guid complianceUserId, string? search)

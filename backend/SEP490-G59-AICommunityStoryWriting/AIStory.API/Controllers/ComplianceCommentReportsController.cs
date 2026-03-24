@@ -1,4 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -32,13 +32,14 @@ public class ComplianceCommentReportsController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
         [FromQuery] string? status = "NEW,IN_REVIEW",
-        [FromQuery] string? search = null)
+        [FromQuery] string? search = null,
+        [FromQuery] string? claimFilter = null)
     {
         try
         {
             var actingUserId = GetCurrentUserId();
             var viewerIsAdmin = User.IsInRole("ADMIN");
-            var result = await _commentReportService.QueryComplianceOpenCommentReportsAsync(page, pageSize, status, search, actingUserId, viewerIsAdmin);
+            var result = await _commentReportService.QueryComplianceOpenCommentReportsAsync(page, pageSize, status, search, actingUserId, viewerIsAdmin, claimFilter);
             return Ok(result);
         }
         catch (Exception ex)
