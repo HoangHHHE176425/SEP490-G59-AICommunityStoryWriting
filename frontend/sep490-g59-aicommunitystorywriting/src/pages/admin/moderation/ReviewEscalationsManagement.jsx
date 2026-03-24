@@ -132,7 +132,7 @@ function urgencyBadge(tier) {
     const map = {
         CRITICAL: { ...T.critical, label: 'Nghiêm trọng' },
         HIGH: { ...T.high, label: 'Cao' },
-        STANDARD: { ...T.standard, label: 'Chuẩn' },
+        STANDARD: { ...T.standard, label: 'Thông thường' },
     };
     const c = map[t] ?? { ...T.standard, label: tier || '—' };
     return (
@@ -190,6 +190,10 @@ function truncate(str, max) {
     const t = (str ?? '').toString();
     if (t.length <= max) return t;
     return `${t.slice(0, max)}…`;
+}
+
+function urgencyKeyFromRow(row) {
+    return String(row?.urgencyTier ?? row?.urgency_tier ?? 'STANDARD').toUpperCase();
 }
 
 function toDateTimeLocalInput(value) {
@@ -340,13 +344,23 @@ export function ReviewEscalationsManagement() {
                 ]);
                 const pendingLocks = (Array.isArray(pendingLockRes) ? pendingLockRes : []).map((x) => ({ ...x, __reqType: 'LOCK' }));
                 const pendingActions = (Array.isArray(pendingActionRes) ? pendingActionRes : []).map((x) => ({ ...x, __reqType: 'ADMIN_ACTION' }));
-                const pending = [...pendingLocks, ...pendingActions].sort((a, b) => {
+                const pendingAll = [...pendingLocks, ...pendingActions].sort((a, b) => {
                     const ta = new Date(a?.createdAtUtc ?? a?.created_at ?? 0).getTime();
                     const tb = new Date(b?.createdAtUtc ?? b?.created_at ?? 0).getTime();
                     return tb - ta;
                 });
+                const complianceCounts = pendingAll.reduce((acc, row) => {
+                    const k = urgencyKeyFromRow(row);
+                    if (k === 'CRITICAL') acc.critical += 1;
+                    else if (k === 'HIGH') acc.high += 1;
+                    else acc.standard += 1;
+                    return acc;
+                }, { critical: 0, high: 0, standard: 0 });
+                const pending = !tier
+                    ? pendingAll
+                    : pendingAll.filter((x) => urgencyKeyFromRow(x) === tier);
                 setItems(pending);
-                setCounts({ critical: 0, high: 0, standard: 0 });
+                setCounts(complianceCounts);
                 return;
             }
             if (listMode === 'history') {
@@ -683,9 +697,9 @@ export function ReviewEscalationsManagement() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* Header — cùng format Quản lý xuất bản / Category */}
             <div>
-                <h1 style={{ fontSize: '1.875rem', fontWeight: 700, color: T.title, margin: 0, marginBottom: '0.5rem' }}>Đơn báo cáo duyệt</h1>
+                <h1 style={{ fontSize: '1.875rem', fontWeight: 700, color: T.title, margin: 0, marginBottom: '0.5rem' }}>Quản lý đơn</h1>
                 <p style={{ fontSize: '0.875rem', color: T.slate, margin: 0, maxWidth: '42rem', lineHeight: 1.55 }}>
-                    Đơn escalation moderator (gia hạn / hủy nhận), lịch sử đã xử lý và log tra cứu — cùng luồng API với Admin Client.
+                    Quản lý đơn của kiểm duyệt viên và xử lý vi phạm viên, bao gồm đơn chờ xử lý, lịch sử đã xử lý và nhật ký tra cứu.
                 </p>
             </div>
 
@@ -705,12 +719,12 @@ export function ReviewEscalationsManagement() {
                 <button
                     type="button"
                     onClick={() => { setMainTab('orders'); setOrderSourceTab('moderator'); }}
-                    style={pubTabStyle(mainTab === 'orders', T.sky)}
-                    {...pillHoverHandlers(mainTab === 'orders')}
+                    style={pubTabStyle(mainTab === 'orders' && orderSourceTab === 'moderator', T.sky)}
+                    {...pillHoverHandlers(mainTab === 'orders' && orderSourceTab === 'moderator')}
                 >
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                         Đơn của kiểm duyệt viên
-                        {counts.critical > 0 && mainTab === 'orders' && listMode === 'pending' && (
+                        {counts.critical > 0 && mainTab === 'orders' && listMode === 'pending' && orderSourceTab === 'moderator' && (
                             <span
                                 style={{
                                     minWidth: 20,
@@ -731,18 +745,14 @@ export function ReviewEscalationsManagement() {
                         )}
                     </span>
                 </button>
-                {mainTab === 'orders' && (
-                    <div style={{ marginLeft: 4, display: 'flex', gap: 8 }}>
-                        <button
-                            type="button"
-                            onClick={() => setOrderSourceTab('compliance')}
-                            style={pubTabStyle(orderSourceTab === 'compliance', '#7c3aed')}
-                            {...pillHoverHandlers(orderSourceTab === 'compliance')}
-                        >
-                            Đơn của xử lý vi phạm viên
-                        </button>
-                    </div>
-                )}
+                <button
+                    type="button"
+                    onClick={() => { setMainTab('orders'); setOrderSourceTab('compliance'); }}
+                    style={pubTabStyle(mainTab === 'orders' && orderSourceTab === 'compliance', T.sky)}
+                    {...pillHoverHandlers(mainTab === 'orders' && orderSourceTab === 'compliance')}
+                >
+                    Đơn của xử lý vi phạm viên
+                </button>
             </div>
 
             {mainTab === 'orders' && (
@@ -773,7 +783,7 @@ export function ReviewEscalationsManagement() {
                             </button>
                         </div>
 
-                        {listMode === 'pending' && orderSourceTab === 'moderator' && (
+                        {listMode === 'pending' && (
                             <div style={{ marginBottom: '1.25rem' }}>
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
                                     <div style={{ borderRadius: '12px', border: `1px solid ${T.critical.border}`, background: T.critical.bg, padding: '1rem' }}>
@@ -785,7 +795,7 @@ export function ReviewEscalationsManagement() {
                                         <p style={{ fontSize: '1.5rem', fontWeight: 700, color: T.high.fg, margin: '0.35rem 0 0' }}>{counts.high}</p>
                                     </div>
                                     <div style={{ borderRadius: '12px', border: `1px solid ${T.standard.border}`, background: T.standard.bg, padding: '1rem' }}>
-                                        <p style={{ fontSize: '0.75rem', color: T.standard.fg, margin: 0, fontWeight: 600 }}>Chuẩn</p>
+                                        <p style={{ fontSize: '0.75rem', color: T.standard.fg, margin: 0, fontWeight: 600 }}>Thông thường</p>
                                         <p style={{ fontSize: '1.5rem', fontWeight: 700, color: T.standard.fg, margin: '0.35rem 0 0' }}>{counts.standard}</p>
                                     </div>
                                 </div>
@@ -794,7 +804,7 @@ export function ReviewEscalationsManagement() {
                                         { key: '', label: 'Tất cả', color: T.sky },
                                         { key: 'CRITICAL', label: 'Chỉ nghiêm trọng', color: '#ef4444' },
                                         { key: 'HIGH', label: 'Chỉ cao', color: '#f97316' },
-                                        { key: 'STANDARD', label: 'Chỉ chuẩn', color: '#64748b' },
+                                        { key: 'STANDARD', label: 'Chỉ thông thường', color: '#64748b' },
                                     ].map((b) => {
                                         const active = tier === b.key;
                                         return (

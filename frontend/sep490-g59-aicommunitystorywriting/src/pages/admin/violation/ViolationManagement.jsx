@@ -47,6 +47,21 @@ import {
 import { getModerationLogs } from '../../../api/admin/adminModerationApi';
 
 const PAGE_SIZE = 10;
+const REPORT_STATUS_FILTER_OPTIONS = [
+    { value: 'OPEN', label: 'Đang mở (mới + đang xử lý)' },
+    { value: 'NEW', label: 'Mới nhận' },
+    { value: 'IN_REVIEW', label: 'Đang xử lý' },
+    { value: 'RESOLVED', label: 'Đã xử lý thành công' },
+    { value: 'DISMISSED', label: 'Không đủ bằng chứng' },
+    { value: 'ALL', label: 'Tất cả trạng thái' },
+];
+
+function mapStatusFilterToApiValue(filterValue) {
+    const key = String(filterValue ?? '').trim().toUpperCase();
+    if (!key || key === 'OPEN') return 'NEW,IN_REVIEW';
+    if (key === 'ALL') return undefined;
+    return key;
+}
 
 function formatDate(value) {
     if (!value) return '—';
@@ -378,7 +393,7 @@ export default function ViolationManagement() {
     const [rows, setRows] = useState([]);
     const [totalCount, setTotalCount] = useState(0);
     const [currentPage, setCurrentPage] = useState(1);
-    const [filters, setFilters] = useState({ search: '', statuses: 'NEW,IN_REVIEW', flaggedOnly: false });
+    const [filters, setFilters] = useState({ search: '', statusFilter: 'OPEN', flaggedOnly: false });
     const [selectedStory, setSelectedStory] = useState(null);
     const [storyTickets, setStoryTickets] = useState([]);
     const [storyTicketLoading, setStoryTicketLoading] = useState(false);
@@ -417,6 +432,8 @@ export default function ViolationManagement() {
     const [commentClaimPickerRows, setCommentClaimPickerRows] = useState([]);
     const [commentClaimPickerLoading, setCommentClaimPickerLoading] = useState(false);
     const [commentClaimPickerStoryMeta, setCommentClaimPickerStoryMeta] = useState({});
+    const [claimableStoryCount, setClaimableStoryCount] = useState(0);
+    const [claimableCommentCount, setClaimableCommentCount] = useState(0);
     const [infoModal, setInfoModal] = useState(null);
     const [adminLogType, setAdminLogType] = useState('compliance');
 
@@ -427,6 +444,32 @@ export default function ViolationManagement() {
     );
 
     const totalPages = useMemo(() => Math.max(1, Math.ceil(totalCount / PAGE_SIZE)), [totalCount]);
+    const reportStatusApiValue = useMemo(() => mapStatusFilterToApiValue(filters.statusFilter), [filters.statusFilter]);
+
+    const refreshClaimableCounts = useCallback(async () => {
+        try {
+            const [storyRes, commentRes] = await Promise.all([
+                getComplianceStoryReports({
+                    page: 1,
+                    pageSize: 1,
+                    groupByStory: true,
+                    claimFilter: 'unclaimed',
+                    statuses: 'NEW,IN_REVIEW',
+                }),
+                getComplianceCommentReports({
+                    page: 1,
+                    pageSize: 1,
+                    claimFilter: 'unclaimed',
+                    status: 'NEW,IN_REVIEW',
+                }),
+            ]);
+            setClaimableStoryCount(readPaged(storyRes).totalCount);
+            setClaimableCommentCount(readPaged(commentRes).totalCount);
+        } catch {
+            setClaimableStoryCount(0);
+            setClaimableCommentCount(0);
+        }
+    }, []);
 
     const loadData = useCallback(async (page = 1, opts = {}) => {
         const afterClaim = opts.afterClaim === true;
@@ -457,7 +500,7 @@ export default function ViolationManagement() {
                 data = await getComplianceStoryReports({
                     page, pageSize: PAGE_SIZE, groupByStory: true, sortBy: 'priority_desc',
                     claimFilter: 'mine',
-                    statuses: filters.statuses || undefined, search: filters.search || undefined, flaggedOnly: filters.flaggedOnly ? true : undefined,
+                    statuses: reportStatusApiValue, search: filters.search || undefined, flaggedOnly: filters.flaggedOnly ? true : undefined,
                 });
             } else if (activeTab === 'comment-reports') {
                 if (!showClaimedCommentList && !afterClaim) {
@@ -465,7 +508,7 @@ export default function ViolationManagement() {
                         page: 1,
                         pageSize: 1,
                         claimFilter: 'mine',
-                        status: filters.statuses || 'NEW,IN_REVIEW',
+                        status: 'NEW,IN_REVIEW',
                     });
                     const mineProbeItems = readPaged(mineProbe).items;
                     if (Array.isArray(mineProbeItems) && mineProbeItems.length > 0) {
@@ -482,7 +525,7 @@ export default function ViolationManagement() {
                     page,
                     pageSize: PAGE_SIZE,
                     claimFilter: 'mine',
-                    status: filters.statuses || undefined,
+                    status: reportStatusApiValue,
                     search: filters.search || undefined,
                 });
             } else if (activeTab === 'lock-requests') {
@@ -535,7 +578,7 @@ export default function ViolationManagement() {
                     pageSize: 300,
                     groupByStory: false,
                     claimFilter: 'mine',
-                    statuses: filters.statuses || undefined,
+                    statuses: reportStatusApiValue,
                     search: filters.search || undefined,
                     sortBy: 'newest',
                 });
@@ -553,11 +596,14 @@ export default function ViolationManagement() {
         } finally {
             setLoading(false);
         }
-    }, [activeTab, adminLogType, filters.flaggedOnly, filters.search, filters.statuses, showClaimedStoryList, showClaimedCommentList]);
+    }, [activeTab, adminLogType, filters.flaggedOnly, filters.search, reportStatusApiValue, showClaimedStoryList, showClaimedCommentList]);
 
     const isReportTab = activeTab === 'story-reports' || activeTab === 'comment-reports';
 
     useEffect(() => { loadData(1); }, [activeTab, loadData]);
+    useEffect(() => {
+        if (isReportTab) refreshClaimableCounts();
+    }, [isReportTab, activeTab, refreshClaimableCounts]);
     useEffect(() => {
         if (isAdmin) getAdminComplianceOfficers().then((x) => setOfficers(Array.isArray(x) ? x : x?.items ?? [])).catch(() => setOfficers([]));
     }, [isAdmin]);
@@ -843,6 +889,7 @@ export default function ViolationManagement() {
                 statuses: 'NEW,IN_REVIEW',
             });
             const paged = readPaged(queue);
+            setClaimableStoryCount(paged.totalCount);
             let grouped = onlyUnclaimedPickerRows(paged.items.map(normalizeStoryQueueItem));
             if (grouped.length > 0) {
                 setClaimPickerRows(grouped);
@@ -903,6 +950,7 @@ export default function ViolationManagement() {
                 status: 'NEW,IN_REVIEW',
             });
             const paged = readPaged(res);
+            setClaimableCommentCount(paged.totalCount);
             const rows = onlyUnclaimedPickerRows(paged.items.map(normalizeCommentQueueItem));
             if (rows.length > 0) {
                 setCommentClaimPickerRows(rows);
@@ -931,6 +979,7 @@ export default function ViolationManagement() {
             setIsClaimPickerOpen(false);
             setShowClaimedStoryList(true);
             await loadData(1, { afterClaim: true });
+            await refreshClaimableCounts();
         } catch (e) {
             setInfoModal({
                 title: 'Không thể nhận duyệt',
@@ -947,6 +996,7 @@ export default function ViolationManagement() {
             setIsCommentClaimPickerOpen(false);
             setShowClaimedCommentList(true);
             await loadData(1, { afterClaim: true });
+            await refreshClaimableCounts();
         } catch (e) {
             setInfoModal({
                 title: 'Không thể nhận duyệt',
@@ -1263,7 +1313,7 @@ export default function ViolationManagement() {
                                 onClick={loadClaimableStories}
                                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sky-500 text-white text-sm font-semibold hover:bg-sky-600"
                             >
-                                {claimPickerLoading ? 'Đang tải...' : 'Nhận duyệt đơn'}
+                                {claimPickerLoading ? 'Đang tải...' : `Nhận duyệt đơn (${claimableStoryCount})`}
                             </button>
                         ) : (
                             <button
@@ -1271,7 +1321,7 @@ export default function ViolationManagement() {
                                 onClick={loadClaimableComments}
                                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sky-500 text-white text-sm font-semibold hover:bg-sky-600"
                             >
-                                {commentClaimPickerLoading ? 'Đang tải...' : 'Nhận duyệt đơn'}
+                                {commentClaimPickerLoading ? 'Đang tải...' : `Nhận duyệt đơn (${claimableCommentCount})`}
                             </button>
                         )}
                         <button
@@ -1326,8 +1376,12 @@ export default function ViolationManagement() {
                     <>
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
                             <input value={filters.search} onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))} placeholder="Tìm theo mã, tên truyện, người báo cáo..." style={input} />
-                            <input value={filters.statuses} onChange={(e) => setFilters((p) => ({ ...p, statuses: e.target.value }))} placeholder="Trạng thái báo cáo (vd: NEW,IN_REVIEW)" style={input} />
-                            <button onClick={() => setFilters({ search: '', statuses: 'NEW,IN_REVIEW', flaggedOnly: false })} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"><RotateCcw style={{ width: 14, height: 14 }} /> Đặt lại</button>
+                            <select value={filters.statusFilter} onChange={(e) => setFilters((p) => ({ ...p, statusFilter: e.target.value }))} style={input}>
+                                {REPORT_STATUS_FILTER_OPTIONS.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                            </select>
+                            <button onClick={() => setFilters({ search: '', statusFilter: 'OPEN', flaggedOnly: false })} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"><RotateCcw style={{ width: 14, height: 14 }} /> Đặt lại</button>
                         </div>
                         {activeTab === 'story-reports' && (
                             <label className="inline-flex gap-2 mt-2 text-sm text-slate-700">

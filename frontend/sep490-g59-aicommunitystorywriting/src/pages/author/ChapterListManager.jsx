@@ -125,7 +125,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
     const [hasPendingReviewChapter, setHasPendingReviewChapter] = useState(false);
     /** Set orderIndex (0-based) chương đã PUBLISHED — dùng để hiển thị trạng thái. */
     const [publishedOrderIndices, setPublishedOrderIndices] = useState(new Set());
-    /** Set orderIndex (0-based) chương đang PENDING_REVIEW — cho phép gửi chương tiếp theo khi chương trước đã gửi (published hoặc pending). */
+    /** Set orderIndex (0-based) chương đang PENDING_REVIEW. */
     const [pendingOrderIndices, setPendingOrderIndices] = useState(new Set());
     /** Chương đang được mở rộng để xem/tạo version (click vào hàng chương). */
     const [expandedChapterId, setExpandedChapterId] = useState(null);
@@ -360,6 +360,19 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
             if (ch && (chapterVersionsMap[ch.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review')) return false;
         }
         return true;
+    };
+    /**
+     * Chỉ cho gửi chương N khi chương N-1 đã có kết quả xử lý (duyệt hoặc từ chối),
+     * đồng thời chương N-1 không còn phiên bản đang chờ duyệt.
+     */
+    const canSubmitBySequentialReview = (chapterNumber) => {
+        if (chapterNumber === 1) return true;
+        const prevChapter = chapters.find((c) => c.number === chapterNumber - 1);
+        if (!prevChapter) return false;
+        const prevStatus = String(prevChapter.status ?? '').toLowerCase();
+        const prevHasPendingVersion = (chapterVersionsMap[prevChapter.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review');
+        const prevProcessed = prevStatus === 'published' || prevStatus === 'rejected';
+        return prevProcessed && !prevHasPendingVersion;
     };
     const closeConfirmDialog = () => {
         const isVersionAction = confirmDialog.action?.startsWith('version_');
@@ -758,10 +771,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                     const hasPendingVersion = versions.some((ver) => (ver.status ?? '').toLowerCase() === 'pending_review');
                                     const chapterIsPendingReview = (chapter.status ?? '').toLowerCase() === 'pending_review';
                                     const chapterIsPublished = (chapter.status ?? '').toLowerCase() === 'published';
-                                    const prevOrderIndex = chapter.number - 2;
-                                    const prevChapter = chapters.find((c) => c.number === chapter.number - 1);
-                                    const prevHasPendingVersion = prevChapter && (chapterVersionsMap[prevChapter.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review');
-                                    const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(prevOrderIndex) || pendingOrderIndices.has(prevOrderIndex) || prevHasPendingVersion;
+                                    const canSubmitForPublish = canSubmitBySequentialReview(chapter.number);
                                     const canSubmitVersion = canSubmitForPublish && !hasPendingVersion && !chapterIsPendingReview && !chapterIsPublished;
                                     const versionsLoading = loadingVersionsForChapterId === chapter.id;
                                     const chapterAiContributionLine = formatAiContributionLine(chapter);
@@ -998,13 +1008,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                     {(chapter.status === 'draft' || chapter.status === 'pending_review' || chapter.status === 'rejected') && (
                                                         <div style={{ display: 'flex', width: '100%' }}>
                                                             {(chapter.status === 'draft' || chapter.status === 'rejected') && (() => {
-                                                                const prevOrderIndex = chapter.number - 2;
-                                                                const prevChapter = chapters.find((c) => c.number === chapter.number - 1);
-                                                                const prevHasPendingVersion = prevChapter && (chapterVersionsMap[prevChapter.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review');
-                                                                const canSubmitForPublish = chapter.number === 1 || publishedOrderIndices.has(prevOrderIndex) || pendingOrderIndices.has(prevOrderIndex) || prevHasPendingVersion;
+                                                                const canSubmitForPublish = canSubmitBySequentialReview(chapter.number);
                                                                 const canSubmitChapter = canSubmitForPublish && !hasPendingVersion;
                                                                 const chapterPublishTitle = !canSubmitForPublish
-                                                                    ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.`
+                                                                    ? `Chỉ được gửi khi chương ${chapter.number - 1} đã có kết quả duyệt hoặc từ chối duyệt.`
                                                                     : hasPendingVersion
                                                                         ? 'Đã có phiên bản đang chờ duyệt, không thể gửi chương gốc.'
                                                                         : 'Gửi chương lên để duyệt xuất bản';
@@ -1404,7 +1411,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                     if (vStatusLower === 'published' || !canSubmitVersion) return;
                                                                                                     openVersionSubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                                 }}
-                                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : chapterIsPublished ? 'Chương đã xuất bản — không gửi thêm phiên bản chỉnh sửa (đã có phiên bản xuất bản).' : !canSubmitVersion ? (!canSubmitForPublish ? `Phải gửi chương ${chapter.number - 1} trước khi gửi chương ${chapter.number}.` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.' : 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.') : 'Gửi duyệt phiên bản'}
+                                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : chapterIsPublished ? 'Chương đã xuất bản — không gửi thêm phiên bản chỉnh sửa (đã có phiên bản xuất bản).' : !canSubmitVersion ? (!canSubmitForPublish ? `Chỉ được gửi khi chương ${chapter.number - 1} đã có kết quả duyệt hoặc từ chối duyệt.` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.' : 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.') : 'Gửi duyệt phiên bản'}
                                                                                                 disabled={vStatusLower === 'published' || !canSubmitVersion}
                                                                                                 style={{
                                                                                                     display: 'inline-flex',
@@ -1426,7 +1433,7 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                 }}
                                                                                             >
                                                                                                 <Send size={12} />
-                                                                                                {vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (!canSubmitForPublish ? `Gửi chương ${chapter.number - 1} trước` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt' : chapterIsPublished ? 'Đã có phiên bản xuất bản' : 'Đã có phiên bản chờ duyệt') : 'Xuất bản'}
+                                                                                                {vStatusLower === 'published' ? 'Đã xuất bản' : !canSubmitVersion ? (!canSubmitForPublish ? `Chờ xử lý chương ${chapter.number - 1}` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt' : chapterIsPublished ? 'Đã có phiên bản xuất bản' : 'Đã có phiên bản chờ duyệt') : 'Xuất bản'}
                                                                                             </button>
                                                                                         )}
                                                                                     </div>
