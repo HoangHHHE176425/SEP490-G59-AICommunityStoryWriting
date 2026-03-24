@@ -346,7 +346,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
     {
         if (string.IsNullOrWhiteSpace(finalContent)) return (null, null);
         var chaptersList = _chapterRepository.GetByStoryId(storyId).ToList();
-        // Khớp chapters.order_index từ FE (chương 1 → order_index 0). Ưu tiên index chương đang soạn để compare-chapter-preview khớp khi copy–paste.
+        // Khớp chapters.order_index từ FE (chương 1 → order_index 0). Ưu tiên index chương đang soạn để map đúng slot chương hiện tại.
         int nextChapterIndex;
         if (targetOrderIndex is >= 0)
             nextChapterIndex = targetOrderIndex.Value;
