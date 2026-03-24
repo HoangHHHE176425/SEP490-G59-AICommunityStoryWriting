@@ -81,7 +81,13 @@ public class ChapterVersionAiCompareService : IChapterVersionAiCompareService
                 Message = "Chưa có bản ai_generated_content gắn chapter_id này."
             };
 
-        var aiOutputs = aiRecords.Select(r => r.ai_output).ToList();
+        // Reduce accidental high score from historical unrelated AI outputs:
+        // use the newest AI record linked to this chapter as baseline.
+        var aiOutputs = aiRecords
+            .OrderByDescending(r => r.created_at)
+            .Take(1)
+            .Select(r => r.ai_output)
+            .ToList();
         var (bestScore, bestAiLen) = await ContentSimilarityHelper.CompareAuthorToAiOutputsAsync(
             snapshot,
             aiOutputs,

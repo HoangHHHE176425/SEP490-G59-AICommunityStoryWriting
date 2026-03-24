@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { getAdminWalletSummary, getSystemCoinLedger, getTopAuthorsByIncome, getTopSpenders } from '../../../api/admin/walletApi';
 import { AdminTransactions } from '../transactions/AdminTransactions';
+import { useAuth } from '../../../contexts/AuthContext';
 
 // FE mock: Ví hệ thống (admin) - sau này nối API:
 // - GET /api/admin/wallet/summary
@@ -110,6 +111,9 @@ const MOCK_TOP_SPENDERS = [
 ];
 
 export function AdminWalletDashboard({ initialActiveTab } = {}) {
+    const { role } = useAuth();
+    const roleUpper = (role ?? '').toString().toUpperCase();
+    const isWalletRestricted = roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE';
     const [activeTab, setActiveTab] = useState(initialActiveTab || 'overview');
     const [chartRange, setChartRange] = useState('7'); // 7 | 30 ngày
     const [overviewLoading, setOverviewLoading] = useState(false);
@@ -286,11 +290,13 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
 
     // Load once on mount
     useEffect(() => {
+        if (isWalletRestricted) return;
         handleRefreshOverview();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [isWalletRestricted]);
 
     useEffect(() => {
+        if (isWalletRestricted) return;
         if (activeTab !== 'history') return;
         let cancelled = false;
         const loadHistory = async () => {
@@ -320,10 +326,20 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
         return () => {
             cancelled = true;
         };
-    }, [activeTab, historyPage, historyPageSize, historyDateFrom, historyDateTo, historyTypeFilter]);
+    }, [activeTab, historyPage, historyPageSize, historyDateFrom, historyDateTo, historyTypeFilter, isWalletRestricted]);
 
     return (
         <div className="space-y-6 rounded-2xl">
+            {isWalletRestricted ? (
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-center">
+                    <h2 className="text-lg font-semibold text-slate-900">Không có quyền xem ví hệ thống</h2>
+                    <p className="mt-2 text-sm text-slate-600">
+                        Moderator/Compliance chỉ thực hiện chức năng điều hành và không truy cập được phần ví hệ thống.
+                    </p>
+                </div>
+            ) : null}
+            {isWalletRestricted ? null : (
+                <>
             {loadError ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12px] font-semibold text-amber-800">
                     {loadError}
@@ -879,6 +895,8 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                         <AdminTransactions />
                     </div>
                 </div>
+            )}
+                </>
             )}
         </div>
     );

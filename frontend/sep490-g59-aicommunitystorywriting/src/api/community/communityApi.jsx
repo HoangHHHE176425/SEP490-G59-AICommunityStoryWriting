@@ -17,8 +17,8 @@ export async function getCommunityStats() {
     };
   } catch (e) {
     const status = e?.response?.status;
-    // BE chưa có route → không báo lỗi UI, tính từ danh sách truyện public
-    if (status === 404 || status === 501) {
+    // BE chưa có route hoặc đang lỗi tạm thời → fallback để widget vẫn hiển thị.
+    if (status === 404 || status === 500 || status === 501 || status === 502 || status === 503 || status === 504) {
       const fromStories = await getCommunityStatsFromPublishedStories();
       return { ...fromStories, statsSource: 'stories' };
     }
