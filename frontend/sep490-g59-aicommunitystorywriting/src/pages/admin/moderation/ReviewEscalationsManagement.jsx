@@ -10,6 +10,8 @@ import {
 import {
     getAdminComplianceLockRequests,
     resolveAdminComplianceLockRequest,
+    getAdminComplianceAdminActionRequests,
+    resolveAdminComplianceAdminActionRequest,
 } from '../../../api/admin/adminComplianceApi';
 import { getChapterReviewContent } from '../../../api/moderator/moderatorApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
@@ -189,6 +191,14 @@ function truncate(str, max) {
     return `${t.slice(0, max)}…`;
 }
 
+function toDateTimeLocalInput(value) {
+    if (!value) return '';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** Nhãn trạng thái chương cho bảng tóm tắt (không tải nội dung). */
 function chapterStatusVi(status) {
     const s = String(status ?? '').toUpperCase();
@@ -269,6 +279,7 @@ export function ReviewEscalationsManagement() {
     const [complianceResolveRow, setComplianceResolveRow] = useState(null);
     const [complianceDecision, setComplianceDecision] = useState('APPROVE_UNLOCK');
     const [complianceAdminNote, setComplianceAdminNote] = useState('');
+    const [complianceSuspendUntilUtc, setComplianceSuspendUntilUtc] = useState('');
     const [complianceResolving, setComplianceResolving] = useState(false);
 
     /** Log tab */
@@ -297,13 +308,17 @@ export function ReviewEscalationsManagement() {
         try {
             if (orderSourceTab === 'compliance') {
                 if (listMode === 'history') {
-                    const [approvedRes, rejectedRes] = await Promise.all([
+                    const [approvedLockRes, rejectedLockRes, approvedActionRes, rejectedActionRes] = await Promise.all([
                         getAdminComplianceLockRequests({ status: 'APPROVED' }),
                         getAdminComplianceLockRequests({ status: 'REJECTED' }),
+                        getAdminComplianceAdminActionRequests({ status: 'APPROVED' }),
+                        getAdminComplianceAdminActionRequests({ status: 'REJECTED' }),
                     ]);
-                    const approved = Array.isArray(approvedRes) ? approvedRes : [];
-                    const rejected = Array.isArray(rejectedRes) ? rejectedRes : [];
-                    const merged = [...approved, ...rejected].sort((a, b) => {
+                    const approvedLocks = (Array.isArray(approvedLockRes) ? approvedLockRes : []).map((x) => ({ ...x, __reqType: 'LOCK' }));
+                    const rejectedLocks = (Array.isArray(rejectedLockRes) ? rejectedLockRes : []).map((x) => ({ ...x, __reqType: 'LOCK' }));
+                    const approvedActions = (Array.isArray(approvedActionRes) ? approvedActionRes : []).map((x) => ({ ...x, __reqType: 'ADMIN_ACTION' }));
+                    const rejectedActions = (Array.isArray(rejectedActionRes) ? rejectedActionRes : []).map((x) => ({ ...x, __reqType: 'ADMIN_ACTION' }));
+                    const merged = [...approvedLocks, ...rejectedLocks, ...approvedActions, ...rejectedActions].sort((a, b) => {
                         const ta = new Date(a?.resolvedAtUtc ?? a?.resolved_at ?? a?.createdAtUtc ?? a?.created_at ?? 0).getTime();
                         const tb = new Date(b?.resolvedAtUtc ?? b?.resolved_at ?? b?.createdAtUtc ?? b?.created_at ?? 0).getTime();
                         return tb - ta;
@@ -313,8 +328,17 @@ export function ReviewEscalationsManagement() {
                     setCounts({ critical: 0, high: 0, standard: 0 });
                     return;
                 }
-                const pendingRes = await getAdminComplianceLockRequests({ status: 'PENDING' });
-                const pending = Array.isArray(pendingRes) ? pendingRes : [];
+                const [pendingLockRes, pendingActionRes] = await Promise.all([
+                    getAdminComplianceLockRequests({ status: 'PENDING' }),
+                    getAdminComplianceAdminActionRequests({ status: 'PENDING' }),
+                ]);
+                const pendingLocks = (Array.isArray(pendingLockRes) ? pendingLockRes : []).map((x) => ({ ...x, __reqType: 'LOCK' }));
+                const pendingActions = (Array.isArray(pendingActionRes) ? pendingActionRes : []).map((x) => ({ ...x, __reqType: 'ADMIN_ACTION' }));
+                const pending = [...pendingLocks, ...pendingActions].sort((a, b) => {
+                    const ta = new Date(a?.createdAtUtc ?? a?.created_at ?? 0).getTime();
+                    const tb = new Date(b?.createdAtUtc ?? b?.created_at ?? 0).getTime();
+                    return tb - ta;
+                });
                 setItems(pending);
                 setCounts({ critical: 0, high: 0, standard: 0 });
                 return;
@@ -569,8 +593,10 @@ export function ReviewEscalationsManagement() {
 
     const openComplianceResolve = (row) => {
         setComplianceResolveRow(row);
-        setComplianceDecision('APPROVE_UNLOCK');
+        const reqType = row?.__reqType;
+        setComplianceDecision(reqType === 'ADMIN_ACTION' ? 'APPROVE' : 'APPROVE_UNLOCK');
         setComplianceAdminNote('');
+        setComplianceSuspendUntilUtc(toDateTimeLocalInput(row?.proposedSuspendUntilUtc ?? row?.ProposedSuspendUntilUtc));
         setResolveApiError(null);
     };
 
@@ -583,13 +609,22 @@ export function ReviewEscalationsManagement() {
     const submitComplianceResolve = async () => {
         if (!complianceResolveRow) return;
         const id = complianceResolveRow.id ?? complianceResolveRow.Id;
+        const reqType = complianceResolveRow.__reqType;
         setComplianceResolving(true);
         setResolveApiError(null);
         try {
-            await resolveAdminComplianceLockRequest(id, {
-                decision: complianceDecision,
-                adminNote: complianceAdminNote.trim() || undefined,
-            });
+            if (reqType === 'ADMIN_ACTION') {
+                await resolveAdminComplianceAdminActionRequest(id, {
+                    decision: complianceDecision,
+                    adminNote: complianceAdminNote.trim() || undefined,
+                    suspendUntilUtc: complianceSuspendUntilUtc ? new Date(complianceSuspendUntilUtc).toISOString() : undefined,
+                });
+            } else {
+                await resolveAdminComplianceLockRequest(id, {
+                    decision: complianceDecision,
+                    adminNote: complianceAdminNote.trim() || undefined,
+                });
+            }
             setComplianceResolveRow(null);
             await loadOrders();
         } catch (e) {
@@ -797,7 +832,7 @@ export function ReviewEscalationsManagement() {
                                             <table style={tableBase}>
                                                 <thead>
                                                     <tr>
-                                                        {['Kết quả', 'Truyện', 'Người gửi', 'Lý do', 'Tạo lúc', 'Xử lý lúc', 'Ghi chú admin'].map((h) => (
+                                                        {['Kết quả', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Lý do', 'Tạo lúc', 'Xử lý lúc', 'Ghi chú admin'].map((h) => (
                                                             <th key={h} style={thBase}>{h}</th>
                                                         ))}
                                                     </tr>
@@ -810,8 +845,14 @@ export function ReviewEscalationsManagement() {
                                                         return (
                                                             <tr key={id}>
                                                                 <td style={tdBase}>{historyResultBadge(status)}</td>
+                                                                <td style={tdBase}>{row.__reqType === 'ADMIN_ACTION' ? 'Yêu cầu xử lý tài khoản' : 'Yêu cầu gỡ lock'}</td>
                                                                 <td style={tdBase}>{row.storyTitle ?? row.story?.title ?? '—'}</td>
                                                                 <td style={tdBase}>{row.requesterDisplayName ?? row.requesterEmail ?? '—'}</td>
+                                                                <td style={{ ...tdBase, fontSize: '0.75rem' }}>
+                                                                    {row.__reqType === 'ADMIN_ACTION'
+                                                                        ? (String(row.requestKind ?? '').toUpperCase() === 'BAN_USER' ? 'Chặn tài khoản' : 'Tạm đình chỉ quyền viết')
+                                                                        : 'Gỡ lock truyện'}
+                                                                </td>
                                                                 <td style={{ ...tdBase, maxWidth: 260, fontSize: '0.75rem' }}>{truncate(row.message ?? '', 180) || '—'}</td>
                                                                 <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.createdAtUtc ?? row.created_at)}</td>
                                                                 <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.resolvedAtUtc ?? row.resolved_at)}</td>
@@ -871,7 +912,7 @@ export function ReviewEscalationsManagement() {
                                     <thead>
                                         <tr>
                                             {(orderSourceTab === 'compliance'
-                                                ? ['Trạng thái', 'Truyện', 'Người gửi', 'Lý do', 'Tạo lúc', '']
+                                                ? ['Trạng thái', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Lý do', 'Tạo lúc', '']
                                                 : ['Mức độ', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Hạn hiện tại', 'Hạn đề xuất', 'Lý do', '']
                                             ).map((h) => (
                                                 <th key={h || 'a'} style={thBase}>{h}</th>
@@ -885,8 +926,14 @@ export function ReviewEscalationsManagement() {
                                                 return (
                                                     <tr key={id}>
                                                         <td style={tdBase}>{logStatusBadge(row.status ?? row.Status)}</td>
+                                                        <td style={tdBase}>{row.__reqType === 'ADMIN_ACTION' ? 'Yêu cầu xử lý tài khoản' : 'Yêu cầu gỡ lock'}</td>
                                                         <td style={tdBase}>{row.storyTitle ?? row.story?.title ?? '—'}</td>
                                                         <td style={tdBase}>{row.requesterDisplayName ?? row.requesterEmail ?? '—'}</td>
+                                                        <td style={{ ...tdBase, fontSize: '0.75rem' }}>
+                                                            {row.__reqType === 'ADMIN_ACTION'
+                                                                ? (String(row.requestKind ?? '').toUpperCase() === 'BAN_USER' ? 'Chặn tài khoản' : 'Tạm đình chỉ quyền viết')
+                                                                : 'Gỡ lock truyện'}
+                                                        </td>
                                                         <td style={{ ...tdBase, maxWidth: 280, wordBreak: 'break-word', fontSize: '0.75rem' }}>
                                                             {row.message || '—'}
                                                         </td>
@@ -1559,13 +1606,22 @@ export function ReviewEscalationsManagement() {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div style={{ padding: '1rem 1.25rem', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: T.title }}>Xử lý đơn gỡ lock từ compliance</h3>
+                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: T.title }}>
+                                {complianceResolveRow.__reqType === 'ADMIN_ACTION'
+                                    ? (String(complianceResolveRow.requestKind ?? '').toUpperCase() === 'BAN_USER'
+                                        ? 'Xử lý đơn chặn tài khoản'
+                                        : 'Xử lý đơn tạm đình chỉ quyền viết')
+                                    : 'Xử lý đơn gỡ lock từ compliance'}
+                            </h3>
                             <button type="button" onClick={closeComplianceResolve} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
                         </div>
                         <div style={{ padding: '1rem 1.25rem', display: 'grid', gap: 10 }}>
                             <div style={{ fontSize: '0.875rem', color: T.slateDark, lineHeight: 1.5 }}>
                                 <div><strong>Truyện:</strong> {complianceResolveRow.storyTitle ?? complianceResolveRow.story?.title ?? '—'}</div>
                                 <div><strong>Người gửi:</strong> {complianceResolveRow.requesterDisplayName ?? complianceResolveRow.requesterEmail ?? '—'}</div>
+                                {complianceResolveRow.__reqType === 'ADMIN_ACTION' && (
+                                    <div><strong>Yêu cầu:</strong> {String(complianceResolveRow.requestKind ?? '').toUpperCase() === 'BAN_USER' ? 'Chặn tài khoản' : 'Tạm đình chỉ quyền viết'}</div>
+                                )}
                                 <div><strong>Lý do:</strong> {complianceResolveRow.message || '—'}</div>
                             </div>
                             {resolveApiError ? (
@@ -1577,10 +1633,32 @@ export function ReviewEscalationsManagement() {
                             <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
                                 Quyết định
                                 <select value={complianceDecision} onChange={(e) => setComplianceDecision(e.target.value)} style={inputBase}>
-                                    <option value="APPROVE_UNLOCK">APPROVE_UNLOCK (Chấp nhận trả hàng đợi)</option>
-                                    <option value="REJECT">REJECT (Từ chối)</option>
+                                    {complianceResolveRow.__reqType === 'ADMIN_ACTION' ? (
+                                        <>
+                                            <option value="APPROVE">Chấp nhận</option>
+                                            <option value="REJECT">Từ chối</option>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <option value="APPROVE_UNLOCK">Chấp nhận trả hàng đợi</option>
+                                            <option value="REJECT">Từ chối</option>
+                                        </>
+                                    )}
                                 </select>
                             </label>
+                            {complianceResolveRow.__reqType === 'ADMIN_ACTION'
+                                && String(complianceResolveRow.requestKind ?? '').toUpperCase() === 'SUSPEND_AUTHOR_WRITING'
+                                && complianceDecision === 'APPROVE' && (
+                                    <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                        Thời điểm kết thúc đình chỉ (tuỳ chọn)
+                                        <input
+                                            type="datetime-local"
+                                            value={complianceSuspendUntilUtc}
+                                            onChange={(e) => setComplianceSuspendUntilUtc(e.target.value)}
+                                            style={inputBase}
+                                        />
+                                    </label>
+                                )}
                             <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
                                 Ghi chú admin
                                 <textarea

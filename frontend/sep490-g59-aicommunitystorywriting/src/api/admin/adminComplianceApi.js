@@ -91,6 +91,17 @@ export async function adminReleaseComplianceStoryClaim(storyId) {
     return res.data;
 }
 
+export async function getAdminComplianceAdminActionRequests(params = {}) {
+    const query = toQuery(params);
+    const res = await axiosInstance.get(`/admin/compliance-story-reports/admin-action-requests${query ? `?${query}` : ''}`);
+    return res.data;
+}
+
+export async function resolveAdminComplianceAdminActionRequest(requestId, body) {
+    const res = await axiosInstance.post(`/admin/compliance-story-reports/admin-action-requests/${requestId}/resolve`, body);
+    return res.data;
+}
+
 export async function getComplianceCommentReports(params = {}) {
     const query = toQuery(params);
     const res = await axiosInstance.get(`/compliance/comment-reports${query ? `?${query}` : ''}`);

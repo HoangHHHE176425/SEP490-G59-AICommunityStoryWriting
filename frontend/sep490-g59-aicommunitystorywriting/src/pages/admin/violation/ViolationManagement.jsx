@@ -6,6 +6,8 @@ import {
     Undo2,
     CheckCheck,
     Flag,
+    FlagOff,
+    MessageSquare,
     MessageSquareOff,
     EyeOff,
     ShieldAlert,
@@ -249,19 +251,15 @@ function statusViLabel(status) {
     return status || '—';
 }
 
-function Modal({ title, onClose, children, closeIconOnly = false }) {
+function Modal({ title, onClose, children, maxWidth = 1100 }) {
     return (
         <div className="fixed inset-0 z-[1200] bg-slate-900/45 flex items-center justify-center p-3">
-            <div className="bg-white w-[min(1100px,96vw)] max-h-[88vh] rounded-xl border border-slate-200 shadow-2xl flex flex-col">
+            <div className="bg-white w-[96vw] max-h-[88vh] rounded-xl border border-slate-200 shadow-2xl flex flex-col" style={{ maxWidth }}>
                 <div className="flex justify-between items-center border-b border-slate-200 px-4 py-3">
                     <h3 className="m-0 text-base font-bold text-slate-900">{title}</h3>
-                    {closeIconOnly ? (
-                        <button className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" onClick={onClose}>
-                            <X style={{ width: 16, height: 16 }} />
-                        </button>
-                    ) : (
-                        <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm hover:bg-slate-50" onClick={onClose}><X style={{ width: 16, height: 16 }} /> Đóng</button>
-                    )}
+                    <button className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" onClick={onClose}>
+                        <X style={{ width: 16, height: 16 }} />
+                    </button>
                 </div>
                 <div className="p-4 overflow-auto">{children}</div>
             </div>
@@ -297,6 +295,8 @@ export default function ViolationManagement() {
     const [selectedComment, setSelectedComment] = useState(null);
     const [actionModal, setActionModal] = useState(null);
     const [adminActionForm, setAdminActionForm] = useState({ requestKind: 'BAN_USER', message: '', proposedSuspendUntilUtc: '' });
+    const [adminActionError, setAdminActionError] = useState('');
+    const [adminActionSubmitting, setAdminActionSubmitting] = useState(false);
     const [officers, setOfficers] = useState([]);
     const [lockResolveForm, setLockResolveForm] = useState({ decision: 'APPROVE_UNLOCK', newAssigneeId: '', adminNote: '' });
     const [showClaimedStoryList, setShowClaimedStoryList] = useState(false);
@@ -310,6 +310,8 @@ export default function ViolationManagement() {
     const [releaseFormError, setReleaseFormError] = useState('');
     const [releasingStoryId, setReleasingStoryId] = useState(null);
     const [pendingReleaseByStory, setPendingReleaseByStory] = useState({});
+    const [storyActionConfirm, setStoryActionConfirm] = useState(null);
+    const [storyActionBusy, setStoryActionBusy] = useState(false);
 
     const currentUserId = user?.id ?? user?.Id ?? null;
     const releaseStorageKey = useMemo(
@@ -485,6 +487,7 @@ export default function ViolationManagement() {
 
     const submitAdminAction = async () => {
         if (!actionModal) return;
+        setAdminActionError('');
         const payload = {
             requestKind: adminActionForm.requestKind,
             message: adminActionForm.message || undefined,
@@ -492,12 +495,20 @@ export default function ViolationManagement() {
                 ? new Date(adminActionForm.proposedSuspendUntilUtc).toISOString()
                 : undefined,
         };
-        if (actionModal.type === 'story') {
-            await actionWithReload(() => requestComplianceStoryAdminAction(actionModal.targetId, payload));
-        } else {
-            await actionWithReload(() => requestComplianceCommentAdminAction(actionModal.targetId, payload));
+        setAdminActionSubmitting(true);
+        try {
+            if (actionModal.type === 'story') {
+                await requestComplianceStoryAdminAction(actionModal.targetId, payload);
+            } else {
+                await requestComplianceCommentAdminAction(actionModal.targetId, payload);
+            }
+            await loadData(currentPage);
+            setActionModal(null);
+        } catch (e) {
+            setAdminActionError(e?.response?.data?.message ?? e?.message ?? 'Không thể gửi yêu cầu.');
+        } finally {
+            setAdminActionSubmitting(false);
         }
-        setActionModal(null);
     };
 
     const openReleaseRequestModal = (story) => {
@@ -532,6 +543,20 @@ export default function ViolationManagement() {
             setReleaseFormError(e?.response?.data?.message ?? e?.message ?? 'Không thể gửi yêu cầu.');
         } finally {
             setReleasingStoryId(null);
+        }
+    };
+
+    const openStoryActionConfirm = (payload) => setStoryActionConfirm(payload);
+
+    const submitStoryActionConfirm = async () => {
+        if (!storyActionConfirm) return;
+        const { run } = storyActionConfirm;
+        setStoryActionBusy(true);
+        try {
+            await run();
+            setStoryActionConfirm(null);
+        } finally {
+            setStoryActionBusy(false);
         }
     };
 
@@ -644,12 +669,49 @@ export default function ViolationManagement() {
                                                 >
                                                     <Undo2 size={16} />
                                                 </button>
-                                                {isAdmin && <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : 'Admin gỡ khóa đơn'} onClick={() => actionWithReload(() => adminReleaseComplianceStoryClaim(r.storyId))} disabled={hasPendingReleaseRequest}><LockOpen size={16} /></button>}
-                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : 'Xử lý toàn bộ ticket mở'} onClick={() => actionWithReload(() => resolveAllOpenComplianceStoryReports(r.storyId, { status: 'RESOLVED' }))} disabled={hasPendingReleaseRequest}><CheckCheck size={16} /></button>
-                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : (r.complianceFlagged ? 'Bỏ gắn cờ vi phạm' : 'Gắn cờ vi phạm')} onClick={() => actionWithReload(() => setComplianceStoryFlag(r.storyId, { flagged: !r.complianceFlagged }))} disabled={hasPendingReleaseRequest}><Flag size={16} /></button>
-                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : (r.commentsDisabled ? 'Mở lại bình luận' : 'Khóa bình luận')} onClick={() => actionWithReload(() => setComplianceStoryCommentsDisabled(r.storyId, { value: !r.commentsDisabled }))} disabled={hasPendingReleaseRequest}><MessageSquareOff size={16} /></button>
-                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : (r.complianceHidden ? 'Hiển thị lại truyện' : 'Ẩn truyện khỏi người dùng thường')} onClick={() => actionWithReload(() => setComplianceStoryHidden(r.storyId, { value: !r.complianceHidden }))} disabled={hasPendingReleaseRequest}><EyeOff size={16} /></button>
-                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : 'Gửi yêu cầu BAN/SUSPEND lên admin'} onClick={() => { setAdminActionForm({ requestKind: 'BAN_USER', message: '', proposedSuspendUntilUtc: '' }); setActionModal({ type: 'story', targetId: r.storyId }); }} disabled={hasPendingReleaseRequest}><ShieldAlert size={16} /></button>
+                                                {isAdmin && <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : 'Admin gỡ khóa đơn'} onClick={() => openStoryActionConfirm({
+                                                    title: 'Xác nhận gỡ khóa đơn',
+                                                    message: 'Bạn có chắc muốn admin gỡ khóa đơn và trả các ticket về hàng đợi?',
+                                                    run: () => actionWithReload(() => adminReleaseComplianceStoryClaim(r.storyId)),
+                                                })} disabled={hasPendingReleaseRequest}><LockOpen size={16} /></button>}
+                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : 'Xử lý toàn bộ ticket mở'} onClick={() => openStoryActionConfirm({
+                                                    title: 'Xác nhận xử lý toàn bộ',
+                                                    message: 'Bạn có chắc muốn đánh dấu xử lý toàn bộ ticket mở của truyện này?',
+                                                    run: () => actionWithReload(() => resolveAllOpenComplianceStoryReports(r.storyId, { status: 'RESOLVED' })),
+                                                })} disabled={hasPendingReleaseRequest}><CheckCheck size={16} /></button>
+                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : (r.complianceFlagged ? 'Bỏ gắn cờ vi phạm' : 'Gắn cờ vi phạm')} onClick={() => openStoryActionConfirm({
+                                                    title: r.complianceFlagged ? 'Xác nhận bỏ gắn cờ' : 'Xác nhận gắn cờ vi phạm',
+                                                    message: r.complianceFlagged
+                                                        ? 'Bạn có chắc muốn bỏ gắn cờ vi phạm cho truyện này?'
+                                                        : 'Bạn có chắc muốn gắn cờ vi phạm cho truyện này?',
+                                                    run: () => actionWithReload(() => setComplianceStoryFlag(r.storyId, { flagged: !r.complianceFlagged })),
+                                                })} disabled={hasPendingReleaseRequest}>
+                                                    {r.complianceFlagged ? <FlagOff size={16} /> : <Flag size={16} />}
+                                                </button>
+                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : (r.commentsDisabled ? 'Mở lại bình luận' : 'Khóa bình luận')} onClick={() => openStoryActionConfirm({
+                                                    title: r.commentsDisabled ? 'Xác nhận mở lại bình luận' : 'Xác nhận khóa bình luận',
+                                                    message: r.commentsDisabled
+                                                        ? 'Bạn có chắc muốn mở lại bình luận cho truyện này?'
+                                                        : 'Bạn có chắc muốn khóa bình luận của truyện này?',
+                                                    run: () => actionWithReload(() => setComplianceStoryCommentsDisabled(r.storyId, { value: !r.commentsDisabled })),
+                                                })} disabled={hasPendingReleaseRequest}>
+                                                    {r.commentsDisabled ? <MessageSquareOff size={16} /> : <MessageSquare size={16} />}
+                                                </button>
+                                                <button style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn} title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : (r.complianceHidden ? 'Hiển thị lại truyện' : 'Ẩn truyện khỏi người dùng thường')} onClick={() => openStoryActionConfirm({
+                                                    title: r.complianceHidden ? 'Xác nhận hiển thị lại truyện' : 'Xác nhận ẩn truyện',
+                                                    message: r.complianceHidden
+                                                        ? 'Bạn có chắc muốn hiển thị lại truyện cho người dùng thường?'
+                                                        : 'Bạn có chắc muốn ẩn truyện khỏi người dùng thường?',
+                                                    run: () => actionWithReload(() => setComplianceStoryHidden(r.storyId, { value: !r.complianceHidden })),
+                                                })} disabled={hasPendingReleaseRequest}>
+                                                    {r.complianceHidden ? <EyeOff size={16} /> : <Eye size={16} />}
+                                                </button>
+                                                <button
+                                                    style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn}
+                                                    title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : 'Yêu cầu chặn tài khoản / tạm đình chỉ'}
+                                                    onClick={() => { setAdminActionForm({ requestKind: 'BAN_USER', message: '', proposedSuspendUntilUtc: '' }); setAdminActionError(''); setActionModal({ type: 'story', targetId: r.storyId }); }}
+                                                    disabled={hasPendingReleaseRequest}
+                                                ><ShieldAlert size={16} /></button>
                                             </div>
                                             {hasPendingReleaseRequest ? (
                                                 <div className="text-xs text-amber-700 mt-1">Đang chờ admin xử lý đơn hủy nhận duyệt.</div>
@@ -691,7 +753,7 @@ export default function ViolationManagement() {
                                     {isAdmin && <button style={btn} onClick={() => actionWithReload(() => adminReleaseComplianceCommentClaim(r.commentId))}>Admin release claim</button>}
                                     <button style={btn} onClick={() => actionWithReload(() => resolveAllOpenComplianceCommentReports(r.commentId, { status: 'RESOLVED', hideComment: true, includeReplies: true }))}>Resolve all</button>
                                     <button style={btn} onClick={() => actionWithReload(() => setComplianceCommentThreadHidden(r.commentId, { value: true, includeReplies: true }))}>Ẩn thread</button>
-                                    <button style={btn} onClick={() => { setAdminActionForm({ requestKind: 'BAN_USER', message: '', proposedSuspendUntilUtc: '' }); setActionModal({ type: 'comment', targetId: r.commentId }); }}>Yêu cầu BAN/SUSPEND</button>
+                                    <button style={btn} onClick={() => { setAdminActionForm({ requestKind: 'BAN_USER', message: '', proposedSuspendUntilUtc: '' }); setAdminActionError(''); setActionModal({ type: 'comment', targetId: r.commentId }); }}>Yêu cầu chặn / đình chỉ</button>
                                 </div>
                             </td>
                         </tr>
@@ -794,7 +856,7 @@ export default function ViolationManagement() {
             </div>
 
             {selectedStory && (
-                <Modal title={`Ticket chi tiết - ${selectedStory.storyTitle || selectedStory.storyId}`} onClose={() => setSelectedStory(null)} closeIconOnly>
+                <Modal title={`Ticket chi tiết - ${selectedStory.storyTitle || selectedStory.storyId}`} onClose={() => setSelectedStory(null)}>
                     {storyTicketLoading ? <div>Đang tải ticket...</div> : (
                         <div className="space-y-4">
                             <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-4">
@@ -859,7 +921,7 @@ export default function ViolationManagement() {
             )}
 
             {isClaimPickerOpen && (
-                <Modal title="Danh sách báo cáo vi phạm chờ nhận duyệt" onClose={() => setIsClaimPickerOpen(false)} closeIconOnly>
+                <Modal title="Danh sách báo cáo vi phạm chờ nhận duyệt" onClose={() => setIsClaimPickerOpen(false)}>
                     <div className="grid gap-3">
                         {claimPickerRows.length === 0 && (
                             <div className="p-6 text-center text-sm text-slate-500">Không có đơn chờ nhận.</div>
@@ -916,17 +978,38 @@ export default function ViolationManagement() {
             )}
 
             {actionModal?.type === 'story' || actionModal?.type === 'comment' ? (
-                <Modal title="Gửi admin-action-request (BAN/SUSPEND)" onClose={() => setActionModal(null)}>
-                    <div style={{ display: 'grid', gap: 8 }}>
-                        <select value={adminActionForm.requestKind} onChange={(e) => setAdminActionForm((p) => ({ ...p, requestKind: e.target.value }))} style={input}>
-                            <option value="BAN_USER">BAN_USER</option>
-                            <option value="SUSPEND_AUTHOR_WRITING">SUSPEND_AUTHOR_WRITING</option>
-                        </select>
-                        {adminActionForm.requestKind === 'SUSPEND_AUTHOR_WRITING' && (
-                            <input type="datetime-local" value={adminActionForm.proposedSuspendUntilUtc} onChange={(e) => setAdminActionForm((p) => ({ ...p, proposedSuspendUntilUtc: e.target.value }))} style={input} />
-                        )}
-                        <textarea value={adminActionForm.message} onChange={(e) => setAdminActionForm((p) => ({ ...p, message: e.target.value }))} placeholder="Lý do đề xuất..." style={{ ...input, minHeight: 90 }} />
-                        <div><button style={btn} onClick={submitAdminAction}>Gửi yêu cầu</button></div>
+                <Modal title="Gửi yêu cầu xử lý lên quản trị viên" onClose={() => setActionModal(null)} maxWidth={620}>
+                    <div className="space-y-4">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                            Chọn hình thức xử lý phù hợp và mô tả rõ lý do để quản trị viên xem xét.
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <label className="text-sm font-semibold text-slate-700">
+                                Hình thức xử lý
+                                <select value={adminActionForm.requestKind} onChange={(e) => setAdminActionForm((p) => ({ ...p, requestKind: e.target.value }))} style={{ ...input, width: '100%', marginTop: 6 }}>
+                                    <option value="BAN_USER">Chặn tài khoản</option>
+                                    <option value="SUSPEND_AUTHOR_WRITING">Tạm đình chỉ quyền viết</option>
+                                </select>
+                            </label>
+                            {adminActionForm.requestKind === 'SUSPEND_AUTHOR_WRITING' && (
+                                <label className="text-sm font-semibold text-slate-700">
+                                    Thời hạn đình chỉ
+                                    <input type="datetime-local" value={adminActionForm.proposedSuspendUntilUtc} onChange={(e) => setAdminActionForm((p) => ({ ...p, proposedSuspendUntilUtc: e.target.value }))} style={{ ...input, width: '100%', marginTop: 6 }} />
+                                </label>
+                            )}
+                        </div>
+                        <label className="text-sm font-semibold text-slate-700">
+                            Lý do đề xuất
+                            <textarea value={adminActionForm.message} onChange={(e) => setAdminActionForm((p) => ({ ...p, message: e.target.value }))} placeholder="Mô tả ngắn gọn lý do đề xuất xử lý..." style={{ ...input, width: '100%', marginTop: 6, minHeight: 110, resize: 'vertical' }} />
+                        </label>
+                        {adminActionError ? (
+                            <div className="text-sm text-red-600">{adminActionError}</div>
+                        ) : null}
+                        <div className="flex justify-end">
+                            <button style={{ ...btn, background: '#0ea5e9', color: '#fff', borderColor: '#0ea5e9' }} onClick={submitAdminAction} disabled={adminActionSubmitting}>
+                                {adminActionSubmitting ? 'Đang gửi...' : 'Gửi yêu cầu'}
+                            </button>
+                        </div>
                     </div>
                 </Modal>
             ) : null}
@@ -961,7 +1044,7 @@ export default function ViolationManagement() {
             )}
 
             {releaseConfirmTarget && (
-                <Modal title="Trả truyện về hàng đợi xử lý vi phạm?" onClose={() => {
+                <Modal title="Trả truyện về hàng đợi xử lý vi phạm?" maxWidth={520} onClose={() => {
                     if (releasingStoryId) return;
                     setReleaseConfirmTarget(null);
                     setReleaseFormError('');
@@ -1000,7 +1083,7 @@ export default function ViolationManagement() {
                                     setReleaseFormError('');
                                 }}
                             >
-                                Đóng
+                                Hủy
                             </button>
                             <button
                                 style={{ ...btn, background: releasingStoryId ? '#94a3b8' : '#dc2626', color: '#fff', borderColor: releasingStoryId ? '#94a3b8' : '#dc2626' }}
@@ -1008,6 +1091,39 @@ export default function ViolationManagement() {
                                 onClick={confirmReleaseRequest}
                             >
                                 {releasingStoryId ? 'Đang gửi...' : 'Gửi đơn lên quản trị'}
+                            </button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+
+            {storyActionConfirm && (
+                <Modal
+                    title={storyActionConfirm.title || 'Xác nhận thao tác'}
+                    maxWidth={480}
+                    onClose={() => {
+                        if (storyActionBusy) return;
+                        setStoryActionConfirm(null);
+                    }}
+                >
+                    <div style={{ display: 'grid', gap: 10 }}>
+                        <p className="text-sm text-slate-700 m-0">
+                            {storyActionConfirm.message || 'Bạn có chắc muốn thực hiện thao tác này?'}
+                        </p>
+                        <div className="flex justify-end gap-2">
+                            <button
+                                style={btn}
+                                disabled={storyActionBusy}
+                                onClick={() => setStoryActionConfirm(null)}
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                style={{ ...btn, background: '#0ea5e9', color: '#fff', borderColor: '#0ea5e9' }}
+                                disabled={storyActionBusy}
+                                onClick={submitStoryActionConfirm}
+                            >
+                                {storyActionBusy ? 'Đang xử lý...' : 'Xác nhận'}
                             </button>
                         </div>
                     </div>
@@ -1030,4 +1146,4 @@ const th = {
 const td = { padding: '0.75rem', color: '#334155', verticalAlign: 'top', fontSize: '0.875rem' };
 const input = { border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.6rem 0.75rem', fontSize: '0.875rem', color: '#0f172a', background: '#f8fafc' };
 const btn = { display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', borderRadius: 8, padding: '0.4rem 0.7rem', cursor: 'pointer' };
-const iconBtn = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, border: '1px solid #e2e8f0', background: '#fff', color: '#475569', borderRadius: 8, cursor: 'pointer' };
+const iconBtn = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, border: '1px solid #dbe2ea', background: '#fff', color: '#64748b', borderRadius: 10, cursor: 'pointer' };
