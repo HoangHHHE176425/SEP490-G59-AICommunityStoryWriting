@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
+import { useAuth } from '../../contexts/AuthContext';
 import { BookOpen, Sparkles, Users, Award, Bot, Heart, Target, Zap, Shield, TrendingUp, Globe, Star, CheckCircle, Lightbulb, MessageCircle, Trophy, Lock, Rocket } from 'lucide-react';
 
 export default function AboutUs() {
   return (
-    <div className="w-full bg-white">
+    <div className="aboutus-compact w-full bg-white">
       <Header />
       <HeroSection />
       <IntroSection />
@@ -27,6 +28,7 @@ export default function AboutUs() {
 
 function HeroSection() {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
 
   return (
     <section className="relative py-32 px-6 overflow-hidden bg-gradient-to-br from-[#0F172A] to-[#1E293B]">
@@ -56,7 +58,7 @@ function HeroSection() {
 
           <div className="flex items-center justify-center gap-4 flex-wrap">
             <button
-              onClick={() => navigate('/register')}
+              onClick={() => navigate(isAuthenticated ? '/home' : '/register')}
               className="group px-8 py-4 bg-gradient-to-r from-[#13EC5B] to-[#11D350] text-white rounded-xl hover:shadow-[0_0_40px_rgba(19,236,91,0.5)] transition-all font-bold text-lg flex items-center gap-3"
             >
               Tham Gia Ngay
@@ -219,14 +221,18 @@ function WhyChooseUsSection() {
   ];
 
   return (
-    <section className="py-20 px-6 bg-white">
-      <div className="max-w-7xl mx-auto">
+    <section className="py-20 px-6 bg-gradient-to-br from-[#0F172A] to-[#1E293B] relative overflow-hidden">
+      <div className="absolute inset-0 opacity-10">
+        <div className="absolute top-10 left-20 w-96 h-96 bg-[#13EC5B] rounded-full blur-[120px]"></div>
+        <div className="absolute bottom-10 right-20 w-96 h-96 bg-[#2B7FFF] rounded-full blur-[120px]"></div>
+      </div>
+      <div className="max-w-7xl mx-auto relative z-10">
         <div className="text-center mb-16">
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#13EC5B]/10 border border-[#13EC5B]/30 rounded-full mb-4">
             <Star className="w-4 h-4 text-[#13EC5B]" />
             <span className="text-[#13EC5B] font-semibold text-sm">Tại sao chọn chúng tôi</span>
           </div>
-          <h2 className="text-4xl md:text-5xl font-bold text-[#1A2332] mb-4">
+          <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
             Điều Gì Làm<br />
             <span className="bg-gradient-to-r from-[#13EC5B] to-[#2B7FFF] bg-clip-text text-transparent">
               CSW-AI Khác Biệt?
@@ -355,6 +361,7 @@ function FeaturesSection() {
 
 function HowItWorksSection() {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const steps = [
     {
       number: '01',
@@ -424,7 +431,7 @@ function HowItWorksSection() {
 
         <div className="mt-12 text-center">
           <button
-            onClick={() => navigate('/register')}
+            onClick={() => navigate(isAuthenticated ? '/home' : '/register')}
             className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-[#13EC5B] to-[#11D350] text-white rounded-xl hover:shadow-[0_0_40px_rgba(19,236,91,0.5)] transition-all font-bold text-lg"
           >
             <Sparkles className="w-5 h-5" />
@@ -636,6 +643,7 @@ function TeamSection() {
 
 function CTASection() {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
 
   return (
     <section className="py-20 px-6 bg-gradient-to-br from-[#0F172A] to-[#1E293B] relative overflow-hidden">
@@ -663,7 +671,7 @@ function CTASection() {
 
         <div className="flex items-center justify-center gap-4 flex-wrap mb-8">
           <button
-            onClick={() => navigate('/register')}
+            onClick={() => navigate(isAuthenticated ? '/home' : '/register')}
             className="group px-10 py-5 bg-gradient-to-r from-[#13EC5B] to-[#11D350] text-white rounded-xl hover:shadow-[0_0_40px_rgba(19,236,91,0.5)] transition-all font-bold text-xl flex items-center gap-3"
           >
             <Sparkles className="w-6 h-6" />
