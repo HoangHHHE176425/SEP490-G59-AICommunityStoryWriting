@@ -150,6 +150,8 @@ export function useToast() {
         setToasts(prev => prev.filter(toast => toast.id !== id));
     };
 
+    const clearToasts = () => setToasts([]);
+
     const ToastContainer = () => (
         <>
             {toasts.map(toast => (
@@ -164,5 +166,5 @@ export function useToast() {
         </>
     );
 
-    return { showToast, ToastContainer };
+    return { showToast, ToastContainer, clearToasts };
 }

@@ -21,9 +21,15 @@ public partial class reports
 
     public Guid? assigned_to { get; set; }
 
+    /// <summary>COMPLIANCE đã đánh dấu xử lý xong (RESOLVED/DISMISSED); null nếu admin đóng hoặc chưa đóng.</summary>
+    public Guid? compliance_resolved_by { get; set; }
+
     public DateTime? created_at { get; set; }
 
     public DateTime? resolved_at { get; set; }
+
+    /// <summary>Số user đã góp báo cáo cho ticket mở này (gộp queue; mặc định 1).</summary>
+    public int contributor_count { get; set; } = 1;
 
     public virtual users? assigned_toNavigation { get; set; }
 

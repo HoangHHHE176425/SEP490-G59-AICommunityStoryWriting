@@ -26,6 +26,21 @@ namespace AIStory.Client.Controllers
             return View();
         }
 
+        public IActionResult Library()
+        {
+            return View();
+        }
+
+        public IActionResult WalletHistory()
+        {
+            return View();
+        }
+
+        public IActionResult AuthorUnlockChapterIncomeHistory()
+        {
+            return View();
+        }
+
         public IActionResult Privacy()
         {
             return View();

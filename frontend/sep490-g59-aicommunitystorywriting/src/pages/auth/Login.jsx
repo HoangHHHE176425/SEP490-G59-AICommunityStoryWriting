@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, BookOpen } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
@@ -7,14 +7,27 @@ import { Footer } from '../../components/homepage/Footer';
 
 export default function Login() {
     const navigate = useNavigate();
-    const { login, loginWithGoogle, loginWithFacebook } = useAuth();
+    const { login, loginWithGoogle, resendOtp } = useAuth();
+    const location = useLocation();
+    const emailFromQuery = new URLSearchParams(location.search).get('email') || '';
     const [formData, setFormData] = useState({
-        email: '',
+        email: emailFromQuery,
         password: '',
     });
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
+    const [verifyPending, setVerifyPending] = useState(false);
     const [loading, setLoading] = useState(false);
+
+    const redirect = (() => {
+        const q = new URLSearchParams(location.search);
+        const r = q.get('redirect');
+        // Chỉ cho phép redirect nội bộ để tránh mở URL ngoài ý muốn.
+        if (typeof r !== 'string' || !r.trim()) return null;
+        const rr = r.trim();
+        return rr.startsWith('/') ? rr : null;
+    })();
+    const navigateTarget = redirect || '/home';
 
     const handleChange = (e) => {
         setFormData({
@@ -22,11 +35,13 @@ export default function Login() {
             [e.target.name]: e.target.value,
         });
         setError('');
+        setVerifyPending(false);
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
+        setVerifyPending(false);
         setLoading(true);
 
         if (!formData.email || !formData.password) {
@@ -38,12 +53,41 @@ export default function Login() {
         try {
             const result = await login(formData.email, formData.password);
             if (result.success) {
-                navigate('/home');
+                navigate(navigateTarget, { replace: true });
             } else {
-                setError(result.message || 'Đăng nhập thất bại');
+                const msg = (result.message || '').toString();
+                const isNotVerified =
+                    /not\s+verified/i.test(msg) ||
+                    /chưa\s+xác\s+thực|xác\s+thực\s+tài\s+khoản|OTP/i.test(msg);
+
+                if (isNotVerified) {
+                    setVerifyPending(true);
+                    return;
+                }
+
+                setError(msg || 'Đăng nhập thất bại');
             }
-        } catch (err) {
+        } catch {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleGoVerify = async () => {
+        const email = formData.email?.trim();
+        if (!email) return;
+        setError('');
+        setLoading(true);
+        try {
+            // Gửi OTP mới rồi chuyển hướng sang trang nhập OTP.
+            const res = await resendOtp(email);
+            if (!res?.success) {
+                throw new Error(res?.message || 'Không thể gửi lại OTP.');
+            }
+            navigate(`/verify-otp?email=${encodeURIComponent(email)}&sent=1`, { replace: true });
+        } catch {
+            setError('Không thể gửi lại OTP. Vui lòng thử lại.');
         } finally {
             setLoading(false);
         }
@@ -53,30 +97,9 @@ export default function Login() {
         setError('');
         setLoading(true);
         try {
-            const result = await loginWithGoogle();
-            if (result.success) {
-                navigate('/home');
-            } else {
-                setError(result.message || 'Đăng nhập Google thất bại');
-            }
-        } catch (err) {
-            setError('Đã xảy ra lỗi. Vui lòng thử lại.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleFacebookLogin = async () => {
-        setError('');
-        setLoading(true);
-        try {
-            const result = await loginWithFacebook();
-            if (result.success) {
-                navigate('/home');
-            } else {
-                setError(result.message || 'Đăng nhập Facebook thất bại');
-            }
-        } catch (err) {
+            // Redirect code flow: loginWithGoogle will navigate away immediately.
+            await loginWithGoogle(navigateTarget);
+        } catch {
             setError('Đã xảy ra lỗi. Vui lòng thử lại.');
         } finally {
             setLoading(false);
@@ -102,7 +125,7 @@ export default function Login() {
                                 Đăng Nhập
                             </h1>
                             <p className="text-slate-600 dark:text-slate-400">
-                                Chào mừng bạn trở lại!
+                                Dành cho bạn đọc và tác giả. Chào mừng bạn trở lại!
                             </p>
                         </div>
 
@@ -111,6 +134,28 @@ export default function Login() {
                             <div className="mb-6 p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-3">
                                 <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0" />
                                 <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+                            </div>
+                        )}
+
+                        {verifyPending && (
+                            <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg flex items-start gap-3">
+                                <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-300 flex-shrink-0 mt-0.5" />
+                                <div className="flex-1">
+                                    <p className="text-sm text-amber-800 dark:text-amber-200 font-semibold">
+                                        Tài khoản của bạn chưa được xác thực.
+                                    </p>
+                                    <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
+                                        Hãy xác thực để tiếp tục đăng nhập. Nếu chưa nhận được OTP, bạn có thể bấm gửi lại trên trang xác thực.
+                                    </p>
+                                    <button
+                                        type="button"
+                                        onClick={handleGoVerify}
+                                        disabled={loading}
+                                        className="mt-3 w-full py-2.5 bg-primary text-white font-bold rounded-lg hover:bg-primary/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        {loading ? 'Đang gửi OTP...' : 'Xác thực tài khoản'}
+                                    </button>
+                                </div>
                             </div>
                         )}
 
@@ -142,19 +187,6 @@ export default function Login() {
                                 Đăng nhập với Google
                             </button>
 
-                            <button
-                                onClick={handleFacebookLogin}
-                                disabled={loading}
-                                className="w-full flex items-center justify-center gap-3 px-4 py-3 bg-white border border-slate-200 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                                    <path
-                                        fill="#1877F2"
-                                        d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"
-                                    />
-                                </svg>
-                                Đăng nhập với Facebook
-                            </button>
                         </div>
 
                         {/* Divider */}
@@ -249,7 +281,7 @@ export default function Login() {
                         </form>
 
                         {/* Sign Up Link */}
-                        <div className="mt-6 text-center">
+                        <div className="mt-6 text-center space-y-2">
                             <p className="text-sm text-slate-600 dark:text-slate-400">
                                 Chưa có tài khoản?{' '}
                                 <Link
@@ -259,6 +291,7 @@ export default function Login() {
                                     Đăng ký ngay
                                 </Link>
                             </p>
+                            
                         </div>
                     </div>
                 </div>

@@ -33,11 +33,17 @@ public partial class chapters
 
     public DateTime? updated_at { get; set; }
 
-    public virtual ICollection<ai_generated_content> ai_generated_content { get; set; } = new List<ai_generated_content>();
+    /// <summary>Thời điểm tác giả gửi duyệt chapter/version lần này (UTC).</summary>
+    public DateTime? submitted_for_review_at { get; set; }
 
-    public virtual ICollection<ai_plagiarism_reports> ai_plagiarism_reports { get; set; } = new List<ai_plagiarism_reports>();
+    public decimal? ai_similarity_percent { get; set; }
+
+    public virtual ICollection<ai_generated_content> ai_generated_content { get; set; } = new List<ai_generated_content>();
 
     public virtual ICollection<chapter_versions> chapter_versions { get; set; } = new List<chapter_versions>();
 
     public virtual stories? story { get; set; }
+
+    public virtual ICollection<story_event_memory> story_event_memory { get; set; } = new List<story_event_memory>();
 }
+    

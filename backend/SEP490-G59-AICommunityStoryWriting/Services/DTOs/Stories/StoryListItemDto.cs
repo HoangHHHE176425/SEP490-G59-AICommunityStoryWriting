@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.Stories
+namespace Services.DTOs.Stories
 {
     public class StoryListItemDto
     {
@@ -15,6 +15,10 @@
         public string? CategoryNames { get; set; }
         public Guid? AuthorId { get; set; }
         public string? AuthorName { get; set; }
+        /// <summary>Đường dẫn avatar tác giả (user_profiles.avatar_url), ví dụ /uploads/avatars/....</summary>
+        public string? AuthorAvatarUrl { get; set; }
+        /// <summary>Độ tuổi phù hợp: ALL, 13+, 16+, 18+</summary>
+        public string? AgeRating { get; set; }
 
         public int? TotalChapters { get; set; }
         /// <summary>Số chapter đã PUBLISHED.</summary>
@@ -35,5 +39,36 @@
         public string? ClaimedByDisplayName { get; set; }
         /// <summary>Trong queue moderator: thời điểm nhận duyệt.</summary>
         public DateTime? ClaimedAt { get; set; }
+
+        /// <summary>Có đơn báo cáo lên admin đang chờ xử lý — moderator đang nhận duyệt không được duyệt/từ chối đến khi admin xử lý.</summary>
+        public bool HasPendingEscalation { get; set; }
+
+        /// <summary>Lý do từ chối (lịch sử từ chối; có thể có ngay cả khi story hiện đã PUBLISHED).</summary>
+        public string? RejectionReason { get; set; }
+        /// <summary>Thời điểm moderator từ chối (lịch sử từ chối).</summary>
+        public DateTime? RejectedAt { get; set; }
+
+        /// <summary>Mốc tác giả gửi duyệt (submitted_for_review_at; fallback ước lượng nếu dữ liệu cũ).</summary>
+        public DateTime? PendingSince { get; set; }
+        /// <summary>Moderator queue: không dùng (null). Mức SLA theo <see cref="PendingSince"/> + <see cref="TimeStatus"/>.</summary>
+        public DateTime? DeadlineAt { get; set; }
+        /// <summary>Mức ưu tiên theo thời gian đã chờ kể từ mốc gửi: OnTime (&lt;2 ngày), Warning (≥2), Critical (≥4), Overdue (≥7).</summary>
+        public string? TimeStatus { get; set; }
+        /// <summary>Admin: thời điểm moderator duyệt/từ chối.</summary>
+        public DateTime? ReviewedAt { get; set; }
+        /// <summary>Admin: tên moderator đã duyệt/từ chối.</summary>
+        public string? ReviewedByModeratorName { get; set; }
+
+        /// <summary>Ghi chú admin khi từ chối đơn RELEASE_ASSIGNMENT (hủy nhận duyệt) do moderator hiện tại gửi. Chỉ điền khi truyện còn ít nhất một chương chờ duyệt (sau khi xử lý hết chương thì ẩn; nhận duyệt lại sau khi hết hạn đơn vẫn theo so sánh claim vs resolved_at).</summary>
+        public string? AdminRejectedReleaseNote { get; set; }
+        /// <summary>Thời điểm admin từ chối đơn hủy nhận duyệt.</summary>
+        public DateTime? AdminRejectedReleaseAt { get; set; }
+        /// <summary>True khi bản ghi từ chối đơn hủy nhận duyệt thuộc đúng phiên claim hiện tại.</summary>
+        public bool IsCurrentClaimRejection { get; set; }
+
+        /// <summary>Ghi chú admin khi từ chối đơn EXTEND_DEADLINE (xin gia hạn) do moderator hiện tại gửi.</summary>
+        public string? AdminRejectedExtendNote { get; set; }
+        /// <summary>Thời điểm admin từ chối đơn xin gia hạn.</summary>
+        public DateTime? AdminRejectedExtendAt { get; set; }
     }
 }

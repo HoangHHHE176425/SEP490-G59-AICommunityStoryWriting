@@ -97,15 +97,65 @@ namespace AIStory.API.Controllers
             }
         }
 
+        [HttpGet("author-onboarding")]
+        public async Task<IActionResult> GetAuthorOnboardingStatus()
+        {
+            try
+            {
+                var userId = GetUserIdFromToken();
+                var status = await _accountService.GetAuthorOnboardingStatusAsync(userId);
+                return Ok(status);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("become-author")]
+        public async Task<IActionResult> BecomeAuthor()
+        {
+            try
+            {
+                var userId = GetUserIdFromToken();
+                var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+                var userAgent = Request.Headers.UserAgent.ToString();
+                var result = await _accountService.BecomeAuthorAsync(userId, ip, userAgent);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>Hồ sơ công khai theo userId (trang tác giả). Khách xem được; không trả email/SĐT/CCCD.</summary>
+        [AllowAnonymous]
         [HttpGet("profile/{userId:guid}")]
         public async Task<IActionResult> GetProfileByUserId(Guid userId)
         {
             try
             {
                 var profile = await _accountService.GetProfileAsync(userId);
-                if (profile == null)
-                    return NotFound(new { message = "User not found." });
+                Guid? viewerId = null;
+                if (User?.Identity?.IsAuthenticated == true)
+                {
+                    var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+                    if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var vid))
+                        viewerId = vid;
+                }
+                var isViewingSelf = viewerId.HasValue && viewerId.Value == userId;
+                if (!isViewingSelf)
+                {
+                    profile.Email = string.Empty;
+                    profile.Phone = null;
+                    profile.IdNumber = null;
+                }
                 return Ok(profile);
+            }
+            catch (Exception ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+            {
+                return NotFound(new { message = "User not found." });
             }
             catch (Exception ex)
             {

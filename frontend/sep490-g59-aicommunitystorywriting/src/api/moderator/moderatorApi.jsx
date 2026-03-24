@@ -74,17 +74,56 @@ export async function getModeratorReviewedStories(params = {}) {
 }
 
 /**
- * Moderator nhận duyệt truyện (claim). 1 item chỉ 1 moderator; đã nhận thì người khác không thấy trong queue unclaimed.
+ * Lịch sử phiên bản chương bị từ chối (version). Moderator chỉ thấy bản do mình từ chối; ADMIN thấy tất cả.
+ * @returns {Promise<Array<{ id, chapterId?, storyId?, storyTitle?, chapterTitle?, versionNumber, titleSnapshot?, status?, rejectionReason?, rejectedAt? }>>}
  */
-export async function claimStory(storyId) {
-    await axiosInstance.post(`/moderator/stories/${storyId}/claim`);
+export async function getRejectedChapterVersionsHistory() {
+    const res = await axiosInstance.get('/moderator/chapter-versions/rejected-history');
+    return Array.isArray(res.data) ? res.data : [];
 }
 
 /**
- * Moderator nhận duyệt chương (claim).
+ * Moderator xem chi tiết một version (nội dung snapshot).
+ * @param {string} chapterId - Guid chapter
+ * @param {string} versionId - Guid version
  */
-export async function claimChapter(chapterId) {
-    await axiosInstance.post(`/moderator/chapters/${chapterId}/claim`);
+export async function getModeratorChapterVersion(chapterId, versionId) {
+    const res = await axiosInstance.get(`/moderator/chapters/${chapterId}/versions/${versionId}`);
+    return res.data;
+}
+
+/**
+ * Moderator nhận duyệt truyện (claim). Body bắt buộc: reviewDeadlineAt (UTC ISO).
+ */
+export async function claimStory(storyId, reviewDeadlineAt) {
+    await axiosInstance.post(`/moderator/stories/${storyId}/claim`, { reviewDeadlineAt });
+}
+
+/**
+ * Moderator nhận duyệt chương (claim). Body bắt buộc: reviewDeadlineAt (UTC ISO).
+ */
+export async function claimChapter(chapterId, reviewDeadlineAt) {
+    await axiosInstance.post(`/moderator/chapters/${chapterId}/claim`, { reviewDeadlineAt });
+}
+
+/**
+ * Thông tin assignment hiện tại của moderator cho mục (deadline, đơn escalation, SLA).
+ * @param {'STORY'|'CHAPTER'} targetType
+ * @param {string} targetId - Guid
+ */
+export async function getReviewAssignmentSelf(targetType, targetId) {
+    const q = new URLSearchParams({ targetType, targetId: String(targetId) });
+    const res = await axiosInstance.get(`/moderator/review-assignment/self?${q}`);
+    return res.data;
+}
+
+/**
+ * Gửi đơn báo cáo lên admin (gia hạn hạn duyệt / hủy nhận duyệt RELEASE_ASSIGNMENT).
+ * @param {{ targetType: string, targetId: string, requestKind: string, reason: string, proposedDeadlineAt?: string|null }} dto
+ */
+export async function submitReviewEscalation(dto) {
+    const res = await axiosInstance.post('/moderator/review-escalations', dto);
+    return res.data;
 }
 
 /**
@@ -113,4 +152,15 @@ export async function approveChapter(chapterId) {
  */
 export async function rejectChapter(chapterId, reason) {
     await axiosInstance.post(`/moderator/chapters/${chapterId}/reject`, { reason });
+}
+
+/**
+ * Nội dung chapter cho màn duyệt: bản gốc đã xuất bản + bản version chờ duyệt (khi chapter đã PUBLISHED và có version gửi chỉnh sửa).
+ * Dùng để moderator xem 2 phiên bản (chỉnh sửa sau báo cáo vi phạm).
+ * @param {string} chapterId - Guid chapter
+ * @returns {Promise<{ chapterId, chapterStatus, originalTitle, originalContent, hasPendingVersion, pendingVersions }>}
+ */
+export async function getChapterReviewContent(chapterId) {
+    const res = await axiosInstance.get(`/moderator/chapters/${chapterId}/review-content`);
+    return res.data;
 }

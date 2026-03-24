@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -63,13 +63,28 @@ namespace DataAccessObjects.DAOs
         }
 
         /// <summary>Thông báo khi có người trả lời comment của mình. Gọi sau khi đã thêm comment reply thành công.</summary>
-        public static void NotifyCommentReply(Guid recipientUserId, string actorDisplayName, Guid storyId, string? storyTitle, Guid newCommentId)
+        /// <param name="linkUrlOverride">Nếu null: SPA React <c>/story/{storyId}#comment-...</c>. Chapter comment có thể truyền <c>/chapter?storyId=...&amp;chapterId=...</c>.</param>
+        /// <param name="chapterDescriptor">Ví dụ <c>Chương 3: «Tiêu đề»</c> — khi trả lời comment trong chapter (null = comment cấp truyện).</param>
+        /// <returns>Bản ghi đã lưu (để gửi SignalR).</returns>
+        public static notifications NotifyCommentReply(Guid recipientUserId, string actorDisplayName, Guid storyId, string? storyTitle, Guid newCommentId, string? linkUrlOverride = null, string? chapterDescriptor = null)
         {
             if (string.IsNullOrWhiteSpace(actorDisplayName)) actorDisplayName = "Ai đó";
             var title = "Trả lời bình luận";
-            var content = $"{actorDisplayName} đã trả lời bình luận của bạn" + (string.IsNullOrWhiteSpace(storyTitle) ? "." : $" trong truyện «{storyTitle.Trim()}».");
-            var linkUrl = $"/Home/Story?id={storyId}#comment-{newCommentId}";
-            Add(new notifications
+            string content;
+            if (!string.IsNullOrWhiteSpace(chapterDescriptor))
+            {
+                var ch = chapterDescriptor.Trim();
+                var storyPart = string.IsNullOrWhiteSpace(storyTitle) ? "truyện này" : $"truyện «{storyTitle.Trim()}»";
+                content = $"{actorDisplayName} đã trả lời bình luận của bạn trong {ch} của {storyPart}.";
+            }
+            else
+            {
+                content = $"{actorDisplayName} đã trả lời bình luận của bạn" + (string.IsNullOrWhiteSpace(storyTitle) ? "." : $" trong truyện «{storyTitle.Trim()}».");
+            }
+            var linkUrl = string.IsNullOrWhiteSpace(linkUrlOverride)
+                ? $"/story/{storyId}#comment-{newCommentId}"
+                : linkUrlOverride.Trim();
+            var n = new notifications
             {
                 id = Guid.NewGuid(),
                 user_id = recipientUserId,
@@ -78,8 +93,10 @@ namespace DataAccessObjects.DAOs
                 content = content,
                 link_url = linkUrl,
                 is_read = false,
-                created_at = DateTime.Now
-            });
+                created_at = DateTime.UtcNow
+            };
+            Add(n);
+            return n;
         }
 
         /// <summary>Thông báo khi có người thả cảm xúc (reaction) vào comment của mình. Chỉ gọi khi đặt/đổi reaction (không gọi khi bỏ reaction).</summary>
@@ -99,7 +116,7 @@ namespace DataAccessObjects.DAOs
             };
             var title = "Reaction bình luận";
             var content = $"{actorDisplayName} đã thả {reactionLabel} vào bình luận của bạn" + (string.IsNullOrWhiteSpace(storyTitle) ? "." : $" trong truyện «{storyTitle.Trim()}».");
-            var linkUrl = $"/Home/Story?id={storyId}";
+            var linkUrl = $"/story/{storyId}";
             Add(new notifications
             {
                 id = Guid.NewGuid(),
@@ -109,13 +126,14 @@ namespace DataAccessObjects.DAOs
                 content = content,
                 link_url = linkUrl,
                 is_read = false,
-                created_at = DateTime.Now
+                created_at = DateTime.UtcNow
             });
         }
 
-        /// <summary>Gửi thông báo cho tất cả user đang follow story khi có chapter mới được publish. Dùng một context và SaveChanges một lần.</summary>
+        /// <summary>Gửi thông báo cho tất cả user đang follow story khi có chapter mới được publish. Dùng một context và SaveChanges một lần. Trả về danh sách thông báo đã tạo để caller gửi real-time (SignalR).</summary>
         /// <param name="logger">Nếu có thì ghi log vào host (cùng luồng với EF/core).</param>
-        public static void NotifyStoryFollowersNewChapter(Guid storyId, Guid chapterId, string? chapterTitle, string? storyTitle, ILogger? logger = null)
+        /// <returns>Danh sách notification đã lưu (mỗi item có user_id, id, ...) để gửi push real-time.</returns>
+        public static List<notifications> NotifyStoryFollowersNewChapter(Guid storyId, Guid chapterId, string? chapterTitle, string? storyTitle, ILogger? logger = null)
         {
             Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter ENTER StoryId={storyId} ChapterId={chapterId} ChapterTitle={chapterTitle ?? "(null)"} StoryTitle={storyTitle ?? "(null)"}");
             logger?.LogWarning("[NOTIFY] NotifyStoryFollowersNewChapter ENTER StoryId={StoryId} ChapterId={ChapterId} ChapterTitle={ChapterTitle} StoryTitle={StoryTitle}",
@@ -127,7 +145,7 @@ namespace DataAccessObjects.DAOs
             {
                 Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter SKIP: no followers for StoryId={storyId} (kiem tra user_library: story_id, relation_type='FOLLOW')");
                 logger?.LogWarning("[NOTIFY] NotifyStoryFollowersNewChapter SKIP: no followers for StoryId={StoryId} (check user_library.relation_type='FOLLOW')", storyId);
-                return;
+                return new List<notifications>();
             }
             logger?.LogWarning("[NOTIFY] NotifyStoryFollowersNewChapter StoryId={StoryId} FollowerCount={Count} UserIds={UserIds}",
                 storyId, followerIds.Count, string.Join(", ", followerIds));
@@ -137,34 +155,176 @@ namespace DataAccessObjects.DAOs
                 ? "Truyện bạn theo dõi vừa ra chương mới."
                 : $"«{storyTitle.Trim()}» vừa ra chương mới" + (string.IsNullOrWhiteSpace(chapterTitle) ? "." : $": {chapterTitle.Trim()}");
             var linkUrl = $"/Chapters/Read/{chapterId}";
-            using var context = new StoryPlatformDbContext();
-            var now = DateTime.Now;
-            foreach (var userId in followerIds)
+            var now = DateTime.UtcNow;
+            var created = new List<notifications>();
+            using (var context = new StoryPlatformDbContext())
             {
-                context.notifications.Add(new notifications
+                foreach (var userId in followerIds)
                 {
-                    id = Guid.NewGuid(),
-                    user_id = userId,
-                    type = "STORY_CHAPTER_PUBLISHED",
-                    title = title,
-                    content = content,
-                    link_url = linkUrl,
-                    is_read = false,
-                    created_at = now
-                });
+                    var n = new notifications
+                    {
+                        id = Guid.NewGuid(),
+                        user_id = userId,
+                        type = "STORY_CHAPTER_PUBLISHED",
+                        title = title,
+                        content = content,
+                        link_url = linkUrl,
+                        is_read = false,
+                        created_at = now
+                    };
+                    created.Add(n);
+                    context.notifications.Add(n);
+                }
+                try
+                {
+                    context.SaveChanges();
+                    Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter OK: saved {created.Count} notifications for StoryId={storyId}");
+                    logger?.LogWarning("[NOTIFY] NotifyStoryFollowersNewChapter OK: saved {Count} notifications for StoryId={StoryId}", created.Count, storyId);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter ERROR StoryId={storyId} ex={ex.Message}");
+                    logger?.LogError(ex, "NotifyStoryFollowersNewChapter ERROR StoryId={StoryId}", storyId);
+                    throw;
+                }
             }
-            try
+            return created;
+        }
+
+        /// <summary>Gửi thông báo cho tất cả user đang follow tác giả khi tác giả có chapter mới được publish. Trả về danh sách thông báo đã tạo để caller gửi real-time (SignalR).</summary>
+        public static List<notifications> NotifyAuthorFollowersNewChapter(Guid authorId, Guid storyId, Guid chapterId, string? chapterTitle, string? storyTitle, ILogger? logger = null)
+        {
+            var followerIds = FollowDAO.GetAuthorFollowerIds(authorId);
+            if (followerIds.Count == 0)
             {
+                logger?.LogInformation("[NOTIFY] NotifyAuthorFollowersNewChapter SKIP: no followers for AuthorId={AuthorId}", authorId);
+                return new List<notifications>();
+            }
+            var authorName = GetUserDisplayName(authorId);
+            var title = "Tác giả có chương mới";
+            var content = string.IsNullOrWhiteSpace(storyTitle)
+                ? $"{authorName} vừa ra chương mới" + (string.IsNullOrWhiteSpace(chapterTitle) ? "." : $": {chapterTitle.Trim()}")
+                : $"{authorName} vừa ra chương mới trong «{storyTitle.Trim()}»" + (string.IsNullOrWhiteSpace(chapterTitle) ? "." : $": {chapterTitle.Trim()}");
+            var linkUrl = $"/Chapters/Read/{chapterId}";
+            var now = DateTime.UtcNow;
+            var created = new List<notifications>();
+            using (var context = new StoryPlatformDbContext())
+            {
+                foreach (var userId in followerIds)
+                {
+                    var n = new notifications
+                    {
+                        id = Guid.NewGuid(),
+                        user_id = userId,
+                        type = "AUTHOR_CHAPTER_PUBLISHED",
+                        title = title,
+                        content = content,
+                        link_url = linkUrl,
+                        is_read = false,
+                        created_at = now
+                    };
+                    created.Add(n);
+                    context.notifications.Add(n);
+                }
                 context.SaveChanges();
-                Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter OK: saved {followerIds.Count} notifications for StoryId={storyId}");
-                logger?.LogWarning("[NOTIFY] NotifyStoryFollowersNewChapter OK: saved {Count} notifications for StoryId={StoryId}", followerIds.Count, storyId);
+                logger?.LogInformation("[NOTIFY] NotifyAuthorFollowersNewChapter OK: saved {Count} notifications for AuthorId={AuthorId}", created.Count, authorId);
             }
-            catch (Exception ex)
+            return created;
+        }
+
+        /// <summary>Gửi thông báo cho user đang follow tác giả khi tác giả có truyện mới được xuất bản (duyệt). Trả về danh sách thông báo đã tạo để gửi real-time (SignalR).</summary>
+        public static List<notifications> NotifyAuthorFollowersNewStory(Guid authorId, Guid storyId, string? storyTitle, ILogger? logger = null)
+        {
+            var followerIds = FollowDAO.GetAuthorFollowerIds(authorId);
+            if (followerIds.Count == 0)
             {
-                Console.WriteLine($"[CONSOLE] NotifyStoryFollowersNewChapter ERROR StoryId={storyId} ex={ex.Message}");
-                logger?.LogError(ex, "NotifyStoryFollowersNewChapter ERROR StoryId={StoryId}", storyId);
-                throw;
+                logger?.LogInformation("[NOTIFY] NotifyAuthorFollowersNewStory SKIP: no followers for AuthorId={AuthorId}", authorId);
+                return new List<notifications>();
             }
+            var authorName = GetUserDisplayName(authorId);
+            var title = "Tác giả có truyện mới";
+            var content = string.IsNullOrWhiteSpace(storyTitle)
+                ? $"{authorName} vừa đăng truyện mới."
+                : $"{authorName} vừa đăng truyện mới: «{storyTitle.Trim()}»";
+            var linkUrl = $"/Home/Story?id={storyId}";
+            var now = DateTime.UtcNow;
+            var created = new List<notifications>();
+            using (var context = new StoryPlatformDbContext())
+            {
+                foreach (var userId in followerIds)
+                {
+                    var n = new notifications
+                    {
+                        id = Guid.NewGuid(),
+                        user_id = userId,
+                        type = "AUTHOR_STORY_PUBLISHED",
+                        title = title,
+                        content = content,
+                        link_url = linkUrl,
+                        is_read = false,
+                        created_at = now
+                    };
+                    created.Add(n);
+                    context.notifications.Add(n);
+                }
+                context.SaveChanges();
+                logger?.LogInformation("[NOTIFY] NotifyAuthorFollowersNewStory OK: saved {Count} notifications for AuthorId={AuthorId}", created.Count, authorId);
+            }
+            return created;
+        }
+
+        /// <summary>Thông báo cho tác giả khi có độc giả ủng hộ (donate). Trả về thông báo đã lưu để gửi real-time (SignalR).</summary>
+        public static notifications NotifyDonationReceived(Guid recipientUserId, string senderDisplayName, int amount, string? message)
+        {
+            if (string.IsNullOrWhiteSpace(senderDisplayName)) senderDisplayName = "Người dùng";
+            var title = "Ủng hộ từ độc giả";
+            var content = $"{senderDisplayName} đã ủng hộ {amount} coin cho bạn.";
+            if (!string.IsNullOrWhiteSpace(message))
+                content += " Lời nhắn: " + message.Trim();
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = recipientUserId,
+                type = "DONATION",
+                title = title,
+                content = content,
+                link_url = "/wallet",
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+            Add(n);
+            return n;
+        }
+
+        /// <summary>Thông báo cho tác giả khi có độc giả mở khóa chương trả phí (trừ xu).</summary>
+        public static notifications NotifyAuthorChapterUnlocked(
+            Guid authorUserId,
+            string readerDisplayName,
+            string storyTitle,
+            string chapterTitle,
+            int coinPrice,
+            Guid storyId,
+            Guid chapterId)
+        {
+            if (string.IsNullOrWhiteSpace(readerDisplayName)) readerDisplayName = "Người đọc";
+            var safeStory = string.IsNullOrWhiteSpace(storyTitle) ? "Truyện" : storyTitle.Trim();
+            var safeChapter = string.IsNullOrWhiteSpace(chapterTitle) ? "Chương" : chapterTitle.Trim();
+            var title = "Có người mở khóa chương";
+            var content = $"{readerDisplayName} đã trả {coinPrice} xu để mở khóa \"{safeChapter}\" — {safeStory}.";
+            var linkUrl = $"/chapter?storyId={storyId}&chapterId={chapterId}";
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = authorUserId,
+                type = "CHAPTER_UNLOCK",
+                title = title,
+                content = content,
+                link_url = linkUrl,
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+            Add(n);
+            return n;
         }
     }
 }

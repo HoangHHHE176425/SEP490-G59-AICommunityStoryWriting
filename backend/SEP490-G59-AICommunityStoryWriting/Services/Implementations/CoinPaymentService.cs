@@ -1,8 +1,11 @@
 using BusinessObjects;
 using BusinessObjects.Entities;
+using DataAccessObjects.DAOs;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Services.DTOs.Notifications;
 using Services.DTOs.Payments;
 using Services.Integrations.PayOS;
 using Services.Interfaces;
@@ -15,13 +18,17 @@ namespace Services.Implementations
     {
         private readonly StoryPlatformDbContext _db;
         private readonly PayOSClient _payos;
+        private readonly IConfiguration _config;
         private readonly ILogger<CoinPaymentService> _logger;
+        private readonly INotificationHubNotifier? _notificationHubNotifier;
 
-        public CoinPaymentService(StoryPlatformDbContext db, PayOSClient payos, ILogger<CoinPaymentService> logger)
+        public CoinPaymentService(StoryPlatformDbContext db, PayOSClient payos, IConfiguration config, ILogger<CoinPaymentService> logger, INotificationHubNotifier? notificationHubNotifier = null)
         {
             _db = db;
             _payos = payos;
+            _config = config;
             _logger = logger;
+            _notificationHubNotifier = notificationHubNotifier;
         }
 
         public async Task<IReadOnlyList<CoinPackageDto>> GetActivePackagesAsync(CancellationToken cancellationToken = default)
@@ -68,6 +75,9 @@ namespace Services.Implementations
             {
                 UserId = wallet.user_id,
                 BalanceCoin = wallet.balance_coin ?? 0,
+                IncomeBalance = wallet.income_balance ?? 0m,
+                FrozenBalance = wallet.frozen_balance ?? 0m,
+                PendingEscrowBalance = wallet.pending_escrow_balance ?? 0m,
                 Currency = wallet.currency ?? "VND",
                 UpdatedAt = AsUtc(wallet.updated_at)
             };
@@ -129,12 +139,19 @@ namespace Services.Implementations
             var cancelUrl = QueryHelpers.AddQueryString(request.CancelUrl, "orderId", order.id.ToString());
             var returnUrl = QueryHelpers.AddQueryString(request.ReturnUrl, "orderId", order.id.ToString());
 
+            // Set PayOS payment link expiration (TTL)
+            // PayOS expects expiredAt as Unix Timestamp (Int32).
+            var ttlMinutes = _config.GetValue<int?>("PayOS:DefaultExpiredMinutes") ?? 15;
+            ttlMinutes = Math.Clamp(ttlMinutes, 1, 7 * 24 * 60); // 1 minute .. 7 days (sane bound)
+            var expiredAt = checked((int)DateTimeOffset.UtcNow.AddMinutes(ttlMinutes).ToUnixTimeSeconds());
+
             var payosRes = await _payos.CreatePaymentLinkAsync(
                 orderCode,
                 pkg.price_amount,
                 description,
                 cancelUrl,
                 returnUrl,
+                expiredAt,
                 cancellationToken
             );
 
@@ -336,6 +353,437 @@ namespace Services.Implementations
                 await tx.CommitAsync(cancellationToken);
                 return MapOrderDto(order);
             });
+        }
+
+        public async Task<DonateResponseDto> DonateAsync(Guid senderUserId, Guid receiverUserId, int amount, string? message, CancellationToken cancellationToken = default)
+        {
+            if (amount <= 0) throw new ArgumentOutOfRangeException(nameof(amount), "Số coin ủng hộ phải lớn hơn 0.");
+            if (senderUserId == receiverUserId) throw new InvalidOperationException("Bạn không thể tự ủng hộ chính mình.");
+
+            var strategy = _db.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+                var sender = await _db.users.FirstOrDefaultAsync(u => u.id == senderUserId, cancellationToken);
+                var receiver = await _db.users.FirstOrDefaultAsync(u => u.id == receiverUserId, cancellationToken);
+
+                if (sender == null) throw new InvalidOperationException("Tài khoản người ủng hộ không tồn tại.");
+                if (receiver == null) throw new InvalidOperationException("Tác giả nhận ủng hộ không tồn tại.");
+
+                // Ensure wallets
+                var senderWallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == senderUserId, cancellationToken);
+                if (senderWallet == null)
+                {
+                    senderWallet = new wallets
+                    {
+                        user_id = senderUserId,
+                        balance_coin = 0,
+                        currency = "VND",
+                        income_balance = 0m,
+                        frozen_balance = 0m,
+                        pending_escrow_balance = 0m,
+                        updated_at = DateTime.UtcNow
+                    };
+                    _db.wallets.Add(senderWallet);
+                    await _db.SaveChangesAsync(cancellationToken);
+                }
+
+                var receiverWallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == receiverUserId, cancellationToken);
+                if (receiverWallet == null)
+                {
+                    receiverWallet = new wallets
+                    {
+                        user_id = receiverUserId,
+                        balance_coin = 0,
+                        currency = "VND",
+                        income_balance = 0m,
+                        frozen_balance = 0m,
+                        pending_escrow_balance = 0m,
+                        updated_at = DateTime.UtcNow
+                    };
+                    _db.wallets.Add(receiverWallet);
+                    await _db.SaveChangesAsync(cancellationToken);
+                }
+
+                var senderBalance = senderWallet.balance_coin ?? 0;
+                if (senderBalance < amount)
+                {
+                    throw new InvalidOperationException("Số dư coin không đủ để thực hiện ủng hộ.");
+                }
+
+                // Platform fee: 30% goes to system wallet, 70% goes to author.
+                // Use floor to avoid charging more than intended; net + fee == amount.
+                var platformFee = (int)Math.Floor(amount * 0.30m);
+                platformFee = Math.Clamp(platformFee, 0, amount);
+                var authorNet = amount - platformFee;
+
+                senderWallet.balance_coin = senderBalance - amount;
+                senderWallet.updated_at = DateTime.UtcNow;
+
+                // Author receives income into income_balance (withdrawable), not spendable balance_coin.
+                var receiverIncome = receiverWallet.income_balance ?? 0m;
+                receiverWallet.income_balance = receiverIncome + authorNet;
+                receiverWallet.updated_at = DateTime.UtcNow;
+
+                // Ensure platform wallet row exists (id=1)
+                var platformWallet = await _db.platform_wallet.FirstOrDefaultAsync(w => w.id == 1, cancellationToken);
+                if (platformWallet == null)
+                {
+                    platformWallet = new platform_wallet
+                    {
+                        id = 1,
+                        balance_coin = 0,
+                        updated_at = DateTime.UtcNow
+                    };
+                    _db.platform_wallet.Add(platformWallet);
+                    await _db.SaveChangesAsync(cancellationToken);
+                }
+
+                platformWallet.balance_coin += platformFee;
+                platformWallet.updated_at = DateTime.UtcNow;
+
+                var donation = new donations
+                {
+                    id = Guid.NewGuid(),
+                    sender_id = senderUserId,
+                    receiver_id = receiverUserId,
+                    story_id = null,
+                    amount = amount,
+                    message = message,
+                    created_at = DateTime.UtcNow
+                };
+
+                _db.donations.Add(donation);
+
+                // Log author's income for analytics/withdraw flows.
+                // Top authors dashboard uses author_income_logs as the source of truth.
+                _db.author_income_logs.Add(new author_income_logs
+                {
+                    author_id = receiverUserId,
+                    source_type = "DONATE",
+                    source_id = donation.id,
+                    gross_amount = amount,
+                    platform_fee = platformFee,
+                    net_amount = authorNet,
+                    status = "AVAILABLE",
+                    created_at = DateTime.UtcNow
+                });
+
+                await _db.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+
+                // B11: Thông báo realtime cho tác giả khi có donate.
+                // Tuy nhiên KHÔNG để lỗi notification làm hỏng giao dịch donate (trừ/cộng coin + lưu donations).
+                try
+                {
+                    var senderDisplayName = NotificationDAO.GetUserDisplayName(senderUserId);
+                    var notification = NotificationDAO.NotifyDonationReceived(receiverUserId, senderDisplayName, amount, message);
+                    _ = PushDonationNotificationAsync(receiverUserId, notification);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "DonateAsync succeeded but creating/pushing donation notification failed. Sender={SenderId} Receiver={ReceiverId} Amount={Amount}",
+                        senderUserId, receiverUserId, amount);
+                }
+
+                return new DonateResponseDto
+                {
+                    DonationId = donation.id,
+                    SenderId = senderUserId,
+                    ReceiverId = receiverUserId,
+                    Amount = amount,
+                    Message = message,
+                    CreatedAt = donation.created_at,
+                    SenderBalanceAfter = senderWallet.balance_coin ?? 0,
+                    // Keep this field as receiver's spendable coins (balance_coin) for backward compatibility.
+                    // Author's withdrawable income is in income_balance.
+                    ReceiverBalanceAfter = receiverWallet.balance_coin ?? 0
+                };
+            });
+        }
+
+        public async Task<AuthorActivityResponseDto> GetAuthorActivityAsync(Guid authorUserId, int page = 1, int pageSize = 50, CancellationToken cancellationToken = default)
+        {
+            page = Math.Max(1, page);
+            pageSize = Math.Clamp(pageSize, 1, 100);
+
+            var donations = await _db.donations
+                .AsNoTracking()
+                .Where(d => d.receiver_id == authorUserId)
+                .OrderByDescending(d => d.created_at)
+                .ToListAsync(cancellationToken);
+
+            var withdrawals = await _db.withdraw_requests
+                .AsNoTracking()
+                .Where(w => w.author_id == authorUserId)
+                .OrderByDescending(w => w.created_at)
+                .ToListAsync(cancellationToken);
+
+            var list = new List<AuthorActivityItemDto>();
+
+            foreach (var d in donations)
+            {
+                var senderName = d.sender_id.HasValue ? NotificationDAO.GetUserDisplayName(d.sender_id.Value) : "Người dùng";
+                list.Add(new AuthorActivityItemDto
+                {
+                    Type = "DONATE",
+                    Id = d.id,
+                    CreatedAt = d.created_at,
+                    Amount = d.amount,
+                    Note = d.message,
+                    SenderDisplayName = senderName,
+                    WithdrawStatus = null,
+                    ProcessedAt = null
+                });
+            }
+
+            foreach (var w in withdrawals)
+            {
+                list.Add(new AuthorActivityItemDto
+                {
+                    Type = "WITHDRAW",
+                    Id = w.id,
+                    CreatedAt = w.created_at,
+                    Amount = (int)Math.Round(w.amount_requested),
+                    Note = w.admin_note,
+                    SenderDisplayName = null,
+                    WithdrawStatus = w.status,
+                    ProcessedAt = w.processed_at
+                });
+            }
+
+            var ordered = list.OrderByDescending(x => x.CreatedAt ?? DateTime.MinValue).ToList();
+            var totalCount = ordered.Count;
+            var items = ordered.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+            return new AuthorActivityResponseDto
+            {
+                Items = items,
+                TotalCount = totalCount,
+                Page = page,
+                PageSize = pageSize
+            };
+        }
+
+        public async Task<WithdrawRequestItemDto> CreateWithdrawRequestAsync(Guid authorUserId, int amountCoins, string? bankInfo, CancellationToken cancellationToken = default)
+        {
+            const decimal CoinRateVnd = 100m; // 1 coin = 100 VND
+            const decimal MinWithdrawVnd = 50_000m;
+
+            if (amountCoins <= 0)
+                throw new ArgumentOutOfRangeException(nameof(amountCoins), "Số coin rút phải lớn hơn 0.");
+
+            if (string.IsNullOrWhiteSpace(bankInfo))
+                throw new InvalidOperationException("Vui lòng chọn tài khoản ngân hàng để rút tiền.");
+
+            var user = await _db.users.FirstOrDefaultAsync(u => u.id == authorUserId, cancellationToken);
+            if (user == null)
+                throw new InvalidOperationException("Không tìm thấy tài khoản tác giả.");
+            if (!string.Equals(user.status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Tài khoản tác giả không ở trạng thái ACTIVE.");
+
+            // Expected FE payload example:
+            // bank_name=Vietcombank | account_number=0123456789 | account_holder_name=... | branch_name=... | is_verified=1
+            string? Extract(string key)
+            {
+                foreach (var rawPart in bankInfo.Split('|', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var part = rawPart.Trim();
+                    var kv = part.Split('=', 2, StringSplitOptions.RemoveEmptyEntries);
+                    if (kv.Length != 2) continue;
+                    if (string.Equals(kv[0].Trim(), key, StringComparison.OrdinalIgnoreCase))
+                        return kv[1].Trim();
+                }
+                return null;
+            }
+
+            string DigitsOnly(string? s)
+            {
+                if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+                var sb = new System.Text.StringBuilder(s.Length);
+                foreach (var ch in s)
+                {
+                    if (char.IsDigit(ch)) sb.Append(ch);
+                }
+                return sb.ToString();
+            }
+
+            var accountNumber = DigitsOnly(Extract("account_number"));
+            if (string.IsNullOrWhiteSpace(accountNumber))
+                throw new InvalidOperationException("Thông tin tài khoản ngân hàng không hợp lệ.");
+
+            var bankBin = DigitsOnly(Extract("bank_bin"));
+            if (string.IsNullOrWhiteSpace(bankBin))
+                throw new InvalidOperationException("Missing Bank BIN/toBin for PayOS payout.");
+
+            var isVerifiedRaw = Extract("is_verified");
+            var isVerified = string.Equals(isVerifiedRaw?.Trim(), "1", StringComparison.OrdinalIgnoreCase)
+                              || string.Equals(isVerifiedRaw?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
+            if (!isVerified)
+                throw new InvalidOperationException("Bạn chưa có tài khoản ngân hàng đã xác thực.");
+
+            var amountVnd = amountCoins * CoinRateVnd;
+            if (amountVnd < MinWithdrawVnd)
+                throw new InvalidOperationException("Minimum withdrawal amount is 50,000 VND.");
+
+            var now = DateTime.UtcNow;
+
+            // Fraud detection (BR-55)
+            var threeMonthsAgo = now.AddMonths(-3);
+            var totalNetIncomeLast3Months = await _db.author_income_logs
+                .AsNoTracking()
+                .Where(l =>
+                    l.author_id == authorUserId &&
+                    l.created_at != null &&
+                    l.created_at >= threeMonthsAgo &&
+                    l.status != null && l.status.ToUpper() == "AVAILABLE")
+                .SumAsync(l => l.net_amount ?? 0m, cancellationToken);
+
+            var avgMonthlyIncomeCoins = totalNetIncomeLast3Months / 3m;
+            var isFraudA = avgMonthlyIncomeCoins > 0 && amountCoins > avgMonthlyIncomeCoins * 3m;
+
+            var sevenDaysAgo = now.AddDays(-7);
+            var requestCountLast7Days = await _db.withdraw_requests
+                .AsNoTracking()
+                .CountAsync(w =>
+                    w.author_id == authorUserId &&
+                    w.created_at != null &&
+                    w.created_at >= sevenDaysAgo, cancellationToken);
+            var isFraudB = requestCountLast7Days > 3;
+
+            var priorWithdrawCount = await _db.withdraw_requests
+                .AsNoTracking()
+                .CountAsync(w => w.author_id == authorUserId, cancellationToken);
+            var isFraudC = user.created_at != null
+                            && user.created_at >= now.AddDays(-30)
+                            && priorWithdrawCount == 0;
+
+            var isFraud = isFraudA || isFraudB || isFraudC;
+            var initialStatus = isFraud ? "PENDING_REVIEW" : "PENDING";
+
+            var riskFlags = new List<string>();
+            if (isFraudA) riskFlags.Add("AMOUNT_ANOMALY");
+            if (isFraudB) riskFlags.Add("HIGH_FREQUENCY");
+            if (isFraudC) riskFlags.Add("NEW_ACCOUNT_FIRST_WITHDRAW");
+            var riskFlagsText = riskFlags.Count == 0 ? null : string.Join(",", riskFlags);
+            var riskReason = riskFlags.Count == 0
+                ? null
+                : $"Fraud signals detected: {string.Join("; ", riskFlags)}";
+            var riskScore = riskFlags.Count == 0 ? 0m : Math.Min(100m, riskFlags.Count * 35m);
+
+            var strategy = _db.Database.CreateExecutionStrategy();
+            return await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+                var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == authorUserId, cancellationToken);
+                if (wallet == null)
+                    throw new InvalidOperationException("Ví không tồn tại. Vui lòng thử lại sau.");
+
+                var income = wallet.income_balance ?? 0m;
+                if (income < amountCoins)
+                    throw new InvalidOperationException($"Thu nhập khả dụng không đủ. Hiện có {income} coin, yêu cầu {amountCoins} coin.");
+
+                // Move from withdrawable income -> frozen while admin processes.
+                wallet.income_balance = income - amountCoins;
+                wallet.frozen_balance = (wallet.frozen_balance ?? 0m) + amountCoins;
+                wallet.updated_at = now;
+
+                var req = new withdraw_requests
+                {
+                    id = Guid.NewGuid(),
+                    author_id = authorUserId,
+                    amount_requested = amountCoins,
+                    fee_amount = null,
+                    bank_info_snapshot = bankInfo.Trim(),
+                    status = initialStatus,
+                    admin_note = null,
+                    transaction_proof_url = null,
+                    created_at = now,
+                    processed_at = null,
+                    processed_by = null,
+                    is_suspected_fraud = isFraud,
+                    risk_score = riskScore,
+                    risk_flags = riskFlagsText,
+                    risk_reason = riskReason,
+                    reviewed_by = null,
+                    reviewed_at = null
+                };
+
+                _db.withdraw_requests.Add(req);
+                await _db.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+
+                return new WithdrawRequestItemDto
+                {
+                    Id = req.id,
+                    AmountRequested = req.amount_requested,
+                    FeeAmount = req.fee_amount,
+                    Status = req.status,
+                    CreatedAt = req.created_at,
+                    ProcessedAt = req.processed_at,
+                    AdminNote = req.admin_note
+                };
+            });
+        }
+
+        public async Task CancelWithdrawRequestAsync(Guid authorUserId, Guid withdrawRequestId, CancellationToken cancellationToken = default)
+        {
+            var strategy = _db.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+                var req = await _db.withdraw_requests
+                    .FirstOrDefaultAsync(x => x.id == withdrawRequestId && x.author_id == authorUserId, cancellationToken);
+                if (req == null)
+                    throw new InvalidOperationException("Yêu cầu rút tiền không tồn tại.");
+
+                var s = (req.status ?? "PENDING").ToUpperInvariant();
+                if (s != "PENDING" && s != "PENDING_REVIEW")
+                    throw new InvalidOperationException("Chỉ có thể hủy yêu cầu rút tiền khi đang chờ xử lý.");
+
+                req.status = "CANCELLED";
+                req.processed_at = DateTime.UtcNow;
+                req.processed_by = authorUserId;
+
+                var wallet = await _db.wallets.FirstOrDefaultAsync(w => w.user_id == authorUserId, cancellationToken);
+                if (wallet != null)
+                {
+                    wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - req.amount_requested);
+                    wallet.income_balance = (wallet.income_balance ?? 0m) + req.amount_requested;
+                    wallet.updated_at = DateTime.UtcNow;
+                }
+
+                await _db.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+            });
+        }
+
+        /// <summary>Gửi real-time (SignalR) thông báo donate tới tác giả. Gọi fire-and-forget sau DonateAsync.</summary>
+        private async Task PushDonationNotificationAsync(Guid userId, notifications n)
+        {
+            if (_notificationHubNotifier == null) return;
+            try
+            {
+                var dto = new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = n.is_read == true,
+                    CreatedAt = n.created_at
+                };
+                await _notificationHubNotifier.NotifyUserAsync(userId, dto);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Push donation notification to author failed. UserId={UserId} NotificationId={NotificationId}", userId, n.id);
+            }
         }
 
         private static CoinOrderDto MapOrderDto(coin_orders o)

@@ -35,6 +35,12 @@
                         <li class="nav-item" id="moderatorNavItem" style="display: none;">
                             <a class="nav-link text-dark" asp-area="" asp-controller="Moderator" asp-action="Index"><i class="bi bi-shield-check"></i> Kiểm duyệt</a>
                         </li>
+                        <li class="nav-item" id="complianceNavItem" style="display: none;">
+                            <a class="nav-link text-dark" asp-area="" asp-controller="Compliance" asp-action="Index"><i class="bi bi-flag"></i> Báo cáo vi phạm</a>
+                        </li>
+                        <li class="nav-item" id="adminNavItem" style="display: none;">
+                            <a class="nav-link text-dark" asp-area="" asp-controller="Admin" asp-action="Index"><i class="bi bi-gear-wide-connected"></i> Admin</a>
+                        </li>
                     </ul>
                     <ul class="navbar-nav align-items-center">
                         <li class="nav-item dropdown" id="notificationBellItem" style="display: none;">
@@ -70,6 +76,19 @@
                                 <i class="bi bi-person-circle"></i> <span id="userEmail">User</span>
                             </a>
                             <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
+                                <li>
+                                    <a class="dropdown-item" href="/Home/Library">
+                                        <i class="bi bi-collection"></i> Thư viện của tôi
+                                    </a>
+                                </li>
+                                <li>
+                                    <a class="dropdown-item" href="/Home/WalletHistory">
+                                        <i class="bi bi-clock-history"></i> Lịch sử ví
+                                    </a>
+                                </li>
+                                <li class="px-3 py-2 text-muted small" id="userWalletBalanceItem" style="white-space: normal; display: none;">
+                                    <i class="bi bi-wallet2 me-1"></i> Ví coin: <span id="userWalletBalanceValue">0</span>
+                                </li>
                                 <li>
                                     <a class="dropdown-item" href="#" id="profileLink">
                                         <i class="bi bi-person"></i> Hồ sơ
@@ -154,6 +173,14 @@
                 if (moderatorNav) {
                     moderatorNav.style.display = AuthHelper.isModerator() ? 'block' : 'none';
                 }
+                var complianceNav = document.getElementById('complianceNavItem');
+                if (complianceNav) {
+                    complianceNav.style.display = AuthHelper.isComplianceOfficer() ? 'block' : 'none';
+                }
+                var adminNav = document.getElementById('adminNavItem');
+                if (adminNav) {
+                    adminNav.style.display = AuthHelper.isAdmin() ? 'block' : 'none';
+                }
                 var notificationBell = document.getElementById('notificationBellItem');
                 if (notificationBell) notificationBell.style.display = 'block';
                 if (typeof loadUnreadNotificationCount === 'function') loadUnreadNotificationCount();
@@ -171,13 +198,42 @@
                         userEmail.textContent = decoded.sub;
                     }
                 }
+
+                // Load wallet coin balance
+                const walletItem = document.getElementById('userWalletBalanceItem');
+                const walletValueEl = document.getElementById('userWalletBalanceValue');
+                if (walletItem && walletValueEl) {
+                    walletItem.style.display = 'block';
+                    walletValueEl.textContent = '0';
+                    ApiService.getMyWallet()
+                        .then(function (w) {
+                            const balanceCoin = w?.balanceCoin ?? w?.BalanceCoin ?? w?.balance_coin ?? w?.Balance_coin ?? 0;
+                            const incomeBalance = w?.incomeBalance ?? w?.IncomeBalance ?? w?.income_balance ?? w?.Income_balance ?? 0;
+                            // For AUTHORS, the unlock chapter income is stored in income_balance (withdrawable),
+                            // while balance_coin is typically 0 until funds are withdrawn/released.
+                            const isAuthor = (typeof AuthHelper !== 'undefined' && AuthHelper.isAuthor && AuthHelper.isAuthor());
+                            walletValueEl.textContent = String(isAuthor ? incomeBalance : balanceCoin);
+                        })
+                        .catch(function () {
+                            walletItem.style.display = 'none';
+                        });
+                }
             } else {
                 // Hiển thị login/register
                 loginNavItem.style.display = 'block';
                 registerNavItem.style.display = 'block';
                 userNavItem.style.display = 'none';
+                var moderatorNav = document.getElementById('moderatorNavItem');
+                if (moderatorNav) moderatorNav.style.display = 'none';
+                var complianceNav = document.getElementById('complianceNavItem');
+                if (complianceNav) complianceNav.style.display = 'none';
+                var adminNav = document.getElementById('adminNavItem');
+                if (adminNav) adminNav.style.display = 'none';
                 var notificationBell = document.getElementById('notificationBellItem');
                 if (notificationBell) notificationBell.style.display = 'none';
+
+                const walletItem = document.getElementById('userWalletBalanceItem');
+                if (walletItem) walletItem.style.display = 'none';
             }
         }
 

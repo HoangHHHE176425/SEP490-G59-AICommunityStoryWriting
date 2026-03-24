@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.Chapters
+namespace Services.DTOs.Chapters
 {
     public class ChapterResponseDto
     {
@@ -11,8 +11,12 @@
         public string? Status { get; set; }
         public string? AccessType { get; set; }
         public int? CoinPrice { get; set; }
+        /// <summary>Chỉ dùng cho màn reader: user hiện tại có đang được mở khóa chapter trả phí hay chưa.</summary>
+        public bool IsUnlocked { get; set; }
         public int? WordCount { get; set; }
         public decimal? AiContributionRatio { get; set; }
+        /// <summary>Phần trăm giống với bản AI (0–100); compare-chapter ghi vào DB khi chương PUBLISHED.</summary>
+        public decimal? AiSimilarityPercent { get; set; }
         public bool IsAiClean { get; set; }
         public DateTime? PublishedAt { get; set; }
         public DateTime? CreatedAt { get; set; }

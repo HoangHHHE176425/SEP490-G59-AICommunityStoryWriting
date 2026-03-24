@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List } from 'lucide-react';
+import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List, Wallet, History, Coins, ArrowDownToLine, Landmark, ShieldCheck, ShieldX, Percent } from 'lucide-react';
 import { StoryEditor } from './StoryEditor';
 import { StoryInfoEditor } from './StoryInfoEditor';
 import { ChapterListManager } from '../author/ChapterListManager';
@@ -7,12 +7,14 @@ import { StoryCommentsViewer } from './StoryCommentsViewer';
 import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
-import { createStory, updateStory, getStories, getStoryById } from '../../api/story/storyApi';
-import { createChapter, updateChapter, getChapterById, getChapters } from '../../api/chapter/chapterApi';
+import { createStory, updateStory, getStories, getStoryById, deleteStory } from '../../api/story/storyApi';
+import { createChapter, updateChapter, getChapterById, getChapters, createChapterVersion, updateChapterVersion, getChapterVersionById, submitChapterVersion } from '../../api/chapter/chapterApi';
+import * as coinApi from '../../api/coins/coinApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
 import { Pagination } from '../../components/pagination/Pagination';
+import { setAuthorChapterListActive } from '../../utils/authorUiFlags';
 
 function mapStoryFromApi(item) {
     const status = item.status || item.Status || '';
@@ -59,7 +61,7 @@ function mapStoryFromApi(item) {
         ageRating,
         categories,
         status: status.toLowerCase(),
-        chapters: item.totalChapters ?? item.TotalChapters ?? 0,
+        chapters: item.publishedChaptersCount ?? item.PublishedChaptersCount ?? item.totalChapters ?? item.TotalChapters ?? 0,
         totalViews: Number(item.totalViews ?? item.TotalViews ?? 0),
         follows: Number(item.totalFavorites ?? item.TotalFavorites ?? 0),
         rating: item.avgRating ?? item.AvgRating ?? 0,
@@ -84,6 +86,11 @@ export function AuthorStoryManagement({ onBack }) {
     const [activeMenu, setActiveMenu] = useState('stories');
     const [currentStory, setCurrentStory] = useState(null);
     const [currentChapter, setCurrentChapter] = useState(null);
+    /** Chương gốc khi đang tạo version (mở editor giống tạo chương mới nhưng pre-fill từ chương này). */
+    const [sourceChapterForVersion, setSourceChapterForVersion] = useState(null);
+    const [editingVersion, setEditingVersion] = useState(null);
+    /** True khi mở màn editor chỉ để xem chi tiết chương (read-only), không lưu/xuất bản. */
+    const [viewChapterOnly, setViewChapterOnly] = useState(false);
     const [stories, setStories] = useState([]);
     const [storiesLoading, setStoriesLoading] = useState(true);
     const [storiesError, setStoriesError] = useState(null);
@@ -93,6 +100,132 @@ export function AuthorStoryManagement({ onBack }) {
 
     const STORIES_PAGE_SIZE = 10;
     const authorId = user?.id ?? user?.Id;
+
+    useEffect(() => {
+        setAuthorChapterListActive(activeView === 'chapterList');
+        return () => setAuthorChapterListActive(false);
+    }, [activeView]);
+
+    // Lịch sử donate + rút tiền (author)
+    const [authorActivityItems, setAuthorActivityItems] = useState([]);
+    const [authorActivityLoading, setAuthorActivityLoading] = useState(false);
+    const [authorActivityError, setAuthorActivityError] = useState(null);
+    const [cancelWithdrawConfirm, setCancelWithdrawConfirm] = useState({ open: false, withdrawId: null });
+    // Rút tiền: số dư ví, số coin nhập, trạng thái gửi
+    const [withdrawBalance, setWithdrawBalance] = useState(null);
+    const [withdrawAmount, setWithdrawAmount] = useState('');
+    const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+    const [withdrawError, setWithdrawError] = useState(null);
+    // Rút tiền: chọn TK ngân hàng từ danh sách của author
+    const [selectedBankAccountIdx, setSelectedBankAccountIdx] = useState(-1);
+
+    // Danh sách ngân hàng (dùng cho form thêm tài khoản ngân hàng)
+    // PayOS payout batch yêu cầu `toBin` (Bank BIN). Ở dự án này ta ánh xạ theo BIN 6 chữ số theo ngân hàng.
+    // Nếu BIN không có trong map thì bạn vẫn có thể nhập thủ công ở ô Bank BIN/toBin.
+    const BANK_BIN_MAP = {
+        Vietcombank: '970436',
+        VietinBank: '970415',
+        BIDV: '970418',
+        Agribank: '970405',
+        'Techcombank': '970407',
+        'MB Bank': '970422',
+        ACB: '970416',
+        Sacombank: '970403',
+        VPBank: '970432',
+        TPBank: '970423',
+        SHB: '970443',
+        HDBank: '970437',
+        OCB: '970448',
+        VIB: '970441',
+        Eximbank: '970431',
+        // MSB: chưa map mặc định (cần nhập thủ công nếu PayOS yêu cầu).
+    };
+
+    const BANK_OPTIONS = [
+        'Vietcombank',
+        'VietinBank',
+        'BIDV',
+        'Agribank',
+        'Techcombank',
+        'MB Bank',
+        'ACB',
+        'Sacombank',
+        'VPBank',
+        'TPBank',
+        'SHB',
+        'HDBank',
+        'OCB',
+        'VIB',
+        'Eximbank',
+        'MSB',
+    ];
+
+    // UC-60: 100 coin = 10,000 VND => 1 coin = 100 VND
+    const COIN_RATE_VND = 100;
+    const MIN_WITHDRAW_VND = 50_000;
+    const MIN_WITHDRAW_COINS = Math.floor(MIN_WITHDRAW_VND / COIN_RATE_VND); // 500
+
+    const formatVnd = (vnd) => {
+        try {
+            return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(vnd || 0);
+        } catch {
+            return `${vnd || 0} VND`;
+        }
+    };
+
+    // Form "Thêm tài khoản ngân hàng" (tách khỏi phần rút tiền)
+    const [bankName, setBankName] = useState('');
+    const [bankBin, setBankBin] = useState(''); // PayOS toBin (BIN ngân hàng đích)
+    const [accountNumber, setAccountNumber] = useState('');
+    const [accountHolderName, setAccountHolderName] = useState('');
+    const [branchName, setBranchName] = useState('');
+    const [isBankVerified, setIsBankVerified] = useState(true);
+
+    // Auto-fill toBin when bank changes (if mapping exists).
+    useEffect(() => {
+        const mapped = BANK_BIN_MAP[bankName];
+        if (mapped) setBankBin(mapped);
+        else setBankBin((prev) => prev || '');
+    }, [bankName]);
+
+    // Danh sách tài khoản ngân hàng (load từ backend)
+    const [bankAccounts, setBankAccounts] = useState([]);
+
+    const maskAccountNumber = (value) => {
+        const s = String(value || '').replace(/\s+/g, '');
+        if (!s) return '—';
+        if (s.length <= 4) return s;
+        return `${'•'.repeat(Math.max(0, s.length - 4))}${s.slice(-4)}`;
+    };
+
+    const formatTime = (iso) => {
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return iso || '—';
+        return d.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+
+    const verifiedBankAccounts = bankAccounts.filter((a) => a.is_verified);
+    const selectedBankAccount = verifiedBankAccounts[selectedBankAccountIdx] ?? null;
+
+    const buildBankInfoStringFromAccount = (acc) => {
+        if (!acc) return null;
+        const bn = String(acc.bank_name || '').trim();
+        const bb = String(acc.bank_bin || '').trim();
+        // PayOS toAccountNumber should be digits only; remove whitespace safely.
+        const an = String(acc.account_number || '').replace(/[^\d]/g, '').trim();
+        const ah = String(acc.account_holder_name || '').trim();
+        const br = String(acc.branch_name || '').trim();
+        const verified = !!acc.is_verified;
+        if (!bn || !an || !ah) return null;
+        return [
+            `bank_name=${bn}`,
+            `bank_bin=${bb || ''}`,
+            `account_number=${an}`,
+            `account_holder_name=${ah}`,
+            `branch_name=${br || '-'}`,
+            `is_verified=${verified ? '1' : '0'}`,
+        ].join(' | ');
+    };
 
     const loadStories = useCallback((page = 1, options = {}) => {
         if (!authorId) {
@@ -196,6 +329,146 @@ export function AuthorStoryManagement({ onBack }) {
         queueMicrotask(() => loadStories(1));
     }, [loadStories]);
 
+    useEffect(() => {
+        const shouldPoll = activeView === 'history' || activeView === 'withdraw';
+        if (!shouldPoll || !authorId) return;
+
+        let cancelled = false;
+        let inFlight = false;
+        let didInitialLoad = false;
+
+        const fetchActivity = async ({ silent } = { silent: false }) => {
+            if (inFlight) return;
+            inFlight = true;
+            try {
+                if (!silent) {
+                    setAuthorActivityLoading(true);
+                    setAuthorActivityError(null);
+                }
+
+                const res = await coinApi.getAuthorActivity({ page: 1, pageSize: 100 });
+                if (cancelled) return;
+
+                if (res?.success && res?.data?.items) {
+                    setAuthorActivityItems(res.data.items);
+                } else {
+                    if (!silent) {
+                        setAuthorActivityItems([]);
+                        if (!res?.success) setAuthorActivityError(res?.message ?? 'Không tải được lịch sử.');
+                    }
+                }
+            } catch (e) {
+                if (!cancelled && !silent) {
+                    setAuthorActivityItems([]);
+                    setAuthorActivityError('Không tải được lịch sử donate và rút tiền.');
+                }
+            } finally {
+                if (!cancelled) {
+                    inFlight = false;
+                    if (!silent) setAuthorActivityLoading(false);
+                    didInitialLoad = true;
+                }
+            }
+        };
+
+        // Initial load
+        fetchActivity({ silent: false });
+
+        // Poll while user is viewing history/withdraw, so PROCESSING -> COMPLETED/FAILED updates automatically.
+        const intervalMs = 10000; // 10s
+        const id = setInterval(() => {
+            if (cancelled) return;
+            if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+            // After first load, poll silently to avoid loading spinner flicker.
+            fetchActivity({ silent: didInitialLoad });
+        }, intervalMs);
+
+        return () => {
+            cancelled = true;
+            clearInterval(id);
+        };
+    }, [activeView, authorId]);
+
+    const handleCancelWithdraw = (withdrawId) => {
+        if (!withdrawId) return;
+        setCancelWithdrawConfirm({ open: true, withdrawId });
+    };
+
+    const handleConfirmCancelWithdraw = async () => {
+        const withdrawId = cancelWithdrawConfirm.withdrawId;
+        setCancelWithdrawConfirm({ open: false, withdrawId: null });
+        if (!withdrawId) return;
+
+        setAuthorActivityLoading(true);
+        setAuthorActivityError(null);
+        try {
+            const res = await coinApi.cancelWithdrawRequest(withdrawId);
+            if (!res?.success) {
+                setAuthorActivityError(res?.message ?? 'Không thể hủy yêu cầu rút tiền.');
+                return;
+            }
+
+            showToast('Đã hủy yêu cầu rút tiền.', 'success');
+
+            // Refresh wallet + history for current screen.
+            const w = await coinApi.getMyWallet();
+            if (w?.success && w?.data) {
+                setWithdrawBalance(w.data.incomeBalance ?? w.data.income_balance ?? 0);
+            }
+            const ar = await coinApi.getAuthorActivity({ page: 1, pageSize: 100 });
+            if (ar?.success && ar?.data?.items) setAuthorActivityItems(ar.data.items);
+        } finally {
+            setAuthorActivityLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (activeView !== 'withdraw' || !authorId) return;
+        setWithdrawError(null);
+        coinApi.getMyWallet()
+            .then((res) => {
+                if (res?.success && res?.data != null) {
+                    // Tác giả rút tiền từ `income_balance` (khả dụng để withdraw),
+                    // còn `balance_coin` là phần spendable.
+                    setWithdrawBalance(res.data.incomeBalance ?? res.data.income_balance ?? 0);
+                } else {
+                    setWithdrawBalance(0);
+                }
+            })
+            .catch(() => setWithdrawBalance(0));
+    }, [activeView, authorId]);
+
+    // Load author bank accounts from backend (remove demo data)
+    useEffect(() => {
+        if ((activeView !== 'bank-accounts' && activeView !== 'withdraw') || !authorId) return;
+
+        coinApi.getAuthorBankAccounts()
+            .then((res) => {
+                if (!res?.success) throw new Error(res?.message ?? 'Không tải được tài khoản ngân hàng.');
+
+                const items = res?.data ?? [];
+                const normalized = Array.isArray(items)
+                    ? items.map((acc) => ({
+                        ...acc,
+                        bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
+                        account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
+                        account_holder_name: acc.account_holder_name ?? '',
+                        branch_name: acc.branch_name ?? '',
+                        is_verified: !!acc.is_verified,
+                    }))
+                    : [];
+
+                setBankAccounts(normalized);
+
+                const verified = normalized.filter((a) => !!a.is_verified);
+                setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
+            })
+            .catch((err) => {
+                setBankAccounts([]);
+                setSelectedBankAccountIdx(-1);
+            });
+    }, [activeView, authorId]);
+
     /** Real-time: refetch danh sách truyện khi tab đang hiển thị (moderator duyệt/từ chối → trạng thái truyện thay đổi). */
     const STORIES_POLL_INTERVAL_MS = 1000;
     const storiesCurrentPageRef = useRef(storiesCurrentPage);
@@ -276,6 +549,7 @@ export function AuthorStoryManagement({ onBack }) {
     };
 
     const handleEditChapter = async (chapter) => {
+        setViewChapterOnly(false);
         const chapterId = chapter?.id ?? chapter?.Id;
         if (!chapterId) {
             showToast('Không tìm thấy ID chương', 'error');
@@ -283,13 +557,9 @@ export function AuthorStoryManagement({ onBack }) {
         }
 
         try {
-            // Gọi API để lấy đầy đủ thông tin chương
             const fullChapter = await getChapterById(chapterId);
-
-            // Map dữ liệu từ API về format UI
             const status = (fullChapter.status ?? fullChapter.Status ?? 'DRAFT').toUpperCase();
             const accessTypeApi = (fullChapter.accessType ?? fullChapter.AccessType ?? 'FREE').toUpperCase();
-
             const mappedChapter = {
                 id: fullChapter.id ?? fullChapter.Id,
                 number: (fullChapter.orderIndex ?? fullChapter.OrderIndex ?? 0) + 1,
@@ -299,7 +569,6 @@ export function AuthorStoryManagement({ onBack }) {
                 accessType: accessTypeApi === 'PAID' ? 'paid' : 'public',
                 price: fullChapter.coinPrice ?? fullChapter.CoinPrice ?? 0,
             };
-
             setCurrentChapter(mappedChapter);
             setActiveView('editChapter');
         } catch (error) {
@@ -309,14 +578,139 @@ export function AuthorStoryManagement({ onBack }) {
         }
     };
 
+    /** Mở màn xem chi tiết chương (read-only, cùng giao diện editor nhưng không chỉnh sửa/lưu). */
+    const handleViewChapter = async (chapter) => {
+        setViewChapterOnly(true);
+        const chapterId = chapter?.id ?? chapter?.Id;
+        if (!chapterId) {
+            showToast('Không tìm thấy ID chương', 'error');
+            return;
+        }
+        try {
+            const fullChapter = await getChapterById(chapterId);
+            const status = (fullChapter.status ?? fullChapter.Status ?? 'DRAFT').toUpperCase();
+            const accessTypeApi = (fullChapter.accessType ?? fullChapter.AccessType ?? 'FREE').toUpperCase();
+            const mappedChapter = {
+                id: fullChapter.id ?? fullChapter.Id,
+                number: (fullChapter.orderIndex ?? fullChapter.OrderIndex ?? 0) + 1,
+                title: fullChapter.title ?? fullChapter.Title ?? '',
+                content: fullChapter.content ?? fullChapter.Content ?? '',
+                status: status.toLowerCase(),
+                accessType: accessTypeApi === 'PAID' ? 'paid' : 'public',
+                price: fullChapter.coinPrice ?? fullChapter.CoinPrice ?? 0,
+            };
+            setCurrentChapter(mappedChapter);
+            setActiveView('editChapter');
+        } catch (error) {
+            const errorMessage = error?.response?.data?.message || error?.message || 'Không thể tải thông tin chương';
+            showToast(errorMessage, 'error');
+            setViewChapterOnly(false);
+        }
+    };
+
+    /** Mở màn tạo version mới: form để trống, chỉ cần chapter id + số chương để hiển thị. */
+    const handleAddVersion = (story, chapterFromList) => {
+        const chapterId = chapterFromList?.id ?? chapterFromList?.Id;
+        if (!chapterId) {
+            showToast('Không tìm thấy ID chương', 'error');
+            return;
+        }
+        const number = chapterFromList?.number ?? (chapterFromList?.orderIndex ?? chapterFromList?.OrderIndex ?? chapterFromList?.order_index ?? 0) + 1;
+        const title = chapterFromList?.title ?? chapterFromList?.name ?? `Chương ${number}`;
+        setCurrentStory(story);
+        setCurrentChapter(null);
+        const chStatus = (chapterFromList?.status ?? 'draft').toString().toLowerCase();
+        setSourceChapterForVersion({
+            id: chapterId,
+            number: Number(number) || 1,
+            title,
+            content: '',
+            status: chStatus,
+            accessType: 'public',
+            price: 0,
+        });
+        setEditingVersion(null);
+        setActiveView('addChapterVersion');
+    };
+
+    /** Mở editor chỉnh sửa version đã có: load chi tiết version rồi mở ChapterEditorPage ở chế độ edit version. */
+    const handleEditVersion = async (chapter, versionFromList) => {
+        const chapterId = chapter?.id ?? chapter?.Id;
+        const versionId = versionFromList?.id ?? versionFromList?.Id;
+        if (!chapterId || !versionId) {
+            showToast('Không tìm thấy chương hoặc phiên bản', 'error');
+            return;
+        }
+        try {
+            const detail = await getChapterVersionById(chapterId, versionId);
+            const id = detail.id ?? detail.Id;
+            const titleSnapshot = detail.titleSnapshot ?? detail.TitleSnapshot ?? detail.title_snapshot ?? '';
+            const contentSnapshot = detail.contentSnapshot ?? detail.ContentSnapshot ?? detail.content_snapshot ?? '';
+            const versionNumber = detail.versionNumber ?? detail.VersionNumber ?? detail.version_number ?? 1;
+            const chapterNumber = chapter.number ?? (chapter.orderIndex ?? chapter.order_index ?? 0) + 1;
+            const sourceMapped = {
+                id: chapterId,
+                number: Number(chapterNumber) || 1,
+                title: chapter.title ?? chapter.name ?? `Chương ${chapterNumber}`,
+                status: (chapter.status ?? chapter.Status ?? 'draft').toString().toLowerCase(),
+            };
+            setSourceChapterForVersion(sourceMapped);
+            setEditingVersion({
+                id,
+                chapterId,
+                titleSnapshot,
+                contentSnapshot,
+                versionNumber: Number(versionNumber) || 1,
+                status: detail.status ?? detail.Status,
+            });
+            setActiveView('addChapterVersion');
+        } catch (error) {
+            const msg = error?.response?.data?.message || error?.message || 'Không thể tải phiên bản';
+            showToast(msg, 'error');
+        }
+    };
+
+    /** Sau khi lưu chương + (tuỳ chọn) popup so sánh AI — ChapterEditorPage gọi khi hoàn tất. */
+    const navigateAwayFromChapterEditor = () => {
+        setActiveView('chapterList');
+        setCurrentChapter(null);
+        setSourceChapterForVersion(null);
+        setEditingVersion(null);
+        setViewChapterOnly(false);
+    };
+
     const handleSaveChapter = async (chapterData) => {
         const storyId = currentStory?.id ?? currentStory?.Id;
         if (!storyId) {
             showToast('Không tìm thấy truyện', 'error');
-            return;
+            throw new Error('NO_STORY');
         }
 
         try {
+            // Chế độ version: tạo mới hoặc cập nhật version; nếu status === 'published' thì gửi duyệt (giống nút Xuất bản ở danh sách phiên bản)
+            if (chapterData.sourceChapterId) {
+                const chapterId = chapterData.sourceChapterId;
+                const titleSnapshot = chapterData.title ?? '';
+                const contentSnapshot = chapterData.content ?? '';
+                const shouldSubmitForReview = chapterData.status === 'published';
+                let versionId = chapterData.editingVersionId;
+
+                if (chapterData.editingVersionId) {
+                    await updateChapterVersion(chapterId, chapterData.editingVersionId, { titleSnapshot, contentSnapshot });
+                    showToast(shouldSubmitForReview ? 'Đã cập nhật và gửi phiên bản đi duyệt' : 'Đã cập nhật phiên bản', 'success');
+                } else {
+                    const created = await createChapterVersion(chapterId, { titleSnapshot, contentSnapshot });
+                    versionId = created?.id ?? created?.Id ?? created?.id;
+                    showToast(shouldSubmitForReview && versionId ? 'Đã tạo và gửi phiên bản đi duyệt' : 'Đã tạo phiên bản', 'success');
+                }
+
+                if (shouldSubmitForReview && versionId) {
+                    await submitChapterVersion(chapterId, versionId);
+                }
+
+                return { chapterId: null, mode: 'version' };
+            }
+
             // Map status: 'draft' -> 'DRAFT', 'published' -> 'PENDING_REVIEW'
             const apiStatus = chapterData.status === 'published' ? 'PENDING_REVIEW' : 'DRAFT';
 
@@ -330,7 +724,7 @@ export function AuthorStoryManagement({ onBack }) {
                 // Thêm chương mới
                 const orderIndex = (chapterData.number || 1) - 1; // number bắt đầu từ 1, orderIndex từ 0
 
-                await createChapter({
+                const created = await createChapter({
                     storyId,
                     title: chapterData.title,
                     content: chapterData.content || '',
@@ -338,50 +732,74 @@ export function AuthorStoryManagement({ onBack }) {
                     status: apiStatus,
                     accessType: apiAccessType,
                     coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
+                    aiSimilarityPercent: chapterData.aiSimilarityPercent,
                 });
 
+                const newChapterId = created?.id ?? created?.Id;
                 showToast(
                     apiStatus === 'DRAFT' ? 'Đã lưu nháp chương mới' : 'Đã xuất bản chương mới',
                     'success'
                 );
-            } else {
-                // Cập nhật chương hiện có
-                const chapterId = currentChapter.id ?? currentChapter.Id;
-                if (!chapterId) {
-                    showToast('Không tìm thấy ID chương', 'error');
-                    return;
-                }
-
-                await updateChapter(chapterId, {
-                    title: chapterData.title,
-                    content: chapterData.content || '',
-                    orderIndex: (chapterData.number || 1) - 1,
-                    status: apiStatus,
-                    accessType: apiAccessType,
-                    coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
-                    changeSummary: chapterData.changeSummary ? String(chapterData.changeSummary).trim() : undefined,
-                });
-
-                showToast(
-                    apiStatus === 'DRAFT' ? 'Đã cập nhật chương (lưu nháp)' : 'Đã cập nhật chương (xuất bản)',
-                    'success'
-                );
+                return { chapterId: newChapterId };
+            }
+            // Cập nhật chương hiện có
+            const chapterId = currentChapter.id ?? currentChapter.Id;
+            if (!chapterId) {
+                showToast('Không tìm thấy ID chương', 'error');
+                throw new Error('NO_CHAPTER_ID');
             }
 
-            // Quay về danh sách chương
-            setActiveView('chapterList');
-            setCurrentChapter(null);
+            await updateChapter(chapterId, {
+                title: chapterData.title,
+                content: chapterData.content || '',
+                orderIndex: (chapterData.number || 1) - 1,
+                status: apiStatus,
+                accessType: apiAccessType,
+                coinPrice: apiAccessType === 'PAID' ? (chapterData.price || 0) : 0,
+                changeSummary: chapterData.changeSummary ? String(chapterData.changeSummary).trim() : undefined,
+                aiSimilarityPercent: chapterData.aiSimilarityPercent,
+            });
+
+            showToast(
+                apiStatus === 'DRAFT' ? 'Đã cập nhật chương (lưu nháp)' : 'Đã cập nhật chương (xuất bản)',
+                'success'
+            );
+            return { chapterId };
         } catch (error) {
-            const errorMessage = error?.response?.data?.message || error?.message || 'Không thể lưu chương';
-            showToast(errorMessage, 'error');
+            const data = error?.response?.data;
+            const errorMessage =
+                (typeof data === 'string' && data.trim() ? data.trim() : null) ??
+                data?.message ??
+                data?.Message ??
+                data?.detail ??
+                data?.title ??
+                error?.message ??
+                'Không thể lưu chương';
+            if (error?.message !== 'NO_STORY' && error?.message !== 'NO_CHAPTER_ID') {
+                showToast(errorMessage, 'error');
+            }
             console.error('Error saving chapter:', error);
+            throw error;
         }
     };
 
+    const [deleteStoryConfirm, setDeleteStoryConfirm] = useState({ open: false, storyId: null });
+
     const handleDeleteStory = (storyId) => {
-        if (window.confirm('Bạn có chắc chắn muốn xóa truyện này?')) {
-            setStories(stories.filter(s => s.id !== storyId));
-        }
+        if (!storyId) return;
+        setDeleteStoryConfirm({ open: true, storyId });
+    };
+
+    const handleConfirmDeleteStory = () => {
+        const { storyId } = deleteStoryConfirm;
+        if (!storyId) return;
+        setDeleteStoryConfirm({ open: false, storyId: null });
+        deleteStory(storyId)
+            .then(() => loadStories(storiesCurrentPage))
+            .catch((err) => {
+                const msg = err?.response?.data?.message ?? err?.message ?? 'Xóa truyện thất bại';
+                alert(msg);
+            });
     };
 
     const handleSaveStory = async (storyData) => {
@@ -436,7 +854,15 @@ export function AuthorStoryManagement({ onBack }) {
         }
     };
 
-    const { showToast, ToastContainer } = useToast();
+    const { showToast, ToastContainer, clearToasts } = useToast();
+
+    /** Chỉ xóa toasts khi vừa chuyển SANG màn danh sách chương (từ màn khác), tránh xóa mỗi lần re-render gây nhấp nháy. */
+    const prevActiveViewRef = useRef(activeView);
+    useEffect(() => {
+        const prev = prevActiveViewRef.current;
+        prevActiveViewRef.current = activeView;
+        if (prev !== 'chapterList' && activeView === 'chapterList') clearToasts();
+    }, [activeView, clearToasts]);
 
     const getCategoryId = (c) => (typeof c === 'object' && c?.id ? c.id : c);
 
@@ -503,30 +929,47 @@ export function AuthorStoryManagement({ onBack }) {
 
     if (activeView === 'chapterList') {
         return (
-            <ChapterListManager
-                story={currentStory}
-                onBack={() => {
-                    setActiveView('stories');
-                    setCurrentStory(null);
-                    loadStories(storiesCurrentPage);
-                }}
-                onAddChapter={() => handleAddChapter(currentStory)}
-                onEditChapter={(chapter) => handleEditChapter(chapter)}
-            />
+            <>
+                <ChapterListManager
+                    story={currentStory}
+                    onBack={() => {
+                        setActiveView('stories');
+                        setCurrentStory(null);
+                        loadStories(storiesCurrentPage);
+                    }}
+                    onAddChapter={() => handleAddChapter(currentStory)}
+                    onEditChapter={(chapter) => handleEditChapter(chapter)}
+                    onViewChapter={(chapter) => handleViewChapter(chapter)}
+                    onAddVersion={(chapter) => handleAddVersion(currentStory, chapter)}
+                    onEditVersion={(chapter, version) => handleEditVersion(chapter, version)}
+                />
+                <ToastContainer />
+            </>
         );
     }
 
-    if (activeView === 'addChapter' || activeView === 'editChapter') {
+    if (activeView === 'addChapter' || activeView === 'editChapter' || activeView === 'addChapterVersion') {
         return (
-            <ChapterEditorPage
-                story={currentStory}
-                chapter={activeView === 'editChapter' ? currentChapter : null}
-                onSave={handleSaveChapter}
-                onCancel={() => {
-                    setActiveView('chapterList');
-                    setCurrentChapter(null);
-                }}
-            />
+            <>
+                {/* Cùng hook useToast với handleSaveChapter — bắt buộc render để toast lỗi (vd. chương trước chưa xuất bản) hiển thị khi đang sửa chương */}
+                <ToastContainer />
+                <ChapterEditorPage
+                    story={currentStory}
+                    chapter={activeView === 'editChapter' ? currentChapter : null}
+                    sourceChapterForVersion={activeView === 'addChapterVersion' ? sourceChapterForVersion : null}
+                    editingVersion={activeView === 'addChapterVersion' ? editingVersion : null}
+                    readOnly={viewChapterOnly}
+                    onSave={handleSaveChapter}
+                    onNavigateAfterSave={navigateAwayFromChapterEditor}
+                    onCancel={() => {
+                        setActiveView('chapterList');
+                        setCurrentChapter(null);
+                        setSourceChapterForVersion(null);
+                        setEditingVersion(null);
+                        setViewChapterOnly(false);
+                    }}
+                />
+            </>
         );
     }
 
@@ -696,6 +1139,111 @@ export function AuthorStoryManagement({ onBack }) {
                             <Book style={{ width: '20px', height: '20px' }} />
                             Truyện của tôi
                         </button>
+
+                        <button
+                            onClick={() => {
+                                setActiveMenu('withdraw');
+                                setActiveView('withdraw');
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'withdraw' ? '#f0fdf4' : 'transparent',
+                                border: 'none',
+                                borderLeft: activeMenu === 'withdraw' ? '3px solid #13ec5b' : '3px solid transparent',
+                                borderRadius: '9999px',
+                                marginLeft: '0.5rem',
+                                marginRight: '0.5rem',
+                                textAlign: 'left',
+                                fontSize: '0.875rem',
+                                fontWeight: activeMenu === 'withdraw' ? 600 : 500,
+                                color: activeMenu === 'withdraw' ? '#13ec5b' : '#333333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'withdraw') e.currentTarget.style.backgroundColor = '#f9fafb';
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'withdraw') e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                        >
+                            <Wallet style={{ width: '20px', height: '20px' }} />
+                            Rút tiền
+                        </button>
+
+                        <button
+                            onClick={() => {
+                                setActiveMenu('bank-accounts');
+                                setActiveView('bank-accounts');
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'bank-accounts' ? '#f0fdf4' : 'transparent',
+                                border: 'none',
+                                borderLeft: activeMenu === 'bank-accounts' ? '3px solid #13ec5b' : '3px solid transparent',
+                                borderRadius: '9999px',
+                                marginLeft: '0.5rem',
+                                marginRight: '0.5rem',
+                                textAlign: 'left',
+                                fontSize: '0.875rem',
+                                fontWeight: activeMenu === 'bank-accounts' ? 600 : 500,
+                                color: activeMenu === 'bank-accounts' ? '#13ec5b' : '#333333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'bank-accounts') e.currentTarget.style.backgroundColor = '#f9fafb';
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'bank-accounts') e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                        >
+                            <Landmark style={{ width: '20px', height: '20px' }} />
+                            Tài khoản ngân hàng
+                        </button>
+
+                        <button
+                            onClick={() => {
+                                setActiveMenu('history');
+                                setActiveView('history');
+                            }}
+                            style={{
+                                width: '100%',
+                                padding: '0.875rem 1.5rem',
+                                backgroundColor: activeMenu === 'history' ? '#f0fdf4' : 'transparent',
+                                border: 'none',
+                                borderLeft: activeMenu === 'history' ? '3px solid #13ec5b' : '3px solid transparent',
+                                borderRadius: '9999px',
+                                marginLeft: '0.5rem',
+                                marginRight: '0.5rem',
+                                textAlign: 'left',
+                                fontSize: '0.875rem',
+                                fontWeight: activeMenu === 'history' ? 600 : 500,
+                                color: activeMenu === 'history' ? '#13ec5b' : '#333333',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.75rem',
+                                transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                                if (activeMenu !== 'history') e.currentTarget.style.backgroundColor = '#f9fafb';
+                            }}
+                            onMouseLeave={(e) => {
+                                if (activeMenu !== 'history') e.currentTarget.style.backgroundColor = 'transparent';
+                            }}
+                        >
+                            <History style={{ width: '20px', height: '20px' }} />
+                            Lịch sử donate và rút tiền
+                        </button>
                     </nav>
 
                     {/* Logout Section */}
@@ -748,7 +1296,790 @@ export function AuthorStoryManagement({ onBack }) {
 
                 {/* Main Content */}
                 <div style={{ flex: 1, padding: '2rem' }}>
-                    {activeView === 'profile' ? (
+                    {activeView === 'withdraw' ? (
+                        <div style={{ maxWidth: '720px' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '1rem',
+                                marginBottom: '1.75rem',
+                                padding: '1.5rem 1.75rem',
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                            }}>
+                                <div style={{
+                                    width: '52px', height: '52px', borderRadius: '14px',
+                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    boxShadow: '0 4px 14px rgba(19, 236, 91, 0.3)'
+                                }}>
+                                    <Wallet style={{ width: '28px', height: '28px', color: '#ffffff' }} />
+                                </div>
+                                <div>
+                                    <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: '#1A2332', margin: 0, letterSpacing: '-0.02em' }}>Rút tiền</h2>
+                                    <p style={{ fontSize: '0.875rem', color: '#90A1B9', margin: '6px 0 0 0' }}>Rút số dư từ donate về tài khoản của bạn</p>
+                                </div>
+                            </div>
+
+                            <div style={{
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                padding: '1.75rem',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                marginBottom: '1.5rem'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                                    <Coins style={{ width: '20px', height: '20px', color: '#13ec5b' }} />
+                                    <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>Số dư khả dụng</span>
+                                </div>
+                                <div style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'baseline',
+                                    gap: '0.5rem',
+                                    padding: '1rem 1.25rem',
+                                    backgroundColor: '#f0fdf4',
+                                    borderRadius: '12px',
+                                    border: '1px solid #bbf7d0'
+                                }}>
+                                    <span style={{ fontSize: '1.75rem', fontWeight: 700, color: '#15803d', letterSpacing: '-0.02em' }}>{withdrawBalance != null ? Number(withdrawBalance).toLocaleString() : '—'}</span>
+                                    <span style={{ fontSize: '0.875rem', color: '#166534', fontWeight: 500 }}>coin</span>
+                                </div>
+                                <div style={{ fontSize: '0.8125rem', color: '#166534', marginTop: '0.5rem' }}>
+                                    ≈ {withdrawBalance != null ? formatVnd(Number(withdrawBalance) * COIN_RATE_VND) : '—'}
+                                </div>
+                            </div>
+
+                            <div style={{
+                                backgroundColor: '#fff7ed',
+                                borderRadius: '16px',
+                                padding: '1.25rem 1.25rem',
+                                border: '1px solid #fed7aa',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                                marginBottom: '1.5rem'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                    <div style={{
+                                        width: '44px',
+                                        height: '44px',
+                                        borderRadius: '14px',
+                                        backgroundColor: '#fef3c7',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 4px 14px rgba(234,179,8,0.25)',
+                                        flexShrink: 0
+                                    }}>
+                                        <Percent style={{ width: '22px', height: '22px', color: '#ea580c' }} />
+                                    </div>
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#9a3412', marginBottom: '0.25rem' }}>
+                                            Phí nền tảng 0% - Bạn nhận 100%
+                                        </div>
+                                        <div style={{ fontSize: '0.8125rem', color: '#7c2d12', lineHeight: 1.5 }}>
+                                            Khi rút tiền, hệ thống không tính thêm phí. Toàn bộ <b>income balance</b> sẽ được chuyển cho bạn.
+                                        </div>
+                                        <div style={{ marginTop: '0.75rem' }}>
+                                            <div style={{
+                                                height: '10px',
+                                                borderRadius: '9999px',
+                                                background: 'linear-gradient(90deg, #13ec5b 0%, #13ec5b 100%)',
+                                                border: '1px solid #bbf7d0'
+                                            }} />
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#7c2d12', marginTop: '0.4rem' }}>
+                                                <span>100% bạn nhận</span>
+                                                <span>0% nền tảng</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                padding: '1.75rem',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                                    <ArrowDownToLine style={{ width: '20px', height: '20px', color: '#6b7280' }} />
+                                    <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#374151' }}>Yêu cầu rút tiền</span>
+                                </div>
+                                {withdrawError && (
+                                    <p style={{ fontSize: '0.875rem', color: '#dc2626', marginBottom: '0.75rem' }}>{withdrawError}</p>
+                                )}
+                                <div style={{ marginBottom: '1.25rem' }}>
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                        Tài khoản ngân hàng (đã xác thực)
+                                    </label>
+                                    <select
+                                        value={selectedBankAccountIdx >= 0 ? String(selectedBankAccountIdx) : ''}
+                                        onChange={(e) => setSelectedBankAccountIdx(e.target.value === '' ? -1 : Number(e.target.value))}
+                                        style={{
+                                            width: '100%',
+                                            maxWidth: '520px',
+                                            padding: '0.75rem 1rem',
+                                            border: '1px solid #e5e7eb',
+                                            borderRadius: '10px',
+                                            fontSize: '0.9375rem',
+                                            outline: 'none',
+                                            backgroundColor: '#ffffff'
+                                        }}
+                                        onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                        onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                    >
+                                        <option value="">Chọn tài khoản ngân hàng</option>
+                                        {verifiedBankAccounts.map((acc, idx) => (
+                                            <option key={`${acc.bank_name}-${acc.account_number}-${idx}`} value={String(idx)}>
+                                                {acc.bank_name} • {maskAccountNumber(acc.account_number)} • {acc.account_holder_name}
+                                            </option>
+                                        ))}
+                                    </select>
+
+                                    {verifiedBankAccounts.length === 0 ? (
+                                        <p style={{ fontSize: '0.8125rem', color: '#b45309', margin: '0.5rem 0 0 0' }}>
+                                            Bạn chưa có tài khoản ngân hàng đã xác thực. Vào tab <b>Tài khoản ngân hàng</b> để thêm và xác thực trước khi rút.
+                                        </p>
+                                    ) : !selectedBankAccount ? (
+                                        <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.5rem 0 0 0' }}>
+                                            Chọn 1 tài khoản để gửi kèm theo yêu cầu rút tiền.
+                                        </p>
+                                    ) : (
+                                        <div style={{
+                                            marginTop: '0.75rem',
+                                            padding: '0.75rem 1rem',
+                                            backgroundColor: '#f8fafc',
+                                            border: '1px solid #e5e7eb',
+                                            borderRadius: '12px',
+                                            maxWidth: '640px'
+                                        }}>
+                                            <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827' }}>
+                                                {selectedBankAccount.bank_name} — {selectedBankAccount.branch_name || '—'}
+                                            </div>
+                                            <div style={{ fontSize: '0.8125rem', color: '#64748b', marginTop: '0.25rem' }}>
+                                                {selectedBankAccount.account_holder_name} • {selectedBankAccount.account_number}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                                <div style={{ marginBottom: '1.25rem' }}>
+                                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Số coin muốn rút</label>
+                                    <input
+                                        type="number"
+                                        placeholder="0"
+                                        min={MIN_WITHDRAW_COINS}
+                                        max={withdrawBalance != null ? withdrawBalance : undefined}
+                                        value={withdrawAmount}
+                                        onChange={(e) => setWithdrawAmount(e.target.value.replace(/[^0-9]/g, '') || '')}
+                                        style={{
+                                            width: '100%',
+                                            maxWidth: '320px',
+                                            padding: '0.75rem 1rem',
+                                            border: '1px solid #e5e7eb',
+                                            borderRadius: '10px',
+                                            fontSize: '0.9375rem',
+                                            outline: 'none'
+                                        }}
+                                        onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                        onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                    />
+                                    {!selectedBankAccount && (
+                                        <p style={{ fontSize: '0.8125rem', color: '#b45309', margin: '0.5rem 0 0 0' }}>
+                                            Vui lòng chọn tài khoản ngân hàng để rút tiền.
+                                        </p>
+                                    )}
+                                </div>
+                                <button
+                                    type="button"
+                                    disabled={
+                                        withdrawSubmitting ||
+                                        withdrawBalance == null ||
+                                        !withdrawAmount ||
+                                        !selectedBankAccount ||
+                                        !selectedBankAccount?.bank_bin ||
+                                        (withdrawBalance != null && Number(withdrawAmount) > withdrawBalance) ||
+                                        Number(withdrawAmount) < MIN_WITHDRAW_COINS
+                                    }
+                                    style={{
+                                        padding: '0.625rem 1.5rem',
+                                        backgroundColor: '#13ec5b',
+                                        border: 'none',
+                                        borderRadius: '10px',
+                                        fontSize: '0.875rem',
+                                        fontWeight: 600,
+                                        color: '#ffffff',
+                                        cursor: withdrawSubmitting ? 'not-allowed' : 'pointer',
+                                        opacity: (withdrawSubmitting || !withdrawAmount || withdrawBalance == null || (withdrawBalance != null && Number(withdrawAmount) > withdrawBalance) || Number(withdrawAmount) < MIN_WITHDRAW_COINS) ? 0.6 : 1,
+                                        boxShadow: '0 2px 8px rgba(19, 236, 91, 0.35)',
+                                        transition: 'all 0.2s ease'
+                                    }}
+                                    onMouseEnter={(e) => { if (!e.currentTarget.disabled) { e.currentTarget.style.backgroundColor = '#10d452'; e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(19, 236, 91, 0.4)'; } }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#13ec5b'; e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 2px 8px rgba(19, 236, 91, 0.35)'; }}
+                                    onClick={async () => {
+                                        const amount = Number(withdrawAmount);
+                                        if (!amount || amount < MIN_WITHDRAW_COINS) {
+                                            setWithdrawError('Minimum withdrawal amount is 50,000 VND.');
+                                            return;
+                                        }
+                                        if (!selectedBankAccount?.bank_bin) {
+                                            setWithdrawError('Vui lòng nhập Bank BIN/toBin cho tài khoản rút tiền.');
+                                            return;
+                                        }
+                                        const bankInfo = buildBankInfoStringFromAccount(selectedBankAccount);
+                                        if (!bankInfo) {
+                                            setWithdrawError('Vui lòng chọn tài khoản ngân hàng hợp lệ.');
+                                            return;
+                                        }
+                                        setWithdrawSubmitting(true);
+                                        setWithdrawError(null);
+                                        const res = await coinApi.createWithdrawRequest({ amountCoins: amount, bankInfo });
+                                        setWithdrawSubmitting(false);
+                                        if (res?.success) {
+                                            setWithdrawAmount('');
+                                            showToast('Đã gửi yêu cầu rút tiền. Quản trị viên sẽ xử lý.', 'success');
+                                            coinApi.getMyWallet().then((r) => {
+                                                if (r?.success && r?.data) {
+                                                    setWithdrawBalance(r.data.incomeBalance ?? r.data.income_balance ?? 0);
+                                                }
+                                            });
+                                            coinApi.getAuthorActivity({ page: 1, pageSize: 100 }).then((ar) => { if (ar?.success && ar?.data?.items) setAuthorActivityItems(ar.data.items); });
+                                            // Để Header/Wallet trang cập nhật tổng coin ngay khi income_balance chuyển sang frozen_balance
+                                            window.dispatchEvent(new Event('wallet:changed'));
+                                        } else {
+                                            setWithdrawError(res?.message ?? 'Không gửi được yêu cầu rút tiền.');
+                                        }
+                                    }}
+                                >
+                                    {withdrawSubmitting ? 'Đang gửi...' : 'Gửi yêu cầu rút tiền'}
+                                </button>
+                            </div>
+                        </div>
+                    ) : activeView === 'bank-accounts' ? (
+                        <div style={{ maxWidth: '960px' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '1rem',
+                                marginBottom: '1.75rem',
+                                padding: '1.5rem 1.75rem',
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                            }}>
+                                <div style={{
+                                    width: '52px', height: '52px', borderRadius: '14px',
+                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    boxShadow: '0 4px 14px rgba(19, 236, 91, 0.3)'
+                                }}>
+                                    <Landmark style={{ width: '28px', height: '28px', color: '#ffffff' }} />
+                                </div>
+                                <div>
+                                    <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: '#1A2332', margin: 0, letterSpacing: '-0.02em' }}>
+                                        Danh sách tài khoản ngân hàng
+                                    </h2>
+                                    <p style={{ fontSize: '0.875rem', color: '#90A1B9', margin: '6px 0 0 0' }}>
+                                        Quản lý tài khoản nhận tiền và trạng thái xác thực
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div style={{
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                padding: '1.75rem',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                marginBottom: '1.5rem'
+                            }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                                    <div style={{ gridColumn: 'span 2' }}>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                            Ngân hàng
+                                        </label>
+                                        <select
+                                            value={bankName}
+                                            onChange={(e) => setBankName(e.target.value)}
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none', backgroundColor: '#ffffff' }}
+                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                        >
+                                            <option value="">Chọn ngân hàng</option>
+                                            {BANK_OPTIONS.map((b) => (
+                                                <option key={b} value={b}>{b}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                            Bank BIN (toBin)
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={bankBin}
+                                            onChange={(e) => setBankBin(e.target.value.replace(/[^\d]/g, ''))}
+                                            placeholder="Ví dụ: 970422"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                            Số tài khoản
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={accountNumber}
+                                            onChange={(e) => setAccountNumber(e.target.value.replace(/[^\d]/g, ''))}
+                                            placeholder="Nhập số tài khoản"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                            Chủ tài khoản
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={accountHolderName}
+                                            onChange={(e) => setAccountHolderName(e.target.value)}
+                                            placeholder="Ví dụ: NGUYỄN VĂN A"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                        />
+                                    </div>
+                                    <div style={{ gridColumn: 'span 2' }}>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
+                                            Chi nhánh (tuỳ chọn)
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={branchName}
+                                            onChange={(e) => setBranchName(e.target.value)}
+                                            placeholder="Ví dụ: CN TP.HCM"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
+                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
+                                        />
+                                    </div>
+                                    <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <input id="bank-verified-list" type="checkbox" checked={isBankVerified} onChange={(e) => setIsBankVerified(e.target.checked)} />
+                                        <label htmlFor="bank-verified-list" style={{ fontSize: '0.8125rem', color: '#64748b' }}>
+                                            Đã xác thực
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            const bn = bankName.trim();
+                                            const bb = bankBin.trim();
+                                            const an = accountNumber.trim();
+                                            const ah = accountHolderName.trim();
+                                            if (!bn || !bb || !an || !ah) {
+                                                showToast('Vui lòng nhập đủ: Ngân hàng, Bank BIN/toBin, Số tài khoản, Chủ tài khoản.', 'error');
+                                                return;
+                                            }
+
+                                            const res = await coinApi.upsertAuthorBankAccount({
+                                                bankName: bn,
+                                                bankBin: bb,
+                                                accountNumber: an,
+                                                accountHolderName: ah,
+                                                branchName: branchName.trim(),
+                                                isVerified: isBankVerified,
+                                            });
+
+                                            if (!res?.success) {
+                                                showToast(res?.message ?? 'Không thể thêm tài khoản ngân hàng.', 'error');
+                                                return;
+                                            }
+
+                                            setBankName('');
+                                            setBankBin('');
+                                            setAccountNumber('');
+                                            setAccountHolderName('');
+                                            setBranchName('');
+                                            setIsBankVerified(true);
+                                            showToast('Đã thêm tài khoản ngân hàng.', 'success');
+
+                                            // Refresh list
+                                            const r = await coinApi.getAuthorBankAccounts();
+                                            if (r?.success) {
+                                                const items = r?.data ?? [];
+                                                const normalized = Array.isArray(items)
+                                                    ? items.map((acc) => ({
+                                                        ...acc,
+                                                        bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
+                                                        account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
+                                                        account_holder_name: acc.account_holder_name ?? '',
+                                                        branch_name: acc.branch_name ?? '',
+                                                        is_verified: !!acc.is_verified,
+                                                    }))
+                                                    : [];
+                                                setBankAccounts(normalized);
+                                                const verified = normalized.filter((a) => !!a.is_verified);
+                                                setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
+                                            }
+                                        }}
+                                        style={{
+                                            padding: '0.625rem 1.25rem',
+                                            backgroundColor: '#13ec5b',
+                                            border: 'none',
+                                            borderRadius: '10px',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            color: '#ffffff',
+                                            cursor: 'pointer',
+                                            boxShadow: '0 2px 8px rgba(19, 236, 91, 0.35)',
+                                            transition: 'all 0.2s ease'
+                                        }}
+                                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#10d452'; }}
+                                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#13ec5b'; }}
+                                    >
+                                        Thêm tài khoản
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div style={{
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                overflow: 'hidden'
+                            }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                    <thead>
+                                        <tr style={{ backgroundColor: '#f8fafc' }}>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>NGÂN HÀNG</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>SỐ TK</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>CHỦ TK</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>CHI NHÁNH</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>XÁC THỰC</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>CẬP NHẬT</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>HÀNH ĐỘNG</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {bankAccounts.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={7} style={{ padding: '2.5rem', textAlign: 'center', color: '#64748b' }}>
+                                                    Chưa có tài khoản ngân hàng nào.
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            bankAccounts.map((acc, idx) => (
+                                                <tr key={`${acc.bank_name}-${acc.account_number}-${idx}`} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                    <td style={{ padding: '1rem 1.25rem', color: '#374151', fontWeight: 600 }}>{acc.bank_name}</td>
+                                                    <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{maskAccountNumber(acc.account_number)}</td>
+                                                    <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{acc.account_holder_name}</td>
+                                                    <td style={{ padding: '1rem 1.25rem', color: '#64748b' }}>{acc.branch_name || '—'}</td>
+                                                    <td style={{ padding: '1rem 1.25rem' }}>
+                                                        {acc.is_verified ? (
+                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.25rem 0.5rem', borderRadius: '9999px', backgroundColor: '#ecfdf5', color: '#047857', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #a7f3d0' }}>
+                                                                <ShieldCheck style={{ width: '14px', height: '14px' }} /> Verified
+                                                            </span>
+                                                        ) : (
+                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.25rem 0.5rem', borderRadius: '9999px', backgroundColor: '#fffbeb', color: '#b45309', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #fde68a' }}>
+                                                                <ShieldX style={{ width: '14px', height: '14px' }} /> Unverified
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td style={{ padding: '1rem 1.25rem', textAlign: 'right', color: '#64748b' }}>{formatTime(acc.updated_at)}</td>
+                                                    <td style={{ padding: '1rem 1.25rem', textAlign: 'right' }}>
+                                                        <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
+                                                            <button
+                                                                type="button"
+                                                                onClick={async () => {
+                                                                    const nextVerified = !acc.is_verified;
+                                                                    const res = await coinApi.verifyAuthorBankAccount({ isVerified: nextVerified });
+                                                                    if (!res?.success) {
+                                                                        showToast(res?.message ?? 'Không thể cập nhật trạng thái xác thực.', 'error');
+                                                                        return;
+                                                                    }
+
+                                                                    showToast(nextVerified ? 'Đã xác thực.' : 'Đã huỷ xác thực.', 'success');
+
+                                                                    const r = await coinApi.getAuthorBankAccounts();
+                                                                    if (r?.success) {
+                                                                        const items = r?.data ?? [];
+                                                                        const normalized = Array.isArray(items)
+                                                                            ? items.map((acc) => ({
+                                                                                ...acc,
+                                                                                bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
+                                                                                account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
+                                                                                account_holder_name: acc.account_holder_name ?? '',
+                                                                                branch_name: acc.branch_name ?? '',
+                                                                                is_verified: !!acc.is_verified,
+                                                                            }))
+                                                                            : [];
+                                                                        setBankAccounts(normalized);
+                                                                        const verified = normalized.filter((a) => !!a.is_verified);
+                                                                        setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
+                                                                    }
+                                                                }}
+                                                                style={{
+                                                                    padding: '0.45rem 0.75rem',
+                                                                    borderRadius: '10px',
+                                                                    border: '1px solid #e5e7eb',
+                                                                    backgroundColor: '#ffffff',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: '0.8125rem',
+                                                                    fontWeight: 600,
+                                                                    color: '#111827'
+                                                                }}
+                                                            >
+                                                                {acc.is_verified ? 'Huỷ xác thực' : 'Xác thực'}
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={async () => {
+                                                                    if (!window.confirm('Xoá tài khoản ngân hàng này?')) return;
+                                                                    const res = await coinApi.deleteAuthorBankAccount();
+                                                                    if (!res?.success) {
+                                                                        showToast(res?.message ?? 'Không thể xoá tài khoản ngân hàng.', 'error');
+                                                                        return;
+                                                                    }
+                                                                    showToast('Đã xoá tài khoản ngân hàng.', 'success');
+                                                                    const r = await coinApi.getAuthorBankAccounts();
+                                                                    if (r?.success) {
+                                                                        const items = r?.data ?? [];
+                                                                        const normalized = Array.isArray(items)
+                                                                            ? items.map((acc) => ({
+                                                                                ...acc,
+                                                                                bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
+                                                                                account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
+                                                                                account_holder_name: acc.account_holder_name ?? '',
+                                                                                branch_name: acc.branch_name ?? '',
+                                                                                is_verified: !!acc.is_verified,
+                                                                            }))
+                                                                            : [];
+                                                                        setBankAccounts(normalized);
+                                                                        const verified = normalized.filter((a) => !!a.is_verified);
+                                                                        setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
+                                                                    }
+                                                                }}
+                                                                style={{
+                                                                    padding: '0.45rem 0.75rem',
+                                                                    borderRadius: '10px',
+                                                                    border: '1px solid #fecaca',
+                                                                    backgroundColor: '#fef2f2',
+                                                                    cursor: 'pointer',
+                                                                    fontSize: '0.8125rem',
+                                                                    fontWeight: 700,
+                                                                    color: '#b91c1c'
+                                                                }}
+                                                            >
+                                                                Xoá
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ) : activeView === 'history' ? (
+                        <div style={{ maxWidth: '960px' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '1rem',
+                                marginBottom: '1.75rem',
+                                padding: '1.5rem 1.75rem',
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                            }}>
+                                <div style={{
+                                    width: '52px', height: '52px', borderRadius: '14px',
+                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    boxShadow: '0 4px 14px rgba(19, 236, 91, 0.3)'
+                                }}>
+                                    <History style={{ width: '28px', height: '28px', color: '#ffffff' }} />
+                                </div>
+                                <div>
+                                    <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: '#1A2332', margin: 0, letterSpacing: '-0.02em' }}>Lịch sử donate và rút tiền</h2>
+                                    <p style={{ fontSize: '0.875rem', color: '#90A1B9', margin: '6px 0 0 0' }}>Xem lịch sử nhận donate và các lần rút tiền</p>
+                                </div>
+                            </div>
+
+                            <div style={{
+                                backgroundColor: '#f0fdf4',
+                                borderRadius: '16px',
+                                padding: '1.1rem 1.25rem',
+                                border: '1px solid #bbf7d0',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+                                marginBottom: '1.25rem'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                    <div style={{
+                                        width: '40px',
+                                        height: '40px',
+                                        borderRadius: '14px',
+                                        backgroundColor: '#dcfce7',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        boxShadow: '0 4px 14px rgba(19,236,91,0.18)',
+                                        flexShrink: 0
+                                    }}>
+                                        <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>
+                                            Tỷ lệ chia sẻ: 70% cho author, 30% nền tảng
+                                        </div>
+                                        <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
+                                            Các khoản <b>Donate</b> trong lịch sử là phần author nhận sau khi nền tảng trừ <b>30%</b> phí.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style={{
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                                overflow: 'hidden'
+                            }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                    <thead>
+                                        <tr style={{ backgroundColor: '#f8fafc' }}>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>THỜI GIAN</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>LOẠI</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>SỐ COIN</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>THỰC NHẬN</th>
+                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>GHI CHÚ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {authorActivityLoading ? (
+                                            <tr>
+                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
+                                            </tr>
+                                        ) : authorActivityError ? (
+                                            <tr>
+                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorActivityError}</td>
+                                            </tr>
+                                        ) : authorActivityItems.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={5} style={{ padding: '3rem 1.5rem', textAlign: 'center' }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+                                                        <div style={{
+                                                            width: '56px', height: '56px', borderRadius: '50%',
+                                                            backgroundColor: '#f1f5f9',
+                                                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                                        }}>
+                                                            <History style={{ width: '28px', height: '28px', color: '#94a3b8' }} />
+                                                        </div>
+                                                        <p style={{ fontSize: '0.9375rem', fontWeight: 500, color: '#64748b', margin: 0 }}>Chưa có giao dịch nào</p>
+                                                        <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>Donate và rút tiền sẽ hiển thị tại đây</p>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            authorActivityItems.map((item) => {
+                                                const createdAt = item.createdAt ?? item.CreatedAt;
+                                                const timeStr = createdAt ? new Date(createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+                                                const typeLabel = (item.type || item.Type) === 'WITHDRAW' ? 'Rút tiền' : 'Donate';
+                                                const amount = item.amount ?? item.Amount ?? 0;
+                                                const isWithdraw = (item.type || item.Type) === 'WITHDRAW';
+                                                const withdrawStatusRaw = item.withdrawStatus ?? item.WithdrawStatus;
+                                                const statusUpper = String(withdrawStatusRaw ?? '').toUpperCase();
+
+                                                // DONATE: author nhận net = amount - floor(amount * 0.3)
+                                                const netReceived = isWithdraw
+                                                    ? (statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? Number(amount) : 0)
+                                                    : Math.max(0, Number(amount) - Math.floor(Number(amount) * 0.3));
+
+                                                const statusLabel =
+                                                    statusUpper === 'PENDING' ? 'Chờ xử lý' :
+                                                        statusUpper === 'PENDING_REVIEW' ? 'Chờ xét duyệt' :
+                                                            statusUpper === 'PROCESSING' ? 'Đang xử lý' :
+                                                                statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? 'Hoàn thành' :
+                                                                    statusUpper === 'FAILED' ? 'Thất bại' :
+                                                                        statusUpper === 'CANCELLED' ? 'Đã hủy' :
+                                                                            statusUpper || '—';
+
+                                                const note = isWithdraw
+                                                    ? (['PENDING', 'PENDING_REVIEW', 'PROCESSING'].includes(statusUpper)
+                                                        ? statusLabel
+                                                        : (item.note ?? item.Note) || statusLabel)
+                                                    : (item.senderDisplayName ?? item.SenderDisplayName
+                                                        ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}`
+                                                        : (item.note ?? item.Note) || '—');
+
+                                                const canCancelWithdraw = isWithdraw && (statusUpper === 'PENDING' || statusUpper === 'PENDING_REVIEW');
+
+                                                const vndAmount = Number(amount) * COIN_RATE_VND;
+                                                const vndNet = netReceived * COIN_RATE_VND;
+                                                return (
+                                                    <tr key={item.id ?? item.Id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                        <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{timeStr}</td>
+                                                        <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{typeLabel}</td>
+                                                        <td style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: (item.type || item.Type) === 'WITHDRAW' ? '#dc2626' : '#15803d' }}>
+                                                            <div>
+                                                                {(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin
+                                                            </div>
+                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndAmount)}</div>
+                                                        </td>
+                                                        <td style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 700, color: (item.type || item.Type) === 'WITHDRAW' ? '#b91c1c' : '#16a34a' }}>
+                                                            <div>
+                                                                {isWithdraw ? (netReceived > 0 ? `+${Number(netReceived).toLocaleString()}` : '—') : `+${Number(netReceived).toLocaleString()}`} coin
+                                                            </div>
+                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                                                {isWithdraw ? (netReceived > 0 ? `≈ ${formatVnd(vndNet)}` : '—') : `≈ ${formatVnd(vndNet)}`}
+                                                            </div>
+                                                        </td>
+                                                        <td style={{ padding: '1rem 1.25rem', color: '#64748b', maxWidth: '280px' }}>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</div>
+                                                                {canCancelWithdraw && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleCancelWithdraw(item.id ?? item.Id)}
+                                                                        style={{
+                                                                            alignSelf: 'flex-start',
+                                                                            padding: '0.35rem 0.75rem',
+                                                                            borderRadius: '10px',
+                                                                            border: '1px solid #fecaca',
+                                                                            backgroundColor: '#fef2f2',
+                                                                            color: '#b91c1c',
+                                                                            fontSize: '0.75rem',
+                                                                            fontWeight: 700,
+                                                                            cursor: 'pointer'
+                                                                        }}
+                                                                    >
+                                                                        Hủy
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    ) : activeView === 'profile' ? (
                         <div style={{ maxWidth: '900px' }}>
                             {/* Thành tích */}
                             <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', padding: '1.5rem', marginBottom: '1.5rem', border: '1px solid #e0e0e0' }}>
@@ -1230,30 +2561,35 @@ export function AuthorStoryManagement({ onBack }) {
                                                         Bình luận
                                                     </button>
                                                     <button
-                                                        onClick={() => handleDeleteStory(story.id)}
+                                                        onClick={() => story.status === 'draft' && handleDeleteStory(story.id)}
+                                                        disabled={story.status !== 'draft'}
+                                                        title={story.status === 'draft' ? 'Xóa truyện' : 'Chỉ được xóa truyện khi ở trạng thái Bản nháp'}
                                                         style={{
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             justifyContent: 'center',
                                                             gap: '0.375rem',
                                                             padding: '0.5rem 1rem',
-                                                            backgroundColor: '#fff',
-                                                            border: '1px solid #fecaca',
+                                                            backgroundColor: story.status === 'draft' ? '#fff' : '#f1f5f9',
+                                                            border: `1px solid ${story.status === 'draft' ? '#fecaca' : '#e2e8f0'}`,
                                                             borderRadius: '9999px',
                                                             fontSize: '0.8125rem',
                                                             fontWeight: 500,
-                                                            color: '#dc2626',
-                                                            cursor: 'pointer',
+                                                            color: story.status === 'draft' ? '#dc2626' : '#94a3b8',
+                                                            cursor: story.status === 'draft' ? 'pointer' : 'not-allowed',
                                                             whiteSpace: 'nowrap',
-                                                            transition: 'all 0.2s'
+                                                            transition: 'all 0.2s',
+                                                            opacity: story.status === 'draft' ? 1 : 0.8
                                                         }}
                                                         onMouseEnter={(e) => {
-                                                            e.currentTarget.style.backgroundColor = '#fef2f2';
-                                                            e.currentTarget.style.borderColor = '#ef4444';
+                                                            if (story.status === 'draft') {
+                                                                e.currentTarget.style.backgroundColor = '#fef2f2';
+                                                                e.currentTarget.style.borderColor = '#ef4444';
+                                                            }
                                                         }}
                                                         onMouseLeave={(e) => {
-                                                            e.currentTarget.style.backgroundColor = '#fff';
-                                                            e.currentTarget.style.borderColor = '#fecaca';
+                                                            e.currentTarget.style.backgroundColor = story.status === 'draft' ? '#fff' : '#f1f5f9';
+                                                            e.currentTarget.style.borderColor = story.status === 'draft' ? '#fecaca' : '#e2e8f0';
                                                         }}
                                                     >
                                                         <Trash2 style={{ width: '14px', height: '14px' }} />
@@ -1280,6 +2616,148 @@ export function AuthorStoryManagement({ onBack }) {
                 </div>
             </div>
             <Footer />
+
+            {/* Popup xác nhận xóa truyện */}
+            {deleteStoryConfirm.open && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10000
+                    }}
+                    onClick={() => setDeleteStoryConfirm({ open: false, storyId: null })}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '400px',
+                            width: '90%',
+                            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#1e293b', margin: '0 0 1rem 0' }}>
+                            Xác nhận xóa truyện
+                        </h3>
+                        <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
+                            Bạn có chắc chắn muốn xóa truyện này? Toàn bộ chương và dữ liệu liên quan sẽ bị xóa vĩnh viễn. Hành động này không thể hoàn tác.
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => setDeleteStoryConfirm({ open: false, storyId: null })}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#64748b',
+                                    backgroundColor: '#f1f5f9',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                onClick={handleConfirmDeleteStory}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#ffffff',
+                                    backgroundColor: '#dc2626',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Xóa
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Popup xác nhận hủy yêu cầu rút tiền */}
+            {cancelWithdrawConfirm.open && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10000
+                    }}
+                    onClick={() => setCancelWithdrawConfirm({ open: false, withdrawId: null })}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '12px',
+                            padding: '1.5rem',
+                            maxWidth: '420px',
+                            width: '90%',
+                            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <h3 style={{ fontSize: '1.125rem', fontWeight: 600, color: '#1e293b', margin: '0 0 1rem 0' }}>
+                            Xác nhận hủy yêu cầu rút tiền
+                        </h3>
+                        <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
+                            Bạn có chắc chắn muốn hủy yêu cầu rút tiền này không?
+                        </p>
+                        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                            <button
+                                onClick={() => setCancelWithdrawConfirm({ open: false, withdrawId: null })}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#64748b',
+                                    backgroundColor: '#f1f5f9',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Không, giữ nguyên
+                            </button>
+                            <button
+                                onClick={handleConfirmCancelWithdraw}
+                                style={{
+                                    padding: '0.625rem 1.25rem',
+                                    fontSize: '0.875rem',
+                                    fontWeight: 600,
+                                    color: '#ffffff',
+                                    backgroundColor: '#dc2626',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Có, hủy yêu cầu
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
+
+export default AuthorStoryManagement;

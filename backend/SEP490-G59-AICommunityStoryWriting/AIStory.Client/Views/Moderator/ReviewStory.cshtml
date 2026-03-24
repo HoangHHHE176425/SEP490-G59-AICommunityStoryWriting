@@ -48,25 +48,58 @@
                     </div>
                 </div>
 
+                <div id="storyReviewTimingCard" class="card border-0 shadow-sm mb-3" style="display: none;">
+                    <div class="card-body py-3">
+                        <h6 class="text-muted text-uppercase small mb-2"><i class="bi bi-clock-history"></i> Thời gian &amp; hạn xử lý</h6>
+                        <div id="storyReviewTimingInner" class="small"></div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <h5 class="mb-0">Quyết định</h5>
                         <a asp-controller="Moderator" asp-action="Index" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-left"></i> Quay lại danh sách</a>
                     </div>
                     <div class="card-body">
-                        <div class="d-flex gap-2 flex-wrap">
+                        <div class="d-flex gap-2 flex-wrap align-items-center">
                             <button type="button" class="btn btn-success btn-lg" id="btnApproveStory">
                                 <i class="bi bi-check-circle"></i> Duyệt truyện
                             </button>
                             <button type="button" class="btn btn-danger btn-lg" id="btnRejectStory">
                                 <i class="bi bi-x-circle"></i> Từ chối (kèm lý do)
                             </button>
+                            <button type="button" class="btn btn-outline-danger btn-lg" id="btnEscalateStory" style="display: none;">
+                                <i class="bi bi-shield-exclamation"></i> Báo cáo admin
+                            </button>
                         </div>
+                        <p class="small text-muted mt-2 mb-0" id="storyAssignmentHint" style="display: none;"></p>
                         <div id="rejectFormStory" class="mt-4" style="display: none;">
                             <label class="form-label">Lý do từ chối <span class="text-danger">*</span></label>
                             <textarea class="form-control" id="rejectReasonStory" rows="4" placeholder="Nhập lý do từ chối..."></textarea>
                             <button type="button" class="btn btn-danger mt-2" id="btnConfirmRejectStory">Xác nhận từ chối</button>
                             <button type="button" class="btn btn-secondary mt-2 ms-2" id="btnCancelRejectStory">Hủy</button>
+                        </div>
+                        <div id="storyEscalationPanel" class="mt-4 border rounded p-3 bg-light" style="display: none;">
+                            <h6 class="mb-2"><i class="bi bi-exclamation-octagon text-danger"></i> Báo cáo lên Admin</h6>
+                            <p class="small text-muted">Gia hạn hạn duyệt hoặc hủy nhận để người khác duyệt. Admin xác nhận; đơn được gắn mức ưu tiên.</p>
+                            <div class="mb-2">
+                                <label class="form-label small">Loại yêu cầu</label>
+                                <select class="form-select form-select-sm" id="storyEscKind">
+                                    <option value="EXTEND_DEADLINE">Gia hạn hạn duyệt</option>
+                                    <option value="RELEASE_ASSIGNMENT">Hủy nhận duyệt</option>
+                                </select>
+                            </div>
+                            <div id="storyEscExtendWrap" class="mb-2">
+                                <label class="form-label small">Hạn đề xuất</label>
+                                <input type="datetime-local" class="form-control form-control-sm" id="storyEscDeadline">
+                            </div>
+                            <p class="small text-muted mb-2">Mức ưu tiên admin: <strong>tự động</strong> theo loại đơn (hủy nhận = nghiêm trọng; gia hạn = chuẩn, có thể tăng theo hạn).</p>
+                            <div class="mb-2">
+                                <label class="form-label small">Lý do (≥10 ký tự)</label>
+                                <textarea class="form-control form-control-sm" id="storyEscReason" rows="3"></textarea>
+                            </div>
+                            <button type="button" class="btn btn-danger btn-sm" id="btnSubmitStoryEsc">Gửi báo cáo</button>
+                            <button type="button" class="btn btn-secondary btn-sm ms-1" id="btnCancelStoryEsc">Đóng</button>
                         </div>
                     </div>
                 </div>
@@ -96,6 +129,17 @@
                 document.getElementById('rejectFormStory').style.display = 'none';
                 document.getElementById('rejectReasonStory').value = '';
             });
+            document.getElementById('btnEscalateStory').addEventListener('click', function () {
+                var p = document.getElementById('storyEscalationPanel');
+                p.style.display = p.style.display === 'none' ? 'block' : 'none';
+            });
+            document.getElementById('storyEscKind').addEventListener('change', function () {
+                document.getElementById('storyEscExtendWrap').style.display = this.value === 'EXTEND_DEADLINE' ? 'block' : 'none';
+            });
+            document.getElementById('btnCancelStoryEsc').addEventListener('click', function () {
+                document.getElementById('storyEscalationPanel').style.display = 'none';
+            });
+            document.getElementById('btnSubmitStoryEsc').addEventListener('click', submitStoryEscalation);
         });
 
         async function loadStory() {
@@ -125,10 +169,120 @@
                     <span class="badge bg-secondary me-1">${s.categoryNames || 'N/A'}</span>
                     <span class="badge bg-warning text-dark me-1">${s.status || 'PENDING_REVIEW'}</span>
                 `;
+                await refreshStoryAssignmentUi();
+                startReviewTimingTicker(refreshStoryAssignmentUi);
             } catch (e) {
                 document.getElementById('loadingStory').style.display = 'none';
                 document.getElementById('errorStory').style.display = 'block';
                 document.getElementById('errorStory').textContent = e.message || 'Không tải được truyện.';
+            }
+        }
+
+        function storyEscDefaultDeadline() {
+            var d = new Date();
+            d.setDate(d.getDate() + 7);
+            d.setHours(23, 59, 0, 0);
+            var pad = function (n) { return n.toString().padStart(2, '0'); };
+            return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        }
+
+        var reviewTimingTickerId = null;
+        function startReviewTimingTicker(refreshFn) {
+            if (reviewTimingTickerId) clearInterval(reviewTimingTickerId);
+            reviewTimingTickerId = setInterval(function () { refreshFn(); }, 60000);
+        }
+
+        function fillStoryReviewTimingCard(self) {
+            var card = document.getElementById('storyReviewTimingCard');
+            var inner = document.getElementById('storyReviewTimingInner');
+            if (!card || !inner) return;
+            var hasAny = self.authorSubmittedAtUtc || self.reviewDeadlineAt || self.policySuggestedDeadlineAt;
+            if (!hasAny) {
+                card.style.display = 'none';
+                return;
+            }
+            card.style.display = 'block';
+            var mainLine = '—';
+            if (self.authorSubmittedAtUtc) {
+                mainLine = '<strong>' + Utils.formatDate(self.authorSubmittedAtUtc) + '</strong> · <em>' + (Utils.formatRelativePastVi ? Utils.formatRelativePastVi(self.authorSubmittedAtUtc) : '') + '</em>';
+            }
+            var badge = (typeof Utils.moderatorDeadlineBadgeHtml === 'function') ? Utils.moderatorDeadlineBadgeHtml(self.timeStatus) : '';
+            var personalLine = '';
+            if (self.isAssignedToMe && self.reviewDeadlineAt) {
+                var pcd = (typeof Utils.formatCountdownRemainingVi === 'function') ? Utils.formatCountdownRemainingVi(self.reviewDeadlineAt) : '';
+                personalLine = '<div class="mt-2 pt-2 border-top small"><span class="text-muted">Cam kết khi nhận duyệt:</span> <strong>' + Utils.formatDate(self.reviewDeadlineAt) + '</strong>' +
+                    (pcd ? ' · <em>' + pcd + '</em>' : '') + '</div>';
+            }
+            inner.innerHTML =
+                '<div class="fw-semibold text-body mb-1">Thời điểm tác giả gửi &amp; mức ưu tiên</div>' +
+                '<div>' + mainLine + ' ' + badge + '</div>' + personalLine;
+        }
+
+        async function refreshStoryAssignmentUi() {
+            try {
+                var self = await ApiService.moderatorGetReviewAssignmentSelf('STORY', storyId);
+                var btn = document.getElementById('btnEscalateStory');
+                var hint = document.getElementById('storyAssignmentHint');
+                var escalationLocked = !!(self.isAssignedToMe && self.hasPendingEscalation);
+                var mustClaimFirst = !self.isAssignedToMe;
+                var btnApprove = document.getElementById('btnApproveStory');
+                var btnReject = document.getElementById('btnRejectStory');
+                var btnConfirmReject = document.getElementById('btnConfirmRejectStory');
+                fillStoryReviewTimingCard(self);
+                if (self.isAssignedToMe) {
+                    btn.style.display = escalationLocked ? 'none' : '';
+                    hint.style.display = 'block';
+                    var dl = self.reviewDeadlineAt ? Utils.formatDate(self.reviewDeadlineAt) : '—';
+                    if (escalationLocked) {
+                        hint.textContent = 'Đơn báo cáo đang chờ admin xử lý — bạn không thể duyệt hoặc từ chối cho đến khi admin quyết định.';
+                        hint.classList.add('text-warning', 'fw-semibold');
+                    } else {
+                        hint.classList.remove('text-warning', 'fw-semibold');
+                        var waitPart = (self.authorSubmittedAtUtc && Utils.formatRelativePastVi)
+                            ? ' · Đang chờ: ' + Utils.formatRelativePastVi(self.authorSubmittedAtUtc)
+                            : '';
+                        hint.textContent = 'Bạn đang nhận duyệt. Cam kết: ' + dl + waitPart;
+                    }
+                } else {
+                    btn.style.display = 'none';
+                    hint.style.display = 'block';
+                    hint.classList.remove('text-warning', 'fw-semibold');
+                    hint.textContent = 'Bạn chưa nhận duyệt mục này — dùng Nhận duyệt trên danh sách chờ trước khi duyệt hoặc từ chối.';
+                }
+                if (btnApprove) btnApprove.disabled = mustClaimFirst || escalationLocked;
+                if (btnReject) btnReject.disabled = mustClaimFirst || escalationLocked;
+                if (btnConfirmReject) btnConfirmReject.disabled = mustClaimFirst || escalationLocked;
+                document.getElementById('storyEscDeadline').value = storyEscDefaultDeadline();
+            } catch (e) { /* ignore */ }
+        }
+
+        async function submitStoryEscalation() {
+            var kind = document.getElementById('storyEscKind').value;
+            var reason = document.getElementById('storyEscReason').value.trim();
+            if (reason.length < 10) {
+                Utils.showAlert('Lý do cần ít nhất 10 ký tự.', 'warning');
+                return;
+            }
+            var body = { targetType: 'STORY', targetId: storyId, requestKind: kind, reason: reason };
+            if (kind === 'EXTEND_DEADLINE') {
+                var localStr = document.getElementById('storyEscDeadline').value;
+                if (!localStr) { Utils.showAlert('Chọn hạn đề xuất.', 'warning'); return; }
+                var pIso = Utils.datetimeLocalToIsoUtc(localStr);
+                if (!pIso) { Utils.showAlert('Hạn đề xuất không hợp lệ.', 'warning'); return; }
+                var dt = new Date(pIso);
+                if (dt.getTime() <= Date.now() + 86400000) {
+                    Utils.showAlert('Hạn đề xuất phải sau ít nhất 24 giờ.', 'warning');
+                    return;
+                }
+                body.proposedDeadlineAt = pIso;
+            }
+            try {
+                await ApiService.moderatorSubmitReviewEscalation(body);
+                Utils.showAlert('Đã gửi báo cáo cho admin.', 'success');
+                document.getElementById('storyEscalationPanel').style.display = 'none';
+                await refreshStoryAssignmentUi();
+            } catch (e) {
+                Utils.showAlert(e.message || 'Gửi thất bại.', 'danger');
             }
         }
 

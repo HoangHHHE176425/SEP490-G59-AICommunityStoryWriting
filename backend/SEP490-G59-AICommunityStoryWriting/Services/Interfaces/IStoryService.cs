@@ -1,11 +1,14 @@
-﻿using Services.DTOs.Stories;
+using Services.DTOs.Community;
+using Services.DTOs.Stories;
 
 public interface IStoryService
 {
     StoryResponseDto Create(CreateStoryRequestDto request, Guid authorId, string? coverImageUrl);
     PagedResultDto<StoryListItemDto> GetAll(StoryQueryDto query);
-    StoryResponseDto? GetById(Guid id);
-    StoryResponseDto? GetBySlug(string slug);
+    StoryResponseDto? GetById(Guid id, Guid? userId = null);
+    StoryResponseDto? GetBySlug(string slug, Guid? userId = null);
+    /// <summary>Lưu tiến độ đọc: user đang đọc đến chapter nào của story.</summary>
+    void SaveReadingProgress(Guid storyId, Guid userId, Guid chapterId);
     PagedResultDto<StoryListItemDto> GetByAuthor(Guid authorId, StoryQueryDto query);
     bool Update(Guid id, UpdateStoryRequestDto request);
     bool Delete(Guid id);
@@ -19,4 +22,11 @@ public interface IStoryService
     void RecordReadChapter(Guid storyId, Guid chapterId, Guid userId, string? ipAddress = null, string? deviceInfo = null);
     /// <summary>Đánh giá story (1..5 sao). Chặn nếu user chưa đọc story.</summary>
     (decimal avgRating, int ratingCount) RateStory(Guid storyId, Guid userId, int starValue, string? reviewText);
+    /// <summary>Lấy lý do từ chối gần nhất của truyện (từ moderation_logs), bất kể status hiện tại.</summary>
+    (string? reason, DateTime? rejectedAt) GetLatestRejectionForStory(Guid storyId);
+
+    /// <summary>
+    /// Truyện PUBLISHED, không compliance_hidden — khớp GetAll khi guest (không gồm truyện bị ẩn compliance).
+    /// </summary>
+    CommunityStatsDto GetPublicCommunityStats();
 }

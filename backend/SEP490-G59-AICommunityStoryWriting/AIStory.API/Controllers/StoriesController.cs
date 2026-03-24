@@ -1,11 +1,17 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
+using System.Linq;
 using System.Security.Claims;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Services.DTOs.Comments;
+using Services.DTOs.Notifications;
 using Services.DTOs.Stories;
+using Services.DTOs.StoryReports;
+using Services.Interfaces;
 
 namespace AIStory.API.Controllers
 {
@@ -15,12 +21,47 @@ namespace AIStory.API.Controllers
     public class StoriesController : ControllerBase
     {
         private readonly IStoryService _storyService;
+        private readonly IContentGuardrailService _contentGuardrail;
+        private readonly IStoryReportService _storyReportService;
+        private readonly INotificationHubNotifier _notificationHubNotifier;
         private readonly ILogger<StoriesController> _logger;
 
-        public StoriesController(IStoryService storyService, ILogger<StoriesController> logger)
+        public StoriesController(
+            IStoryService storyService,
+            IContentGuardrailService contentGuardrail,
+            IStoryReportService storyReportService,
+            INotificationHubNotifier notificationHubNotifier,
+            ILogger<StoriesController> logger)
         {
             _storyService = storyService;
+            _contentGuardrail = contentGuardrail;
+            _storyReportService = storyReportService;
+            _notificationHubNotifier = notificationHubNotifier;
             _logger = logger;
+        }
+
+        private static NotificationDto MapNotificationToDto(notifications n) => new()
+        {
+            Id = n.id,
+            Type = n.type,
+            Title = n.title,
+            Content = n.content,
+            LinkUrl = n.link_url,
+            IsRead = n.is_read == true,
+            CreatedAt = n.created_at
+        };
+
+        private async Task PushCommentReplyNotificationAsync(notifications n)
+        {
+            if (n.user_id == null) return;
+            try
+            {
+                await _notificationHubNotifier.NotifyUserAsync(n.user_id.Value, MapNotificationToDto(n));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Push COMMENT_REPLY notification failed. UserId={UserId} NotificationId={NotificationId}", n.user_id, n.id);
+            }
         }
 
         /// <summary>Tạo story mới - Chỉ AUTHOR</summary>
@@ -129,6 +170,86 @@ namespace AIStory.API.Controllers
             return Guid.TryParse(sub, out var id) ? id : null;
         }
 
+        private bool CanBypassStoryComplianceHidden(StoryResponseDto? story, Guid? userId)
+        {
+            if (story == null || story.ComplianceHidden != true) return true;
+            if (User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE")) return true;
+            if (userId.HasValue && story.AuthorId.HasValue && story.AuthorId.Value == userId.Value) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Bổ sung các tham số query từ FE (storyProgressStatus, ageRating, min/maxTotalChapters) vào StoryQueryDto —
+        /// model binder mặc định không gán được một số property (kết quả: lọc trạng thái/độ tuổi không hoạt động).
+        /// </summary>
+        private static void MergeStoryListQueryFromRequest(HttpRequest request, StoryQueryDto query)
+        {
+            static string? FirstQuery(IQueryCollection q, params string[] keys)
+            {
+                foreach (var key in keys)
+                {
+                    var v = q[key].FirstOrDefault();
+                    if (!string.IsNullOrWhiteSpace(v)) return v;
+                }
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(query.StoryProgressStatus))
+            {
+                var v = FirstQuery(request.Query, "storyProgressStatus", "StoryProgressStatus");
+                if (v != null) query.StoryProgressStatus = v;
+            }
+
+            if (string.IsNullOrWhiteSpace(query.AgeRating))
+            {
+                var v = FirstQuery(request.Query, "ageRating", "AgeRating");
+                if (v != null) query.AgeRating = v;
+            }
+
+            if (!query.MinTotalChapters.HasValue)
+            {
+                var v = FirstQuery(request.Query, "minTotalChapters", "MinTotalChapters");
+                if (v != null && int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n))
+                    query.MinTotalChapters = n;
+            }
+
+            if (!query.MaxTotalChapters.HasValue)
+            {
+                var v = FirstQuery(request.Query, "maxTotalChapters", "MaxTotalChapters");
+                if (v != null && int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n))
+                    query.MaxTotalChapters = n;
+            }
+        }
+
+        /// <summary>Báo cáo vi phạm truyện (cần đăng nhập).</summary>
+        [HttpPost("{id:guid}/reports")]
+        public async Task<IActionResult> ReportStory(Guid id, [FromBody] CreateStoryReportRequestDto request)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(request.ReasonCode))
+                return BadRequest(new { message = "ReasonCode is required." });
+            var userId = GetCurrentUserId();
+            if (!userId.HasValue)
+                return Unauthorized(new { message = "Cần đăng nhập để báo cáo." });
+            try
+            {
+                var reportId = await _storyReportService.CreateStoryReportAsync(id, userId.Value, request);
+                return Ok(new { id = reportId, message = "Đã gửi báo cáo." });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Report story failed");
+                return StatusCode(500, new { message = "Không gửi được báo cáo.", error = ex.Message });
+            }
+        }
+
         /// <summary>Lấy danh sách stories với pagination và filtering (cho phép xem không cần đăng nhập)</summary>
         [HttpGet]
         [AllowAnonymous]
@@ -136,6 +257,8 @@ namespace AIStory.API.Controllers
         {
             try
             {
+                if (User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE"))
+                    query.IncludeComplianceHiddenInLists = true;
                 var result = _storyService.GetAll(query);
                 return Ok(result);
             }
@@ -145,26 +268,31 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy story theo ID (Guid) (cho phép xem không cần đăng nhập). Ghi nhận lượt xem (chống spam: 1 lượt/viewer/24h).</summary>
+        /// <summary>Lấy story theo ID (Guid) (cho phép xem không cần đăng nhập). Ghi nhận lượt xem khi recordView=true (chống spam: 1 lượt/viewer/24h). Nếu đăng nhập thì trả thêm lastReadChapterId/lastReadAt (lịch sử đọc dở).</summary>
         [HttpGet("{id:guid}")]
         [AllowAnonymous]
-        public IActionResult GetById(Guid id)
+        public IActionResult GetById(Guid id, [FromQuery] bool recordView = true)
         {
             try
             {
-                var story = _storyService.GetById(id);
+                var userId = GetCurrentUserId();
+                var story = _storyService.GetById(id, userId);
                 if (story == null)
                     return NotFound(new { message = $"Story with ID {id} not found" });
-                var viewerKey = GetViewerKey();
-                _storyService.RecordViewIfAllowed(id, viewerKey);
-                var userId = GetCurrentUserId();
-                if (userId.HasValue)
+                if (!CanBypassStoryComplianceHidden(story, userId))
+                    return NotFound(new { message = $"Story with ID {id} not found" });
+                if (recordView)
                 {
-                    var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-                    var ua = Request.Headers.UserAgent.ToString();
-                    _storyService.RecordReadStory(id, userId.Value, ip, ua);
+                    var viewerKey = GetViewerKey();
+                    _storyService.RecordViewIfAllowed(id, viewerKey);
+                    if (userId.HasValue)
+                    {
+                        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+                        var ua = Request.Headers.UserAgent.ToString();
+                        _storyService.RecordReadStory(id, userId.Value, ip, ua);
+                    }
                 }
-                story.UserIsFollowing = GetCurrentUserId() is Guid uid ? UserLibraryDAO.IsFollowing(uid, id) : null;
+                story.UserIsFollowing = userId is Guid uid ? UserLibraryDAO.IsFollowing(uid, id) : null;
                 return Ok(story);
             }
             catch (Exception ex)
@@ -173,31 +301,80 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Lấy story theo slug (cho phép xem không cần đăng nhập). Ghi nhận lượt xem (chống spam: 1 lượt/viewer/24h).</summary>
+        /// <summary>Lưu tiến độ đọc: đang đọc đến chapter nào của truyện. Cần đăng nhập.</summary>
+        [HttpPost("{id:guid}/reading-progress")]
+        [Authorize]
+        public IActionResult SaveReadingProgress(Guid id, [FromBody] SaveReadingProgressRequest request)
+        {
+            var userId = GetCurrentUserId();
+            if (!userId.HasValue)
+                return Unauthorized(new { message = "User ID not found in token." });
+            if (request?.ChapterId == null || request.ChapterId == Guid.Empty)
+                return BadRequest(new { message = "ChapterId is required." });
+            try
+            {
+                _storyService.SaveReadingProgress(id, userId.Value, request.ChapterId.Value);
+                return Ok(new { message = "Đã lưu tiến độ đọc.", lastReadChapterId = request.ChapterId });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Failed to save reading progress", error = ex.Message });
+            }
+        }
+
+        /// <summary>Lấy story theo slug (cho phép xem không cần đăng nhập). Ghi nhận lượt xem khi recordView=true (chống spam: 1 lượt/viewer/24h).</summary>
         [HttpGet("slug/{slug}")]
         [AllowAnonymous]
-        public IActionResult GetBySlug(string slug)
+        public IActionResult GetBySlug(string slug, [FromQuery] bool recordView = true)
         {
             try
             {
-                var story = _storyService.GetBySlug(slug);
+                var userId = GetCurrentUserId();
+                var story = _storyService.GetBySlug(slug, userId);
                 if (story == null)
                     return NotFound(new { message = $"Story with slug '{slug}' not found" });
-                var viewerKey = GetViewerKey();
-                _storyService.RecordViewIfAllowed(story.Id, viewerKey);
-                var userId = GetCurrentUserId();
-                if (userId.HasValue)
+                if (!CanBypassStoryComplianceHidden(story, userId))
+                    return NotFound(new { message = $"Story with slug '{slug}' not found" });
+                if (recordView)
                 {
-                    var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-                    var ua = Request.Headers.UserAgent.ToString();
-                    _storyService.RecordReadStory(story.Id, userId.Value, ip, ua);
+                    var viewerKey = GetViewerKey();
+                    _storyService.RecordViewIfAllowed(story.Id, viewerKey);
+                    if (userId.HasValue)
+                    {
+                        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+                        var ua = Request.Headers.UserAgent.ToString();
+                        _storyService.RecordReadStory(story.Id, userId.Value, ip, ua);
+                    }
                 }
-                story.UserIsFollowing = GetCurrentUserId() is Guid uid ? UserLibraryDAO.IsFollowing(uid, story.Id) : null;
+                story.UserIsFollowing = userId is Guid uid ? UserLibraryDAO.IsFollowing(uid, story.Id) : null;
                 return Ok(story);
             }
             catch (Exception ex)
             {
                 return StatusCode(500, new { message = "An error occurred while fetching the story", error = ex.Message });
+            }
+        }
+
+        /// <summary>Chỉ ghi nhận 1 lượt xem (chống spam: BE cache 1 lượt/viewer/24h). Dùng khi FE đã cache 24h để tránh gọi GET story nhiều lần.</summary>
+        [HttpPost("{id:guid}/record-view")]
+        [AllowAnonymous]
+        public IActionResult RecordView(Guid id)
+        {
+            try
+            {
+                var userId = GetCurrentUserId();
+                var story = _storyService.GetById(id, userId);
+                if (story == null)
+                    return NotFound(new { message = $"Story with ID {id} not found" });
+                if (!CanBypassStoryComplianceHidden(story, userId))
+                    return NotFound(new { message = $"Story with ID {id} not found" });
+                var viewerKey = GetViewerKey();
+                _storyService.RecordViewIfAllowed(id, viewerKey);
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "An error occurred while recording view", error = ex.Message });
             }
         }
 
@@ -271,6 +448,40 @@ namespace AIStory.API.Controllers
             }
         }
 
+        /// <summary>Lấy lịch sử đánh giá của story (status VISIBLE). AllowAnonymous.</summary>
+        [HttpGet("{id:guid}/ratings")]
+        [AllowAnonymous]
+        public IActionResult GetStoryRatings(Guid id)
+        {
+            try
+            {
+                var story = StoryDAO.GetById(id);
+                if (story == null)
+                    return NotFound(new { message = $"Story with ID {id} not found" });
+                var list = RatingDAO.GetByStoryId(id);
+                var dtos = list.Select(r =>
+                {
+                    var nickname = r.user?.user_profiles?.nickname?.Trim();
+                    var email = r.user?.email?.Trim();
+                    var display = !string.IsNullOrWhiteSpace(nickname) ? nickname : !string.IsNullOrWhiteSpace(email) ? email : "Ẩn danh";
+                    return new StoryRatingItemDto
+                    {
+                        Id = r.id,
+                        UserId = r.user_id,
+                        UserDisplayName = display ?? "Ẩn danh",
+                        StarValue = r.star_value ?? 0,
+                        ReviewText = r.review_text,
+                        CreatedAt = r.created_at
+                    };
+                }).ToList();
+                return Ok(dtos);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "An error occurred while fetching ratings", error = ex.Message });
+            }
+        }
+
         /// <summary>Lấy danh sách người đã reaction comment (để hiển thị modal xem tất cả). Cho phép xem không cần đăng nhập.</summary>
         [HttpGet("{storyId:guid}/comments/{commentId:guid}/reactions", Order = 0)]
         [AllowAnonymous]
@@ -308,9 +519,10 @@ namespace AIStory.API.Controllers
                 var story = StoryDAO.GetById(id);
                 if (story == null)
                     return NotFound(new { message = $"Story with ID {id} not found" });
-                var entities = CommentDAO.GetStoryComments(id);
+                var entities = CommentDAO.GetStoryCommentsForDisplay(id);
                 var currentUserId = GetCurrentUserId();
-                var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId)).ToList();
+                var storyAuthorId = story.author_id;
+                var dtos = entities.Select(c => MapToStoryCommentDto(c, currentUserId, storyAuthorId)).ToList();
                 return Ok(dtos);
             }
             catch (Exception ex)
@@ -322,7 +534,7 @@ namespace AIStory.API.Controllers
         /// <summary>Comment story. Bắt buộc login + đã đọc ít nhất 1 chapter mới được comment.</summary>
         [HttpPost("{id:guid}/comments")]
         [Authorize]
-        public IActionResult AddStoryComment(Guid id, [FromBody] CreateStoryCommentRequestDto request)
+        public async Task<IActionResult> AddStoryComment(Guid id, [FromBody] CreateStoryCommentRequestDto request)
         {
             try
             {
@@ -336,9 +548,19 @@ namespace AIStory.API.Controllers
                 if (content.Length > 2000)
                     return BadRequest(new { message = "Nội dung comment tối đa 2000 ký tự." });
 
+                var guardrailResult = await _contentGuardrail.CheckCommentBannedWordsAsync(content, HttpContext.RequestAborted);
+                if (!guardrailResult.Passed)
+                    return BadRequest(new
+                    {
+                        message = "Nội dung comment chứa từ không được phép.",
+                        violations = guardrailResult.Violations.Select(v => new { v.Type, v.Quote })
+                    });
+
                 var story = StoryDAO.GetById(id);
                 if (story == null)
                     return NotFound(new { message = $"Story with ID {id} not found" });
+                if (story.comments_disabled)
+                    return BadRequest(new { message = "Truyện này đang tạm khóa bình luận (compliance)." });
                 if (!string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
                     return BadRequest(new { message = "Chỉ có thể comment truyện đã PUBLISHED." });
 
@@ -349,8 +571,8 @@ namespace AIStory.API.Controllers
                 if (request.ParentId.HasValue)
                 {
                     parent = CommentDAO.GetById(request.ParentId.Value);
-                    if (parent == null || parent.story_id != id)
-                        return BadRequest(new { message = "ParentId không hợp lệ." });
+                    if (parent == null || parent.story_id != id || parent.chapter_id != null)
+                        return BadRequest(new { message = "ParentId không hợp lệ (phải là comment cấp truyện)." });
                 }
 
                 var entity = CommentDAO.AddStoryComment(id, userId.Value, content, request.ParentId);
@@ -361,14 +583,15 @@ namespace AIStory.API.Controllers
                         ?? "Ai đó";
                     try
                     {
-                        NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, id, story.title, entity.id);
+                        var notif = NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, id, story.title, entity.id);
+                        await PushCommentReplyNotificationAsync(notif);
                     }
                     catch (Exception ex)
                     {
                         _logger.LogWarning(ex, "NotifyCommentReply failed for parent {ParentId}", parent.id);
                     }
                 }
-                var dto = MapToStoryCommentDto(entity, userId);
+                var dto = MapToStoryCommentDto(entity, userId, story.author_id);
                 return Created($"/api/stories/{id}/comments/{dto.Id}", dto);
             }
             catch (InvalidOperationException ex)
@@ -385,14 +608,45 @@ namespace AIStory.API.Controllers
             }
         }
 
-        private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null)
+        /// <summary>Tag AUTHOR chỉ khi commenter trùng tác giả truyện; tài khoản có role AUTHOR nhưng không phải chủ truyện → USER.</summary>
+        private static string? ResolveCommentDisplayUserRole(string? accountRole, Guid? commentUserId, Guid? storyAuthorId)
         {
+            var r = accountRole?.Trim();
+            if (string.IsNullOrEmpty(r)) return null;
+            if (string.Equals(r, "AUTHOR", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!storyAuthorId.HasValue || !commentUserId.HasValue || commentUserId.Value != storyAuthorId.Value)
+                    return "USER";
+            }
+            return r;
+        }
+
+        private static StoryCommentDto MapToStoryCommentDto(comments c, Guid? currentUserId = null, Guid? storyAuthorId = null)
+        {
+            var statusUpper = (c.status ?? "").Trim().ToUpperInvariant();
+            var content = statusUpper == "HIDDEN_PARENT" ? "Nội dung bình luận đã bị ẩn." : (c.content ?? "");
             var nickname = c.userNavigation?.user_profiles?.nickname;
             var email = c.userNavigation?.email;
             var display = !string.IsNullOrWhiteSpace(nickname) ? nickname : email;
-            var userHasLiked = currentUserId.HasValue && CommentDAO.HasLiked(currentUserId.Value, c.id);
-            var reactionCounts = CommentDAO.GetReactionCounts(c.id);
-            var userReactionType = currentUserId.HasValue ? CommentDAO.GetUserReaction(currentUserId.Value, c.id) : null;
+            var userHasLiked = false;
+            IReadOnlyDictionary<string, int>? reactionCounts = null;
+            string? userReactionType = null;
+            try
+            {
+                if (currentUserId.HasValue)
+                {
+                    userHasLiked = CommentDAO.HasLiked(currentUserId.Value, c.id);
+                    userReactionType = CommentDAO.GetUserReaction(currentUserId.Value, c.id);
+                }
+                reactionCounts = CommentDAO.GetReactionCounts(c.id);
+            }
+            catch
+            {
+                // Nếu bảng likes/reactions chưa đúng schema, bỏ qua phần reaction để tránh lỗi 500.
+                reactionCounts = new Dictionary<string, int>();
+                userHasLiked = false;
+                userReactionType = null;
+            }
             return new StoryCommentDto
             {
                 Id = c.id,
@@ -400,7 +654,9 @@ namespace AIStory.API.Controllers
                 ParentId = c.parent_id,
                 UserId = c.user_id ?? Guid.Empty,
                 UserDisplayName = display,
-                Content = c.content,
+                UserRole = ResolveCommentDisplayUserRole(c.userNavigation?.role, c.user_id, storyAuthorId),
+                UserCreatedAt = c.userNavigation?.created_at,
+                Content = content,
                 LikesCount = c.likes_count ?? 0,
                 UserHasLiked = userHasLiked,
                 ReactionCounts = reactionCounts,
@@ -465,7 +721,16 @@ namespace AIStory.API.Controllers
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { message = "An error occurred while setting reaction", error = ex.Message });
+                // Nếu schema bảng reaction/likes chưa khớp (lỗi commentsid/usersid...), không chặn luồng ở client.
+                // Tạm thời trả về OK với reaction rỗng để tránh 500.
+                _logger.LogWarning(ex, "SetCommentReaction failed for CommentId={CommentId}", commentId);
+                return Ok(new
+                {
+                    message = "Reaction feature is temporarily unavailable.",
+                    userReactionType = (string?)null,
+                    reactionCounts = new Dictionary<string, int>(),
+                    error = ex.Message
+                });
             }
         }
 
@@ -476,6 +741,10 @@ namespace AIStory.API.Controllers
         {
             try
             {
+                MergeStoryListQueryFromRequest(Request, query);
+                var uid = GetCurrentUserId();
+                if (uid == authorId || User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE"))
+                    query.IncludeComplianceHiddenInLists = true;
                 var result = _storyService.GetByAuthor(authorId, query);
                 return Ok(result);
             }
@@ -669,9 +938,11 @@ namespace AIStory.API.Controllers
                 var authorIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
                 if (authorIdClaim == null || !Guid.TryParse(authorIdClaim.Value, out var currentUserId) || story.AuthorId != currentUserId)
                     return Forbid();
-                if (story.Status != "REJECTED")
+                // Chỉ ẩn lịch sử từ chối khi truyện đã được duyệt (PUBLISHED). Khi gửi lại xuất bản (PENDING_REVIEW) vẫn hiển thị.
+                if (story.Status == "PUBLISHED")
                     return Ok(new { reason = (string?)null, rejectedAt = (DateTime?)null });
-                return Ok(new { reason = story.RejectionReason, rejectedAt = story.RejectedAt });
+                var (reason, rejectedAt) = _storyService.GetLatestRejectionForStory(id);
+                return Ok(new { reason, rejectedAt });
             }
             catch (Exception ex)
             {

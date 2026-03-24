@@ -1,26 +1,38 @@
 import { useEffect, useState } from 'react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { User, Edit, Coins, Ticket, Trash2, BookOpen } from 'lucide-react';
+import { User, Edit, Coins, Trash2, BookOpen } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
-import { useLocation } from 'react-router-dom';
 import ViewProfile from '../../components/profile/ViewProfile';
 import EditProfile from '../../components/profile/EditProfile';
 import DeleteAccount from '../../components/profile/DeleteAccount';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
+import * as coinApi from '../../api/coins/coinApi';
 
 export default function Profile() {
-    const { user } = useAuth();
+    const { user, role } = useAuth();
     const location = useLocation();
     const [activeTab, setActiveTab] = useState('info');
+    const [walletBalanceCoin, setWalletBalanceCoin] = useState(null);
+    const [walletIncomeBalance, setWalletIncomeBalance] = useState(null);
 
     const profileData = user;
+    const coinsFallback = profileData?.stats?.currentCoins ?? 0;
+
+    const roleUpper = (role ?? '').toString().toUpperCase();
+    const isAuthor = roleUpper === 'AUTHOR' || user?.isAuthor === true;
+
+    const displayedCoins =
+        walletBalanceCoin !== null
+            ? isAuthor
+                ? (walletBalanceCoin ?? 0) + (walletIncomeBalance ?? 0)
+                : walletBalanceCoin
+            : coinsFallback;
 
     const tabs = [
         { id: 'info', label: 'Thông tin', icon: User },
         { id: 'edit', label: 'Chỉnh sửa', icon: Edit },
-        { id: 'voucher', label: 'Voucher', icon: Ticket },
         { id: 'delete', label: 'Xóa tài khoản', icon: Trash2 },
     ];
 
@@ -33,14 +45,42 @@ export default function Profile() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [location.search]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadWallet = async () => {
+            if (!profileData?.id) {
+                    setWalletBalanceCoin(null);
+                    setWalletIncomeBalance(null);
+                return;
+            }
+            const res = await coinApi.getMyWallet();
+            if (cancelled) return;
+                if (res?.success) {
+                    setWalletBalanceCoin(res?.data?.balanceCoin ?? 0);
+                    setWalletIncomeBalance(Number(res?.data?.incomeBalance ?? 0) || 0);
+                }
+        };
+
+        loadWallet().catch(() => {
+            // ignore and keep fallback
+        });
+
+        const handler = () => loadWallet().catch(() => {});
+        window.addEventListener('wallet:changed', handler);
+
+        return () => {
+            cancelled = true;
+            window.removeEventListener('wallet:changed', handler);
+        };
+    }, [profileData?.id]);
+
     const renderContent = () => {
         switch (activeTab) {
             case 'info':
                 return <ViewProfile />;
             case 'edit':
                 return <EditProfile />;
-            case 'voucher':
-                return <div className="p-8 text-center text-slate-500">Tính năng Voucher đang được phát triển...</div>;
             case 'delete':
                 return <DeleteAccount />;
             default:
@@ -84,7 +124,7 @@ export default function Profile() {
                                     >
                                         <Coins className="w-4 h-4 text-amber-500" />
                                         <span className="text-sm font-bold text-amber-700 dark:text-amber-400">
-                                            {(profileData?.stats?.currentCoins ?? 0).toLocaleString()} Coins
+                                            {Number(displayedCoins || 0).toLocaleString()} Coins
                                         </span>
                                     </Link>
                                     <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-full">

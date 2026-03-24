@@ -30,5 +30,14 @@ namespace AIStory.Client.Controllers
             ViewBag.ChapterId = id.Value;
             return View();
         }
+
+        /// <summary>Trang chi tiết chapter: hiển thị thông tin chapter và danh sách phiên bản (version). Author có thể tạo/sửa/xóa/gửi duyệt version.</summary>
+        public IActionResult Details(Guid? id)
+        {
+            if (!id.HasValue)
+                return RedirectToAction("Index");
+            ViewBag.ChapterId = id.Value;
+            return View();
+        }
     }
 }

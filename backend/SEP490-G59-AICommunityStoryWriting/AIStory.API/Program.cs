@@ -1,4 +1,5 @@
 using AIStory.API.Hubs;
+using AIStory.API.Services;
 using AIStory.Services.Helpers;
 using AIStory.Services.Implementations;
 using BusinessObjects;
@@ -11,12 +12,13 @@ using Microsoft.OpenApi.Models;
 using Repositories;
 using Repositories.Implementations;
 using Repositories.Interfaces;
+using AIStory.API.BackgroundServices;
 using Services.Implementations;
+using Services.Integrations.PayOS;
 using Services.Interfaces;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
-using Services.Integrations.PayOS;
 
 namespace AIStory.API
 {
@@ -43,16 +45,7 @@ namespace AIStory.API
                     options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
                     options.JsonSerializerOptions.WriteIndented = true;
                 });
-            // Connection chỉ cấu hình trong StoryPlatformDbContext.OnConfiguring
-            // builder.Services.AddDbContext<StoryPlatformDbContext>(options =>
-            //     options.UseSqlServer(
-            //         builder.Configuration.GetConnectionString("DefaultConnection")
-            //         ?? "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
-            //         sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
-            //             maxRetryCount: 5,
-            //             maxRetryDelay: TimeSpan.FromSeconds(30),
-            //             errorNumbersToAdd: null)
-            //     ));
+            // Đăng ký DbContext, để OnConfiguring trong StoryPlatformDbContext tự cấu hình connection string.
             builder.Services.AddDbContext<StoryPlatformDbContext>();
             // CORS Configuration
             builder.Services.AddCors(options =>
@@ -87,10 +80,8 @@ namespace AIStory.API
             builder.Services.AddScoped<ICategoryService, CategoryService>();
             builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
             builder.Services.AddScoped<IChapterService, ChapterService>();
-
-            // Payments / Coin recharge
-            builder.Services.AddHttpClient<PayOSClient>();
-            builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
+            builder.Services.AddScoped<IChapterVersionRepository, ChapterVersionRepository>();
+            builder.Services.AddScoped<IChapterVersionService, ChapterVersionService>();
 
             // Policies
             builder.Services.AddScoped<IPolicyRepository, PolicyRepository>();
@@ -100,10 +91,42 @@ namespace AIStory.API
             builder.Services.AddScoped<IAdminUserService, AdminUserService>();
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
             builder.Services.AddScoped<IModerationService, ModerationService>();
+            builder.Services.AddScoped<IReviewEscalationService, ReviewEscalationService>();
+            builder.Services.AddScoped<IAdminUnifiedEscalationService, AdminUnifiedEscalationService>();
+            builder.Services.AddScoped<IStoryReportService, StoryReportService>();
+            builder.Services.AddScoped<ICommentReportService, CommentReportService>();
             builder.Services.AddSignalR();
+            builder.Services.AddSingleton<IUserIdProvider, SignalRUserIdProvider>();
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
 
+            // AI: Story Memory Engine (RAG khi đã index) + 4 Agent
+            builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
+            builder.Services.AddScoped<IContentGuardrailService, ContentGuardrailService>();
+            builder.Services.AddScoped<IAIUsageLogRepository, AIUsageLogRepository>();
+            builder.Services.AddScoped<IStoryCharacterMemoryRepository, StoryCharacterMemoryRepository>();
+            builder.Services.AddScoped<IStoryEventMemoryRepository, StoryEventMemoryRepository>();
+            builder.Services.AddScoped<IStoryStoryStateRepository, StoryStoryStateRepository>();
+            builder.Services.AddSingleton<IVectorStore, FaissVectorStore>();
+            builder.Services.AddScoped<IStoryRagService, StoryRagService>();
+            builder.Services.AddScoped<IStoryMemoryEngine, StoryMemoryEngine>();
+            builder.Services.AddScoped<IPlotManagerService, PlotManagerService>();
+            builder.Services.AddScoped<IAINextChapterService, AINextChapterService>();
+            builder.Services.AddScoped<IAICoCreationService, AICoCreationService>();
+            builder.Services.AddScoped<IAIConsistencyCheckService, AIConsistencyCheckService>();
+            builder.Services.AddScoped<IChapterCheckService, ChapterCheckService>();
+            builder.Services.AddScoped<IAiGeneratedContentRepository, AiGeneratedContentRepository>();
+            builder.Services.AddScoped<IAiSensitiveWordsRepository, AiSensitiveWordsRepository>();
+            builder.Services.AddScoped<IAiConfigsRepository, AiConfigsRepository>();
+            builder.Services.AddScoped<IAIUsageLimitConfigService, AIUsageLimitConfigService>();
+            builder.Services.AddScoped<IChapterCompareService, ChapterCompareService>();
+            builder.Services.AddScoped<IChapterVersionAiCompareService, ChapterVersionAiCompareService>();
+            builder.Services.AddSingleton<IAISuggestRateLimitService, AISuggestRateLimitService>();
+
+            // Coin / PayOS
+            builder.Services.AddHttpClient<PayOSClient>();
+            builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
+            builder.Services.AddHostedService<PayOSPendingOrderSyncService>();
 
             var jwtKey = builder.Configuration["Jwt:Key"];
             var jwtIssuer = builder.Configuration["Jwt:Issuer"];
@@ -149,7 +172,7 @@ namespace AIStory.API
             {
                 options.AddPolicy("UserOnly", policy =>
                     policy.RequireAuthenticatedUser()
-                          .RequireRole("USER", "AUTHOR", "ADMIN"));
+                          .RequireRole("USER", "AUTHOR", "ADMIN", "MODERATOR", "COMPLIANCE"));
 
                 options.AddPolicy("AuthorOnly", policy =>
                     policy.RequireAuthenticatedUser()
@@ -207,6 +230,7 @@ namespace AIStory.API
 
             if (app.Environment.IsDevelopment())
             {
+                app.UseDeveloperExceptionPage();
                 app.UseSwagger();
                 app.UseSwaggerUI(c =>
                 {

@@ -3,12 +3,52 @@
 }
 
 <div class="container-fluid mt-4">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="row g-3" id="homeStatsRow" aria-live="polite">
+                <div class="col-sm-6 col-lg-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body d-flex align-items-center gap-3">
+                            <div class="rounded-circle bg-primary bg-opacity-10 p-3 text-primary"><i class="bi bi-journal-bookmark fs-3"></i></div>
+                            <div>
+                                <div class="text-muted small text-uppercase">Truyện đã xuất bản</div>
+                                <div class="fs-3 fw-semibold home-stat-value" id="homeStatStories"><span class="spinner-border spinner-border-sm text-primary" role="status"></span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-sm-6 col-lg-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body d-flex align-items-center gap-3">
+                            <div class="rounded-circle bg-success bg-opacity-10 p-3 text-success"><i class="bi bi-people fs-3"></i></div>
+                            <div>
+                                <div class="text-muted small text-uppercase">Tác giả</div>
+                                <div class="fs-3 fw-semibold home-stat-value" id="homeStatAuthors"><span class="spinner-border spinner-border-sm text-success" role="status"></span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-sm-6 col-lg-4">
+                    <div class="card h-100 border-0 shadow-sm">
+                        <div class="card-body d-flex align-items-center gap-3">
+                            <div class="rounded-circle bg-info bg-opacity-10 p-3 text-info"><i class="bi bi-eye fs-3"></i></div>
+                            <div>
+                                <div class="text-muted small text-uppercase">Tổng lượt đọc</div>
+                                <div class="fs-3 fw-semibold home-stat-value" id="homeStatViews"><span class="spinner-border spinner-border-sm text-info" role="status"></span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="alert alert-warning py-2 small mb-0 d-none" id="homeStatsError" role="alert"></div>
+        </div>
+    </div>
     <div class="row">
         <div class="col-12">
             <div class="d-flex justify-content-between align-items-end flex-wrap gap-2 mb-3">
                 <div>
                     <h2 class="mb-1"><i class="bi bi-compass"></i> Khám phá truyện</h2>
-                    <div class="text-muted">Chỉ hiển thị truyện <strong>PUBLISHED</strong>. Click “Đọc” để xem stats + rating.</div>
+                    <div class="text-muted">Chỉ hiển thị truyện <strong>PUBLISHED</strong>. Click “Đọc” để xem truyện; báo cáo vi phạm có trên trang đọc.</div>
                 </div>
                 <div class="d-flex gap-2">
                     <input class="form-control" style="min-width:260px" id="searchInput" placeholder="Tìm theo tên / tóm tắt..." onkeyup="loadPublishedStories(1)">
@@ -63,6 +103,21 @@
                     </div>
                 </div>
             </div>
+
+            <div class="row g-4 mt-2">
+                <div class="col-md-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-body text-center">
+                            <i class="bi bi-cash-coin" style="font-size: 3rem; color: #dc3545;"></i>
+                            <h5 class="card-title mt-3">Lịch sử thu nhập</h5>
+                            <p class="card-text">Xem coin nhận từ mở khóa chapter</p>
+                            <a href="/Home/AuthorUnlockChapterIncomeHistory" class="btn btn-danger">
+                                <i class="bi bi-arrow-right"></i> Xem chi tiết
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -73,10 +128,37 @@
         let totalPages = 1;
 
         document.addEventListener('DOMContentLoaded', function () {
+            loadCommunityHomeStats();
             loadPublishedStories(1).then(function () {
                 if (typeof window.loadUnreadNotificationCount === 'function') window.loadUnreadNotificationCount();
             });
         });
+
+        async function loadCommunityHomeStats() {
+            const errEl = document.getElementById('homeStatsError');
+            const setVals = (stories, authors, views) => {
+                const fmt = (typeof Utils !== 'undefined' && Utils.formatNumber) ? Utils.formatNumber : (n) => String(n);
+                document.getElementById('homeStatStories').textContent = fmt(stories);
+                document.getElementById('homeStatAuthors').textContent = fmt(authors);
+                document.getElementById('homeStatViews').textContent = fmt(views);
+            };
+            try {
+                const s = await ApiService.getCommunityHomeStats();
+                const stories = s?.publishedStoriesCount ?? s?.PublishedStoriesCount ?? 0;
+                const authors = s?.authorsCount ?? s?.AuthorsCount ?? 0;
+                const views = s?.totalViews ?? s?.TotalViews ?? 0;
+                setVals(stories, authors, views);
+                if (errEl) { errEl.classList.add('d-none'); errEl.textContent = ''; }
+            } catch (e) {
+                document.getElementById('homeStatStories').textContent = '—';
+                document.getElementById('homeStatAuthors').textContent = '—';
+                document.getElementById('homeStatViews').textContent = '—';
+                if (errEl) {
+                    errEl.textContent = 'Không tải được thống kê trang chủ: ' + (e?.message || e);
+                    errEl.classList.remove('d-none');
+                }
+            }
+        }
 
         async function loadPublishedStories(page) {
             try {

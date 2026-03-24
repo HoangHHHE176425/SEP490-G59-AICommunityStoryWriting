@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import * as authApi from '../api/auth/authApi';
 import * as accountApi from '../api/account/accountApi';
+import * as policyApi from '../api/policy/policyApi';
 import { createNotificationHubConnection } from '../api/notification/notificationHub';
 
 // Preserve context identity across Vite HMR to avoid "useAuth must be used within AuthProvider"
@@ -68,26 +69,28 @@ export function AuthProvider({ children }) {
 
     /** Real-time notification: khi moderator duyệt/từ chối, backend push NewNotification tới author. Dispatch event để component có thể hiển thị toast hoặc refresh danh sách. */
     const notificationHubStopRef = useRef(null);
+    const userId = user?.id ?? null;
     useEffect(() => {
         const token = localStorage.getItem('accessToken');
-        if (!token || !user) {
+        if (!token || !userId) {
             if (notificationHubStopRef.current) {
                 notificationHubStopRef.current();
                 notificationHubStopRef.current = null;
             }
             return;
         }
-        const { stop } = createNotificationHubConnection((notification) => {
+        const { stop, startPromise } = createNotificationHubConnection((notification) => {
             window.dispatchEvent(new CustomEvent('app:notification', { detail: notification }));
         });
         notificationHubStopRef.current = stop;
+        startPromise?.catch(() => { });
         return () => {
             if (notificationHubStopRef.current) {
                 notificationHubStopRef.current();
                 notificationHubStopRef.current = null;
             }
         };
-    }, [user]);
+    }, [userId]);
 
     const login = async (email, password) => {
         const result = await authApi.login({ email, password });
@@ -110,12 +113,17 @@ export function AuthProvider({ children }) {
         return await authApi.verifyOtp({ email, otpCode });
     };
 
-    const loginWithGoogle = async () => {
-        return { success: false, message: 'Google login chưa được tích hợp ở backend.' };
+    const resendOtp = async (email) => {
+        return await authApi.resendOtp({ email });
     };
 
-    const loginWithFacebook = async () => {
-        return { success: false, message: 'Facebook login chưa được tích hợp ở backend.' };
+    const loginWithGoogle = async (returnUrl = '/home') => {
+        const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+        const ru = typeof returnUrl === 'string' && returnUrl.startsWith('/') ? returnUrl : '/home';
+        // Redirect code flow: browser will go to backend -> Google -> backend callback -> frontend callback.
+        window.location.href = `${apiBase}/Auth/google/login?returnUrl=${encodeURIComponent(ru)}`;
+        // If redirect is blocked, return success so UI won't show an error.
+        return { success: true };
     };
 
     const forgotPassword = async (email) => {
@@ -156,6 +164,24 @@ export function AuthProvider({ children }) {
         return res;
     };
 
+    const becomeAuthor = async (policyId) => {
+        if (policyId) {
+            const acceptRes = await policyApi.acceptAuthorPolicy(policyId);
+            if (!acceptRes?.success) return acceptRes;
+        }
+
+        const res = await accountApi.becomeAuthor();
+        if (!res.success) return res;
+
+        const accessToken = res?.data?.accessToken;
+        if (accessToken) {
+            localStorage.setItem('accessToken', accessToken);
+        }
+
+        const profile = await fetchProfile();
+        return { success: true, user: profile, data: res.data };
+    };
+
     const role = (user?.role ?? user?.Role ?? '').toString().trim().toUpperCase();
     const hasAdminTag = Array.isArray(user?.tags) && user.tags.includes('Quản trị viên');
     const isAdmin = role === 'ADMIN' || hasAdminTag;
@@ -166,8 +192,8 @@ export function AuthProvider({ children }) {
         login,
         register,
         verifyOtp,
+        resendOtp,
         loginWithGoogle,
-        loginWithFacebook,
         forgotPassword,
         resetPassword,
         logout,
@@ -176,6 +202,7 @@ export function AuthProvider({ children }) {
         changeMyPassword,
         deleteMyAccount,
         uploadMyAvatar,
+        becomeAuthor,
         isAuthenticated: !!user,
         isAdmin,
         role,
@@ -183,6 +210,7 @@ export function AuthProvider({ children }) {
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
     const context = useContext(AuthContext);
     if (!context) {

@@ -157,6 +157,10 @@ const AuthHelper = {
         return this.hasAnyRole('MODERATOR', 'ADMIN');
     },
 
+    isComplianceOfficer() {
+        return this.hasAnyRole('COMPLIANCE', 'ADMIN');
+    },
+
     // Kiểm tra token có hết hạn không
     isTokenExpired() {
         const token = this.getToken();
@@ -174,8 +178,9 @@ const AuthHelper = {
         if (this.isTokenExpired()) {
             try {
                 const response = await ApiService.refreshToken();
-                if (response?.accessToken) {
-                    this.setToken(response.accessToken);
+                const token = response?.accessToken ?? response?.AccessToken;
+                if (token) {
+                    this.setToken(token);
                     return true;
                 }
             } catch (error) {

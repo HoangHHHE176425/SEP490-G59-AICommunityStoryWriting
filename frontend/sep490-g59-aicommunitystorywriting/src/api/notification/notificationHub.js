@@ -46,9 +46,16 @@ export function createNotificationHubConnection(onNewNotification) {
         }
     });
 
-    const startPromise = connection.start().catch((err) => {
-        console.warn('[NotificationHub] Connection failed:', err?.message || err);
-    });
+    const startPromise = connection
+        .start()
+        .then(() => {
+            if (typeof console !== 'undefined' && console.debug) {
+                console.debug('[NotificationHub] Connected');
+            }
+        })
+        .catch((err) => {
+            console.warn('[NotificationHub] Connection failed:', err?.message || err);
+        });
 
     return {
         connection,
@@ -56,6 +63,9 @@ export function createNotificationHubConnection(onNewNotification) {
         async stop() {
             try {
                 connection.off(NEW_NOTIFICATION);
+                // Tránh stop() trong lúc negotiation → lỗi "The connection was stopped during negotiation".
+                // Đợi start() xong (thành công hoặc thất bại) rồi mới stop.
+                await startPromise.catch(() => {});
                 await connection.stop();
             } catch {
                 // ignore when already stopped

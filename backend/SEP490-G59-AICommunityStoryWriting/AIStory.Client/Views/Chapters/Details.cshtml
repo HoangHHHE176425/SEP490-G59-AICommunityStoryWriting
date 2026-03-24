@@ -1,0 +1,262 @@
+﻿@{
+    ViewData["Title"] = "Chi tiết Chapter";
+    var chapterId = ViewBag.ChapterId ?? Guid.Empty;
+}
+
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <a href="/Chapters" class="btn btn-secondary mb-3"><i class="bi bi-arrow-left"></i> Quay lại</a>
+
+            <!-- Chapter info -->
+            <div class="card mb-4" id="chapterInfoCard">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                        <div>
+                            <h4 class="card-title mb-1" id="chapterTitle">Đang tải...</h4>
+                            <p class="text-muted small mb-2">
+                                <span id="chapterOrderBadge" class="badge bg-secondary"></span>
+                                <span id="chapterStatusBadge" class="badge ms-1"></span>
+                                <span id="chapterPublishedAt" class="ms-2"></span>
+                            </p>
+                            <div id="chapterStats" class="small text-muted"></div>
+                        </div>
+                        <div>
+                            <a id="btnEditChapter" href="#" class="btn btn-primary btn-sm"><i class="bi bi-pencil"></i> Chỉnh sửa</a>
+                            <button type="button" class="btn btn-outline-danger btn-sm" id="btnDeleteChapter" title="Xóa chapter"><i class="bi bi-trash"></i> Xóa</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Phiên bản chương -->
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-link-45deg"></i> Phiên bản chương</h5>
+                    <button type="button" class="btn btn-success btn-sm" id="btnCreateVersion"><i class="bi bi-plus-lg"></i> Tạo version</button>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Version</th>
+                                    <th>Tiêu đề version</th>
+                                    <th>Ngày tạo</th>
+                                    <th>Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody id="versionsTableBody">
+                                <tr>
+                                    <td colspan="4" class="text-center text-muted">Đang tải...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Tạo / Sửa version -->
+<div class="modal fade" id="versionModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="versionModalTitle">Tạo version</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="versionId" />
+                <div class="mb-3">
+                    <label class="form-label">Tiêu đề version</label>
+                    <input type="text" class="form-control" id="versionTitleSnapshot" placeholder="VD: Bản chỉnh sửa lần 2" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Nội dung (tùy chọn - để trống sẽ dùng nội dung chapter hiện tại)</label>
+                    <textarea class="form-control" id="versionContentSnapshot" rows="8" placeholder="Nội dung version..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                <button type="button" class="btn btn-primary" id="btnSaveVersion">Lưu</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        const chapterId = '@chapterId';
+        let chapter = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            if (!AuthHelper.isAuthenticated() || !AuthHelper.isAuthor()) {
+                Utils.showAlert('Vui lòng đăng nhập với tài khoản AUTHOR.', 'warning');
+                setTimeout(() => { window.location.href = '/Chapters'; }, 1500);
+                return;
+            }
+            loadChapter();
+            loadVersions();
+
+            document.getElementById('btnCreateVersion').addEventListener('click', showCreateVersionModal);
+            document.getElementById('btnSaveVersion').addEventListener('click', saveVersion);
+            document.getElementById('btnDeleteChapter').addEventListener('click', deleteChapter);
+        });
+
+        async function loadChapter() {
+            try {
+                chapter = await ApiService.getChapterById(chapterId);
+                document.getElementById('chapterTitle').textContent = chapter.title || '(Không có tiêu đề)';
+                document.getElementById('chapterOrderBadge').textContent = 'Chương ' + (chapter.orderIndex ?? 0);
+                const status = chapter.status || 'DRAFT';
+                const statusBadge = document.getElementById('chapterStatusBadge');
+                statusBadge.textContent = status === 'PUBLISHED' ? 'Đã xuất bản' : status === 'PENDING_REVIEW' ? 'Chờ duyệt' : status === 'REJECTED' ? 'Bị từ chối' : 'Nháp';
+                statusBadge.className = 'badge ms-1 ' + (status === 'PUBLISHED' ? 'bg-success' : status === 'PENDING_REVIEW' ? 'bg-warning text-dark' : status === 'REJECTED' ? 'bg-danger' : 'bg-secondary');
+                document.getElementById('chapterPublishedAt').textContent = chapter.publishedAt ? 'Xuất bản: ' + Utils.formatDate(chapter.publishedAt) : '';
+                document.getElementById('chapterStats').innerHTML = [
+                    chapter.wordCount ? (Utils.formatNumber(chapter.wordCount) + ' từ') : '',
+                    chapter.accessType ? (chapter.accessType === 'PAID' && chapter.coinPrice ? chapter.coinPrice + ' coin' : '') : ''
+                ].filter(Boolean).join(' | ') || '';
+                const editLink = document.getElementById('btnEditChapter');
+                if (chapter.storyId)
+                    editLink.href = '/Stories/Details/' + chapter.storyId + '?highlightChapter=' + chapterId;
+                else
+                    editLink.href = '/Chapters';
+            } catch (e) {
+                Utils.showAlert('Không tải được chapter: ' + (e.message || e), 'danger');
+                document.getElementById('chapterTitle').textContent = 'Lỗi';
+            }
+        }
+
+        async function loadVersions() {
+            const tbody = document.getElementById('versionsTableBody');
+            try {
+                const list = await ApiService.getChapterVersions(chapterId);
+                if (!list || list.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Chưa có phiên bản. Nhấn "Tạo version" để thêm.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = list.map(v => {
+                    const canEdit = v.status === 'DRAFT';
+                    const canDelete = v.status === 'DRAFT';
+                    const canSubmit = v.status === 'DRAFT';
+                    const isPublished = v.status === 'PUBLISHED';
+                    const isPending = v.status === 'PENDING_REVIEW';
+                    return `<tr>
+                        <td><strong>#${v.versionNumber}</strong></td>
+                        <td>${(v.titleSnapshot || '-')}</td>
+                        <td>${Utils.formatDate(v.createdAt)}</td>
+                        <td>
+                            <button class="btn btn-sm btn-primary" onclick="editVersion('${v.id}')" title="Sửa" ${!canEdit ? 'disabled' : ''}><i class="bi bi-pencil"></i> Sửa</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteVersion('${v.id}')" title="Xóa" ${!canDelete ? 'disabled' : ''}><i class="bi bi-trash"></i> Xóa</button>
+                            ${isPublished
+                                ? '<span class="btn btn-sm btn-secondary disabled"><i class="bi bi-send-check"></i> Đã xuất bản</span>'
+                                : isPending
+                                    ? '<span class="btn btn-sm btn-warning disabled"><i class="bi bi-hourglass-split"></i> Chờ duyệt</span>'
+                                    : `<button class="btn btn-sm btn-success" onclick="submitVersion('${v.id}')" title="Gửi duyệt" ${!canSubmit ? 'disabled' : ''}><i class="bi bi-send-check"></i> Xuất bản</button>`
+                            }
+                        </td>
+                    </tr>`;
+                }).join('');
+            } catch (e) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger">Lỗi: ' + (e.message || e) + '</td></tr>';
+            }
+        }
+
+        function showCreateVersionModal() {
+            document.getElementById('versionModalTitle').textContent = 'Tạo version';
+            document.getElementById('versionId').value = '';
+            document.getElementById('versionTitleSnapshot').value = '';
+            document.getElementById('versionContentSnapshot').value = chapter && chapter.content ? chapter.content : '';
+            document.getElementById('versionContentSnapshot').placeholder = 'Để trống sẽ dùng nội dung chapter hiện tại';
+            new bootstrap.Modal(document.getElementById('versionModal')).show();
+        }
+
+        async function editVersion(versionId) {
+            try {
+                const v = await ApiService.getChapterVersion(chapterId, versionId);
+                document.getElementById('versionModalTitle').textContent = 'Sửa version #' + v.versionNumber;
+                document.getElementById('versionId').value = v.id;
+                document.getElementById('versionTitleSnapshot').value = v.titleSnapshot || '';
+                document.getElementById('versionContentSnapshot').value = v.contentSnapshot || '';
+                new bootstrap.Modal(document.getElementById('versionModal')).show();
+            } catch (e) {
+                Utils.showAlert('Không tải được version: ' + (e.message || e), 'danger');
+            }
+        }
+
+        async function saveVersion() {
+            const id = document.getElementById('versionId').value;
+            const titleSnapshot = document.getElementById('versionTitleSnapshot').value.trim();
+            const contentSnapshot = document.getElementById('versionContentSnapshot').value.trim();
+            try {
+                if (id) {
+                    await ApiService.updateChapterVersion(chapterId, id, {
+                        titleSnapshot: titleSnapshot || null,
+                        contentSnapshot: contentSnapshot || null
+                    });
+                    Utils.showAlert('Đã cập nhật version.', 'success');
+                } else {
+                    await ApiService.createChapterVersion(chapterId, {
+                        titleSnapshot: titleSnapshot || null,
+                        contentSnapshot: contentSnapshot || null
+                    });
+                    Utils.showAlert('Đã tạo version.', 'success');
+                }
+                bootstrap.Modal.getInstance(document.getElementById('versionModal')).hide();
+                loadVersions();
+            } catch (e) {
+                Utils.showAlert(e.message || 'Lỗi lưu version.', 'danger');
+            }
+        }
+
+        async function deleteVersion(versionId) {
+            if (!confirm('Bạn có chắc muốn xóa version này?')) return;
+            try {
+                await ApiService.deleteChapterVersion(chapterId, versionId);
+                Utils.showAlert('Đã xóa version.', 'success');
+                loadVersions();
+            } catch (e) {
+                Utils.showAlert(e.message || 'Không thể xóa.', 'danger');
+            }
+        }
+
+        async function submitVersion(versionId) {
+            if (!confirm('Gửi version này để duyệt? Nội dung version sẽ được áp dụng lên chapter và chuyển chapter sang chờ duyệt.')) return;
+            try {
+                await ApiService.submitChapterVersion(chapterId, versionId);
+                Utils.showAlert('Đã gửi duyệt. Chapter đang chờ moderator duyệt.', 'success');
+                loadChapter();
+                loadVersions();
+            } catch (e) {
+                Utils.showAlert(e.message || 'Không thể gửi duyệt.', 'danger');
+            }
+        }
+
+        async function deleteChapter() {
+            if (!confirm('Bạn có chắc muốn xóa chương này? (Chỉ chương nháp; nếu có phiên bản chỉnh sửa sẽ được hỏi thêm.)')) return;
+            try {
+                await ApiService.deleteChapter(chapterId, false);
+                Utils.showAlert('Đã xóa chương.', 'success');
+                setTimeout(() => { window.location.href = '/Chapters'; }, 1000);
+            } catch (e) {
+                const code = e.body && e.body.code;
+                if (e.status === 409 && code === 'CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED') {
+                    const n = e.body.versionCount ?? '?';
+                    if (!confirm(`Chương có ${n} phiên bản (nháp / chỉnh sửa). Bạn có đồng ý xóa luôn tất cả các phiên bản đó không?`)) return;
+                    try {
+                        await ApiService.deleteChapter(chapterId, true);
+                        Utils.showAlert('Đã xóa chương và các phiên bản.', 'success');
+                        setTimeout(() => { window.location.href = '/Chapters'; }, 1000);
+                    } catch (e2) {
+                        Utils.showAlert(e2.message || 'Không thể xóa chương.', 'danger');
+                    }
+                    return;
+                }
+                Utils.showAlert(e.message || 'Không thể xóa chương.', 'danger');
+            }
+        }
+    </script>
+}

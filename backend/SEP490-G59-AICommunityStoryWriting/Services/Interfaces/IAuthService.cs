@@ -14,7 +14,16 @@ namespace Services.Interfaces
 
         Task VerifyAccountAsync(VerifyOtpRequest request);
 
+        /// <summary>
+        /// Gửi lại OTP xác thực email (EMAIL_VERIFICATION) và trả về TTL còn lại.
+        /// </summary>
+        Task<ResendOtpResponse> ResendOtpAsync(ResendOtpRequest request);
+
         Task<AuthResponse> LoginAsync(DTOs.Auth.LoginRequest request);
+        /// <summary>
+        /// Login hoặc tạo user khi Google OAuth redirect code flow trả về email.
+        /// </summary>
+        Task<AuthResponse> LoginWithGoogleAsync(string email, string? fullName, string googleSubject);
         Task<AuthResponse> RefreshAsync(string refreshToken);
         Task LogoutAsync(string refreshToken);
         Task ForgotPasswordAsync(DTOs.Auth.ForgotPasswordRequest request);

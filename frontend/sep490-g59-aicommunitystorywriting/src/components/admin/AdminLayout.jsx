@@ -1,59 +1,97 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { getSystemWalletBalance } from '../../api/admin/walletApi';
 import {
     LayoutDashboard,
     Bookmark,
     Users,
     FileText,
     MessageSquare,
-    Settings,
     Menu,
     LogOut,
     Bell,
-    Search,
     X,
     CheckSquare,
-    Shield
+    Shield,
+    Brain,
+    AlertTriangle,
+    Wallet,
+    Landmark,
+    Flag,
 } from 'lucide-react';
 
-const ROLE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', MODERATOR: 'Kiểm duyệt', ADMIN: 'Quản trị' };
+const ROLE_LABELS = {
+    USER: 'Người dùng',
+    AUTHOR: 'Tác giả',
+    MODERATOR: 'Kiểm duyệt',
+    ADMIN: 'Quản trị',
+    COMPLIANCE: 'Compliance',
+};
 
 const ALL_MENU_ITEMS = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'wallet-dashboard', label: 'Ví hệ thống', icon: Wallet },
     { id: 'categories', label: 'Quản lý thể loại', icon: Bookmark },
     { id: 'publication', label: 'Quản lý xuất bản', icon: CheckSquare },
+    { id: 'review-escalations', label: 'Đơn báo cáo duyệt', icon: Flag },
     { id: 'stories', label: 'Quản lý truyện', icon: FileText },
+    { id: 'violations', label: 'Quản lý vi phạm', icon: AlertTriangle },
     { id: 'users', label: 'Quản lý người dùng', icon: Users },
     { id: 'comments', label: 'Quản lý bình luận', icon: MessageSquare },
     { id: 'policies', label: 'Quản lý Policy', icon: Shield },
-    { id: 'settings', label: 'Cài đặt', icon: Settings },
+    { id: 'ai-config', label: 'Cấu hình AI', icon: Brain },
 ];
 
-/** Menu chỉ dành cho MODERATOR (chỉ xuất bản + dashboard). */
-const MODERATOR_MENU_IDS = new Set(['dashboard', 'publication']);
+/** Menu giới hạn cho MODERATOR và COMPLIANCE (dashboard + xuất bản). */
+const LIMITED_ADMIN_MENU_IDS = new Set(['dashboard', 'publication']);
 
 export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) {
     const navigate = useNavigate();
     const { user, logout, role } = useAuth();
     const roleUpper = (role ?? user?.role ?? user?.Role ?? '').toString().toUpperCase();
-    const isModeratorOnly = roleUpper === 'MODERATOR';
-    const menuItems = isModeratorOnly
-        ? ALL_MENU_ITEMS.filter((item) => MODERATOR_MENU_IDS.has(item.id))
+    const hasLimitedMenu = roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE';
+    const menuItems = hasLimitedMenu
+        ? ALL_MENU_ITEMS.filter((item) => LIMITED_ADMIN_MENU_IDS.has(item.id))
         : ALL_MENU_ITEMS;
 
     const displayName = user?.displayName ?? user?.DisplayName ?? user?.email ?? 'Admin';
     const roleLabel = ROLE_LABELS[roleUpper] ?? 'Quản trị';
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+    // Số dư ví hệ thống (API: GET /api/admin/wallet/balance)
+    const [systemWalletBalance, setSystemWalletBalance] = useState(null);
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const data = await getSystemWalletBalance();
+                const balance = data?.balanceCoin ?? data?.balance_coin ?? data?.systemWalletBalanceCoins;
+                if (!cancelled && typeof balance === 'number') setSystemWalletBalance(balance);
+            } catch {
+                // Best-effort: keep null if API fails
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+    useEffect(() => {
+        const handler = (evt) => {
+            const next = evt?.detail?.balance;
+            if (typeof next === 'number' && Number.isFinite(next)) setSystemWalletBalance(next);
+        };
+        window.addEventListener('system-wallet:balance', handler);
+        return () => window.removeEventListener('system-wallet:balance', handler);
+    }, []);
 
     const handleLogout = async () => {
         try {
             await logout();
         } finally {
             setIsMobileSidebarOpen(false);
-            navigate('/login');
+            navigate('/admin/login');
         }
     };
 
@@ -114,31 +152,35 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                        <div
+                        {/* Icon ví hệ thống + số dư */}
+                        <button
+                            onClick={() => onNavigate('wallet-dashboard')}
+                            title="Ví hệ thống"
                             style={{
-                                display: window.innerWidth >= 768 ? 'flex' : 'none',
+                                display: 'flex',
                                 alignItems: 'center',
                                 gap: '0.5rem',
-                                padding: '0.5rem 1rem',
-                                backgroundColor: '#f1f5f9',
-                                borderRadius: '0.5rem'
+                                padding: '0.5rem 0.75rem',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '0.5rem',
+                                backgroundColor: '#f0fdf4',
+                                cursor: 'pointer',
+                                transition: 'background-color 0.2s'
                             }}
-                            className="hidden md:flex"
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = '#dcfce7';
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = '#f0fdf4';
+                            }}
                         >
-                            <Search style={{ width: '16px', height: '16px', color: '#94a3b8' }} />
-                            <input
-                                type="text"
-                                placeholder="Tìm kiếm..."
-                                style={{
-                                    background: 'transparent',
-                                    border: 'none',
-                                    outline: 'none',
-                                    fontSize: '0.875rem',
-                                    color: '#1e293b',
-                                    width: '16rem'
-                                }}
-                            />
-                        </div>
+                            <Wallet style={{ width: '18px', height: '18px', color: '#16a34a' }} />
+                            <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#166534' }}>
+                                {systemWalletBalance != null
+                                    ? `${Number(systemWalletBalance).toLocaleString('vi-VN')} Coin`
+                                    : '...'}
+                            </span>
+                        </button>
 
                         <button
                             style={{

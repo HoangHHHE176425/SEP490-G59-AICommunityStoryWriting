@@ -42,6 +42,9 @@ export async function createChapter(data) {
         aiContributionRatio: data.aiContributionRatio ?? 0,
         isAiClean: data.isAiClean ?? false,
     };
+    if (data.aiSimilarityPercent != null && Number.isFinite(Number(data.aiSimilarityPercent))) {
+        body.aiSimilarityPercent = Number(data.aiSimilarityPercent);
+    }
 
     const response = await axiosInstance.post("/chapters", body);
     return response.data;
@@ -49,7 +52,7 @@ export async function createChapter(data) {
 
 /**
  * Lấy danh sách chapters có phân trang và lọc.
- * @param {Object} params - { storyId?, page?, pageSize?, status?, accessType?, sortBy?, sortOrder? }
+ * @param {Object} params - { storyId?, page?, pageSize?, status?, accessType?, sortBy?, sortOrder?, includeChapterIds?: string[] }
  * @returns {Promise} - PagedResultDto
  */
 export async function getChapters(params = {}) {
@@ -61,6 +64,12 @@ export async function getChapters(params = {}) {
     if (params.accessType) q.append("accessType", params.accessType);
     if (params.sortBy) q.append("sortBy", params.sortBy);
     if (params.sortOrder) q.append("sortOrder", params.sortOrder);
+    const inc = params.includeChapterIds;
+    if (Array.isArray(inc) && inc.length > 0) {
+        inc.forEach((id) => {
+            if (id != null && String(id).trim() !== "") q.append("includeChapterIds", String(id).trim());
+        });
+    }
 
     const url = q.toString() ? `/chapters?${q}` : "/chapters";
     const response = await axiosInstance.get(url);
@@ -135,6 +144,9 @@ export async function updateChapter(id, data) {
     };
     if (data.changeSummary != null && String(data.changeSummary).trim() !== '') {
         body.changeSummary = String(data.changeSummary).trim();
+    }
+    if (data.aiSimilarityPercent != null && Number.isFinite(Number(data.aiSimilarityPercent))) {
+        body.aiSimilarityPercent = Number(data.aiSimilarityPercent);
     }
 
     const response = await axiosInstance.put(`/chapters/${id}`, body);
@@ -218,4 +230,99 @@ export async function rejectChapter(id, chapterData) {
     };
     if (orderIndex != null) payload.orderIndex = orderIndex;
     return updateChapter(id, payload);
+}
+
+// ---------- Chapter Versions (AUTHOR) ----------
+/** GET /chapters/{chapterId}/versions - Lấy danh sách version của chapter. */
+export async function getChapterVersions(chapterId) {
+    const response = await axiosInstance.get(`/chapters/${chapterId}/versions`);
+    return response.data;
+}
+
+/** GET /chapters/{chapterId}/versions/{versionId} - Lấy chi tiết một version. */
+export async function getChapterVersionById(chapterId, versionId) {
+    const response = await axiosInstance.get(`/chapters/${chapterId}/versions/${versionId}`);
+    const raw = response?.data;
+    if (raw == null) return raw;
+    return raw?.data ?? raw;
+}
+
+/** POST /chapters/{chapterId}/versions - Tạo version mới. Body: { titleSnapshot?, contentSnapshot? } */
+export async function createChapterVersion(chapterId, data = {}) {
+    const body = {
+        titleSnapshot: data.titleSnapshot ?? data.title ?? '',
+        contentSnapshot: data.contentSnapshot ?? data.content ?? '',
+    };
+    const response = await axiosInstance.post(`/chapters/${chapterId}/versions`, body);
+    return response.data;
+}
+
+/** PUT /chapters/{chapterId}/versions/{versionId} - Cập nhật version (chỉ DRAFT). */
+export async function updateChapterVersion(chapterId, versionId, data = {}) {
+    const body = {};
+    if (data.titleSnapshot != null || data.title != null) body.titleSnapshot = data.titleSnapshot ?? data.title ?? '';
+    if (data.contentSnapshot != null || data.content != null) body.contentSnapshot = data.contentSnapshot ?? data.content ?? '';
+    const response = await axiosInstance.put(`/chapters/${chapterId}/versions/${versionId}`, body);
+    return response.data;
+}
+
+/** DELETE /chapters/{chapterId}/versions/{versionId} - Xóa version (chỉ DRAFT). */
+export async function deleteChapterVersion(chapterId, versionId) {
+    const response = await axiosInstance.delete(`/chapters/${chapterId}/versions/${versionId}`);
+    return response.data;
+}
+
+/** POST /chapters/{chapterId}/versions/{versionId}/submit - Gửi duyệt version (xuất bản). */
+export async function submitChapterVersion(chapterId, versionId) {
+    const response = await axiosInstance.post(`/chapters/${chapterId}/versions/${versionId}/submit`);
+    return response.data;
+}
+
+/** POST /chapters/{chapterId}/versions/{versionId}/unsubmit - Hủy gửi duyệt version (đưa version và chapter về DRAFT). Chỉ version PENDING_REVIEW. */
+export async function unsubmitChapterVersion(chapterId, versionId) {
+    const response = await axiosInstance.post(`/chapters/${chapterId}/versions/${versionId}/unsubmit`);
+    return response.data;
+}
+
+// ---------- Chapter Comments (AllowAnonymous list; POST cần đăng nhập + đã đọc ít nhất 1 chương) ----------
+
+/** GET api/chapters/{id}/comments - Danh sách comment của chapter (AllowAnonymous). */
+export async function getChapterComments(chapterId) {
+    const response = await axiosInstance.get(`/chapters/${chapterId}/comments`);
+    return response.data;
+}
+
+/** POST api/chapters/{id}/comments - Thêm comment (body: content, parentId?). Yêu cầu đăng nhập và đã đọc ít nhất 1 chapter của truyện. */
+export async function addChapterComment(chapterId, body) {
+    const payload = {
+        content: (body?.content ?? '').trim(),
+        parentId: body?.parentId ?? null,
+    };
+    const response = await axiosInstance.post(`/chapters/${chapterId}/comments`, payload);
+    return response.data;
+}
+
+/** GET api/chapters/{chapterId}/comments/{commentId}/reactions - Danh sách người đã reaction (cho modal). */
+export async function getChapterCommentReactions(chapterId, commentId) {
+    const response = await axiosInstance.get(`/chapters/${chapterId}/comments/${commentId}/reactions`);
+    return response.data;
+}
+
+/** POST api/chapters/{chapterId}/comments/{commentId}/reaction - Đặt/bỏ reaction (LIKE, DISLIKE, FUNNY, SAD, ANGRY, LOVE, WOW). reactionType = null/'' để bỏ. */
+export async function setChapterCommentReaction(chapterId, commentId, reactionType) {
+    const response = await axiosInstance.post(`/chapters/${chapterId}/comments/${commentId}/reaction`, {
+        reactionType: reactionType ?? null,
+    });
+    return response.data;
+}
+
+/**
+ * POST /api/chapters/{chapterId}/unlock
+ * Mở khóa chapter trả phí: trừ coin người mua, chia 30%/70% và ghi lịch sử purchases + author_income_logs.
+ * @param {string} chapterId
+ * @returns {Promise<{unlocked: boolean, alreadyUnlocked?: boolean}>}
+ */
+export async function unlockPaidChapter(chapterId) {
+    const response = await axiosInstance.post(`/chapters/${chapterId}/unlock`);
+    return response.data;
 }

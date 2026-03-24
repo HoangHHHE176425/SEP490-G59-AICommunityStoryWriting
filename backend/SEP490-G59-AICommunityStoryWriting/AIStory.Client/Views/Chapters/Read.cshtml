@@ -14,7 +14,11 @@
                     </a>
                     <span class="ms-2" id="storyTitleHeader">Đang tải...</span>
                 </div>
-                <div>
+                <div class="d-flex align-items-center gap-1 flex-wrap">
+                    <button class="btn btn-sm btn-outline-primary" id="btnSaveReadingProgress" onclick="saveReadingProgress()" title="Lưu lại đang đọc đến chương này (để tiếp tục sau)" style="display:none;">
+                        <i class="bi bi-bookmark-check"></i> Lưu lịch sử đọc
+                    </button>
+                    <span class="text-muted small" id="saveProgressResult"></span>
                     <button class="btn btn-sm btn-outline-secondary" onclick="toggleFullscreen()" title="Toàn màn hình">
                         <i class="bi bi-arrows-fullscreen"></i>
                     </button>
@@ -50,6 +54,32 @@
                     </div>
                 </div>
 
+                <!-- Unlock paid chapter modal -->
+                <div class="modal fade" id="unlockPaidChapterModal" tabindex="-1" aria-hidden="true">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="bi bi-lock-fill me-2"></i>Mở khóa chương trả phí</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div id="unlockPaidChapterMessage" class="mb-2 text-muted"></div>
+                                <div class="mb-3">
+                                    Giá: <strong id="unlockPaidChapterCoinPrice">0</strong> coin
+                                </div>
+                                <div class="alert alert-danger d-none mb-0" id="unlockPaidChapterErrorBox"></div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Để sau</button>
+                                <button type="button" class="btn btn-primary" id="unlockPaidChapterBtn" onclick="unlockPaidChapter()">
+                                    <span class="spinner-border spinner-border-sm me-2 d-none" id="unlockPaidChapterSpinner" role="status"></span>
+                                    <i class="bi bi-unlock me-1"></i>Mua để mở khóa
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Navigation -->
                 <div class="d-flex justify-content-between align-items-center mt-5 pt-4 border-top">
                     <button class="btn btn-outline-primary" id="prevChapterBtn" onclick="navigateChapter('prev')" disabled>
@@ -66,6 +96,72 @@
                 <!-- Chapter Stats -->
                 <div class="mt-4 text-center text-muted small">
                     <div id="chapterStats"></div>
+                </div>
+
+                <!-- Bình luận chapter -->
+                <div class="card mt-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <strong>Bình luận</strong>
+                        <span class="badge bg-secondary" id="chapterCommentsCount">0</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-warning small mb-3" id="chapterCommentRuleHint">
+                            Để comment: bạn cần <strong>đăng nhập</strong> và <strong>đọc ít nhất 1 chapter</strong> của truyện này.
+                        </div>
+                        <div class="mb-3">
+                            <textarea class="form-control" id="chapterNewCommentContent" rows="2" placeholder="Viết bình luận..."></textarea>
+                            <div class="d-flex justify-content-between align-items-center mt-2">
+                                <small class="text-muted">Tối đa 2000 ký tự</small>
+                                <button class="btn btn-primary btn-sm" id="chapterSubmitCommentBtn" onclick="submitChapterComment()">
+                                    <i class="bi bi-send"></i> Gửi bình luận
+                                </button>
+                            </div>
+                            <div class="mt-2 small" id="chapterCommentSubmitResult"></div>
+                        </div>
+                        <div id="chapterCommentsList">
+                            <div class="text-center"><div class="spinner-border text-primary" role="status"></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal fade" id="chapterCommentReactionsModal" tabindex="-1">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="bi bi-emoji-smile me-1"></i> Người đã thả cảm xúc</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                            </div>
+                            <div class="modal-body" id="chapterCommentReactionsModalBody"></div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal fade" id="chapterCommentReportModal" tabindex="-1">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title"><i class="bi bi-flag"></i> Báo cáo bình luận</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="small text-muted mb-2" id="chapterCommentReportTitle"></p>
+                                <label class="form-label small">Lý do</label>
+                                <select class="form-select form-select-sm mb-2" id="chapterCommentReportReason"></select>
+                                <label class="form-label small">Mô tả thêm (tùy chọn)</label>
+                                <textarea class="form-control form-control-sm" id="chapterCommentReportDesc" rows="3" maxlength="4000"></textarea>
+                                <div class="small text-danger mt-2" id="chapterCommentReportErr" style="display:none;"></div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Đóng</button>
+                                <button type="button" class="btn btn-danger btn-sm" id="chapterCommentReportSubmitBtn">
+                                    <i class="bi bi-send"></i> Gửi báo cáo
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -131,6 +227,62 @@
         let storyId = null;
         let allChapters = [];
         let currentChapterIndex = -1;
+        let replyingToCommentId = null;
+        let replyingToDisplayName = null;
+        let isChapterUnlocked = false;
+        let chapterCommentReportCommentId = null;
+        let chapterCommentReportReportedUserName = null;
+
+        const CHAPTER_COMMENT_REACTIONS = [
+            { type: 'LIKE', icon: 'bi-hand-thumbs-up', label: 'Thích' },
+            { type: 'DISLIKE', icon: 'bi-hand-thumbs-down', label: 'Không thích' },
+            { type: 'FUNNY', icon: 'bi-emoji-laughing', label: 'Buồn cười' },
+            { type: 'SAD', icon: 'bi-emoji-frown', label: 'Buồn' },
+            { type: 'ANGRY', icon: 'bi-emoji-angry', label: 'Phẫn nộ' },
+            { type: 'LOVE', icon: 'bi-heart-fill', label: 'Yêu thích' },
+            { type: 'WOW', icon: 'bi-emoji-surprise', label: 'Wow' }
+        ];
+
+        async function ensureChapterCommentReportReasons() {
+            const sel = document.getElementById('chapterCommentReportReason');
+            if (!sel || sel.options.length > 0) return;
+            try {
+                const list = await ApiService.getCommentReportReasons();
+                (list || []).forEach(function (r) {
+                    const o = document.createElement('option');
+                    o.value = r.code || r.Code;
+                    o.textContent = (r.labelVi || r.LabelVi || r.label || r.Label || o.value);
+                    sel.appendChild(o);
+                });
+            } catch (e) { console.error(e); }
+        }
+
+        window.openChapterCommentReport = function (commentId, reportedUserName) {
+            if (!AuthHelper.isAuthenticated()) {
+                Utils.showAlert('Vui lòng đăng nhập để báo cáo bình luận.', 'warning');
+                window.location.href = '/Auth/Login?returnUrl=' + encodeURIComponent(window.location.pathname);
+                return;
+            }
+            chapterCommentReportCommentId = commentId;
+            chapterCommentReportReportedUserName = reportedUserName || '';
+            const titleEl = document.getElementById('chapterCommentReportTitle');
+            const errEl = document.getElementById('chapterCommentReportErr');
+            const descEl = document.getElementById('chapterCommentReportDesc');
+            const reasonSel = document.getElementById('chapterCommentReportReason');
+            if (titleEl) titleEl.textContent = reportedUserName ? `Bình luận của ${reportedUserName}` : 'Bình luận';
+            if (errEl) {
+                errEl.textContent = '';
+                errEl.style.display = 'none';
+            }
+            if (descEl) descEl.value = '';
+            if (!reasonSel || !reasonSel.options || reasonSel.options.length === 0) {
+                ensureChapterCommentReportReasons().then(function () {
+                    new bootstrap.Modal(document.getElementById('chapterCommentReportModal')).show();
+                });
+                return;
+            }
+            new bootstrap.Modal(document.getElementById('chapterCommentReportModal')).show();
+        };
 
         document.addEventListener('DOMContentLoaded', function() {
             // Bắt buộc đăng nhập mới được đọc chapter
@@ -146,6 +298,50 @@
             }
 
             loadChapter();
+
+            const crSpr = document.getElementById('chapterCommentReportSubmitBtn');
+            if (crSpr) {
+                crSpr.addEventListener('click', async function () {
+                    const err = document.getElementById('chapterCommentReportErr');
+                    if (err) {
+                        err.textContent = '';
+                        err.style.display = 'none';
+                    }
+                    const commentId = chapterCommentReportCommentId;
+                    if (!commentId) {
+                        if (err) {
+                            err.textContent = 'Không xác định bình luận.';
+                            err.style.display = 'block';
+                        }
+                        return;
+                    }
+                    const reason = document.getElementById('chapterCommentReportReason')?.value;
+                    if (!reason) {
+                        if (err) {
+                            err.textContent = 'Chọn lý do.';
+                            err.style.display = 'block';
+                        }
+                        return;
+                    }
+                    const desc = document.getElementById('chapterCommentReportDesc')?.value || null;
+                    try {
+                        crSpr.disabled = true;
+                        await ApiService.reportChapterComment(chapterId, commentId, {
+                            reasonCode: reason,
+                            description: desc
+                        });
+                        bootstrap.Modal.getInstance(document.getElementById('chapterCommentReportModal')).hide();
+                        Utils.showAlert('Đã gửi báo cáo bình luận. Cảm ơn bạn.', 'success');
+                    } catch (e) {
+                        if (err) {
+                            err.textContent = e?.message || String(e);
+                            err.style.display = 'block';
+                        }
+                    } finally {
+                        crSpr.disabled = false;
+                    }
+                });
+            }
         });
 
         async function loadChapter() {
@@ -161,9 +357,20 @@
                 }
 
                 storyId = currentChapter.storyId;
+                const isPaidChapter = (currentChapter.accessType || '').toUpperCase() === 'PAID' && (currentChapter.coinPrice ?? 0) > 0;
+                isChapterUnlocked = !isPaidChapter || (currentChapter.IsUnlocked ?? currentChapter.isUnlocked ?? false);
 
                 // Render chapter first so user can read even if other calls fail
                 renderChapter();
+                updateSaveProgressButton();
+
+                if (isPaidChapter && !isChapterUnlocked) {
+                    showUnlockPaidChapterModal(currentChapter.coinPrice ?? 0);
+                    disableLockedChapterUI(true);
+                } else {
+                    disableLockedChapterUI(false);
+                    loadChapterComments();
+                }
 
                 // Load story info - non-critical, show warning if fails
                 try {
@@ -221,6 +428,8 @@
 
             // Render content
             const contentDiv = document.getElementById('chapterContent');
+            const isPaidChapter = (currentChapter.accessType || '').toUpperCase() === 'PAID' && (currentChapter.coinPrice ?? 0) > 0;
+            const unlocked = !isPaidChapter || (currentChapter.IsUnlocked ?? currentChapter.isUnlocked ?? false);
             if (currentChapter.content) {
                 // Split content into paragraphs
                 const paragraphs = currentChapter.content
@@ -230,7 +439,11 @@
 
                 contentDiv.innerHTML = paragraphs.map(p => `<p>${p}</p>`).join('');
             } else {
-                contentDiv.innerHTML = '<p class="text-muted text-center">Chương này chưa có nội dung.</p>';
+                if (isPaidChapter && !unlocked) {
+                    contentDiv.innerHTML = '<p class="text-muted text-center">Chương này trả phí. Vui lòng mở khóa để đọc.</p>';
+                } else {
+                    contentDiv.innerHTML = '<p class="text-muted text-center">Chương này chưa có nội dung.</p>';
+                }
             }
 
             // Render stats
@@ -244,9 +457,377 @@
             `;
         }
 
+        function updateSaveProgressButton() {
+            const btn = document.getElementById('btnSaveReadingProgress');
+            if (!btn) return;
+            if (!isChapterUnlocked) {
+                btn.style.display = 'none';
+                return;
+            }
+            if (storyId && chapterId && typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated()) {
+                btn.style.display = 'inline-block';
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        let unlockPaidChapterModalInstance = null;
+
+        function showUnlockPaidChapterModal(price) {
+            const modalEl = document.getElementById('unlockPaidChapterModal');
+            if (!modalEl) return;
+            const coinPriceEl = document.getElementById('unlockPaidChapterCoinPrice');
+            const msgEl = document.getElementById('unlockPaidChapterMessage');
+            const errorBox = document.getElementById('unlockPaidChapterErrorBox');
+            const btn = document.getElementById('unlockPaidChapterBtn');
+
+            if (coinPriceEl) coinPriceEl.textContent = price ?? 0;
+            if (msgEl) msgEl.textContent = 'Bạn cần thanh toán bằng coin để mở khóa chương này.';
+            if (errorBox) {
+                errorBox.textContent = '';
+                errorBox.classList.add('d-none');
+            }
+            if (btn) btn.disabled = false;
+
+            unlockPaidChapterModalInstance = unlockPaidChapterModalInstance || new bootstrap.Modal(modalEl);
+            unlockPaidChapterModalInstance.show();
+        }
+
+        function disableLockedChapterUI(isLocked) {
+            const commentHint = document.getElementById('chapterCommentRuleHint');
+            const commentTextarea = document.getElementById('chapterNewCommentContent');
+            const commentBtn = document.getElementById('chapterSubmitCommentBtn');
+
+            if (isLocked) {
+                const chapterInfoEl = document.getElementById('chapterInfo');
+                if (chapterInfoEl) {
+                    chapterInfoEl.innerHTML = `
+                        <h1 class="chapter-title">Chương trả phí</h1>
+                        <div class="text-muted small mt-1">Vui lòng mở khóa để đọc nội dung.</div>
+                    `;
+                }
+
+                const contentDiv = document.getElementById('chapterContent');
+                if (contentDiv) {
+                    contentDiv.innerHTML = '<p class="text-muted text-center">Chương này trả phí. Vui lòng mở khóa để đọc.</p>';
+                }
+
+                const statsDiv = document.getElementById('chapterStats');
+                if (statsDiv) statsDiv.innerHTML = '';
+
+                const prevBtn = document.getElementById('prevChapterBtn');
+                const nextBtn = document.getElementById('nextChapterBtn');
+                if (prevBtn) prevBtn.disabled = true;
+                if (nextBtn) nextBtn.disabled = true;
+
+                if (commentHint) {
+                    commentHint.innerHTML = 'Chương này trả phí. Vui lòng mở khóa để có thể bình luận.';
+                }
+                if (commentTextarea) commentTextarea.disabled = true;
+                if (commentBtn) commentBtn.disabled = true;
+            } else {
+                if (commentHint) {
+                    commentHint.innerHTML = 'Để comment: bạn cần <strong>đăng nhập</strong> và <strong>đọc ít nhất 1 chapter</strong> của truyện này.';
+                }
+                if (commentTextarea) commentTextarea.disabled = false;
+                if (commentBtn && typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated()) {
+                    commentBtn.disabled = false;
+                }
+            }
+        }
+
+        async function unlockPaidChapter() {
+            if (!chapterId) return;
+            const btn = document.getElementById('unlockPaidChapterBtn');
+            const spinner = document.getElementById('unlockPaidChapterSpinner');
+            const errorBox = document.getElementById('unlockPaidChapterErrorBox');
+
+            if (btn) btn.disabled = true;
+            if (spinner) spinner.classList.remove('d-none');
+            if (errorBox) {
+                errorBox.textContent = '';
+                errorBox.classList.add('d-none');
+            }
+
+            try {
+                await ApiService.unlockChapter(chapterId);
+
+                const modalEl = document.getElementById('unlockPaidChapterModal');
+                if (unlockPaidChapterModalInstance) unlockPaidChapterModalInstance.hide();
+                else if (modalEl) (new bootstrap.Modal(modalEl)).hide();
+
+                // Reload to get full content + IsUnlocked=true
+                await loadChapter();
+            } catch (e) {
+                const msg = e?.message || e || 'Lỗi không xác định';
+                if (errorBox) {
+                    errorBox.textContent = msg;
+                    errorBox.classList.remove('d-none');
+                } else {
+                    alert(msg);
+                }
+            } finally {
+                if (spinner) spinner.classList.add('d-none');
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function saveReadingProgress() {
+            const resultEl = document.getElementById('saveProgressResult');
+            if (!storyId || !chapterId) return;
+            if (typeof AuthHelper === 'undefined' || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) {
+                if (resultEl) resultEl.textContent = 'Vui lòng đăng nhập để lưu lịch sử đọc.';
+                return;
+            }
+            const btn = document.getElementById('btnSaveReadingProgress');
+            if (btn) btn.disabled = true;
+            if (resultEl) resultEl.textContent = '';
+            try {
+                await ApiService.saveReadingProgress(storyId, chapterId);
+                if (resultEl) { resultEl.textContent = 'Đã lưu.'; resultEl.className = 'text-success small'; }
+            } catch (e) {
+                if (resultEl) { resultEl.textContent = (e && e.message) || 'Lỗi'; resultEl.className = 'text-danger small'; }
+            }
+            if (btn) btn.disabled = false;
+        }
+
+        function escapeHtml(text) {
+            if (text == null) return '';
+            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+
+        // Format time ago like Facebook: 14 giây / 14 phút / 4 giờ / 3 ngày ...
+        function formatTimeAgo(value) {
+            if (!value) return '';
+            const d = (value instanceof Date) ? value : new Date(value);
+            if (isNaN(d.getTime())) return '';
+
+            let diffSec = Math.floor((Date.now() - d.getTime()) / 1000);
+            if (diffSec < 0) diffSec = 0;
+
+            if (diffSec < 60) return `${Math.max(1, diffSec)} giây`;
+            const diffMin = Math.floor(diffSec / 60);
+            if (diffMin < 60) return `${diffMin} phút`;
+            const diffHour = Math.floor(diffMin / 60);
+            if (diffHour < 24) return `${diffHour} giờ`;
+            const diffDay = Math.floor(diffHour / 24);
+            if (diffDay < 7) return `${diffDay} ngày`;
+
+            const diffMonth = Math.floor(diffDay / 30);
+            if (diffMonth < 12) return `${diffMonth} tháng`;
+            const diffYear = Math.floor(diffDay / 365);
+            return `${diffYear} năm`;
+        }
+
+        async function loadChapterComments() {
+            if (!chapterId) return;
+            try {
+                const list = await ApiService.getChapterComments(chapterId);
+                renderChapterComments(list || []);
+            } catch (e) {
+                document.getElementById('chapterCommentsList').innerHTML =
+                    '<div class="alert alert-danger mb-0">Không tải được bình luận.</div>';
+            }
+        }
+
+        function renderChapterComments(list) {
+            const container = document.getElementById('chapterCommentsList');
+            const countEl = document.getElementById('chapterCommentsCount');
+            if (countEl) countEl.textContent = (list || []).length;
+            if (!list || list.length === 0) {
+                container.innerHTML = '<div class="text-muted">Chưa có bình luận.</div>';
+                return;
+            }
+
+            const currentUserId = typeof AuthHelper !== 'undefined' && AuthHelper.getUserId ? AuthHelper.getUserId() : null;
+            const byParent = new Map();
+            const roots = [];
+            for (const c of list) {
+                const pid = c.parentId || null;
+                if (!pid) roots.push(c);
+                if (!byParent.has(pid)) byParent.set(pid, []);
+                byParent.get(pid).push(c);
+            }
+            function renderNode(c, depth) {
+                const name = escapeHtml(c.userDisplayName || 'Ẩn danh');
+                const role = (c.userRole || '').toString().trim().toUpperCase();
+                const roleMeta = {
+                    AUTHOR: { label: 'Tác giả', className: 'bg-warning text-dark', title: 'Tác giả' },
+                    USER: { label: 'Độc giả', className: 'bg-primary text-white', title: 'Độc giả' },
+                    ADMIN: { label: 'Quản trị viên', className: 'bg-danger text-white', title: 'Quản trị viên' },
+                    MODERATOR: { label: 'Kiểm duyệt', className: 'bg-success text-white', title: 'Kiểm duyệt' }
+                };
+                // USER tag depends on account age.
+                // Config/thresholds (days since created_at):
+                // - < 30  : Thành viên mới
+                // - < 180 : Độc giả
+                // - >=180 : Độc giả kỳ cựu
+                let meta = roleMeta[role];
+                if (role === 'USER') {
+                    const createdAt = c.userCreatedAt ? new Date(c.userCreatedAt) : null;
+                    let days = null;
+                    if (createdAt && !isNaN(createdAt.getTime())) {
+                        days = (Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24);
+                    }
+                    if (days !== null) {
+                        if (days < 30) meta = { label: 'Thành viên mới', className: 'bg-info text-dark', title: 'Thành viên mới' };
+                        else if (days < 180) meta = { label: 'Độc giả', className: 'bg-primary text-white', title: 'Độc giả' };
+                        else meta = { label: 'Độc giả kỳ cựu', className: 'bg-success text-white', title: 'Độc giả kỳ cựu' };
+                    } else {
+                        meta = { label: 'Độc giả', className: 'bg-primary text-white', title: 'Độc giả' };
+                    }
+                }
+                const roleBadge = meta
+                    ? '<span class="badge ' + meta.className + ' ms-2" title="' + escapeHtml(meta.title || meta.label) + '">' + escapeHtml(meta.label) + '</span>'
+                    : (role
+                        ? '<span class="badge bg-light text-dark border ms-2" title="' + escapeHtml('Role ' + role) + '">' + escapeHtml(role) + '</span>'
+                        : '');
+                const time = formatTimeAgo(c.createdAt);
+                const content = escapeHtml(c.content || '');
+                const canReply = typeof AuthHelper !== 'undefined' && AuthHelper.isAuthenticated && AuthHelper.isAuthenticated();
+                const reactionCounts = c.reactionCounts || {};
+                const userReactionType = c.userReactionType || null;
+                const isReplyingHere = replyingToCommentId === c.id;
+                const replyBadge = isReplyingHere ? '<span class="badge bg-info text-dark ms-2">Đang trả lời</span>' : '';
+                const replyBtn = canReply ? '<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none" onclick="startReplyChapter(\'' + c.id + '\', \'' + name.replace(/'/g, "\\'") + '\')">Trả lời</button>' : '';
+
+                const reportBtn = (canReply && currentUserId && c.userId && String(c.userId).toLowerCase() !== String(currentUserId).toLowerCase())
+                    ? '<button type="button" class="btn btn-link btn-sm p-0 text-decoration-none text-danger" onclick="openChapterCommentReport(\'' + c.id + '\', \'' + String(c.userDisplayName || '').replace(/'/g, "\\'") + '\')"><i class="bi bi-flag"></i> Báo cáo</button>'
+                    : '';
+                const reactionBtns = CHAPTER_COMMENT_REACTIONS.map(function(r) {
+                    const count = reactionCounts[r.type] ?? 0;
+                    const isActive = userReactionType === r.type;
+                    const cur = (userReactionType || '').replace(/'/g, "\\'");
+                    if (canReply) {
+                        return '<button type="button" class="btn btn-link btn-sm p-0 px-1 text-decoration-none ' + (isActive ? 'text-primary fw-bold' : 'text-muted') + '" title="' + r.label + '" onclick="setChapterCommentReaction(\'' + c.id + '\', \'' + r.type + '\', \'' + cur + '\')"><i class="bi ' + r.icon + '"></i> <span class="reaction-count">' + count + '</span></button>';
+                    }
+                    return '<span class="text-muted small px-1"><i class="bi ' + r.icon + '"></i> ' + count + '</span>';
+                }).join('');
+                const totalReactions = Object.values(reactionCounts).reduce(function(a, b) { return a + b; }, 0);
+                const totalReactionsHtml = totalReactions > 0 ? ' <span class="text-muted small text-decoration-underline" style="cursor:pointer" onclick="openChapterCommentReactionsModal(\'' + c.id + '\')" role="button">(' + totalReactions + ' reaction)</span>' : '';
+                const children = byParent.get(c.id) || [];
+                const indent = Math.min(depth, 6) * 16;
+                return '<div class="py-2 comment-node" style="margin-left:' + indent + 'px;" data-comment-id="' + c.id + '">' +
+                    '<div class="d-flex justify-content-between align-items-start gap-2"><div class="fw-medium">' + name + roleBadge + replyBadge + '</div><div class="text-muted small">' + time + '</div></div>' +
+                    '<div class="mb-1">' + content + '</div>' +
+                    '<div class="small d-flex gap-2 align-items-center flex-wrap">' + replyBtn + reportBtn + '<span class="d-flex gap-1 align-items-center flex-wrap">' + reactionBtns + '</span>' + totalReactionsHtml + '</div>' +
+                    (children.length ? children.map(function(ch) { return renderNode(ch, depth + 1); }).join('') : '') +
+                    '</div>' + (depth === 0 ? '<div class="border-bottom"></div>' : '');
+            }
+            container.innerHTML = roots.map(function(c) { return renderNode(c, 0); }).join('');
+            renderChapterReplyStateUI();
+        }
+
+        function renderChapterReplyStateUI() {
+            const textarea = document.getElementById('chapterNewCommentContent');
+            const btn = document.getElementById('chapterSubmitCommentBtn');
+            let stateEl = document.getElementById('chapterReplyStateBar');
+            if (!stateEl) {
+                stateEl = document.createElement('div');
+                stateEl.id = 'chapterReplyStateBar';
+                stateEl.className = 'alert alert-info small py-2 d-flex justify-content-between align-items-center';
+                stateEl.style.display = 'none';
+                stateEl.innerHTML = '<div id="chapterReplyStateText"></div><button type="button" class="btn btn-sm btn-outline-secondary" onclick="cancelReplyChapter()">Hủy trả lời</button>';
+                document.getElementById('chapterCommentRuleHint').parentElement.insertBefore(stateEl, document.getElementById('chapterCommentRuleHint').nextSibling);
+            }
+            if (replyingToCommentId) {
+                stateEl.style.display = 'flex';
+                document.getElementById('chapterReplyStateText').innerHTML = 'Đang trả lời <strong>' + escapeHtml(replyingToDisplayName || 'comment') + '</strong>';
+                textarea.placeholder = 'Trả lời ' + (replyingToDisplayName || 'comment') + '...';
+                btn.innerHTML = '<i class="bi bi-send"></i> Gửi trả lời';
+            } else {
+                stateEl.style.display = 'none';
+                textarea.placeholder = 'Viết bình luận...';
+                btn.innerHTML = '<i class="bi bi-send"></i> Gửi bình luận';
+            }
+        }
+
+        function startReplyChapter(commentId, displayName) {
+            replyingToCommentId = commentId;
+            replyingToDisplayName = displayName;
+            renderChapterReplyStateUI();
+            document.getElementById('chapterNewCommentContent').focus();
+        }
+
+        function cancelReplyChapter() {
+            replyingToCommentId = null;
+            replyingToDisplayName = null;
+            renderChapterReplyStateUI();
+        }
+
+        async function submitChapterComment() {
+            const resultEl = document.getElementById('chapterCommentSubmitResult');
+            resultEl.innerHTML = '';
+            if (typeof AuthHelper === 'undefined' || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) {
+                resultEl.innerHTML = '<span class="text-danger">Vui lòng đăng nhập để bình luận.</span>';
+                return;
+            }
+            const content = (document.getElementById('chapterNewCommentContent').value || '').trim();
+            if (!content) {
+                resultEl.innerHTML = '<span class="text-danger">Nội dung không được để trống.</span>';
+                return;
+            }
+            try {
+                await ApiService.addChapterComment(chapterId, { content: content, parentId: replyingToCommentId });
+                document.getElementById('chapterNewCommentContent').value = '';
+                cancelReplyChapter();
+                resultEl.innerHTML = '<span class="text-success">Đã gửi bình luận.</span>';
+                await loadChapterComments();
+            } catch (e) {
+                resultEl.innerHTML = '<span class="text-danger">' + (e && e.message ? e.message : e) + '</span>';
+            }
+        }
+
+        async function setChapterCommentReaction(commentId, reactionType, currentUserReaction) {
+            if (typeof AuthHelper === 'undefined' || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) return;
+            const toSet = (currentUserReaction === reactionType) ? null : reactionType;
+            try {
+                await ApiService.setChapterCommentReaction(chapterId, commentId, toSet);
+                await loadChapterComments();
+            } catch (e) {
+                console.error(e);
+                await loadChapterComments();
+            }
+        }
+
+        async function openChapterCommentReactionsModal(commentId) {
+            const modalEl = document.getElementById('chapterCommentReactionsModal');
+            const bodyEl = document.getElementById('chapterCommentReactionsModalBody');
+            if (!modalEl || !bodyEl) return;
+            bodyEl.innerHTML = '<div class="text-center py-3"><div class="spinner-border text-primary"></div></div>';
+            if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                var modal = new bootstrap.Modal(modalEl);
+                modal.show();
+            }
+            try {
+                const list = await ApiService.getChapterCommentReactions(chapterId, commentId) || [];
+                const typeToIcon = {}; const typeToLabel = {};
+                CHAPTER_COMMENT_REACTIONS.forEach(function(r) { typeToIcon[r.type] = r.icon; typeToLabel[r.type] = r.label; });
+                if (list.length === 0) {
+                    bodyEl.innerHTML = '<p class="text-muted mb-0">Chưa có ai thả cảm xúc.</p>';
+                } else {
+                    bodyEl.innerHTML = '<ul class="list-group list-group-flush">' + list.map(function(item) {
+                        var icon = typeToIcon[item.reactionType] || 'bi-emoji-smile';
+                        var name = escapeHtml(item.userDisplayName || 'Ẩn danh');
+                        return '<li class="list-group-item d-flex align-items-center gap-2 py-2"><i class="bi ' + icon + ' text-primary"></i><span>' + name + '</span></li>';
+                    }).join('') + '</ul>';
+                }
+            } catch (e) {
+                bodyEl.innerHTML = '<p class="text-danger mb-0">Không tải được danh sách.</p>';
+            }
+        }
+
         function updateNavigation() {
             const prevBtn = document.getElementById('prevChapterBtn');
             const nextBtn = document.getElementById('nextChapterBtn');
+
+            if (!isChapterUnlocked) {
+                if (prevBtn) prevBtn.disabled = true;
+                if (nextBtn) nextBtn.disabled = true;
+                if (prevBtn) prevBtn.onclick = null;
+                if (nextBtn) nextBtn.onclick = null;
+                return;
+            }
 
             if (!allChapters || !Array.isArray(allChapters) || allChapters.length === 0) {
                 prevBtn.disabled = true;
@@ -322,6 +903,9 @@
             if (!allChapters || !Array.isArray(allChapters) || allChapters.length === 0) {
                 return;
             }
+
+            // When locked, prevent navigation to other chapters.
+            if (!isChapterUnlocked) return;
 
             // Left arrow - previous chapter
             if (e.key === 'ArrowLeft' && currentChapterIndex > 0 && currentChapterIndex < allChapters.length) {

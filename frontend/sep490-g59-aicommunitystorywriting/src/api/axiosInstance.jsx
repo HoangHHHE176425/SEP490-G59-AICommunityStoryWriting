@@ -51,6 +51,11 @@ axiosInstance.interceptors.response.use(
             return Promise.reject(error);
         }
 
+        // Chưa đăng nhập: không có accessToken → không gọi refresh (tránh lỗi "Missing refresh token" / vòng 401).
+        if (!getAccessToken()) {
+            return Promise.reject(error);
+        }
+
         // Avoid retry loops.
         if (originalRequest._retry) {
             return Promise.reject(error);

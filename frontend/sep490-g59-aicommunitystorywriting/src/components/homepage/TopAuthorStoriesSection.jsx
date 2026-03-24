@@ -4,7 +4,10 @@ import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { Flame, CheckCircle, Eye, Star } from 'lucide-react';
 import { getStories } from '../../api/story/storyApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
+import { getAuthorFollowersCount } from '../../api/author/authorApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { resolveAuthorAvatarUrl, resolveAuthorDisplayName } from '../../utils/storyAuthorAvatar';
+import { useAuth } from '../../contexts/AuthContext';
 
 function formatViews(num) {
   if (num == null || num === undefined) return '0';
@@ -14,7 +17,7 @@ function formatViews(num) {
   return String(n);
 }
 
-function mapStoryToCard(item, profile = null) {
+function mapStoryToCard(item, profile = null, followerCount = null) {
   const categoryNamesStr = item.categoryNames ?? item.CategoryNames ?? '';
   const categoryNamesArr = categoryNamesStr
     ? String(categoryNamesStr).split(',').map((s) => s.trim()).filter(Boolean)
@@ -24,19 +27,22 @@ function mapStoryToCard(item, profile = null) {
   const imageUrl = coverPath ? resolveBackendUrl(coverPath) : '';
   const totalViews = item.totalViews ?? item.TotalViews ?? 0;
   const rating = Number(item.avgRating ?? item.AvgRating ?? 0);
-  const authorName = profile?.displayName ?? item.authorName ?? item.AuthorName ?? 'Ẩn danh';
-  const authorAvatar = profile?.avatarUrl ? resolveBackendUrl(profile.avatarUrl) : '';
+  const authorName = resolveAuthorDisplayName(item, profile);
+  const authorAvatar = resolveAuthorAvatarUrl(item, profile, authorName);
+  const fc = Number(followerCount);
+  const followers =
+    Number.isFinite(fc) ? formatViews(Math.max(0, fc)) : '—';
   return {
     id: item.id ?? item.Id,
     story: item.title ?? item.Title ?? 'Không có tiêu đề',
     author: {
       name: authorName,
       avatar: authorAvatar,
-      followers: profile?.stats?.totalReads != null ? formatViews(profile.stats.totalReads) : '-',
+      followers,
       verified: profile?.isVerified ?? false
     },
     genre,
-    chapters: item.totalChapters ?? item.TotalChapters ?? 0,
+    chapters: item.publishedChaptersCount ?? item.PublishedChaptersCount ?? item.totalChapters ?? item.TotalChapters ?? 0,
     views: formatViews(totalViews),
     rating: rating > 0 ? rating.toFixed(1) : '-',
     trending: false,
@@ -47,6 +53,7 @@ function mapStoryToCard(item, profile = null) {
 
 export function TopAuthorStoriesSection() {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const [authorStories, setAuthorStories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -54,11 +61,26 @@ export function TopAuthorStoriesSection() {
   useEffect(() => {
     let cancelled = false;
     getStories({ status: 'PUBLISHED', pageSize: 6, page: 1 })
-      .then((res) => {
+      .then(async (res) => {
         const items = res?.items ?? res?.Items ?? [];
         const authorIds = [...new Set(items.map((i) => i.authorId ?? i.AuthorId).filter(Boolean))];
-        if (authorIds.length === 0) {
-          if (!cancelled) setAuthorStories(items.map((item) => mapStoryToCard(item)));
+        const followerCounts =
+          authorIds.length > 0
+            ? await Promise.all(authorIds.map((id) => getAuthorFollowersCount(id).catch(() => 0)))
+            : [];
+        const followerMap = {};
+        authorIds.forEach((id, i) => {
+          followerMap[id] = followerCounts[i];
+        });
+        if (!isAuthenticated || authorIds.length === 0) {
+          if (!cancelled) {
+            setAuthorStories(
+              items.map((item) => {
+                const aid = item.authorId ?? item.AuthorId;
+                return mapStoryToCard(item, null, aid != null ? followerMap[aid] : null);
+              })
+            );
+          }
           return;
         }
         return Promise.all(
@@ -70,7 +92,10 @@ export function TopAuthorStoriesSection() {
             profileMap[id] = profiles[i] || null;
           });
           setAuthorStories(
-            items.map((item) => mapStoryToCard(item, profileMap[item.authorId ?? item.AuthorId]))
+            items.map((item) => {
+              const aid = item.authorId ?? item.AuthorId;
+              return mapStoryToCard(item, profileMap[aid], aid != null ? followerMap[aid] : null);
+            })
           );
         });
       })
@@ -84,7 +109,7 @@ export function TopAuthorStoriesSection() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [isAuthenticated]);
 
   return (
     <section className="bg-white rounded-2xl border border-gray-200 p-6">
@@ -102,7 +127,11 @@ export function TopAuthorStoriesSection() {
             </p>
           </div>
         </div>
-        <button className="text-[#13EC5B] hover:text-[#11D350] font-['Plus_Jakarta_Sans',sans-serif] font-semibold text-[14px] flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => navigate('/story-list?preset=top_author_follow')}
+          className="text-[#13EC5B] hover:text-[#11D350] font-['Plus_Jakarta_Sans',sans-serif] font-semibold text-[14px] flex items-center gap-1"
+        >
           Xem tất cả
           <span>→</span>
         </button>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { BookOpen, Clock, Eye, ChevronRight, Lock, X } from 'lucide-react';
 
-export function ChapterList({ chapters, storyId }) {
+export function ChapterList({ chapters, storyId, lastReadChapterId }) {
     const navigate = useNavigate();
     const [paymentModalChapter, setPaymentModalChapter] = useState(null);
 
@@ -26,15 +26,20 @@ export function ChapterList({ chapters, storyId }) {
                         ? `/chapter?storyId=${encodeURIComponent(storyId)}&chapterId=${encodeURIComponent(chapter.chapterId)}`
                         : '#';
                     const isLocked = chapter.isLocked === true;
-                    const isLink = !!to && to !== '#' && !isLocked;
+                    // Chỉ chặn bằng modal khi FE chắc chắn trạng thái khóa từ API.
+                    // Không hiển thị modal thanh toán ở danh sách chương.
+                    // ChapterReader sẽ tự quyết định hiển thị nội dung hay phần thanh toán theo trạng thái mở khóa thật từ API.
+                    const shouldBlockByModal = false;
+                    const isLink = !!to && to !== '#';
                     const Wrapper = isLink ? Link : 'div';
                     const wrapperProps = isLink ? { to } : {};
+                    const isLastRead = !!lastReadChapterId && chapter.chapterId === lastReadChapterId;
                     return (
                         <Wrapper
                             key={chapter.id}
                             {...wrapperProps}
-                            onClick={isLocked ? (e) => handleLockedClick(e, chapter) : undefined}
-                            className="flex items-center justify-between p-4 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors group cursor-pointer"
+                            onClick={shouldBlockByModal ? (e) => handleLockedClick(e, chapter) : undefined}
+                            className={`flex items-center justify-between p-4 rounded-lg transition-colors group cursor-pointer ${isLastRead ? 'bg-primary/10 dark:bg-primary/20 border border-primary/30 dark:border-primary/40' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                         >
                             <div className="flex items-center gap-3 flex-1 min-w-0">
                                 {chapter.isLocked ? (
@@ -47,10 +52,15 @@ export function ChapterList({ chapters, storyId }) {
                                     </div>
                                 )}
                                 <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                         <p className="font-semibold text-slate-900 dark:text-white group-hover:text-primary transition-colors truncate">
                                             Chương {chapter.id}: {chapter.title}
                                         </p>
+                                        {isLastRead && (
+                                            <span className="px-2 py-0.5 bg-primary text-white text-xs font-bold rounded shrink-0">
+                                                Đang đọc
+                                            </span>
+                                        )}
                                         {chapter.isNew && (
                                             <span className="px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded shrink-0">
                                                 MỚI

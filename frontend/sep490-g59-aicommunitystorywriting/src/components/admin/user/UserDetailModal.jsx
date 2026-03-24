@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { X, User, Mail, Shield, Calendar, LogIn, Ban, CheckCircle, Phone, FileText, BookOpen } from 'lucide-react';
+import { X, User, Mail, Shield, Calendar, LogIn, Ban, CheckCircle, Phone, FileText } from 'lucide-react';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
-import { getUserDisplayName } from '../../../api/admin/userManagementApi';
-import { updateUserRole, assignModeratorCategories, getModeratorCategories } from '../../../api/admin/userManagementApi';
-import { getAllCategories } from '../../../api/category/categoryApi';
+import { getUserDisplayName, updateUserRole } from '../../../api/admin/userManagementApi';
 
-const ROLE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', MODERATOR: 'Kiểm duyệt', ADMIN: 'Quản trị' };
+const ROLE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', MODERATOR: 'Kiểm duyệt', ADMIN: 'Quản trị', COMPLIANCE: 'Compliance' };
+const EDITABLE_ROLES = ['USER', 'AUTHOR', 'MODERATOR', 'ADMIN', 'COMPLIANCE'];
+
 const STATUS_LABELS = {
     ACTIVE: 'Hoạt động',
     PENDING: 'Chờ xác thực',
@@ -20,86 +20,39 @@ function formatDate(value) {
 }
 
 export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignModerator }) {
-    const [categories, setCategories] = useState([]);
-    const [categoriesLoading, setCategoriesLoading] = useState(true);
-    const [categoriesError, setCategoriesError] = useState('');
-    const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
-    const [moderatorCategoryIds, setModeratorCategoryIds] = useState([]);
-    const [savingModerator, setSavingModerator] = useState(false);
+    const [selectedRole, setSelectedRole] = useState('USER');
+    const [savingRole, setSavingRole] = useState(false);
+    const [roleError, setRoleError] = useState('');
 
     useEffect(() => {
-        setCategoriesLoading(true);
-        setCategoriesError('');
-        getAllCategories({ includeInactive: false })
-            .then((data) => {
-                const list = Array.isArray(data) ? data : (data?.items ?? data?.Items ?? []);
-                setCategories(Array.isArray(list) ? list : []);
-            })
-            .catch((err) => {
-                const msg =
-                    err?.response?.data?.message ||
-                    err?.message ||
-                    'Không tải được danh sách thể loại';
-                setCategories([]);
-                setCategoriesError(msg);
-            })
-            .finally(() => setCategoriesLoading(false));
-    }, []);
-
-    useEffect(() => {
-        if (!user?.id) return;
-        getModeratorCategories(user.id).then((res) => {
-            const ids = res?.categoryIds ?? [];
-            setModeratorCategoryIds(ids);
-            setSelectedCategoryIds(ids);
-        }).catch(() => {
-            setModeratorCategoryIds(user.moderatorCategoryIds ?? []);
-            setSelectedCategoryIds(user.moderatorCategoryIds ?? []);
-        });
-    }, [user?.id, user?.moderatorCategoryIds]);
+        if (user?.role) {
+            setSelectedRole(String(user.role).toUpperCase());
+        }
+        setRoleError('');
+    }, [user?.id, user?.role]);
 
     if (!user) return null;
 
     const isBanned = user.status === 'BANNED';
-    const isModerator = user.role === 'MODERATOR';
+    const roleDirty = user.role !== selectedRole;
 
-    const toggleCategory = (id) => {
-        setSelectedCategoryIds((prev) =>
-            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-        );
-    };
-
-    const handleAssignModerator = async () => {
-        if (selectedCategoryIds.length === 0) return;
-        setSavingModerator(true);
+    const handleSaveRole = async () => {
+        if (!roleDirty) return;
+        setSavingRole(true);
+        setRoleError('');
         try {
-            await updateUserRole(user.id, 'MODERATOR');
-            await assignModeratorCategories(user.id, selectedCategoryIds);
-            setModeratorCategoryIds(selectedCategoryIds);
-            onAssignModerator?.();
+            await updateUserRole(user.id, selectedRole);
+            onAssignModerator?.(selectedRole);
         } catch (e) {
-            console.error(e);
+            const msg =
+                e?.response?.data?.message ||
+                e?.message ||
+                'Không thể cập nhật vai trò.';
+            setRoleError(msg);
         } finally {
-            setSavingModerator(false);
+            setSavingRole(false);
         }
     };
-
-    const handleRemoveModerator = async () => {
-        setSavingModerator(true);
-        try {
-            await updateUserRole(user.id, 'USER');
-            await assignModeratorCategories(user.id, []);
-            setModeratorCategoryIds([]);
-            setSelectedCategoryIds([]);
-            onAssignModerator?.();
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setSavingModerator(false);
-        }
-    };
-
-    const getCategoryName = (id) => categories.find((c) => (c.id ?? c.Id) === id)?.name ?? id;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
@@ -157,7 +110,7 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                     <div className="flex items-center gap-2">
                         <Shield className="w-4 h-4 text-slate-400 flex-shrink-0" />
                         <div>
-                            <p className="text-sm text-slate-500">Vai trò</p>
+                            <p className="text-sm text-slate-500">Vai trò hiện tại</p>
                             <p className="font-medium text-slate-900">{ROLE_LABELS[user.role] ?? user.role}</p>
                         </div>
                     </div>
@@ -191,62 +144,38 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                         </div>
                     </div>
 
-                    {/* Gán moderator theo thể loại truyện */}
+                    {/* Thay đổi vai trò (moderator = chỉ đổi role, không gán thể loại) */}
                     <div className="border-t border-slate-200 pt-4 mt-4">
                         <div className="flex items-center gap-2 mb-2">
-                            <BookOpen className="w-4 h-4 text-emerald-600" />
-                            <h3 className="font-semibold text-slate-900">Gán moderator (kiểm duyệt theo thể loại truyện)</h3>
+                            <Shield className="w-4 h-4 text-emerald-600" />
+                            <h3 className="font-semibold text-slate-900">Thay đổi vai trò</h3>
                         </div>
-                        <p className="text-sm text-slate-500 mb-3">Chọn các thể loại truyện mà user này được quyền kiểm duyệt. Sau đó nhấn &quot;Gán làm moderator&quot;.</p>
-                        {moderatorCategoryIds.length > 0 && (
-                            <p className="text-sm text-emerald-700 mb-2">Đang kiểm duyệt: {moderatorCategoryIds.map(getCategoryName).join(', ') || '—'}</p>
-                        )}
-                        <ul className="list-none space-y-2 mb-3 max-h-40 overflow-y-auto border border-slate-200 rounded-lg p-3 bg-slate-50/50">
-                            {categoriesLoading && <li className="text-sm text-slate-500">Đang tải thể loại...</li>}
-                            {!categoriesLoading && categoriesError && (
-                                <li className="text-sm text-red-600">{categoriesError}</li>
-                            )}
-                            {!categoriesLoading && !categoriesError && categories.length === 0 && (
-                                <li className="text-sm text-slate-500">Chưa có thể loại nào trong hệ thống.</li>
-                            )}
-                            {!categoriesLoading && !categoriesError && categories.map((cat) => {
-                                const id = cat.id ?? cat.Id;
-                                const name = cat.name ?? cat.Name ?? id;
-                                const checked = selectedCategoryIds.includes(id);
-                                return (
-                                    <li key={id}>
-                                        <label className="inline-flex items-center gap-2 cursor-pointer hover:bg-white/60 rounded px-2 py-1.5 w-full">
-                                            <input
-                                                type="checkbox"
-                                                checked={checked}
-                                                onChange={() => toggleCategory(id)}
-                                                className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                                            />
-                                            <span className="text-sm text-slate-700">{name}</span>
-                                        </label>
-                                    </li>
-                                );
-                            })}
-                        </ul>
-                        <div className="flex gap-2">
+                        <p className="text-sm text-slate-500 mb-3">
+                            Chọn vai trò mới cho tài khoản (ví dụ <strong>Kiểm duyệt</strong> để cấp quyền moderator). Không còn gán theo thể loại truyện.
+                        </p>
+                        {roleError ? (
+                            <p className="text-sm text-red-600 mb-2">{roleError}</p>
+                        ) : null}
+                        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                            <select
+                                value={selectedRole}
+                                onChange={(e) => setSelectedRole(e.target.value)}
+                                className="flex-1 min-w-0 px-3 py-2 border border-slate-200 rounded-lg text-slate-900 text-sm focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
+                            >
+                                {EDITABLE_ROLES.map((r) => (
+                                    <option key={r} value={r}>
+                                        {ROLE_LABELS[r] ?? r}
+                                    </option>
+                                ))}
+                            </select>
                             <button
                                 type="button"
-                                disabled={savingModerator || selectedCategoryIds.length === 0}
-                                onClick={handleAssignModerator}
-                                className="px-4 py-2 bg-emerald-500 text-white rounded-lg font-semibold text-sm hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled={savingRole || !roleDirty}
+                                onClick={handleSaveRole}
+                                className="px-4 py-2 bg-emerald-500 text-white rounded-lg font-semibold text-sm hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                             >
-                                {savingModerator ? 'Đang lưu...' : 'Gán làm moderator'}
+                                {savingRole ? 'Đang lưu...' : 'Cập nhật vai trò'}
                             </button>
-                            {isModerator && (
-                                <button
-                                    type="button"
-                                    disabled={savingModerator}
-                                    onClick={handleRemoveModerator}
-                                    className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg font-semibold text-sm hover:bg-slate-50 disabled:opacity-50"
-                                >
-                                    Bỏ quyền moderator
-                                </button>
-                            )}
                         </div>
                     </div>
                 </div>

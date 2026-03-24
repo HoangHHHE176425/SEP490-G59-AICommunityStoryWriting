@@ -1,0 +1,313 @@
+﻿@{
+    ViewData["Title"] = "Lịch sử ví coin";
+}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="mb-0"><i class="bi bi-wallet2"></i> Lịch sử ví coin</h2>
+            <div class="text-muted small">Hiển thị chi tiết các lần trừ coin khi mở khóa chương.</div>
+        </div>
+        <a class="btn btn-outline-secondary btn-sm" href="/"><i class="bi bi-arrow-left"></i> Trang chủ</a>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-4 mb-3">
+            <div class="card border-primary h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Số dư coin (có thể dùng để unlock)</div>
+                    <div class="fs-5 fw-semibold" id="walletBalanceCoin">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card border-success h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Thu nhập rút được (income_balance)</div>
+                    <div class="fs-5 fw-semibold" id="walletIncomeBalance">0</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4 mb-3">
+            <div class="card border-warning h-100">
+                <div class="card-body">
+                    <div class="text-muted small">Frozen / Pending escrow</div>
+                    <div class="fs-6" id="walletFrozenPending">0</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header bg-light">
+            <i class="bi bi-funnel"></i> Bộ lọc giao dịch
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Tìm kiếm</label>
+                    <input type="text" class="form-control" id="unlockHistorySearch" placeholder="Truyện hoặc chương...">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Từ ngày</label>
+                    <input type="date" class="form-control" id="unlockHistoryDateFrom">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Đến ngày</label>
+                    <input type="date" class="form-control" id="unlockHistoryDateTo">
+                </div>
+            </div>
+            <div class="row g-3 mt-1">
+                <div class="col-md-3">
+                    <label class="form-label">Min coin</label>
+                    <input type="number" class="form-control" id="unlockHistoryMinCoins" min="0" step="1" placeholder="0">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Max coin</label>
+                    <input type="number" class="form-control" id="unlockHistoryMaxCoins" min="0" step="1" placeholder="">
+                </div>
+                <div class="col-md-3 d-grid">
+                    <button class="btn btn-primary" id="btnUnlockHistoryApply" type="button">
+                        <i class="bi bi-check2-circle"></i> Áp dụng
+                    </button>
+                </div>
+                <div class="col-md-3 d-grid">
+                    <button class="btn btn-outline-secondary" id="btnUnlockHistoryClear" type="button">
+                        <i class="bi bi-x-circle"></i> Xóa
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+            <div>
+                <i class="bi bi-lock-fill"></i> Giao dịch trừ tiền (Mở khóa chương trả phí)
+            </div>
+            <div class="small text-white-50" id="unlockHistoryMeta"></div>
+        </div>
+        <div class="card-body">
+            <div id="walletHistoryLoading" class="text-center py-4">
+                <div class="spinner-border text-primary" role="status"></div>
+                <div class="mt-2 text-muted small">Đang tải...</div>
+            </div>
+
+            <div id="walletHistoryContent" style="display:none;">
+                <div id="walletHistoryList"></div>
+
+                <div id="walletHistoryEmpty" class="text-muted py-4 text-center" style="display:none;">
+                    Chưa có lịch sử mở khóa chương trả phí.
+                </div>
+
+                <div class="d-flex justify-content-center mt-3">
+                    <button class="btn btn-outline-primary btn-sm" id="btnWalletHistoryLoadMore" style="display:none;" onclick="loadMoreUnlockHistory()">
+                        <i class="bi bi-arrow-down-circle"></i> Tải thêm
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        let page = 1;
+        const pageSize = 10;
+        let totalCount = 0;
+        let isLoading = false;
+        let currentFilters = {};
+
+        function getFiltersFromInputs() {
+            const search = document.getElementById('unlockHistorySearch')?.value?.trim();
+            const dateFromStr = document.getElementById('unlockHistoryDateFrom')?.value;
+            const dateToStr = document.getElementById('unlockHistoryDateTo')?.value;
+            const minCoinsStr = document.getElementById('unlockHistoryMinCoins')?.value;
+            const maxCoinsStr = document.getElementById('unlockHistoryMaxCoins')?.value;
+
+            const filters = {};
+
+            if (search) filters.search = search;
+            if (dateFromStr) filters.dateFrom = `${dateFromStr}T00:00:00`;
+            if (dateToStr) filters.dateTo = `${dateToStr}T23:59:59`;
+
+            if (minCoinsStr !== null && minCoinsStr !== undefined && String(minCoinsStr).trim() !== '') {
+                const n = Number.parseInt(minCoinsStr, 10);
+                if (!Number.isNaN(n)) filters.minCoins = n;
+            }
+            if (maxCoinsStr !== null && maxCoinsStr !== undefined && String(maxCoinsStr).trim() !== '') {
+                const n = Number.parseInt(maxCoinsStr, 10);
+                if (!Number.isNaN(n)) filters.maxCoins = n;
+            }
+
+            return filters;
+        }
+
+        function clearFiltersInputs() {
+            const ids = ['unlockHistorySearch', 'unlockHistoryDateFrom', 'unlockHistoryDateTo', 'unlockHistoryMinCoins', 'unlockHistoryMaxCoins'];
+            ids.forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', async function () {
+            if (typeof AuthHelper === 'undefined' || !AuthHelper.isAuthenticated || !AuthHelper.isAuthenticated()) {
+                document.getElementById('walletHistoryLoading').style.display = 'none';
+                document.getElementById('walletHistoryEmpty').style.display = 'block';
+                document.getElementById('walletHistoryEmpty').textContent = 'Bạn cần đăng nhập để xem lịch sử ví.';
+                return;
+            }
+
+            // Filters
+            const applyBtn = document.getElementById('btnUnlockHistoryApply');
+            const clearBtn = document.getElementById('btnUnlockHistoryClear');
+
+            if (applyBtn) {
+                applyBtn.addEventListener('click', async function () {
+                    currentFilters = getFiltersFromInputs();
+                    await loadUnlockHistory(true);
+                });
+            }
+
+            if (clearBtn) {
+                clearBtn.addEventListener('click', async function () {
+                    clearFiltersInputs();
+                    currentFilters = {};
+                    await loadUnlockHistory(true);
+                });
+            }
+
+            currentFilters = getFiltersFromInputs();
+
+            // Wallet summary
+            try {
+                const w = await ApiService.getMyWallet();
+                setWalletSummary(w);
+            } catch (_) {
+                // ignore
+            }
+
+            await loadUnlockHistory(true);
+        });
+
+        function setWalletSummary(w) {
+            const balanceCoin = w?.balanceCoin ?? w?.BalanceCoin ?? w?.balance_coin ?? w?.balanceCoin ?? 0;
+            const incomeBalance = w?.incomeBalance ?? w?.IncomeBalance ?? w?.income_balance ?? 0;
+            const frozenBalance = w?.frozenBalance ?? w?.FrozenBalance ?? w?.frozen_balance ?? 0;
+            const pendingEscrowBalance = w?.pendingEscrowBalance ?? w?.PendingEscrowBalance ?? w?.pending_escrow_balance ?? 0;
+
+            document.getElementById('walletBalanceCoin').textContent = String(balanceCoin ?? 0);
+            document.getElementById('walletIncomeBalance').textContent = String(incomeBalance ?? 0);
+            document.getElementById('walletFrozenPending').textContent =
+                `Frozen: ${String(frozenBalance ?? 0)} / Pending: ${String(pendingEscrowBalance ?? 0)}`;
+        }
+
+        async function loadUnlockHistory(reset) {
+            if (isLoading) return;
+            isLoading = true;
+
+            const loadingEl = document.getElementById('walletHistoryLoading');
+            const contentEl = document.getElementById('walletHistoryContent');
+            const listEl = document.getElementById('walletHistoryList');
+            const emptyEl = document.getElementById('walletHistoryEmpty');
+            const btnEl = document.getElementById('btnWalletHistoryLoadMore');
+
+            if (reset) {
+                page = 1;
+                totalCount = 0;
+                if (listEl) listEl.innerHTML = '';
+                if (emptyEl) emptyEl.style.display = 'none';
+            }
+
+            if (loadingEl) loadingEl.style.display = 'block';
+            if (contentEl) contentEl.style.display = 'none';
+            if (btnEl) btnEl.style.display = 'none';
+
+            try {
+                const resp = await ApiService.getMyChapterUnlockHistory(page, pageSize, currentFilters);
+                const items = resp?.items ?? resp?.Items ?? [];
+                totalCount = resp?.totalCount ?? resp?.TotalCount ?? 0;
+
+                if (items.length === 0 && reset) {
+                    if (emptyEl) emptyEl.style.display = 'block';
+                }
+
+                // Append list
+                if (listEl && items.length > 0) {
+                    emptyEl.style.display = 'none';
+                    listEl.insertAdjacentHTML('beforeend', items.map(function (item) {
+                        const storyId = item.storyId ?? item.StoryId;
+                        const chapterId = item.chapterId ?? item.ChapterId;
+                        const storyTitle = item.storyTitle ?? item.StoryTitle ?? '';
+                        const chapterTitle = item.chapterTitle ?? item.ChapterTitle ?? '';
+                        const coinsPaid = item.coinsPaid ?? item.CoinsPaid ?? 0;
+                        const unlockedAt = item.unlockedAt ?? item.UnlockedAt ?? item.createdAt ?? null;
+
+                        const storyUrl = '/Home/Story/' + storyId;
+                        const chapterUrl = '/Chapters/Read/' + chapterId;
+
+                        const dateText = (unlockedAt && typeof Utils !== 'undefined' && Utils.formatDate)
+                            ? Utils.formatDate(unlockedAt)
+                            : (unlockedAt ? new Date(unlockedAt).toLocaleString('vi-VN') : '');
+
+                        return `
+                            <div class="d-flex align-items-center border-bottom py-3 gap-3">
+                                <div class="flex-grow-1 min-width-0">
+                                    <div class="fw-medium text-dark">
+                                        <a href="${storyUrl}" class="text-decoration-none text-dark">${escapeHtml(storyTitle)}</a>
+                                    </div>
+                                    <div class="small text-muted">${escapeHtml(chapterTitle)}</div>
+                                    <div class="small text-muted">Mở khóa: ${escapeHtml(dateText)}</div>
+                                </div>
+                                <div class="text-end">
+                                    <div class="text-danger fw-semibold">-${String(coinsPaid)} coin</div>
+                                    <a class="btn btn-outline-primary btn-sm mt-2" href="${chapterUrl}">
+                                        <i class="bi bi-book-half"></i> Đọc
+                                    </a>
+                                </div>
+                            </div>
+                        `;
+                    }).join(''));
+                }
+
+                // Meta + load more
+                const metaEl = document.getElementById('unlockHistoryMeta');
+                if (metaEl) metaEl.textContent = totalCount > 0 ? `Tổng: ${totalCount} giao dịch` : '';
+
+                const maxPage = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 1;
+                page += 1;
+                if (page <= maxPage) {
+                    if (btnEl) btnEl.style.display = 'block';
+                }
+            } catch (e) {
+                // If 401 or other, show empty state
+                if (emptyEl) {
+                    emptyEl.style.display = 'block';
+                    emptyEl.textContent = (e?.message || '').indexOf('401') !== -1
+                        ? 'Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.'
+                        : (e?.message || 'Không tải được lịch sử mở khóa.');
+                }
+            } finally {
+                if (loadingEl) loadingEl.style.display = 'none';
+                if (contentEl) contentEl.style.display = 'block';
+                isLoading = false;
+            }
+        }
+
+        function loadMoreUnlockHistory() {
+            return loadUnlockHistory(false);
+        }
+
+        function escapeHtml(text) {
+            if (text == null) return '';
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+    </script>
+}
+

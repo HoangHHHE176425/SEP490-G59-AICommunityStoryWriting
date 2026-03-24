@@ -1,0 +1,2658 @@
+@{
+    ViewData["Title"] = "Admin - Theo dõi kiểm duyệt";
+}
+
+<style>
+    .admin-dashboard .stat-card {
+        border-radius: 12px;
+        border: none;
+        box-shadow: 0 2px 8px rgba(0,0,0,.06);
+    }
+
+    .admin-dashboard .nav-pills .nav-link {
+        border-radius: 10px;
+        font-weight: 500;
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+
+        .admin-dashboard .nav-pills .nav-link:not(.active) {
+            color: #495057;
+            background: #f8f9fa;
+        }
+
+        .admin-dashboard .nav-pills .nav-link.active {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+            color: #fff;
+        }
+
+    .admin-dashboard .filter-panel {
+        background: #f8f9fa;
+        border-radius: 10px;
+        border: 1px solid #e9ecef;
+    }
+
+    .admin-dashboard .badge-time-on {
+        background: #198754;
+        color: #fff;
+    }
+
+    .admin-dashboard .badge-time-warning {
+        background: #ffc107;
+        color: #000;
+    }
+
+    .admin-dashboard .badge-time-overdue {
+        background: #dc3545;
+        color: #fff;
+    }
+
+    .admin-dashboard .table-performance th {
+        white-space: nowrap;
+    }
+
+    .admin-dashboard .badge-esc-critical {
+        background: #b02a37;
+        color: #fff;
+    }
+
+    .admin-dashboard .badge-esc-high {
+        background: #fd7e14;
+        color: #fff;
+    }
+
+    .admin-dashboard .badge-esc-standard {
+        background: #6c757d;
+        color: #fff;
+    }
+
+    .admin-dashboard .card-escalations-urgent {
+        border: 2px solid #dc3545 !important;
+        box-shadow: 0 0 0 0.15rem rgba(220, 53, 69, 0.15);
+    }
+</style>
+
+<div class="container-fluid mt-4 admin-dashboard">
+    <div class="row mb-4">
+        <div class="col-12">
+            <h2 class="mb-1"><i class="bi bi-gear-wide-connected text-secondary"></i> Admin – Theo dõi hoạt động duyệt</h2>
+            <p class="text-muted small mb-0">Tab <strong>Nội dung kiểm duyệt</strong> gom truyện/chương ở mọi giai đoạn (chờ / đã duyệt / từ chối) với tìm kiếm và phân trang; kèm moderation logs và hiệu suất moderator. Tab <strong>Đơn gửi admin</strong> hiển thị <strong>một danh sách</strong> đơn escalation: moderator (gia hạn / hủy nhận duyệt) và compliance (gỡ lock báo cáo truyện, yêu cầu ban / tạm khóa viết), cùng mức độ STANDARD / HIGH / CRITICAL. Hạn duyệt moderator: chọn khi nhận; chưa nhận thì gợi ý +7 ngày từ lúc gửi.</p>
+        </div>
+    </div>
+
+    <div id="adminRequireRole" class="alert alert-warning" style="display: none;">
+        Bạn cần đăng nhập với quyền <strong>Admin</strong> để xem trang này. <a href="/Auth/Login">Đăng nhập</a>
+    </div>
+
+    <div id="adminContent" style="display: none;">
+        <!-- Moderator + ngày: dùng cho tab Nội dung kiểm duyệt (Đã duyệt/Từ chối), Performance, Moderation Logs -->
+        <div class="filter-panel p-3 mb-3">
+            <h6 class="mb-2"><i class="bi bi-funnel"></i> Bộ lọc Moderator &amp; ngày (đã duyệt / từ chối, logs, hiệu suất)</h6>
+            <div class="row g-2 align-items-end">
+                <div class="col-md-2">
+                    <label class="form-label small mb-0">Moderator</label>
+                    <select class="form-select form-select-sm" id="filterModerator">
+                        <option value="">Tất cả</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-0">Từ ngày</label>
+                    <input type="date" class="form-control form-control-sm" id="filterDateFrom">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-0">Đến ngày</label>
+                    <input type="date" class="form-control form-control-sm" id="filterDateTo">
+                </div>
+                <div class="col-md-2" id="filterActionWrap">
+                    <label class="form-label small mb-0">Hành động (Logs)</label>
+                    <select class="form-select form-select-sm" id="filterAction">
+                        <option value="">Tất cả</option>
+                        <option value="APPROVED">Duyệt</option>
+                        <option value="REJECTED">Từ chối</option>
+                    </select>
+                </div>
+                <div class="col-md-2" id="filterTargetTypeWrap">
+                    <label class="form-label small mb-0">Loại (Logs)</label>
+                    <select class="form-select form-select-sm" id="filterTargetType">
+                        <option value="">Tất cả</option>
+                        <option value="STORY">Truyện</option>
+                        <option value="CHAPTER">Chapter</option>
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="button" class="btn btn-primary btn-sm" id="btnApplyFilter"><i class="bi bi-funnel"></i> Áp dụng bộ lọc</button>
+                </div>
+            </div>
+        </div>
+
+        <ul class="nav nav-pills mb-3 flex-wrap" id="adminTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="tab-content-review" data-bs-toggle="tab" data-bs-target="#panel-content-review" type="button"><i class="bi bi-collection-play me-1"></i> Nội dung kiểm duyệt</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-review-escalations" data-bs-toggle="tab" data-bs-target="#panel-review-escalations" type="button">
+                    <i class="bi bi-send-exclamation-fill me-1"></i> Đơn gửi admin
+                    <span class="badge bg-danger ms-1" id="navEscCriticalBadge" style="display: none;">!</span>
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-review-escalation-log" data-bs-toggle="tab" data-bs-target="#panel-review-escalation-log" type="button">
+                    <i class="bi bi-clipboard-data me-1"></i> Log đơn gửi admin
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-logs" data-bs-toggle="tab" data-bs-target="#panel-logs" type="button"><i class="bi bi-list-ul me-1"></i> Moderation Logs</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-performance" data-bs-toggle="tab" data-bs-target="#panel-performance" type="button"><i class="bi bi-bar-chart me-1"></i> Moderator Performance</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-compliance-logs" data-bs-toggle="tab" data-bs-target="#panel-compliance-logs" type="button"><i class="bi bi-list-ul me-1"></i> Compliance Logs</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-compliance-performance" data-bs-toggle="tab" data-bs-target="#panel-compliance-performance" type="button"><i class="bi bi-bar-chart me-1"></i> Compliance Performance</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-platform-wallet" data-bs-toggle="tab" data-bs-target="#panel-platform-wallet" type="button">
+                    <i class="bi bi-wallet2 me-1"></i> Ví hệ thống
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="tab-system-coin-ledger" data-bs-toggle="tab" data-bs-target="#panel-system-coin-ledger" type="button">
+                    <i class="bi bi-list-ul me-1"></i> Nhật ký tiền hệ thống
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="adminTabContent">
+            <div class="tab-pane fade show active" id="panel-content-review">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi bi-collection-play me-1"></i> Truyện &amp; chương — kiểm duyệt</h5>
+                        <p class="text-muted small mb-2">Một màn cho <strong>chờ duyệt</strong>, <strong>đã duyệt</strong>, <strong>từ chối</strong>. Dùng <strong>Moderator</strong> và <strong>Từ/Đến ngày</strong> ở bộ lọc phía trên khi xem đã duyệt hoặc từ chối. Chờ duyệt: cờ <span class="badge badge-time-on">Đúng hạn</span> <span class="badge badge-time-warning">Sắp hết hạn</span> <span class="badge badge-time-overdue">Quá hạn</span>.</p>
+                        <div class="filter-panel p-3 mb-3">
+                            <div class="row g-2 align-items-end mb-2">
+                                <div class="col-6 col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Loại nội dung</label>
+                                    <select class="form-select form-select-sm" id="crKind">
+                                        <option value="story">Truyện</option>
+                                        <option value="chapter">Chương</option>
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Giai đoạn</label>
+                                    <select class="form-select form-select-sm" id="crState">
+                                        <option value="pending">Chờ duyệt</option>
+                                        <option value="approved">Đã duyệt</option>
+                                        <option value="rejected">Từ chối</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 col-lg-3">
+                                    <label class="form-label small mb-0">Tìm kiếm (tiêu đề)</label>
+                                    <input type="text" class="form-control form-control-sm" id="crSearch" placeholder="Tùy chọn" autocomplete="off" />
+                                </div>
+                                <div class="col-md-4 col-lg-3" id="crStoryIdWrap" style="display: none;">
+                                    <label class="form-label small mb-0">Story ID (lọc chương theo truyện)</label>
+                                    <input type="text" class="form-control form-control-sm" id="crStoryId" placeholder="GUID truyện" autocomplete="off" />
+                                </div>
+                                <div class="col-md-3 col-lg-2" id="crClaimWrap">
+                                    <label class="form-label small mb-0">Nhận duyệt (chờ duyệt)</label>
+                                    <select class="form-select form-select-sm" id="crClaimFilter">
+                                        <option value="">Tất cả</option>
+                                        <option value="unclaimed">Chưa có moderator nhận</option>
+                                        <option value="claimed">Đã có moderator nhận</option>
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-2 col-lg-1">
+                                    <label class="form-label small mb-0">/trang</label>
+                                    <select class="form-select form-select-sm" id="crPageSize">
+                                        <option value="20">20</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row g-2 align-items-end mb-2">
+                                <div class="col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Sắp xếp (tùy chọn)</label>
+                                    <select class="form-select form-select-sm" id="crSortBy">
+                                        <option value="">Mặc định hệ thống</option>
+                                        <option value="updatedAt">updatedAt</option>
+                                        <option value="createdAt">createdAt</option>
+                                        <option value="title">title</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Thứ tự</label>
+                                    <select class="form-select form-select-sm" id="crSortOrder">
+                                        <option value="desc">Giảm dần</option>
+                                        <option value="asc">Tăng dần</option>
+                                    </select>
+                                </div>
+                                <div class="col-auto d-flex flex-wrap gap-2">
+                                    <button type="button" class="btn btn-sm btn-primary" id="btnCrApply"><i class="bi bi-funnel"></i> Áp dụng</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="btnCrReload"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                                </div>
+                            </div>
+                            <p id="crHintDateModerator" class="small text-info mb-0 d-none">Ô <strong>Moderator</strong> và <strong>Từ/Đến ngày</strong> (phía trên) chỉ áp dụng cho <strong>Đã duyệt</strong> / <strong>Từ chối</strong>.</p>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnCrPrev" disabled>« Trước</button>
+                            <span class="small text-muted" id="crPageInfo">—</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnCrNext" disabled>Sau »</button>
+                        </div>
+                        <div id="unifiedContentReviewContainer">Chọn tab để tải.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-review-escalations">
+                <p class="text-muted small mb-2">Một danh sách cho mọi <strong>đơn gửi admin</strong>: moderator (gia hạn / hủy nhận duyệt) và compliance (gỡ lock báo cáo truyện, cấm / tạm khóa viết). Cùng thang mức độ; mức gốc gán <strong>tự động theo loại đơn</strong>, rồi lấy max với quy tắc thời gian chờ.</p>
+                <div class="card card-escalations-urgent mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi bi-send-exclamation-fill text-danger"></i> Đơn chờ xử lý (tổng hợp)</h5>
+                        <div class="btn-group btn-group-sm mb-3" role="group">
+                            <button type="button" class="btn btn-outline-primary esc-view-mode active" data-esc-view="pending" id="btnEscViewPending">Chờ xử lý</button>
+                            <button type="button" class="btn btn-outline-primary esc-view-mode" data-esc-view="history" id="btnEscViewHistory">Lịch sử moderator</button>
+                        </div>
+                        <div id="escPendingOnlyWrap">
+                            <p class="text-muted small mb-2">Cờ mức độ: <span class="badge badge-esc-critical">Nghiêm trọng</span> (quá hạn / chờ lâu / hủy nhận moderator / ban user / …); <span class="badge badge-esc-high">Cao</span> (đơn gỡ lock compliance, tạm khóa viết, …); <span class="badge badge-esc-standard">Chuẩn</span>. Mức gốc gán <strong>tự động theo loại đơn</strong>, rồi lấy max với quy tắc thời gian chờ.</p>
+                            <div class="d-flex flex-wrap gap-2 mb-3">
+                                <span class="badge badge-esc-critical">Nghiêm trọng: <strong id="escCountCritical">0</strong></span>
+                                <span class="badge badge-esc-high">Cao: <strong id="escCountHigh">0</strong></span>
+                                <span class="badge badge-esc-standard">Chuẩn: <strong id="escCountStandard">0</strong></span>
+                            </div>
+                            <div class="btn-group btn-group-sm flex-wrap mb-3" role="group">
+                                <button type="button" class="btn btn-outline-secondary esc-filter-btn active" data-esc-tier="">Tất cả</button>
+                                <button type="button" class="btn btn-outline-danger esc-filter-btn" data-esc-tier="CRITICAL">Chỉ nghiêm trọng</button>
+                                <button type="button" class="btn btn-outline-warning esc-filter-btn" data-esc-tier="HIGH">Chỉ cao</button>
+                                <button type="button" class="btn btn-outline-secondary esc-filter-btn" data-esc-tier="STANDARD">Chỉ chuẩn</button>
+                            </div>
+                        </div>
+                        <p id="escHistoryHint" class="text-muted small mb-2" style="display: none;">Chỉ đơn moderator đã chấp nhận / từ chối — tra cứu nhanh. Log đầy đủ (moderator + compliance) dùng tab <strong>Log đơn gửi admin</strong>.</p>
+                        <button type="button" class="btn btn-sm btn-outline-primary mb-2" id="btnReloadEscalations"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                        <div id="reviewEscalationsContainer">Chọn tab để tải.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-review-escalation-log">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi bi-clipboard-data me-1"></i> Log đơn gửi admin</h5>
+                        <p class="text-muted small mb-2">Một bảng cho <strong>moderator escalation</strong>, <strong>đơn gỡ lock báo cáo truyện</strong> và <strong>đơn hành động tài khoản</strong> (compliance). Tìm theo nội dung / tiêu đề / GUID. Lọc <strong>thời điểm xử lý</strong> chỉ khớp bản ghi đã có <code>resolved_at</code>. Lọc <strong>Đích STORY/CHAPTER</strong> chỉ áp dụng đơn moderator.</p>
+                        <div class="row g-2 align-items-end mb-2">
+                            <div class="col-md-4 col-lg-3">
+                                <label class="form-label small mb-0">Tìm kiếm</label>
+                                <input type="text" class="form-control form-control-sm" id="escLogSearch" placeholder="Nội dung, tiêu đề, hoặc GUID" autocomplete="off" />
+                            </div>
+                            <div class="col-6 col-md-3 col-lg-2">
+                                <label class="form-label small mb-0">Nguồn</label>
+                                <select class="form-select form-select-sm" id="escLogSource">
+                                    <option value="">Tất cả</option>
+                                    <option value="REVIEW_ESCALATION">Moderator</option>
+                                    <option value="COMPLIANCE_LOCK">Compliance · gỡ lock</option>
+                                    <option value="COMPLIANCE_ADMIN_ACTION">Compliance · hành động</option>
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-2 col-lg-2">
+                                <label class="form-label small mb-0">Trạng thái</label>
+                                <select class="form-select form-select-sm" id="escLogStatus">
+                                    <option value="">Tất cả</option>
+                                    <option value="PENDING">PENDING</option>
+                                    <option value="APPROVED">APPROVED</option>
+                                    <option value="REJECTED">REJECTED</option>
+                                    <option value="RESOLVED">RESOLVED</option>
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-2 col-lg-2">
+                                <label class="form-label small mb-0">Loại yêu cầu</label>
+                                <select class="form-select form-select-sm" id="escLogRequestKind">
+                                    <option value="">Tất cả</option>
+                                    <option value="EXTEND_DEADLINE">Gia hạn (moderator)</option>
+                                    <option value="RELEASE_ASSIGNMENT">Hủy nhận (moderator)</option>
+                                    <option value="LOCK_RELEASE">Gỡ lock báo cáo</option>
+                                    <option value="BAN_USER">Cấm tài khoản</option>
+                                    <option value="SUSPEND_AUTHOR_WRITING">Tạm khóa viết</option>
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-2 col-lg-2">
+                                <label class="form-label small mb-0">Đích (moderator)</label>
+                                <select class="form-select form-select-sm" id="escLogTargetType">
+                                    <option value="">Tất cả</option>
+                                    <option value="STORY">STORY</option>
+                                    <option value="CHAPTER">CHAPTER</option>
+                                        <option value="COMMENT">COMMENT</option>
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-2 col-lg-1">
+                                <label class="form-label small mb-0">/trang</label>
+                                <select class="form-select form-select-sm" id="escLogPageSize">
+                                    <option value="20">20</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row g-2 align-items-end mb-2">
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small mb-0">Người gửi (GUID)</label>
+                                <input type="text" class="form-control form-control-sm" id="escLogSenderId" placeholder="senderId" autocomplete="off" />
+                            </div>
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small mb-0">Người xử lý (GUID)</label>
+                                <input type="text" class="form-control form-control-sm" id="escLogResolverId" placeholder="resolverId" autocomplete="off" />
+                            </div>
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small mb-0">Tạo từ</label>
+                                <input type="datetime-local" class="form-control form-control-sm" id="escLogCreatedFrom" />
+                            </div>
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small mb-0">Tạo đến</label>
+                                <input type="datetime-local" class="form-control form-control-sm" id="escLogCreatedTo" />
+                            </div>
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small mb-0">Xử lý từ</label>
+                                <input type="datetime-local" class="form-control form-control-sm" id="escLogResolvedFrom" />
+                            </div>
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small mb-0">Xử lý đến</label>
+                                <input type="datetime-local" class="form-control form-control-sm" id="escLogResolvedTo" />
+                            </div>
+                        </div>
+                        <div class="row g-2 align-items-end mb-3">
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small mb-0">Sắp xếp</label>
+                                <select class="form-select form-select-sm" id="escLogSortBy">
+                                    <option value="created_at">Thời gian tạo</option>
+                                    <option value="resolved_at">Thời gian xử lý</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3 col-lg-2">
+                                <label class="form-label small mb-0">Thứ tự</label>
+                                <select class="form-select form-select-sm" id="escLogSortOrder">
+                                    <option value="desc">Mới nhất trước</option>
+                                    <option value="asc">Cũ nhất trước</option>
+                                </select>
+                            </div>
+                            <div class="col-auto d-flex flex-wrap gap-2">
+                                <button type="button" class="btn btn-sm btn-primary" id="btnEscLogApply"><i class="bi bi-funnel"></i> Áp dụng</button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" id="btnEscLogReload"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-2" id="escLogPagerWrap">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnEscLogPrev" disabled>« Trước</button>
+                            <span class="small text-muted" id="escLogPageInfo">—</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnEscLogNext" disabled>Sau »</button>
+                        </div>
+                        <div id="reviewEscalationLogContainer">Chọn tab để tải.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-logs">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi bi-list-ul me-1"></i> Moderation logs</h5>
+                        <p class="text-muted small">Theo dõi hoạt động duyệt của moderator (duyệt / từ chối truyện &amp; chương). Dùng bộ lọc phía trên (Moderator, ngày) kết hợp các ô dưới — tìm theo id log (số), GUID, lý do từ chối, tiêu đề.</p>
+                        <div class="filter-panel p-3 mb-3">
+                            <h6 class="mb-2 small text-uppercase text-muted">Lọc chi tiết</h6>
+                            <div class="row g-2 align-items-end mb-2">
+                                <div class="col-md-4 col-lg-3">
+                                    <label class="form-label small mb-0">Tìm kiếm</label>
+                                    <input type="text" class="form-control form-control-sm" id="logSearch" placeholder="Lý do, tiêu đề, id log hoặc GUID" autocomplete="off" />
+                                </div>
+                                <div class="col-md-4 col-lg-3">
+                                    <label class="form-label small mb-0">Target ID (GUID story/chapter)</label>
+                                    <input type="text" class="form-control form-control-sm" id="logTargetId" placeholder="Lọc đúng một mục" autocomplete="off" />
+                                </div>
+                                <div class="col-6 col-md-2 col-lg-1">
+                                    <label class="form-label small mb-0">/trang</label>
+                                    <select class="form-select form-select-sm" id="logPageSize">
+                                        <option value="20">20</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-2 col-lg-2">
+                                    <label class="form-label small mb-0">Thời xử lý từ (ms)</label>
+                                    <input type="number" class="form-control form-control-sm" id="logProcessingMinMs" min="0" placeholder="Tối thiểu" />
+                                </div>
+                                <div class="col-6 col-md-2 col-lg-2">
+                                    <label class="form-label small mb-0">Đến (ms)</label>
+                                    <input type="number" class="form-control form-control-sm" id="logProcessingMaxMs" min="0" placeholder="Tối đa" />
+                                </div>
+                            </div>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Sắp xếp</label>
+                                    <select class="form-select form-select-sm" id="logSortBy">
+                                        <option value="created_at">Thời gian</option>
+                                        <option value="processing_time_ms">Thời xử lý (ms)</option>
+                                        <option value="id">Id log</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Thứ tự</label>
+                                    <select class="form-select form-select-sm" id="logSortOrder">
+                                        <option value="desc">Mới nhất / lớn nhất trước</option>
+                                        <option value="asc">Cũ nhất / nhỏ nhất trước</option>
+                                    </select>
+                                </div>
+                                <div class="col-auto d-flex flex-wrap gap-2">
+                                    <button type="button" class="btn btn-sm btn-primary" id="btnLogApply"><i class="bi bi-funnel"></i> Áp dụng</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="btnLogReload"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-2" id="logsPagerWrap">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnLogPrev" disabled>« Trước</button>
+                            <span class="small text-muted" id="logPageInfo">—</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnLogNext" disabled>Sau »</button>
+                        </div>
+                        <div id="moderationLogsContainer">Chọn tab để tải.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-performance">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi bi-bar-chart me-1"></i> Moderator Performance</h5>
+                        <p class="text-muted small">Thống kê từ <code>moderation_logs</code> (duyệt / từ chối). Dùng <strong>Moderator</strong> và <strong>Từ/Đến ngày</strong> phía trên; bổ sung tìm kiếm, loại đích, tổng tối thiểu, sắp xếp và phân trang bên dưới. Cột Story/Chapter: số lần duyệt/từ chối theo loại nội dung (trong khoảng lọc).</p>
+                        <div class="filter-panel p-3 mb-3">
+                            <div class="row g-2 align-items-end mb-2">
+                                <div class="col-md-4 col-lg-3">
+                                    <label class="form-label small mb-0">Tìm kiếm (tên / email / GUID)</label>
+                                    <input type="text" class="form-control form-control-sm" id="perfSearch" placeholder="Nickname, email hoặc moderator id" autocomplete="off" />
+                                </div>
+                                <div class="col-6 col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Loại log</label>
+                                    <select class="form-select form-select-sm" id="perfTargetType">
+                                        <option value="">Tất cả</option>
+                                        <option value="STORY">Chỉ truyện</option>
+                                        <option value="CHAPTER">Chỉ chương</option>
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Tổng tối thiểu</label>
+                                    <input type="number" class="form-control form-control-sm" id="perfMinTotal" min="0" step="1" placeholder="0" />
+                                </div>
+                                <div class="col-6 col-md-2 col-lg-1">
+                                    <label class="form-label small mb-0">/trang</label>
+                                    <select class="form-select form-select-sm" id="perfPageSize">
+                                        <option value="20">20</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Sắp xếp</label>
+                                    <select class="form-select form-select-sm" id="perfSortBy">
+                                        <option value="total">Tổng hành động</option>
+                                        <option value="approved">Đã duyệt</option>
+                                        <option value="rejected">Từ chối</option>
+                                        <option value="reject_ratio">Tỷ lệ từ chối</option>
+                                        <option value="story_approved">Duyệt truyện</option>
+                                        <option value="chapter_approved">Duyệt chương</option>
+                                        <option value="name">Tên moderator</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Thứ tự</label>
+                                    <select class="form-select form-select-sm" id="perfSortOrder">
+                                        <option value="desc">Cao → thấp</option>
+                                        <option value="asc">Thấp → cao</option>
+                                    </select>
+                                </div>
+                                <div class="col-auto d-flex flex-wrap gap-2">
+                                    <button type="button" class="btn btn-sm btn-primary" id="btnPerfApply"><i class="bi bi-funnel"></i> Áp dụng</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="btnPerfReload"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnPerfPrev" disabled>« Trước</button>
+                            <span class="small text-muted" id="perfPageInfo">—</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnPerfNext" disabled>Sau »</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered table-performance align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Moderator</th>
+                                        <th>Approved</th>
+                                        <th>Rejected</th>
+                                        <th>Total</th>
+                                        <th>% Từ chối</th>
+                                        <th>Truyện (duyệt / từ)</th>
+                                        <th>Chương (duyệt / từ)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="performanceTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-compliance-logs">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi bi-clipboard2-data me-1"></i> Compliance logs</h5>
+                        <p class="text-muted small">Theo dõi hoạt động của <strong>Compliance</strong>: resolve report + gửi đơn admin + gửi yêu cầu gỡ lock.</p>
+                        <div class="filter-panel p-3 mb-3">
+                            <div class="row g-2 align-items-end mb-2">
+                                <div class="col-md-4 col-lg-3">
+                                    <label class="form-label small mb-0">Tìm kiếm</label>
+                                    <input type="text" class="form-control form-control-sm" id="compLogSearch" placeholder="Nội dung / action / status hoặc GUID" autocomplete="off" />
+                                </div>
+                                <div class="col-md-4 col-lg-3">
+                                    <label class="form-label small mb-0">Compliance userId (GUID)</label>
+                                    <input type="text" class="form-control form-control-sm" id="compLogComplianceUserId" placeholder="Lọc đúng 1 compliance (GUID)" autocomplete="off" />
+                                </div>
+                                <div class="col-6 col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Nguồn</label>
+                                    <select class="form-select form-select-sm" id="compLogSource">
+                                        <option value="">Tất cả</option>
+                                        <option value="REPORT_RESOLUTION">Resolve report</option>
+                                        <option value="ADMIN_ACTION_REQUEST">Admin action</option>
+                                        <option value="LOCK_REQUEST">Lock request</option>
+                                    </select>
+                                </div>
+                                <div class="col-6 col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Trạng thái</label>
+                                    <select class="form-select form-select-sm" id="compLogStatus">
+                                        <option value="">Tất cả</option>
+                                        <option value="PENDING">PENDING</option>
+                                        <option value="APPROVED">APPROVED</option>
+                                        <option value="REJECTED">REJECTED</option>
+                                        <option value="RESOLVED">RESOLVED</option>
+                                        <option value="DISMISSED">DISMISSED</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row g-2 align-items-end mb-2">
+                                <div class="col-6 col-md-2 col-lg-1">
+                                    <label class="form-label small mb-0">/trang</label>
+                                    <select class="form-select form-select-sm" id="compLogPageSize">
+                                        <option value="20">20</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Sắp xếp</label>
+                                    <select class="form-select form-select-sm" id="compLogSortBy">
+                                        <option value="created_at">Thời gian</option>
+                                        <option value="source">Nguồn</option>
+                                        <option value="status">Trạng thái</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Thứ tự</label>
+                                    <select class="form-select form-select-sm" id="compLogSortOrder">
+                                        <option value="desc">Mới nhất trước</option>
+                                        <option value="asc">Cũ nhất trước</option>
+                                    </select>
+                                </div>
+                                <div class="col-auto d-flex flex-wrap gap-2">
+                                    <button type="button" class="btn btn-sm btn-primary" id="btnCompLogApply"><i class="bi bi-funnel"></i> Áp dụng</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="btnCompLogReload"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-2" id="compLogsPagerWrap">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnCompLogPrev" disabled>« Trước</button>
+                            <span class="small text-muted" id="compLogPageInfo">—</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnCompLogNext" disabled>Sau »</button>
+                        </div>
+                        <div id="complianceLogsContainer">Chọn tab để tải.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="panel-compliance-performance">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title"><i class="bi bi-bar-chart me-1"></i> Compliance Performance</h5>
+                        <p class="text-muted small">Thống kê hiệu suất compliance (resolve report + gửi đơn admin + lock request). Dùng <strong>Từ/Đến ngày</strong> phía trên; bổ sung tìm kiếm và sắp xếp bên dưới.</p>
+                        <div class="filter-panel p-3 mb-3">
+                            <div class="row g-2 align-items-end mb-2">
+                                <div class="col-md-4 col-lg-3">
+                                    <label class="form-label small mb-0">Tìm kiếm (tên / email / GUID)</label>
+                                    <input type="text" class="form-control form-control-sm" id="compPerfSearch" placeholder="Nickname, email hoặc compliance id" autocomplete="off" />
+                                </div>
+                                <div class="col-6 col-md-2 col-lg-1">
+                                    <label class="form-label small mb-0">/trang</label>
+                                    <select class="form-select form-select-sm" id="compPerfPageSize">
+                                        <option value="20">20</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Sắp xếp</label>
+                                    <select class="form-select form-select-sm" id="compPerfSortBy">
+                                        <option value="total">Tổng</option>
+                                        <option value="resolved">Resolved</option>
+                                        <option value="dismissed">Dismissed</option>
+                                        <option value="admin_actions">Admin actions</option>
+                                        <option value="lock_requests">Lock requests</option>
+                                        <option value="name">Tên compliance</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 col-lg-2">
+                                    <label class="form-label small mb-0">Thứ tự</label>
+                                    <select class="form-select form-select-sm" id="compPerfSortOrder">
+                                        <option value="desc">Cao → thấp</option>
+                                        <option value="asc">Thấp → cao</option>
+                                    </select>
+                                </div>
+                                <div class="col-auto d-flex flex-wrap gap-2">
+                                    <button type="button" class="btn btn-sm btn-primary" id="btnCompPerfApply"><i class="bi bi-funnel"></i> Áp dụng</button>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" id="btnCompPerfReload"><i class="bi bi-arrow-clockwise"></i> Tải lại</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnCompPerfPrev" disabled>« Trước</button>
+                            <span class="small text-muted" id="compPerfPageInfo">—</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="btnCompPerfNext" disabled>Sau »</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-bordered table-performance align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Compliance</th>
+                                        <th>Resolved</th>
+                                        <th>Dismissed</th>
+                                        <th>Admin actions</th>
+                                        <th>Lock requests</th>
+                                        <th>Truyện (resolved)</th>
+                                        <th>Bình luận (resolved)</th>
+                                        <th>Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="compliancePerformanceTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="tab-pane fade" id="panel-platform-wallet">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <h5 class="mb-0"><i class="bi bi-wallet2"></i> Ví hệ thống (platform_wallet)</h5>
+                            <div class="text-muted small">Coin dùng để chia nền tảng (30%) khi unlock chapter.</div>
+                        </div>
+
+                        <div id="platformWalletError" class="alert alert-warning d-none" role="alert"></div>
+
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-4">
+                                <div class="card border-primary h-100">
+                                    <div class="card-body">
+                                        <div class="text-muted small mb-1">Số dư ví hệ thống (coin)</div>
+                                        <div class="fs-4 fw-bold" id="platformWalletBalanceCoin">0</div>
+                                        <div class="text-muted small mt-1" id="platformWalletUpdatedAt"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card border-success h-100">
+                                    <div class="card-body">
+                                        <div class="text-muted small mb-1">Tổng coin trong hệ thống</div>
+                                        <div class="fs-4 fw-bold" id="platformWalletTotalCoinsInSystem">0</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card border-warning h-100">
+                                    <div class="card-body">
+                                        <div class="text-muted small mb-1">Platform fee revenue (ước tính)</div>
+                                        <div class="fs-4 fw-bold" id="platformWalletPlatformFeeCoins">0</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="filter-panel p-3 mb-4">
+                            <h6 class="mb-3"><i class="bi bi-gear"></i> Điều chỉnh số dư (ADMIN)</h6>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-0">Số coin</label>
+                                    <input type="number" class="form-control form-control-sm" id="platformWalletAdjustAmount" min="1" step="1" placeholder="Ví dụ: 1000">
+                                    <div class="mt-2">
+                                        <label class="form-label small mb-0">Ví người dùng (userId/email/nickname)</label>
+                                        <input type="text" class="form-control form-control-sm" id="platformWalletAdjustTarget" placeholder="vd: userId hoặc email">
+                                    </div>
+                                    <div class="mt-2">
+                                        <label class="form-label small mb-0">Lý do điều chỉnh (note)</label>
+                                        <input type="text" class="form-control form-control-sm" id="platformWalletAdjustNote" placeholder="vd: Bù trừ admin">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label small mb-0">Hành động</label>
+                                    <select class="form-select form-select-sm" id="platformWalletAdjustDirection">
+                                        <option value="ADD">ADD (cộng)</option>
+                                        <option value="SUB" selected>SUB (trừ)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 d-grid">
+                                    <button type="button" class="btn btn-primary btn-sm" id="btnPlatformWalletApply">
+                                        <i class="bi bi-check2-circle"></i> Áp dụng
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="text-muted small mt-2">
+                                Lưu ý: Không cho phép trừ khiến số dư âm.
+                            </div>
+                        </div>
+
+                        <div class="filter-panel p-3 mb-3">
+                            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                                <h6 class="mb-0"><i class="bi bi-funnel"></i> Lọc lịch sử</h6>
+                                <div class="text-muted small" id="platformWalletFilterSummary">–</div>
+                            </div>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Từ ngày</label>
+                                    <input type="date" class="form-control form-control-sm" id="platformWalletFilterDateFrom">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Đến ngày</label>
+                                    <input type="date" class="form-control form-control-sm" id="platformWalletFilterDateTo">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Loại</label>
+                                    <select class="form-select form-select-sm" id="platformWalletFilterType">
+                                        <option value="ALL" selected>Tất cả</option>
+                                        <option value="ADD">ADD</option>
+                                        <option value="SUB">SUB</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Tìm note</label>
+                                    <input type="text" class="form-control form-control-sm" id="platformWalletFilterQ" placeholder="Nhập từ khóa...">
+                                </div>
+                                <div class="col-md-3 d-grid">
+                                    <button type="button" class="btn btn-primary btn-sm" id="btnPlatformWalletFilterApply">
+                                        <i class="bi bi-check2-circle"></i> Áp dụng
+                                    </button>
+                                </div>
+                                <div class="col-md-3 d-grid">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" id="btnPlatformWalletFilterClear">
+                                        <i class="bi bi-x-circle"></i> Xóa
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card border-0 shadow-sm">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+                                    <h6 class="mb-0"><i class="bi bi-clock-history"></i> Gần đây</h6>
+                                    <div class="text-muted small" id="platformWalletAdjustMeta"></div>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Thời gian</th>
+                                                <th>Loại</th>
+                                                <th>Coins</th>
+                                                <th>Lý do</th>
+                                                <th>UserId</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="platformWalletAdjustmentsBody">
+                                            <tr><td colspan="5" class="text-center text-muted">Đang tải...</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <div class="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnPlatformWalletHistoryPrev">
+                                        <i class="bi bi-arrow-left"></i> Trước
+                                    </button>
+                                    <div class="text-muted small" id="platformWalletHistoryPageMeta">Trang 1 / 1</div>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnPlatformWalletHistoryNext">
+                                        Sau <i class="bi bi-arrow-right"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="panel-system-coin-ledger">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <h5 class="mb-0"><i class="bi bi-list-ul"></i> Nhật ký tiền hệ thống</h5>
+                            <div class="text-muted small">Unlock / platform adj / withdraw</div>
+                        </div>
+
+                        <div class="filter-panel p-3 mb-3">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Từ ngày</label>
+                                    <input type="date" class="form-control form-control-sm" id="sysLedgerDateFrom">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Đến ngày</label>
+                                    <input type="date" class="form-control form-control-sm" id="sysLedgerDateTo">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label small mb-0">Loại</label>
+                                    <select class="form-select form-select-sm" id="sysLedgerType">
+                                        <option value="ALL" selected>Tất cả</option>
+                                        <option value="UNLOCK">UNLOCK</option>
+                                        <option value="PLATFORM_ADJ">PLATFORM_ADJ</option>
+                                        <option value="WITHDRAW_REQUESTED">WITHDRAW_REQUESTED</option>
+                                        <option value="WITHDRAW_APPROVED">WITHDRAW_APPROVED</option>
+                                        <option value="WITHDRAW_REJECTED">WITHDRAW_REJECTED</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 d-grid">
+                                    <button type="button" class="btn btn-primary btn-sm" id="btnSysLedgerApply">
+                                        <i class="bi bi-check2-circle"></i> Áp dụng
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="sysLedgerLoading" class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status"></div>
+                            <div class="mt-2 text-muted small">Đang tải...</div>
+                        </div>
+
+                        <div id="sysLedgerError" class="alert alert-warning d-none" role="alert"></div>
+
+                        <div id="sysLedgerContent" style="display:none;">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>Thời gian</th>
+                                            <th>Loại</th>
+                                            <th>Platform</th>
+                                            <th>Buyer</th>
+                                            <th>BuyerId</th>
+                                            <th>Author income</th>
+                                            <th>Author frozen</th>
+                                            <th>AuthorId</th>
+                                            <th>Story/Chapter</th>
+                                            <th>Note</th>
+                                            <th>AdminId</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="sysLedgerList"></tbody>
+                                </table>
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center mt-2 flex-wrap gap-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSysLedgerPrev">
+                                    <i class="bi bi-arrow-left"></i> Trước
+                                </button>
+                                <div class="text-muted small" id="sysLedgerMeta">Trang 1 / 1</div>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSysLedgerNext">
+                                    Sau <i class="bi bi-arrow-right"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Xử lý đơn escalation moderator -->
+        <div class="modal fade" id="resolveEscalationModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-shield-check text-primary"></i> Xử lý đơn moderator (escalation)</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="resolveEscalationSummary" class="small mb-3"></div>
+                        <div id="resolveEscExtendWrap" class="mb-3" style="display: none;">
+                            <label class="form-label small">Hạn duyệt sau khi chấp nhận (để trống = dùng hạn moderator đề xuất)</label>
+                            <input type="datetime-local" class="form-control form-control-sm" id="resolveEscConfirmedDeadline">
+                        </div>
+                        <div id="resolveEscReleaseWrap" class="mb-3" style="display: none;">
+                            <p class="small text-muted mb-2">Sau khi chấp nhận &quot;Hủy nhận duyệt&quot;, chọn cách xử lý:</p>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="resolveEscReleaseMode" id="resolveEscReleaseModeQueue" value="queue" checked>
+                                <label class="form-check-label small" for="resolveEscReleaseModeQueue">Trả về hàng đợi — chưa ai nhận, moderator khác có thể tự nhận</label>
+                            </div>
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="radio" name="resolveEscReleaseMode" id="resolveEscReleaseModeAssign" value="assign">
+                                <label class="form-check-label small" for="resolveEscReleaseModeAssign">Giao trực tiếp cho moderator khác — lock lại truyện/chương và đặt hạn duyệt</label>
+                            </div>
+                            <div id="resolveEscReleaseAssignFields" style="display: none;">
+                                <p id="resolveEscAuthorHint" class="small text-info mb-2" style="display: none;"></p>
+                                <label class="form-label small mb-0">Moderator nhận duyệt (sắp xếp: ít đơn đang nhận → nhiều)</label>
+                                <p class="small text-muted mb-1">Số đơn = số mục đang nhận duyệt (CLAIMED) để chọn người nhẹ tải.</p>
+                                <select class="form-select form-select-sm mb-2" id="resolveEscReassignUser"></select>
+                                <label class="form-label small">Hạn duyệt — không được trước thời điểm tác giả gửi; đồng thời sau ít nhất 24 giờ kể từ hiện tại (cùng quy ước như nhận duyệt)</label>
+                                <input type="datetime-local" class="form-control form-control-sm" id="resolveEscReleaseDeadline">
+                            </div>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label small">Ghi chú admin</label>
+                            <textarea class="form-control form-control-sm" id="resolveEscAdminNote" rows="3" placeholder="Tùy chọn; nên ghi khi từ chối."></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                        <button type="button" class="btn btn-danger" id="btnRejectEscalation">Từ chối yêu cầu</button>
+                        <button type="button" class="btn btn-success" id="btnApproveEscalation">Chấp nhận &amp; thực hiện</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Xử lý đơn escalation compliance (gỡ / giao lại lock báo cáo truyện) -->
+        <div class="modal fade" id="aclResolveModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Xử lý đơn compliance</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <input type="hidden" id="aclResolveRequestId" />
+                        <div class="mb-2 small text-muted" id="aclResolveSummary"></div>
+                        <div class="mb-3">
+                            <label class="form-label">Quyết định</label>
+                            <select class="form-select" id="aclDecision">
+                                <option value="APPROVE_UNLOCK">Duyệt: gỡ lock (về hàng đợi)</option>
+                                <option value="APPROVE_REASSIGN">Duyệt: giao cho compliance khác</option>
+                                <option value="REJECT">Từ chối yêu cầu</option>
+                            </select>
+                        </div>
+                        <div class="mb-3" id="aclReassignWrap" style="display:none;">
+                            <label class="form-label">Compliance nhận (không được là người gửi)</label>
+                            <select class="form-select" id="aclNewAssignee"></select>
+                            <label class="form-label mt-2">Hạn xử lý giao lại (UTC, datetime-local)</label>
+                            <input type="datetime-local" class="form-control" id="aclDeadline" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Ghi chú admin</label>
+                            <textarea class="form-control" id="aclAdminNote" rows="2" placeholder="Tùy chọn"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                        <button type="button" class="btn btn-primary" id="aclResolveSubmit">Xác nhận</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="caaResolveModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Xử lý yêu cầu ban / tạm khóa viết</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <input type="hidden" id="caaResolveRequestId" />
+                        <input type="hidden" id="caaResolveKind" />
+                        <div class="small text-muted mb-2" id="caaResolveSummary"></div>
+                        <div class="mb-2" id="caaSuspendWrap" style="display:none;">
+                            <label class="form-label small">Khóa viết đến (local → UTC khi gửi)</label>
+                            <input type="datetime-local" class="form-control form-control-sm" id="caaSuspendUntilLocal" />
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small">Quyết định</label>
+                            <select class="form-select form-select-sm" id="caaDecision">
+                                <option value="APPROVE">Chấp nhận thực hiện</option>
+                                <option value="REJECT">Từ chối</option>
+                            </select>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label small">Ghi chú admin</label>
+                            <textarea class="form-control form-control-sm" id="caaAdminNote" rows="2"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Hủy</button>
+                        <button type="button" class="btn btn-primary btn-sm" id="caaResolveSubmit">Xác nhận</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        (function() {
+            if (typeof AuthHelper === 'undefined' || !AuthHelper.isAdmin()) {
+                document.getElementById('adminRequireRole').style.display = 'block';
+                return;
+            }
+            document.getElementById('adminContent').style.display = 'block';
+
+            function getFilterParams() {
+                var mod = document.getElementById('filterModerator');
+                var fromEl = document.getElementById('filterDateFrom');
+                var toEl = document.getElementById('filterDateTo');
+                var from = fromEl && fromEl.value ? fromEl.value.trim() : '';
+                var to = toEl && toEl.value ? toEl.value.trim() : '';
+                var o = { page: 1, pageSize: 20 };
+                if (mod && mod.value) o.moderatorId = mod.value;
+                if (from) o.dateFrom = from;
+                if (to) o.dateTo = to;
+                return o;
+            }
+
+            function getLogsFilterParams(page) {
+                var p = getFilterParams();
+                p.page = page || 1;
+                var psEl = document.getElementById('logPageSize');
+                p.pageSize = psEl ? (parseInt(psEl.value, 10) || 20) : 20;
+                var actionEl = document.getElementById('filterAction');
+                var typeEl = document.getElementById('filterTargetType');
+                if (actionEl && actionEl.value) p.action = actionEl.value;
+                if (typeEl && typeEl.value) p.targetType = typeEl.value;
+                var searchEl = document.getElementById('logSearch');
+                if (searchEl && searchEl.value.trim()) p.search = searchEl.value.trim();
+                var tidEl = document.getElementById('logTargetId');
+                if (tidEl && tidEl.value.trim()) p.targetId = tidEl.value.trim();
+                var minEl = document.getElementById('logProcessingMinMs');
+                if (minEl && minEl.value !== '') {
+                    var vmin = parseInt(minEl.value, 10);
+                    if (!isNaN(vmin)) p.processingTimeMinMs = vmin;
+                }
+                var maxEl = document.getElementById('logProcessingMaxMs');
+                if (maxEl && maxEl.value !== '') {
+                    var vmax = parseInt(maxEl.value, 10);
+                    if (!isNaN(vmax)) p.processingTimeMaxMs = vmax;
+                }
+                var sortByEl = document.getElementById('logSortBy');
+                if (sortByEl && sortByEl.value) p.sortBy = sortByEl.value;
+                var sortOrdEl = document.getElementById('logSortOrder');
+                if (sortOrdEl && sortOrdEl.value) p.sortOrder = sortOrdEl.value;
+                return p;
+            }
+
+            function reloadActiveTab() {
+                var activePane = document.querySelector('#adminTabContent .tab-pane.active');
+                if (!activePane) return;
+                var id = activePane.id;
+                if (id === 'panel-content-review') loadUnifiedContentReview(1);
+                else if (id === 'panel-review-escalations') reloadActiveAdminEscalationSubTab();
+                else if (id === 'panel-review-escalation-log') loadReviewEscalationLog();
+                else if (id === 'panel-logs') loadModerationLogs(1);
+                else if (id === 'panel-performance') loadModeratorPerformance(1);
+                else if (id === 'panel-compliance-logs') loadComplianceLogs(1);
+                else if (id === 'panel-compliance-performance') loadCompliancePerformance(1);
+                else if (id === 'panel-platform-wallet') loadPlatformWallet();
+            }
+
+            function reloadActiveAdminEscalationSubTab() {
+                loadReviewEscalations();
+            }
+
+            function timeStatusBadge(ts) {
+                if (!ts) return '';
+                var c = 'badge-time-on';
+                if (ts === 'Warning') c = 'badge-time-warning';
+                else if (ts === 'Critical' || ts === 'Overdue') c = 'badge-time-overdue';
+                var t = ts === 'OnTime' ? 'Mới gửi' : (ts === 'Warning' ? 'Chờ khá lâu' : (ts === 'Critical' ? 'Chờ lâu' : (ts === 'Overdue' ? 'Chờ quá lâu' : ts)));
+                return '<span class="badge ' + c + '">' + t + '</span>';
+            }
+
+            function formatDate(d) {
+                if (!d) return '–';
+                var s = String(d).trim();
+                if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) && !/[zZ]$/.test(s) && !/[+-]\d{2}/.test(s))
+                    s = s.replace(' ', 'T');
+                if (/^\d{4}-\d{2}-\d{2}T/.test(s) && !/[zZ]$/.test(s) && !/[+-][0-9]{2}/.test(s))
+                    s += 'Z';
+                var x = new Date(s);
+                return isNaN(x.getTime()) ? d : x.toLocaleString('vi-VN');
+            }
+
+            function adminDatetimeLocalToIsoUtc(localVal) {
+                if (typeof Utils !== 'undefined' && Utils.datetimeLocalToIsoUtc)
+                    return Utils.datetimeLocalToIsoUtc(localVal) || null;
+                if (!localVal) return null;
+                var m = String(localVal).trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+                if (!m) return null;
+                var dt = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], m[6] != null ? +m[6] : 0, 0);
+                if (isNaN(dt.getTime())) return null;
+                return dt.toISOString();
+            }
+
+            function escapeHtml(text) {
+                if (text == null) return '';
+                return String(text)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+
+            var aclOfficersCache = [];
+
+            function aclEscHtml(t) {
+                if (t == null) return '';
+                var d = document.createElement('div');
+                d.textContent = t;
+                return d.innerHTML;
+            }
+
+            function aclToIsoUtcFromLocal(dtLocalVal) {
+                return adminDatetimeLocalToIsoUtc(dtLocalVal);
+            }
+
+            async function ensureComplianceOfficersForModal() {
+                if (aclOfficersCache && aclOfficersCache.length) return;
+                try {
+                    var raw = await ApiService.adminListComplianceOfficersForReports();
+                    aclOfficersCache = Array.isArray(raw) ? raw : [];
+                } catch (e) {
+                    aclOfficersCache = [];
+                }
+            }
+
+            function aclFillReassignSelect(excludeRequesterId) {
+                var sel = document.getElementById('aclNewAssignee');
+                if (!sel) return;
+                sel.innerHTML = '<option value="">— Chọn —</option>';
+                (aclOfficersCache || []).forEach(function (o) {
+                    var id = String(o.userId || o.UserId);
+                    if (excludeRequesterId && id === String(excludeRequesterId)) return;
+                    var name = o.displayName || o.DisplayName || id;
+                    var n = o.openStoryReportLocks != null ? o.openStoryReportLocks : o.OpenStoryReportLocks;
+                    var opt = document.createElement('option');
+                    opt.value = id;
+                    opt.textContent = name + ' (đang giữ ' + n + ' lock)';
+                    sel.appendChild(opt);
+                });
+            }
+
+            function applyAdminEscalationDeepLink() {
+                try {
+                    var p = new URLSearchParams(window.location.search);
+                    if (p.get('esc') !== 'compliance') return;
+                    var mainTab = document.getElementById('tab-review-escalations');
+                    if (!mainTab) return;
+                    bootstrap.Tab.getOrCreateInstance(mainTab).show();
+                } catch (e) { console.warn(e); }
+            }
+
+            var perfPage = 1;
+
+            function getPerformanceParams(page) {
+                var p = getFilterParams();
+                p.page = page || 1;
+                var psEl = document.getElementById('perfPageSize');
+                p.pageSize = psEl ? (parseInt(psEl.value, 10) || 20) : 20;
+                var searchEl = document.getElementById('perfSearch');
+                if (searchEl && searchEl.value.trim()) p.search = searchEl.value.trim();
+                var ttEl = document.getElementById('perfTargetType');
+                if (ttEl && ttEl.value) p.targetType = ttEl.value;
+                var minEl = document.getElementById('perfMinTotal');
+                if (minEl && minEl.value !== '') {
+                    var mv = parseInt(minEl.value, 10);
+                    if (!isNaN(mv)) p.minTotalActions = mv;
+                }
+                var sb = document.getElementById('perfSortBy');
+                if (sb && sb.value) p.sortBy = sb.value;
+                var so = document.getElementById('perfSortOrder');
+                if (so && so.value) p.sortOrder = so.value;
+                return p;
+            }
+
+            async function loadModeratorFilterDropdown() {
+                var modSelect = document.getElementById('filterModerator');
+                if (!modSelect) return;
+                try {
+                    var r = await ApiService.adminGetModeratorsForAssignment();
+                    var items = r && r.items ? r.items : [];
+                    var opts = modSelect.querySelectorAll('option');
+                    for (var i = opts.length - 1; i >= 1; i--) opts[i].remove();
+                    items.forEach(function (m) {
+                        var opt = document.createElement('option');
+                        opt.value = m.id;
+                        var cnt = (m.claimedAssignmentCount !== undefined && m.claimedAssignmentCount !== null) ? m.claimedAssignmentCount : 0;
+                        opt.textContent = (m.displayName || m.id) + ' (' + cnt + ' đơn đang nhận)';
+                        modSelect.appendChild(opt);
+                    });
+                } catch (e) { /* ignore */ }
+            }
+
+            async function loadModeratorPerformance(optPage) {
+                if (typeof optPage === 'number' && optPage >= 1) perfPage = optPage;
+                var el = document.getElementById('performanceTableBody');
+                var prev = document.getElementById('btnPerfPrev');
+                var next = document.getElementById('btnPerfNext');
+                var info = document.getElementById('perfPageInfo');
+                if (!el) return;
+                el.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Đang tải...</td></tr>';
+                var params = getPerformanceParams(perfPage);
+                try {
+                    var r = await ApiService.adminGetModeratorPerformance(params);
+                    var list = r && r.items ? r.items : [];
+                    var total = (r && r.totalCount !== undefined) ? r.totalCount : 0;
+                    var pageNum = (r && r.page !== undefined) ? r.page : perfPage;
+                    var pageSize = (r && r.pageSize !== undefined) ? r.pageSize : (params.pageSize || 20);
+                    var totalPages = (r && r.totalPages !== undefined) ? r.totalPages : Math.max(1, Math.ceil(total / (pageSize || 20)));
+                    perfPage = pageNum;
+                    if (info) info.textContent = 'Trang ' + pageNum + ' / ' + totalPages + ' · Tổng ' + total + ' moderator';
+                    var hasPrev = (r && r.hasPreviousPage !== undefined) ? r.hasPreviousPage : pageNum > 1;
+                    var hasNext = (r && r.hasNextPage !== undefined) ? r.hasNextPage : pageNum < totalPages;
+                    if (prev) prev.disabled = !hasPrev;
+                    if (next) next.disabled = !hasNext;
+                    if (!list || list.length === 0) {
+                        el.innerHTML = '<tr><td colspan="7" class="text-muted">Không có dữ liệu khớp bộ lọc.</td></tr>';
+                        return;
+                    }
+                    function pctReject(p) {
+                        if (p.rejectRatio != null && p.rejectRatio !== undefined) return (p.rejectRatio * 100).toFixed(1) + '%';
+                        return '–';
+                    }
+                    el.innerHTML = list.map(function (p) {
+                        var sa = p.storyApprovedCount != null ? p.storyApprovedCount : 0;
+                        var sr = p.storyRejectedCount != null ? p.storyRejectedCount : 0;
+                        var ca = p.chapterApprovedCount != null ? p.chapterApprovedCount : 0;
+                        var cr = p.chapterRejectedCount != null ? p.chapterRejectedCount : 0;
+                        return '<tr><td>' + escapeHtml(p.moderatorName || p.moderatorId) + '</td><td>' + p.approvedCount + '</td><td>' + p.rejectedCount + '</td><td>' + (p.total != null ? p.total : (p.approvedCount + p.rejectedCount)) + '</td><td>' + pctReject(p) + '</td><td class="small">' + sa + ' / ' + sr + '</td><td class="small">' + ca + ' / ' + cr + '</td></tr>';
+                    }).join('');
+                } catch (e) {
+                    el.innerHTML = '<tr><td colspan="7" class="text-danger">Lỗi: ' + escapeHtml(e.message || String(e)) + '</td></tr>';
+                    if (prev) prev.disabled = true;
+                    if (next) next.disabled = true;
+                    if (info) info.textContent = '—';
+                }
+            }
+
+            // =============================
+            // Compliance Logs / Performance
+            // =============================
+            var compLogsPage = 1;
+            var compPerfPage = 1;
+
+            function getComplianceDateRange() {
+                var fromEl = document.getElementById('filterDateFrom');
+                var toEl = document.getElementById('filterDateTo');
+                var from = fromEl && fromEl.value ? fromEl.value.trim() : '';
+                var to = toEl && toEl.value ? toEl.value.trim() : '';
+                return { from, to };
+            }
+
+            function getComplianceLogsParams(page) {
+                var p = { page: page || 1 };
+                var psEl = document.getElementById('compLogPageSize');
+                p.pageSize = psEl ? (parseInt(psEl.value, 10) || 20) : 20;
+
+                var dr = getComplianceDateRange();
+                if (dr.from) p.dateFrom = dr.from;
+                if (dr.to) p.dateTo = dr.to;
+
+                var searchEl = document.getElementById('compLogSearch');
+                if (searchEl && searchEl.value.trim()) p.search = searchEl.value.trim();
+
+                var cuEl = document.getElementById('compLogComplianceUserId');
+                if (cuEl && cuEl.value.trim()) p.complianceUserId = cuEl.value.trim();
+
+                var srcEl = document.getElementById('compLogSource');
+                if (srcEl && srcEl.value) p.source = srcEl.value;
+
+                var stEl = document.getElementById('compLogStatus');
+                if (stEl && stEl.value) p.status = stEl.value;
+
+                var sbEl = document.getElementById('compLogSortBy');
+                if (sbEl && sbEl.value) p.sortBy = sbEl.value;
+
+                var soEl = document.getElementById('compLogSortOrder');
+                if (soEl && soEl.value) p.sortOrder = soEl.value;
+
+                return p;
+            }
+
+            function compSourceLabel(src) {
+                src = src || '';
+                if (src === 'REPORT_RESOLUTION') return 'Resolve report';
+                if (src === 'ADMIN_ACTION_REQUEST') return 'Admin action';
+                if (src === 'LOCK_REQUEST') return 'Lock request';
+                return src || '–';
+            }
+
+            function compStatusBadge(st) {
+                st = st || '';
+                if (st === 'RESOLVED') return '<span class="badge bg-success">RESOLVED</span>';
+                if (st === 'DISMISSED') return '<span class="badge bg-secondary">DISMISSED</span>';
+                if (st === 'APPROVED') return '<span class="badge bg-success">APPROVED</span>';
+                if (st === 'REJECTED') return '<span class="badge bg-danger">REJECTED</span>';
+                if (st === 'PENDING') return '<span class="badge bg-warning text-dark">PENDING</span>';
+                return '<span class="badge bg-light text-dark">' + escapeHtml(st || '–') + '</span>';
+            }
+
+            async function loadComplianceLogs(optPage) {
+                if (typeof optPage === 'number' && optPage >= 1) compLogsPage = optPage;
+                var c = document.getElementById('complianceLogsContainer');
+                if (!c) return;
+                var prev = document.getElementById('btnCompLogPrev');
+                var next = document.getElementById('btnCompLogNext');
+                var info = document.getElementById('compLogPageInfo');
+
+                c.innerHTML = '<p class="text-muted mb-0">Đang tải...</p>';
+                var params = getComplianceLogsParams(compLogsPage);
+
+                try {
+                    var r = await ApiService.adminGetComplianceLogs(params);
+                    var items = (r && (r.items || r.Items)) ? (r.items || r.Items) : [];
+                    var total = (r && (r.totalCount !== undefined ? r.totalCount : r.TotalCount)) !== undefined
+                        ? (r.totalCount !== undefined ? r.totalCount : r.TotalCount) : 0;
+                    var pageNum = (r && (r.page !== undefined ? r.page : compLogsPage));
+                    var pageSize = (r && (r.pageSize !== undefined ? r.pageSize : params.pageSize));
+
+                    var totalPages = (r && r.totalPages !== undefined)
+                        ? r.totalPages
+                        : (pageSize > 0 ? Math.ceil(total / pageSize) : 1);
+                    if (totalPages < 1) totalPages = 1;
+                    if (info) info.textContent = 'Trang ' + pageNum + ' / ' + totalPages + ' · Tổng ' + total + ' bản ghi';
+
+                    var hasPrev = (r && r.hasPreviousPage !== undefined) ? r.hasPreviousPage : pageNum > 1;
+                    var hasNext = (r && r.hasNextPage !== undefined) ? r.hasNextPage : pageNum < totalPages;
+                    if (prev) prev.disabled = !hasPrev;
+                    if (next) next.disabled = !hasNext;
+
+                    if (!items || items.length === 0) {
+                        c.innerHTML = '<p class="text-muted mb-0">Không có log khớp bộ lọc.</p>';
+                        return;
+                    }
+
+                    c.innerHTML = '<div class="table-responsive"><table class="table table-sm table-bordered align-middle"><thead><tr>' +
+                        '<th>Id</th><th>Thời gian</th><th>Nguồn</th><th>Trạng thái</th><th>Đích</th><th>Loại/Hành động</th><th>Nội dung</th>' +
+                        '</tr></thead><tbody>' +
+                        items.map(function (x) {
+                            var src = x.source != null ? x.source : x.Source;
+                            var status = x.status != null ? x.status : x.Status;
+                            var action = x.action != null ? x.action : x.Action;
+                            var msg = x.message != null ? x.message : x.Message;
+                            var targetType = x.targetType != null ? x.targetType : x.TargetType;
+                            var targetId = x.targetId != null ? x.targetId : x.TargetId;
+                            var rowId = x.rowId != null ? x.rowId : x.RowId;
+                            var createdAt = x.createdAtUtc != null ? x.createdAtUtc : x.CreatedAtUtc;
+                            if (createdAt == null) createdAt = x.resolvedAtUtc != null ? x.resolvedAtUtc : x.CreatedAtUtc;
+                            var tLabel = (targetType ? String(targetType) : '–') + (targetId ? ('/' + String(targetId)) : '');
+                            var summary = msg ? String(msg) : '';
+                            if (summary.length > 160) summary = summary.substring(0, 160) + '…';
+                            return '<tr>' +
+                                '<td class="small text-muted">' + escapeHtml(String(rowId || '')) + '</td>' +
+                                '<td class="small">' + formatDate(createdAt) + '</td>' +
+                                '<td class="small">' + escapeHtml(compSourceLabel(src)) + '</td>' +
+                                '<td class="small">' + compStatusBadge(status) + '</td>' +
+                                '<td class="small">' + escapeHtml(String(tLabel)) + '</td>' +
+                                '<td class="small">' + escapeHtml(String(action || '–')) + '</td>' +
+                                '<td class="small" style="max-width:240px;">' + escapeHtml(summary || '–') + '</td>' +
+                                '</tr>';
+                        }).join('') +
+                        '</tbody></table></div>';
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger mb-0">Lỗi: ' + escapeHtml(e.message || String(e)) + '</p>';
+                    if (prev) prev.disabled = true;
+                    if (next) next.disabled = true;
+                    if (info) info.textContent = '—';
+                }
+            }
+
+            function getCompliancePerformanceParams(page) {
+                var p = { page: page || 1 };
+                var psEl = document.getElementById('compPerfPageSize');
+                p.pageSize = psEl ? (parseInt(psEl.value, 10) || 20) : 20;
+
+                var dr = getComplianceDateRange();
+                if (dr.from) p.dateFrom = dr.from;
+                if (dr.to) p.dateTo = dr.to;
+
+                var searchEl = document.getElementById('compPerfSearch');
+                if (searchEl && searchEl.value.trim()) p.search = searchEl.value.trim();
+
+                var sbEl = document.getElementById('compPerfSortBy');
+                if (sbEl && sbEl.value) p.sortBy = sbEl.value;
+
+                var soEl = document.getElementById('compPerfSortOrder');
+                if (soEl && soEl.value) p.sortOrder = soEl.value;
+
+                return p;
+            }
+
+            async function loadCompliancePerformance(optPage) {
+                if (typeof optPage === 'number' && optPage >= 1) compPerfPage = optPage;
+                var el = document.getElementById('compliancePerformanceTableBody');
+                var prev = document.getElementById('btnCompPerfPrev');
+                var next = document.getElementById('btnCompPerfNext');
+                var info = document.getElementById('compPerfPageInfo');
+                if (!el) return;
+
+                el.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Đang tải...</td></tr>';
+                var params = getCompliancePerformanceParams(compPerfPage);
+
+                try {
+                    var r = await ApiService.adminGetCompliancePerformance(params);
+                    var list = (r && (r.items || r.Items)) ? (r.items || r.Items) : [];
+                    var total = (r && (r.totalCount !== undefined ? r.totalCount : r.TotalCount)) !== undefined
+                        ? (r.totalCount !== undefined ? r.totalCount : r.TotalCount) : 0;
+                    var pageNum = (r && (r.page !== undefined ? r.page : compPerfPage));
+                    var pageSize = (r && (r.pageSize !== undefined ? r.pageSize : params.pageSize));
+                    var totalPages = (r && r.totalPages !== undefined)
+                        ? r.totalPages
+                        : (pageSize > 0 ? Math.ceil(total / pageSize) : 1);
+                    if (totalPages < 1) totalPages = 1;
+                    compPerfPage = pageNum;
+
+                    if (info) info.textContent = 'Trang ' + pageNum + ' / ' + totalPages + ' · Tổng ' + total + ' compliance';
+
+                    var hasPrev = (r && r.hasPreviousPage !== undefined) ? r.hasPreviousPage : pageNum > 1;
+                    var hasNext = (r && r.hasNextPage !== undefined) ? r.hasNextPage : pageNum < totalPages;
+                    if (prev) prev.disabled = !hasPrev;
+                    if (next) next.disabled = !hasNext;
+
+                    if (!list || list.length === 0) {
+                        el.innerHTML = '<tr><td colspan="8" class="text-muted">Không có dữ liệu khớp bộ lọc.</td></tr>';
+                        return;
+                    }
+
+                    el.innerHTML = list.map(function (p) {
+                        return '<tr>' +
+                            '<td>' + escapeHtml(p.complianceUserName || p.complianceUserId || '–') + '</td>' +
+                            '<td>' + (p.resolvedCount != null ? p.resolvedCount : (p.ResolvedCount || 0)) + '</td>' +
+                            '<td>' + (p.dismissedCount != null ? p.dismissedCount : (p.DismissedCount || 0)) + '</td>' +
+                            '<td>' + (p.adminActionRequestCount != null ? p.adminActionRequestCount : (p.AdminActionRequestCount || 0)) + '</td>' +
+                            '<td>' + (p.lockRequestCount != null ? p.lockRequestCount : (p.LockRequestCount || 0)) + '</td>' +
+                            '<td>' + (p.storyReportResolvedCount != null ? p.storyReportResolvedCount : (p.StoryReportResolvedCount || 0)) + '</td>' +
+                            '<td>' + (p.commentReportResolvedCount != null ? p.commentReportResolvedCount : (p.CommentReportResolvedCount || 0)) + '</td>' +
+                            '<td>' + (p.total != null ? p.total : (p.Total || 0)) + '</td>' +
+                            '</tr>';
+                    }).join('');
+                } catch (e) {
+                    el.innerHTML = '<tr><td colspan="8" class="text-danger">Lỗi: ' + escapeHtml(e.message || String(e)) + '</td></tr>';
+                    if (prev) prev.disabled = true;
+                    if (next) next.disabled = true;
+                    if (info) info.textContent = '—';
+                }
+            }
+
+            var unifiedEscalationPendingCache = [];
+            var escalationTierFilter = '';
+            var escalationListMode = 'pending';
+            var resolveEscalationRow = null;
+            var escalationLogPage = 1;
+
+            function adminEscUrgencyBadge(tier) {
+                if (tier === 'CRITICAL') return '<span class="badge badge-esc-critical">Nghiêm trọng</span>';
+                if (tier === 'HIGH') return '<span class="badge badge-esc-high">Cao</span>';
+                return '<span class="badge badge-esc-standard">Chuẩn</span>';
+            }
+
+            function escHistoryStatusBadge(st) {
+                if (st === 'APPROVED') return '<span class="badge bg-success">Đã chấp nhận</span>';
+                if (st === 'REJECTED') return '<span class="badge bg-secondary">Từ chối</span>';
+                return '<span class="badge bg-light text-dark">' + (st || '–') + '</span>';
+            }
+
+            function isoToDatetimeLocal(iso) {
+                if (!iso) return '';
+                var d = new Date(iso);
+                if (isNaN(d.getTime())) return '';
+                var pad = function (n) { return n.toString().padStart(2, '0'); };
+                return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+            }
+
+            async function loadReviewEscalations() {
+                var c = document.getElementById('reviewEscalationsContainer');
+                if (!c) return;
+                c.innerHTML = '<p class="text-muted mb-0">Đang tải...</p>';
+                try {
+                    if (escalationListMode === 'history') {
+                        unifiedEscalationPendingCache = [];
+                        var rh = await ApiService.adminGetReviewEscalationHistory(0, 200);
+                        var histItems = rh && rh.items ? rh.items : [];
+                        var total = (rh && rh.totalCount !== undefined) ? rh.totalCount : histItems.length;
+                        if (histItems.length === 0) {
+                            c.innerHTML = '<p class="text-muted mb-0">Chưa có đơn nào đã xử lý.</p><p class="small text-muted mb-0">Tổng trong hệ thống: ' + total + '</p>';
+                            return;
+                        }
+                        var rowsH = histItems.map(function (x) {
+                            var kindLabel = x.requestKind === 'EXTEND_DEADLINE' ? 'Gia hạn' : 'Hủy nhận';
+                            var href = x.targetType === 'STORY'
+                                ? ('/Stories/Details/' + x.targetId)
+                                : ('/Moderator/ReviewChapter/' + x.targetId);
+                            var note = (x.resolverNote || '–').replace(/</g, '&lt;');
+                            if (note.length > 160) note = note.substring(0, 160) + '…';
+                            var reason = (x.reason || '').replace(/</g, '&lt;');
+                            if (reason.length > 160) reason = reason.substring(0, 160) + '…';
+                            return '<tr><td>' + escHistoryStatusBadge(x.status) + '</td><td>' + (x.targetType || '') + '</td><td><a href="' + href + '" target="_blank">' + (x.targetTitle || x.targetId) + '</a></td><td>' + (x.senderName || '–') + '</td><td>' + kindLabel + '</td><td>' + (x.resolverName || '–') + '</td><td class="small">' + formatDate(x.resolvedAt) + '</td><td class="small">' + (x.confirmedDeadlineAt ? formatDate(x.confirmedDeadlineAt) : '–') + '</td><td class="small" style="max-width:200px;">' + note + '</td><td class="small" style="max-width:200px;">' + reason + '</td></tr>';
+                        }).join('');
+                        c.innerHTML = '<p class="small text-muted mb-2">Tổng đơn đã xử lý: <strong>' + total + '</strong> — hiển thị 200 bản ghi mới nhất.</p><div class="table-responsive"><table class="table table-sm table-bordered align-middle"><thead><tr><th>Kết quả</th><th>Loại</th><th>Tiêu đề</th><th>Người gửi</th><th>Yêu cầu</th><th>Người xử lý</th><th>Xử lý lúc</th><th>Hạn xác nhận</th><th>Ghi chú admin</th><th>Lý do</th></tr></thead><tbody>' + rowsH + '</tbody></table></div>';
+                        return;
+                    }
+
+                    var r = await ApiService.adminGetPendingUnifiedEscalations(escalationTierFilter || null);
+                    unifiedEscalationPendingCache = r && r.items ? r.items : [];
+                    var counts = (r && r.counts) ? r.counts : { critical: 0, high: 0, standard: 0 };
+                    var c0 = counts.critical != null ? counts.critical : counts.Critical;
+                    var h0 = counts.high != null ? counts.high : counts.High;
+                    var s0 = counts.standard != null ? counts.standard : counts.Standard;
+                    document.getElementById('escCountCritical').textContent = c0;
+                    document.getElementById('escCountHigh').textContent = h0;
+                    document.getElementById('escCountStandard').textContent = s0;
+                    var navB = document.getElementById('navEscCriticalBadge');
+                    if (navB) {
+                        if (c0 > 0) {
+                            navB.style.display = '';
+                            navB.textContent = c0;
+                        } else {
+                            navB.style.display = 'none';
+                        }
+                    }
+                    if (unifiedEscalationPendingCache.length === 0) {
+                        c.innerHTML = '<p class="text-muted mb-0">Không có đơn chờ xử lý.</p>';
+                        return;
+                    }
+                    var rows = unifiedEscalationPendingCache.map(function (item, idx) {
+                        var src = item.source || item.Source || '';
+                        var tierRaw = item.urgencyTier != null ? item.urgencyTier : item.UrgencyTier;
+                        var tier = (tierRaw || 'STANDARD').toString().toUpperCase();
+                        if (src === 'REVIEW_ESCALATION') {
+                            var x = item.moderatorEscalation || item.ModeratorEscalation;
+                            if (!x) return '';
+                            var kindLabel = x.requestKind === 'EXTEND_DEADLINE' ? 'Gia hạn' : 'Hủy nhận';
+                            var href = x.targetType === 'STORY'
+                                ? ('/Stories/Details/' + x.targetId)
+                                : ('/Moderator/ReviewChapter/' + x.targetId);
+                            var reason = (x.reason || '').replace(/</g, '&lt;');
+                            if (reason.length > 100) reason = reason.substring(0, 100) + '…';
+                            return '<tr><td>' + adminEscUrgencyBadge(tier) + '</td><td class="small">Moderator</td><td class="small">' + (x.targetType || '') + '</td><td><a href="' + href + '" target="_blank">' + escapeHtml(String(x.targetTitle || x.targetId)) + '</a></td><td class="small">' + escapeHtml(String(x.senderName || '–')) + '</td><td class="small">' + escapeHtml(kindLabel) + '</td><td class="small" style="max-width:200px;">' + reason + '</td><td><button type="button" class="btn btn-sm btn-primary" onclick="window.__openUnifiedEscalation(' + idx + ')">Xử lý</button></td></tr>';
+                        }
+                        if (src === 'COMPLIANCE_LOCK') {
+                            var L = item.complianceLock || item.ComplianceLock;
+                            if (!L) return '';
+                            var sid = L.storyId || L.StoryId;
+                            var st = L.storyTitle || L.StoryTitle || sid;
+                            var nm = L.requesterDisplayName || L.RequesterDisplayName || L.requesterEmail || '–';
+                            var msg = (L.message != null ? L.message : L.Message);
+                            msg = (msg == null || msg === '') ? '—' : String(msg);
+                            if (msg.length > 100) msg = msg.substring(0, 100) + '…';
+                            return '<tr><td>' + adminEscUrgencyBadge(tier) + '</td><td class="small">Compliance</td><td class="small">Gỡ lock</td><td class="small"><a href="/Home/Story/' + encodeURIComponent(sid) + '" target="_blank" rel="noopener">' + escapeHtml(String(st)) + '</a></td><td class="small">' + escapeHtml(String(nm)) + '</td><td class="small">Lock báo cáo truyện</td><td class="small">' + escapeHtml(msg) + '</td><td><button type="button" class="btn btn-sm btn-primary" onclick="window.__openUnifiedEscalation(' + idx + ')">Xử lý</button></td></tr>';
+                        }
+                        if (src === 'COMPLIANCE_ADMIN_ACTION') {
+                            var A = item.complianceAdminAction || item.ComplianceAdminAction;
+                            if (!A) return '';
+                            var sid = A.storyId || A.StoryId;
+                            var st = A.storyTitle || A.StoryTitle || sid;
+                            var kind = (A.requestKind || A.RequestKind || '').toString();
+                            var tnm = A.targetUserDisplayName || A.TargetUserDisplayName || A.targetUserEmail || '–';
+                            var msg = (A.message != null ? A.message : A.Message);
+                            msg = (msg == null || msg === '') ? '—' : String(msg);
+                            if (msg.length > 100) msg = msg.substring(0, 100) + '…';
+                            return '<tr><td>' + adminEscUrgencyBadge(tier) + '</td><td class="small">Compliance</td><td class="small">' + escapeHtml(kind) + '</td><td class="small"><a href="/Home/Story/' + encodeURIComponent(sid) + '" target="_blank" rel="noopener">' + escapeHtml(String(st)) + '</a></td><td class="small">' + escapeHtml(String(tnm)) + '</td><td class="small">Hành động admin</td><td class="small">' + escapeHtml(msg) + '</td><td><button type="button" class="btn btn-sm btn-primary" onclick="window.__openUnifiedEscalation(' + idx + ')">Xử lý</button></td></tr>';
+                        }
+                        return '';
+                    }).join('');
+                    c.innerHTML = '<div class="table-responsive"><table class="table table-sm table-bordered align-middle"><thead><tr><th>Mức độ</th><th>Luồng</th><th>Loại</th><th>Truyện / mục</th><th>Người gửi / đích</th><th>Vai trò</th><th>Nội dung</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger mb-0">' + (e.message || 'Lỗi tải') + '</p>';
+                }
+            }
+
+            function escLogStatusBadge(st) {
+                if (st === 'PENDING') return '<span class="badge bg-warning text-dark">PENDING</span>';
+                if (st === 'APPROVED') return '<span class="badge bg-success">APPROVED</span>';
+                if (st === 'REJECTED') return '<span class="badge bg-secondary">REJECTED</span>';
+                if (st === 'RESOLVED') return '<span class="badge bg-info text-dark">RESOLVED</span>';
+                return '<span class="badge bg-light text-dark">' + (st || '–') + '</span>';
+            }
+
+            function escLogSourceLabel(src) {
+                var s = (src || '').toString().toUpperCase();
+                if (s === 'REVIEW_ESCALATION') return 'Moderator';
+                if (s === 'COMPLIANCE_LOCK') return 'Compliance · lock';
+                if (s === 'COMPLIANCE_ADMIN_ACTION') return 'Compliance · hành động';
+                return src || '–';
+            }
+
+            function escLogKindDisplay(kind) {
+                if (kind == null || kind === '') return '—';
+                var k = String(kind).toUpperCase();
+                if (k === 'EXTEND_DEADLINE') return 'Gia hạn';
+                if (k === 'RELEASE_ASSIGNMENT') return 'Hủy nhận';
+                if (k === 'LOCK_RELEASE') return 'Gỡ lock báo cáo';
+                if (k === 'BAN_USER') return 'Cấm TK';
+                if (k === 'SUSPEND_AUTHOR_WRITING') return 'Tạm khóa viết';
+                return String(kind);
+            }
+
+            function escLogTargetHref(x) {
+                var rawSrc = x.source != null ? x.source : x.Source;
+                var src = (rawSrc != null ? String(rawSrc) : '').toUpperCase();
+                var rawTt = x.targetType != null ? x.targetType : x.TargetType;
+                var tt = (rawTt != null ? String(rawTt) : '').toUpperCase();
+                var tid = x.targetId != null ? x.targetId : x.TargetId;
+                if (!tid) return '#';
+                if (src === 'COMPLIANCE_LOCK' || src === 'COMPLIANCE_ADMIN_ACTION')
+                    return tt === 'COMMENT'
+                        ? '#'
+                        : '/Home/Story/' + encodeURIComponent(String(tid));
+                if (tt === 'STORY') return '/Stories/Details/' + encodeURIComponent(String(tid));
+                return '/Moderator/ReviewChapter/' + encodeURIComponent(String(tid));
+            }
+
+            function getEscalationLogQueryOpts() {
+                function dtVal(id) {
+                    var el = document.getElementById(id);
+                    if (!el || !el.value) return undefined;
+                    var iso = adminDatetimeLocalToIsoUtc(el.value);
+                    return iso || undefined;
+                }
+                var psEl = document.getElementById('escLogPageSize');
+                var ps = psEl ? (parseInt(psEl.value, 10) || 20) : 20;
+                return {
+                    page: escalationLogPage,
+                    pageSize: ps,
+                    search: (function () {
+                        var el = document.getElementById('escLogSearch');
+                        var t = el ? el.value.trim() : '';
+                        return t || undefined;
+                    })(),
+                    source: (function () { var el = document.getElementById('escLogSource'); return el && el.value ? el.value : undefined; })(),
+                    status: (function () { var el = document.getElementById('escLogStatus'); return el && el.value ? el.value : undefined; })(),
+                    requestKind: (function () { var el = document.getElementById('escLogRequestKind'); return el && el.value ? el.value : undefined; })(),
+                    targetType: (function () { var el = document.getElementById('escLogTargetType'); return el && el.value ? el.value : undefined; })(),
+                    senderId: (function () { var el = document.getElementById('escLogSenderId'); var t = el ? el.value.trim() : ''; return t || undefined; })(),
+                    resolverId: (function () { var el = document.getElementById('escLogResolverId'); var t = el ? el.value.trim() : ''; return t || undefined; })(),
+                    createdFrom: dtVal('escLogCreatedFrom'),
+                    createdTo: dtVal('escLogCreatedTo'),
+                    resolvedFrom: dtVal('escLogResolvedFrom'),
+                    resolvedTo: dtVal('escLogResolvedTo'),
+                    sortBy: (function () { var el = document.getElementById('escLogSortBy'); return el && el.value ? el.value : 'created_at'; })(),
+                    sortOrder: (function () { var el = document.getElementById('escLogSortOrder'); return el && el.value ? el.value : 'desc'; })()
+                };
+            }
+
+            async function loadReviewEscalationLog(optPage) {
+                var c = document.getElementById('reviewEscalationLogContainer');
+                if (!c) return;
+                if (typeof optPage === 'number' && optPage >= 1) escalationLogPage = optPage;
+                c.innerHTML = '<p class="text-muted mb-0">Đang tải...</p>';
+                var prev = document.getElementById('btnEscLogPrev');
+                var next = document.getElementById('btnEscLogNext');
+                var info = document.getElementById('escLogPageInfo');
+                try {
+                    var o = getEscalationLogQueryOpts();
+                    var r = await ApiService.adminGetUnifiedEscalationLog(o);
+                    var items = (r && r.items) ? r.items : [];
+                    var total = (r && r.totalCount !== undefined) ? r.totalCount : 0;
+                    var page = (r && r.page) ? r.page : escalationLogPage;
+                    var pageSize = (r && r.pageSize) ? r.pageSize : o.pageSize;
+                    var totalPages = (r && r.totalPages !== undefined) ? r.totalPages : (pageSize > 0 ? Math.ceil(total / pageSize) : 1);
+                    if (totalPages < 1) totalPages = 1;
+                    escalationLogPage = page;
+                    if (info) info.textContent = 'Trang ' + page + ' / ' + totalPages + ' · Tổng ' + total + ' bản ghi';
+                    var hasPrev = (r && r.hasPreviousPage !== undefined) ? r.hasPreviousPage : page > 1;
+                    var hasNext = (r && r.hasNextPage !== undefined) ? r.hasNextPage : page < totalPages;
+                    if (prev) prev.disabled = !hasPrev;
+                    if (next) next.disabled = !hasNext;
+                    if (items.length === 0) {
+                        c.innerHTML = '<p class="text-muted mb-0">Không có bản ghi khớp bộ lọc.</p>';
+                        return;
+                    }
+                    var rows = items.map(function (x) {
+                        var src = x.source != null ? x.source : x.Source;
+                        var kindRaw = x.kindLabel != null ? x.kindLabel : x.KindLabel;
+                        var kindLabel = escLogKindDisplay(kindRaw);
+                        var href = escLogTargetHref(x);
+                        var tt = (x.targetType != null ? x.targetType : x.TargetType) || '';
+                        var title = (x.targetTitle != null ? x.targetTitle : x.TargetTitle) || (x.targetId != null ? x.targetId : x.TargetId) || '';
+                        var sum = (x.summaryText != null ? x.summaryText : x.SummaryText) || '';
+                        sum = String(sum).replace(/</g, '&lt;');
+                        if (sum.length > 120) sum = sum.substring(0, 120) + '…';
+                        var ut = x.urgencyTier != null ? x.urgencyTier : x.UrgencyTier;
+                        var idRaw = x.id != null ? x.id : x.Id;
+                        var idShort = (idRaw != null ? String(idRaw) : '');
+                        var idFull = idShort;
+                        if (idShort.length > 12) idShort = idShort.substring(0, 8) + '…';
+                        var sn = x.senderName != null ? x.senderName : x.SenderName;
+                        var rn = x.resolverName != null ? x.resolverName : x.ResolverName;
+                        return '<tr><td class="small text-muted" title="' + escapeHtml(idFull) + '">' + escapeHtml(idShort) + '</td><td class="small">' + escapeHtml(escLogSourceLabel(src)) + '</td><td>' + escLogStatusBadge(x.status != null ? x.status : x.Status) + '</td><td>' + adminEscUrgencyBadge(ut) + '</td><td class="small">' + escapeHtml(String(tt)) + '</td><td><a href="' + href + '" target="_blank" rel="noopener">' + escapeHtml(String(title)) + '</a></td><td class="small">' + escapeHtml(kindLabel) + '</td><td class="small">' + escapeHtml(sn != null && sn !== '' ? String(sn) : '–') + '</td><td class="small">' + formatDate(x.createdAt != null ? x.createdAt : x.CreatedAt) + '</td><td class="small">' + escapeHtml(rn != null && rn !== '' ? String(rn) : '–') + '</td><td class="small">' + formatDate(x.resolvedAt != null ? x.resolvedAt : x.ResolvedAt) + '</td><td class="small" style="max-width:200px;">' + sum + '</td></tr>';
+                    }).join('');
+                    c.innerHTML = '<div class="table-responsive"><table class="table table-sm table-bordered align-middle"><thead><tr><th>Id</th><th>Nguồn</th><th>Trạng thái</th><th>Mức độ</th><th>Đích</th><th>Tiêu đề</th><th>Loại</th><th>Người gửi</th><th>Tạo</th><th>Xử lý bởi</th><th>Xử lý lúc</th><th>Nội dung</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger mb-0">' + (e.message || 'Lỗi tải') + '</p>';
+                    if (prev) prev.disabled = true;
+                    if (next) next.disabled = true;
+                    if (info) info.textContent = '—';
+                }
+            }
+
+            window.__openUnifiedEscalation = function (idx) {
+                var item = unifiedEscalationPendingCache[idx];
+                if (!item) return;
+                var src = item.source || item.Source || '';
+                if (src === 'REVIEW_ESCALATION') {
+                    var x = item.moderatorEscalation || item.ModeratorEscalation;
+                    if (!x) return;
+                    resolveEscalationRow = x;
+                    var kindLabel = resolveEscalationRow.requestKind === 'EXTEND_DEADLINE' ? 'Gia hạn hạn duyệt' : 'Hủy nhận duyệt (chuyển cho người khác)';
+                    document.getElementById('resolveEscalationSummary').innerHTML =
+                        '<p class="mb-1"><strong>' + kindLabel + '</strong> — ' + resolveEscalationRow.targetType + ' — ' + (resolveEscalationRow.targetTitle || resolveEscalationRow.targetId) + '</p>' +
+                        '<p class="mb-0 text-muted">Người gửi: ' + (resolveEscalationRow.senderName || '') + ' · Gửi lúc: ' + formatDate(resolveEscalationRow.createdAt) + '</p>';
+                    var ext = document.getElementById('resolveEscExtendWrap');
+                    var rel = document.getElementById('resolveEscReleaseWrap');
+                    if (resolveEscalationRow.requestKind === 'EXTEND_DEADLINE') {
+                        ext.style.display = 'block';
+                        if (rel) rel.style.display = 'none';
+                        document.getElementById('resolveEscConfirmedDeadline').value = isoToDatetimeLocal(resolveEscalationRow.proposedDeadlineAt);
+                    } else {
+                        ext.style.display = 'none';
+                        document.getElementById('resolveEscConfirmedDeadline').value = '';
+                        if (rel) {
+                            rel.style.display = 'block';
+                            document.getElementById('resolveEscReleaseModeQueue').checked = true;
+                            document.getElementById('resolveEscReleaseModeAssign').checked = false;
+                            document.getElementById('resolveEscReleaseAssignFields').style.display = 'none';
+                            document.getElementById('resolveEscReleaseDeadline').value = '';
+                            var ah = document.getElementById('resolveEscAuthorHint');
+                            if (ah) {
+                                if (resolveEscalationRow.authorSubmittedAtUtc) {
+                                    ah.style.display = 'block';
+                                    ah.textContent = 'Thời điểm tác giả gửi duyệt (mốc tối thiểu cho hạn): ' + formatDate(resolveEscalationRow.authorSubmittedAtUtc) + '.';
+                                } else {
+                                    ah.style.display = 'none';
+                                    ah.textContent = '';
+                                }
+                            }
+                            loadModeratorsForEscalation().catch(function (e) { alert(e.message || e); });
+                        }
+                    }
+                    document.getElementById('resolveEscAdminNote').value = '';
+                    new bootstrap.Modal(document.getElementById('resolveEscalationModal')).show();
+                    return;
+                }
+                if (src === 'COMPLIANCE_LOCK') {
+                    var L = item.complianceLock || item.ComplianceLock;
+                    if (!L) return;
+                    var rid = L.id || L.Id;
+                    var rq = L.requesterId || L.RequesterId;
+                    var sid = L.storyId || L.StoryId;
+                    var st = L.storyTitle || L.StoryTitle || sid;
+                    var nm = L.requesterDisplayName || L.RequesterDisplayName || L.requesterEmail || '';
+                    document.getElementById('aclResolveRequestId').value = rid;
+                    document.getElementById('aclResolveSummary').textContent = 'Truyện: ' + st + ' | Người gửi: ' + nm;
+                    ensureComplianceOfficersForModal().then(function () {
+                        aclFillReassignSelect(rq);
+                        document.getElementById('aclDecision').value = 'APPROVE_UNLOCK';
+                        document.getElementById('aclReassignWrap').style.display = 'none';
+                        document.getElementById('aclAdminNote').value = '';
+                        var dl = document.getElementById('aclDeadline');
+                        var w = new Date();
+                        w.setDate(w.getDate() + 7);
+                        try {
+                            dl.value = w.toISOString().slice(0, 16);
+                        } catch (x2) { dl.value = ''; }
+                        new bootstrap.Modal(document.getElementById('aclResolveModal')).show();
+                    });
+                    return;
+                }
+                if (src === 'COMPLIANCE_ADMIN_ACTION') {
+                    var A = item.complianceAdminAction || item.ComplianceAdminAction;
+                    if (!A) return;
+                    var rid2 = A.id || A.Id;
+                    var k = (A.requestKind || A.RequestKind || '').toString();
+                    var psu = A.proposedSuspendUntilUtc || A.ProposedSuspendUntilUtc;
+                    document.getElementById('caaResolveRequestId').value = rid2;
+                    document.getElementById('caaResolveKind').value = k;
+                    document.getElementById('caaResolveSummary').textContent = 'Loại: ' + k;
+                    document.getElementById('caaAdminNote').value = '';
+                    document.getElementById('caaDecision').value = 'APPROVE';
+                    var sw = document.getElementById('caaSuspendWrap');
+                    var su = document.getElementById('caaSuspendUntilLocal');
+                    if (k === 'SUSPEND_AUTHOR_WRITING') {
+                        sw.style.display = 'block';
+                        su.value = '';
+                        if (psu) {
+                            try {
+                                var d = new Date(psu);
+                                if (!isNaN(d.getTime())) {
+                                    var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+                                    su.value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+                                }
+                            } catch (x3) { }
+                        }
+                    } else {
+                        sw.style.display = 'none';
+                    }
+                    new bootstrap.Modal(document.getElementById('caaResolveModal')).show();
+                }
+            };
+
+            async function loadModeratorsForEscalation() {
+                var sel = document.getElementById('resolveEscReassignUser');
+                if (!sel) return;
+                sel.innerHTML = '<option value="">Đang tải...</option>';
+                var r = await ApiService.adminGetModeratorsForAssignment();
+                var items = r && r.items ? r.items : [];
+                var sid = resolveEscalationRow && resolveEscalationRow.senderId ? resolveEscalationRow.senderId : null;
+                var senderName = resolveEscalationRow && resolveEscalationRow.senderName ? resolveEscalationRow.senderName : '';
+                sel.innerHTML = '<option value="">-- Chọn người nhận --</option>';
+                var senderSeen = false;
+                items.forEach(function (m) {
+                    var isSender = sid && String(m.id).toLowerCase() === String(sid).toLowerCase();
+                    if (isSender) senderSeen = true;
+                    var opt = document.createElement('option');
+                    opt.value = m.id;
+                    var cnt = (m.claimedAssignmentCount !== undefined && m.claimedAssignmentCount !== null) ? m.claimedAssignmentCount : 0;
+                    var label = (m.displayName || m.id) + ' — ' + cnt + ' đơn đang nhận';
+                    if (isSender) {
+                        label += ' [Người gửi đơn]';
+                        opt.disabled = true;
+                    }
+                    opt.textContent = label;
+                    sel.appendChild(opt);
+                });
+                if (sid && !senderSeen) {
+                    var optMissing = document.createElement('option');
+                    optMissing.value = sid;
+                    optMissing.textContent = (senderName || sid) + ' [Người gửi đơn]';
+                    optMissing.disabled = true;
+                    sel.appendChild(optMissing);
+                }
+            }
+
+            function pendingClaimFilterSummary(claimVal) {
+                if (claimVal === 'unclaimed') return 'Chỉ các mục chưa có moderator nhận duyệt.';
+                if (claimVal === 'claimed') return 'Chỉ các mục đã có moderator nhận duyệt.';
+                return 'Tất cả mục chờ duyệt (kể cả đã được moderator nhận).';
+            }
+
+            var contentReviewPage = 1;
+
+            function syncCrPanelVisibility() {
+                var kindEl = document.getElementById('crKind');
+                var stateEl = document.getElementById('crState');
+                var storyWrap = document.getElementById('crStoryIdWrap');
+                var claimWrap = document.getElementById('crClaimWrap');
+                var hint = document.getElementById('crHintDateModerator');
+                var kind = kindEl ? kindEl.value : 'story';
+                var state = stateEl ? stateEl.value : 'pending';
+                if (storyWrap) storyWrap.style.display = (kind === 'chapter') ? '' : 'none';
+                if (claimWrap) claimWrap.style.display = (state === 'pending') ? '' : 'none';
+                if (hint) {
+                    if (state === 'approved' || state === 'rejected') hint.classList.remove('d-none');
+                    else hint.classList.add('d-none');
+                }
+            }
+
+            function getContentReviewBaseParams(page) {
+                var p = { page: page || 1 };
+                var psEl = document.getElementById('crPageSize');
+                p.pageSize = psEl ? (parseInt(psEl.value, 10) || 20) : 20;
+                var se = document.getElementById('crSearch');
+                if (se && se.value.trim()) p.search = se.value.trim();
+                var sb = document.getElementById('crSortBy');
+                if (sb && sb.value) p.sortBy = sb.value;
+                var so = document.getElementById('crSortOrder');
+                if (so && so.value) p.sortOrder = so.value;
+                var stateEl = document.getElementById('crState');
+                var state = stateEl ? stateEl.value : 'pending';
+                if (state === 'approved' || state === 'rejected') {
+                    var mod = document.getElementById('filterModerator');
+                    var fromEl = document.getElementById('filterDateFrom');
+                    var toEl = document.getElementById('filterDateTo');
+                    if (mod && mod.value) p.moderatorId = mod.value;
+                    if (fromEl && fromEl.value) p.dateFrom = fromEl.value.trim();
+                    if (toEl && toEl.value) p.dateTo = toEl.value.trim();
+                }
+                return p;
+            }
+
+            async function loadUnifiedContentReview(optPage) {
+                if (typeof optPage === 'number' && optPage >= 1) contentReviewPage = optPage;
+                syncCrPanelVisibility();
+                var c = document.getElementById('unifiedContentReviewContainer');
+                var prev = document.getElementById('btnCrPrev');
+                var next = document.getElementById('btnCrNext');
+                var info = document.getElementById('crPageInfo');
+                if (!c) return;
+                c.innerHTML = '<p class="text-muted mb-0">Đang tải...</p>';
+                var kindEl = document.getElementById('crKind');
+                var stateEl = document.getElementById('crState');
+                var kind = kindEl ? kindEl.value : 'story';
+                var state = stateEl ? stateEl.value : 'pending';
+                var req = getContentReviewBaseParams(contentReviewPage);
+                var claimEl = document.getElementById('crClaimFilter');
+                var claimVal = claimEl && claimEl.value ? claimEl.value : '';
+                var storyIdEl = document.getElementById('crStoryId');
+                if (kind === 'chapter' && storyIdEl && storyIdEl.value.trim()) req.storyId = storyIdEl.value.trim();
+                if (state === 'pending' && claimVal) req.claimFilter = claimVal;
+
+                try {
+                    var r = null;
+                    if (state === 'pending') {
+                        if (kind === 'story') r = await ApiService.adminGetPendingStories(req);
+                        else r = await ApiService.adminGetPendingChapters(req);
+                    } else if (state === 'approved') {
+                        if (kind === 'story') r = await ApiService.adminGetApprovedStories(req);
+                        else r = await ApiService.adminGetApprovedChapters(req);
+                    } else {
+                        if (kind === 'story') r = await ApiService.adminGetRejectedStories(req);
+                        else r = await ApiService.adminGetRejectedChapters(req);
+                    }
+                    var items = r && r.items ? r.items : [];
+                    var total = r && r.totalCount !== undefined ? r.totalCount : 0;
+                    var pageNum = r && r.page !== undefined ? r.page : contentReviewPage;
+                    var pageSize = r && r.pageSize !== undefined ? r.pageSize : (req.pageSize || 20);
+                    var totalPages = r && r.totalPages !== undefined ? r.totalPages : Math.max(1, Math.ceil(total / (pageSize || 20)));
+                    contentReviewPage = pageNum;
+                    if (info) info.textContent = 'Trang ' + pageNum + ' / ' + totalPages + ' · Tổng ' + total + ' mục';
+                    var hasPrev = r && r.hasPreviousPage !== undefined ? r.hasPreviousPage : pageNum > 1;
+                    var hasNext = r && r.hasNextPage !== undefined ? r.hasNextPage : pageNum < totalPages;
+                    if (prev) prev.disabled = !hasPrev;
+                    if (next) next.disabled = !hasNext;
+
+                    if (items.length === 0) {
+                        c.innerHTML = '<p class="text-muted mb-0">Không có dữ liệu khớp bộ lọc.</p>';
+                        return;
+                    }
+
+                    if (state === 'pending') {
+                        if (kind === 'story') {
+                            c.innerHTML = '<div class="table-responsive"><table class="table table-sm table-bordered align-middle"><thead><tr><th>Tiêu đề</th><th>Trạng thái</th><th>Đã nhận bởi</th><th>Nhận lúc</th><th>Gửi lúc</th><th>Cờ chờ</th></tr></thead><tbody>' +
+                                items.map(function (s) {
+                                    return '<tr><td><a href="/Home/Story?slug=' + encodeURIComponent(s.slug || '') + '">' + escapeHtml(s.title || s.id) + '</a></td><td>' + escapeHtml(s.status || '') + '</td><td>' + escapeHtml(s.claimedByDisplayName || '–') + '</td><td class="small">' + formatDate(s.claimedAt) + '</td><td class="small">' + formatDate(s.pendingSince || s.updatedAt) + '</td><td>' + timeStatusBadge(s.timeStatus) + '</td></tr>';
+                                }).join('') + '</tbody></table></div><p class="small text-muted mb-0">' + pendingClaimFilterSummary(claimVal) + '</p>';
+                        } else {
+                            c.innerHTML = '<div class="table-responsive"><table class="table table-sm table-bordered align-middle"><thead><tr><th>Chapter</th><th>Truyện</th><th>Đã nhận bởi</th><th>Nhận lúc</th><th>Gửi lúc</th><th>Cờ chờ</th></tr></thead><tbody>' +
+                                items.map(function (ch) {
+                                    var link = ch.storyId && ch.id ? '/Chapters/Read?storyId=' + encodeURIComponent(ch.storyId) + '&chapterId=' + encodeURIComponent(ch.id) : '#';
+                                    return '<tr><td><a href="' + link + '">' + escapeHtml(ch.title || ch.id) + '</a></td><td>' + escapeHtml(ch.storyTitle || '') + '</td><td>' + escapeHtml(ch.claimedByDisplayName || '–') + '</td><td class="small">' + formatDate(ch.claimedAt) + '</td><td class="small">' + formatDate(ch.pendingSince || ch.updatedAt || ch.createdAt) + '</td><td>' + timeStatusBadge(ch.timeStatus) + '</td></tr>';
+                                }).join('') + '</tbody></table></div><p class="small text-muted mb-0">' + pendingClaimFilterSummary(claimVal) + '</p>';
+                        }
+                    } else {
+                        var isStory = kind === 'story';
+                        var showReject = state === 'rejected';
+                        var header = isStory
+                            ? (showReject ? '<tr><th>Tiêu đề</th><th>Duyệt lúc</th><th>Moderator</th><th>Lý do từ chối</th></tr>' : '<tr><th>Tiêu đề</th><th>Duyệt lúc</th><th>Moderator</th></tr>')
+                            : (showReject ? '<tr><th>Chapter</th><th>Truyện</th><th>Duyệt lúc</th><th>Moderator</th><th>Lý do từ chối</th></tr>' : '<tr><th>Chapter</th><th>Truyện</th><th>Duyệt lúc</th><th>Moderator</th></tr>');
+                        var rows = items.map(function (x) {
+                            var title = x.title || x.id;
+                            var slug = x.slug;
+                            var link = isStory && slug ? '/Home/Story?slug=' + encodeURIComponent(slug) : (x.storyId && x.id ? '/Chapters/Read?storyId=' + encodeURIComponent(x.storyId) + '&chapterId=' + encodeURIComponent(x.id) : '#');
+                            var extra = isStory ? '' : ('<td>' + escapeHtml(x.storyTitle || '') + '</td>');
+                            var reasonCell = showReject ? ('<td class="small" style="max-width:240px;">' + escapeHtml(x.rejectionReason || '–') + '</td>') : '';
+                            return '<tr><td><a href="' + link + '">' + escapeHtml(String(title)) + '</a></td>' + extra + '<td class="small">' + formatDate(x.reviewedAt) + '</td><td class="small">' + escapeHtml(x.reviewedByModeratorName || '–') + '</td>' + reasonCell + '</tr>';
+                        });
+                        c.innerHTML = '<div class="table-responsive"><table class="table table-sm table-bordered align-middle"><thead>' + header + '</thead><tbody>' + rows.join('') + '</tbody></table></div>';
+                    }
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger mb-0">' + escapeHtml(e.message || String(e)) + '</p>';
+                    if (prev) prev.disabled = true;
+                    if (next) next.disabled = true;
+                    if (info) info.textContent = '—';
+                }
+            }
+
+            var logsCurrentPage = 1;
+            async function loadModerationLogs(page) {
+                logsCurrentPage = page || 1;
+                var c = document.getElementById('moderationLogsContainer');
+                var prev = document.getElementById('btnLogPrev');
+                var next = document.getElementById('btnLogNext');
+                var info = document.getElementById('logPageInfo');
+                if (!c) return;
+                c.innerHTML = '<p class="text-muted mb-0">Đang tải...</p>';
+                var params = getLogsFilterParams(logsCurrentPage);
+                try {
+                    var r = await ApiService.adminGetModerationLogs(params);
+                    var items = (r && r.items) ? r.items : [];
+                    var total = (r && r.totalCount !== undefined) ? r.totalCount : 0;
+                    var pageNum = (r && r.page !== undefined) ? r.page : logsCurrentPage;
+                    var pageSize = (r && r.pageSize !== undefined) ? r.pageSize : (params.pageSize || 20);
+                    var totalPages = (r && r.totalPages !== undefined) ? r.totalPages : Math.max(1, Math.ceil(total / (pageSize || 20)));
+                    logsCurrentPage = pageNum;
+                    if (info) info.textContent = 'Trang ' + pageNum + ' / ' + totalPages + ' · Tổng ' + total + ' bản ghi';
+                    var hasPrev = (r && r.hasPreviousPage !== undefined) ? r.hasPreviousPage : pageNum > 1;
+                    var hasNext = (r && r.hasNextPage !== undefined) ? r.hasNextPage : pageNum < totalPages;
+                    if (prev) prev.disabled = !hasPrev;
+                    if (next) next.disabled = !hasNext;
+                    if (items.length === 0) {
+                        c.innerHTML = '<p class="text-muted mb-0">Không có log khớp bộ lọc.</p>';
+                        return;
+                    }
+                    function logTitleCell(l) {
+                        var title = l.targetTitle || (l.targetId ? String(l.targetId) : '–');
+                        if (!l.targetId) return escapeHtml(title);
+                        var href = null;
+                        if (l.targetType === 'STORY') href = '/Stories/Details/' + l.targetId;
+                        else if (l.targetType === 'CHAPTER') href = '/Moderator/ReviewChapter/' + l.targetId;
+                        if (!href) return escapeHtml(title);
+                        return '<a href="' + href + '" target="_blank" rel="noopener">' + escapeHtml(title) + '</a>';
+                    }
+                    function actionBadge(a) {
+                        if (a === 'APPROVED') return '<span class="badge bg-success">Duyệt</span>';
+                        if (a === 'REJECTED') return '<span class="badge bg-danger">Từ chối</span>';
+                        return escapeHtml(a || '–');
+                    }
+                    c.innerHTML = '<div class="table-responsive"><table class="table table-sm table-bordered align-middle"><thead><tr><th>Id</th><th>Thời gian</th><th>Loại</th><th>Tiêu đề</th><th>Hành động</th><th>Moderator</th><th>ms</th><th>Lý do từ chối</th></tr></thead><tbody>' +
+                        items.map(function (l) {
+                            var ms = (l.processingTimeMs != null && l.processingTimeMs !== undefined) ? String(l.processingTimeMs) : '–';
+                            return '<tr><td class="small text-muted">' + l.id + '</td><td class="small">' + formatDate(l.createdAt) + '</td><td>' + escapeHtml(l.targetType || '') + '</td><td>' + logTitleCell(l) + '</td><td>' + actionBadge(l.action) + '</td><td class="small">' + escapeHtml(l.moderatorName || '–') + '</td><td class="small">' + escapeHtml(ms) + '</td><td class="small" style="max-width:240px;">' + escapeHtml(l.rejectionReason || '–') + '</td></tr>';
+                        }).join('') + '</tbody></table></div>';
+                } catch (e) {
+                    c.innerHTML = '<p class="text-danger mb-0">Lỗi: ' + escapeHtml(e.message || String(e)) + '</p>';
+                    if (prev) prev.disabled = true;
+                    if (next) next.disabled = true;
+                    if (info) info.textContent = '—';
+                }
+            }
+
+            let platformWalletHistoryPage = 1;
+            const platformWalletHistoryPageSize = 10;
+
+            function getPlatformWalletHistoryFilters() {
+                var dateFromEl = document.getElementById('platformWalletFilterDateFrom');
+                var dateToEl = document.getElementById('platformWalletFilterDateTo');
+                var typeEl = document.getElementById('platformWalletFilterType');
+                var qEl = document.getElementById('platformWalletFilterQ');
+
+                var f = {};
+                var df = dateFromEl && dateFromEl.value ? dateFromEl.value.trim() : '';
+                var dt = dateToEl && dateToEl.value ? dateToEl.value.trim() : '';
+                var tp = typeEl && typeEl.value ? typeEl.value.trim() : 'ALL';
+                var q = qEl && qEl.value ? qEl.value.trim() : '';
+
+                if (df) f.dateFrom = df;
+                if (dt) f.dateTo = dt;
+                if (tp && tp !== 'ALL') f.type = tp;
+                if (q) f.q = q;
+                return f;
+            }
+
+            function renderPlatformWalletFilterSummary() {
+                var meta = document.getElementById('platformWalletFilterSummary');
+                if (!meta) return;
+
+                var f = getPlatformWalletHistoryFilters();
+                var parts = [];
+                if (f.dateFrom) parts.push('Từ ' + f.dateFrom);
+                if (f.dateTo) parts.push('Đến ' + f.dateTo);
+                if (f.type) parts.push('Loại ' + f.type);
+                if (f.q) parts.push('Note: ' + f.q);
+                meta.textContent = parts.length ? parts.join(' · ') : 'Không có bộ lọc';
+            }
+
+            async function loadPlatformWalletSummary() {
+                var balanceEl = document.getElementById('platformWalletBalanceCoin');
+                var updatedAtEl = document.getElementById('platformWalletUpdatedAt');
+                var totalCoinsEl = document.getElementById('platformWalletTotalCoinsInSystem');
+                var platformFeeCoinsEl = document.getElementById('platformWalletPlatformFeeCoins');
+
+                var bal = await ApiService.adminGetPlatformWalletBalance();
+                var summary = await ApiService.adminGetPlatformWalletSummary();
+
+                if (balanceEl) balanceEl.textContent = String(bal?.balanceCoin ?? bal?.balance_coin ?? bal?.balanceCoin ?? 0);
+                if (updatedAtEl) {
+                    var ts = bal?.updatedAt ?? bal?.updated_at;
+                    updatedAtEl.textContent = ts ? ('Cập nhật: ' + formatDate(ts)) : '';
+                }
+                if (totalCoinsEl) totalCoinsEl.textContent = String(summary?.totalCoinsInSystem ?? summary?.totalCoinsInSystem ?? 0);
+                if (platformFeeCoinsEl) platformFeeCoinsEl.textContent = String(summary?.platformFeeCoins ?? summary?.platformFeeCoins ?? 0);
+            }
+
+            async function loadPlatformWalletAdjustments(page) {
+                var err = document.getElementById('platformWalletError');
+                if (err) {
+                    err.classList.add('d-none');
+                    err.textContent = '';
+                }
+
+                var bodyEl = document.getElementById('platformWalletAdjustmentsBody');
+                var metaEl = document.getElementById('platformWalletAdjustMeta');
+                var pageMetaEl = document.getElementById('platformWalletHistoryPageMeta');
+
+                if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Đang tải...</td></tr>';
+
+                var f = getPlatformWalletHistoryFilters();
+
+                try {
+                    var adj = await ApiService.adminGetUserWalletAdjustments(page, platformWalletHistoryPageSize, f);
+                    var items = adj?.items || adj?.Items || [];
+                    var totalCount = adj?.totalCount ?? adj?.TotalCount ?? 0;
+
+                    if (metaEl) metaEl.textContent = 'Tổng: ' + totalCount;
+
+                    var totalPages = Math.max(1, Math.ceil(totalCount / platformWalletHistoryPageSize));
+                    if (pageMetaEl) pageMetaEl.textContent = 'Trang ' + page + ' / ' + totalPages;
+
+                    var btnPrev = document.getElementById('btnPlatformWalletHistoryPrev');
+                    var btnNext = document.getElementById('btnPlatformWalletHistoryNext');
+                    if (btnPrev) btnPrev.disabled = page <= 1;
+                    if (btnNext) btnNext.disabled = page >= totalPages;
+
+                    if (!bodyEl) return;
+                    if (!items || items.length === 0) {
+                        bodyEl.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Chưa có lịch sử điều chỉnh</td></tr>';
+                        return;
+                    }
+
+                    bodyEl.innerHTML = items.map(function (x) {
+                        var adjustedAt = x.adjustedAt ?? x.AdjustedAt ?? x.createdAt ?? x.CreatedAt;
+                        var deltaCoins = Number(x.deltaCoins ?? x.DeltaCoins ?? 0);
+                        var userId = x.userId ?? x.UserId ?? '–';
+                        var note = x.note ?? x.Note ?? '';
+                        var absCoins = Math.abs(deltaCoins);
+                        var type = deltaCoins >= 0 ? 'ADD' : 'SUB';
+                        return '<tr>' +
+                            '<td>' + (adjustedAt ? formatDate(adjustedAt) : '–') + '</td>' +
+                            '<td>' + type + '</td>' +
+                            '<td>' + absCoins + '</td>' +
+                            '<td>' + escapeHtml(note) + '</td>' +
+                            '<td>' + escapeHtml(userId || '–') + '</td>' +
+                            '</tr>';
+                    }).join('');
+                } catch (e) {
+                    if (err) {
+                        err.classList.remove('d-none');
+                        err.textContent = (e && e.message) ? e.message : 'Không tải được ví hệ thống.';
+                    }
+                    if (bodyEl) bodyEl.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Lỗi tải dữ liệu</td></tr>';
+                }
+            }
+
+            async function loadPlatformWallet() {
+                renderPlatformWalletFilterSummary();
+                await loadPlatformWalletSummary();
+                await loadPlatformWalletAdjustments(platformWalletHistoryPage);
+            }
+
+            async function applyPlatformWalletAdjust() {
+                var err = document.getElementById('platformWalletError');
+                if (err) {
+                    err.classList.add('d-none');
+                    err.textContent = '';
+                }
+
+                var amountEl = document.getElementById('platformWalletAdjustAmount');
+                var dirEl = document.getElementById('platformWalletAdjustDirection');
+                var targetEl = document.getElementById('platformWalletAdjustTarget');
+                var noteEl = document.getElementById('platformWalletAdjustNote');
+                var applyBtn = document.getElementById('btnPlatformWalletApply');
+
+                var amount = amountEl ? Number(amountEl.value) : 0;
+                var dir = dirEl ? dirEl.value : 'SUB';
+                var target = targetEl ? targetEl.value.trim() : '';
+                var note = noteEl ? noteEl.value.trim() : '';
+
+                if (!amount || amount <= 0) {
+                    if (err) {
+                        err.classList.remove('d-none');
+                        err.textContent = 'Số coin điều chỉnh phải lớn hơn 0.';
+                    }
+                    return;
+                }
+
+                if (!target) {
+                    if (err) {
+                        err.classList.remove('d-none');
+                        err.textContent = 'Chọn user (userId/email/nickname) để điều chỉnh.';
+                    }
+                    return;
+                }
+
+                var delta = dir === 'ADD' ? amount : -amount;
+
+                try {
+                    if (applyBtn) applyBtn.disabled = true;
+                    await ApiService.adminAdjustUserWallet(target, delta, note);
+                    if (amountEl) amountEl.value = '';
+                    if (targetEl) targetEl.value = '';
+                    if (noteEl) noteEl.value = '';
+                    await loadPlatformWallet();
+                } catch (e) {
+                    if (err) {
+                        err.classList.remove('d-none');
+                        err.textContent = (e && e.message) ? e.message : 'Không thể điều chỉnh ví hệ thống.';
+                    }
+                } finally {
+                    if (applyBtn) applyBtn.disabled = false;
+                }
+            }
+
+            // -----------------------
+            // System coin ledger (unlock / platform adj / withdraw)
+            // -----------------------
+            let sysLedgerPage = 1;
+            const sysLedgerPageSize = 20;
+            let sysLedgerIsLoading = false;
+
+            function getSysLedgerFilters() {
+                const dateFrom = document.getElementById('sysLedgerDateFrom')?.value;
+                const dateTo = document.getElementById('sysLedgerDateTo')?.value;
+                const type = document.getElementById('sysLedgerType')?.value;
+                const filters = {};
+                if (dateFrom) filters.dateFrom = dateFrom;
+                if (dateTo) filters.dateTo = dateTo;
+                if (type && type !== 'ALL') filters.type = type;
+                return filters;
+            }
+
+            async function loadSysLedger(reset) {
+                const loading = document.getElementById('sysLedgerLoading');
+                const content = document.getElementById('sysLedgerContent');
+                const list = document.getElementById('sysLedgerList');
+                const errorEl = document.getElementById('sysLedgerError');
+                const metaEl = document.getElementById('sysLedgerMeta');
+                const prevBtn = document.getElementById('btnSysLedgerPrev');
+                const nextBtn = document.getElementById('btnSysLedgerNext');
+
+                if (sysLedgerIsLoading) return;
+                sysLedgerIsLoading = true;
+
+                if (errorEl) {
+                    errorEl.classList.add('d-none');
+                    errorEl.textContent = '';
+                }
+
+                if (reset) {
+                    sysLedgerPage = 1;
+                    if (list) list.innerHTML = '';
+                }
+
+                if (loading) loading.style.display = 'block';
+                if (content) content.style.display = 'none';
+
+                try {
+                    const resp = await ApiService.adminGetSystemCoinLedger(sysLedgerPage, sysLedgerPageSize, getSysLedgerFilters());
+                    const items = resp?.items ?? resp?.Items ?? [];
+                    const totalCount = resp?.totalCount ?? resp?.TotalCount ?? 0;
+
+                    if (metaEl) {
+                        const totalPages = Math.max(1, Math.ceil(totalCount / sysLedgerPageSize));
+                        metaEl.textContent = `Trang ${sysLedgerPage} / ${totalPages}`;
+                    }
+
+                    if (prevBtn) prevBtn.disabled = sysLedgerPage <= 1;
+                    if (nextBtn) nextBtn.disabled = sysLedgerPage >= Math.ceil(totalCount / sysLedgerPageSize);
+
+                    if (!list) return;
+                    if (!items || items.length === 0) {
+                        list.innerHTML = '<tr><td colspan="11" class="text-center text-muted">Chưa có dữ liệu</td></tr>';
+                    } else {
+                        list.innerHTML = items.map(function (x) {
+                            const eventType = x.eventType ?? x.EventType ?? '';
+                            const eventTime = x.eventTime ?? x.EventTime ?? x.adjustedAt ?? x.AdjustedAt;
+                            const platform = Number(x.platformDeltaCoins ?? x.PlatformDeltaCoins ?? 0);
+                            const buyer = Number(x.buyerDeltaCoins ?? x.BuyerDeltaCoins ?? 0);
+                            const buyerId = x.buyerUserId ?? x.BuyerUserId ?? '–';
+                            const authorIncome = Number(x.authorIncomeDeltaCoins ?? x.AuthorIncomeDeltaCoins ?? 0);
+                            const authorFrozen = Number(x.authorFrozenDeltaCoins ?? x.AuthorFrozenDeltaCoins ?? 0);
+                            const authorId = x.authorUserId ?? x.AuthorUserId ?? '–';
+                            const storyTitle = x.storyTitle ?? x.StoryTitle ?? '';
+                            const chapterTitle = x.chapterTitle ?? x.ChapterTitle ?? '';
+                            const note = x.note ?? x.Note ?? '';
+                            const adminId = x.adminId ?? x.AdminId ?? '–';
+
+                            const storyText = storyTitle
+                                ? storyTitle + (chapterTitle ? (' / ' + chapterTitle) : '')
+                                : (chapterTitle ? chapterTitle : '-');
+
+                            return `
+                                <tr>
+                                    <td>${eventTime ? escapeHtml(formatDate(eventTime)) : '–'}</td>
+                                    <td>${escapeHtml(eventType)}</td>
+                                    <td>${platform}</td>
+                                    <td>${buyer}</td>
+                                            <td>${escapeHtml(buyerId || '–')}</td>
+                                    <td>${authorIncome}</td>
+                                    <td>${authorFrozen}</td>
+                                            <td>${escapeHtml(authorId || '–')}</td>
+                                    <td>${escapeHtml(storyText)}</td>
+                                    <td>${escapeHtml(note)}</td>
+                                            <td>${escapeHtml(adminId || '–')}</td>
+                                </tr>
+                            `;
+                        }).join('');
+                    }
+
+                    if (loading) loading.style.display = 'none';
+                    if (content) content.style.display = 'block';
+                } catch (e) {
+                    if (errorEl) {
+                        errorEl.classList.remove('d-none');
+                        errorEl.textContent = (e && e.message) ? e.message : 'Không tải được nhật ký hệ thống.';
+                    }
+                } finally {
+                    sysLedgerIsLoading = false;
+                }
+            }
+
+            var btnPlatformWalletFilterApply = document.getElementById('btnPlatformWalletFilterApply');
+            if (btnPlatformWalletFilterApply) {
+                btnPlatformWalletFilterApply.addEventListener('click', function () {
+                    platformWalletHistoryPage = 1;
+                    loadPlatformWallet();
+                });
+            }
+
+            var btnSysLedgerApply = document.getElementById('btnSysLedgerApply');
+            if (btnSysLedgerApply) {
+                btnSysLedgerApply.addEventListener('click', function () {
+                    loadSysLedger(true);
+                });
+            }
+
+            var btnSysLedgerPrev = document.getElementById('btnSysLedgerPrev');
+            if (btnSysLedgerPrev) {
+                btnSysLedgerPrev.addEventListener('click', function () {
+                    if (sysLedgerPage > 1) {
+                        sysLedgerPage -= 1;
+                        loadSysLedger(false);
+                    }
+                });
+            }
+
+            var btnSysLedgerNext = document.getElementById('btnSysLedgerNext');
+            if (btnSysLedgerNext) {
+                btnSysLedgerNext.addEventListener('click', function () {
+                    sysLedgerPage += 1;
+                    loadSysLedger(false);
+                });
+            }
+
+            var tabSysLedger = document.getElementById('tab-system-coin-ledger');
+            if (tabSysLedger) {
+                tabSysLedger.addEventListener('shown.bs.tab', function () {
+                    loadSysLedger(true);
+                });
+            }
+
+            var btnPlatformWalletFilterClear = document.getElementById('btnPlatformWalletFilterClear');
+            if (btnPlatformWalletFilterClear) {
+                btnPlatformWalletFilterClear.addEventListener('click', function () {
+                    var ids = ['platformWalletFilterDateFrom', 'platformWalletFilterDateTo', 'platformWalletFilterQ'];
+                    ids.forEach(function (id) {
+                        var el = document.getElementById(id);
+                        if (el) el.value = '';
+                    });
+                    var typeEl = document.getElementById('platformWalletFilterType');
+                    if (typeEl) typeEl.value = 'ALL';
+                    platformWalletHistoryPage = 1;
+                    loadPlatformWallet();
+                });
+            }
+
+            var btnPlatformWalletHistoryPrev = document.getElementById('btnPlatformWalletHistoryPrev');
+            if (btnPlatformWalletHistoryPrev) {
+                btnPlatformWalletHistoryPrev.addEventListener('click', function () {
+                    if (platformWalletHistoryPage > 1) {
+                        platformWalletHistoryPage -= 1;
+                        loadPlatformWallet();
+                    }
+                });
+            }
+
+            var btnPlatformWalletHistoryNext = document.getElementById('btnPlatformWalletHistoryNext');
+            if (btnPlatformWalletHistoryNext) {
+                btnPlatformWalletHistoryNext.addEventListener('click', function () {
+                    if (btnPlatformWalletHistoryNext.disabled) return;
+                    platformWalletHistoryPage += 1;
+                    loadPlatformWallet();
+                });
+            }
+
+            document.getElementById('tab-content-review').addEventListener('shown.bs.tab', function () { loadUnifiedContentReview(1); });
+            var crKind = document.getElementById('crKind');
+            var crState = document.getElementById('crState');
+            if (crKind) crKind.addEventListener('change', syncCrPanelVisibility);
+            if (crState) crState.addEventListener('change', syncCrPanelVisibility);
+            var btnCrApply = document.getElementById('btnCrApply');
+            if (btnCrApply) btnCrApply.addEventListener('click', function () { contentReviewPage = 1; loadUnifiedContentReview(1); });
+            var btnCrReload = document.getElementById('btnCrReload');
+            if (btnCrReload) btnCrReload.addEventListener('click', function () { loadUnifiedContentReview(contentReviewPage); });
+            var btnCrPrev = document.getElementById('btnCrPrev');
+            if (btnCrPrev) btnCrPrev.addEventListener('click', function () { if (btnCrPrev.disabled) return; loadUnifiedContentReview(contentReviewPage - 1); });
+            var btnCrNext = document.getElementById('btnCrNext');
+            if (btnCrNext) btnCrNext.addEventListener('click', function () { if (btnCrNext.disabled) return; loadUnifiedContentReview(contentReviewPage + 1); });
+            function refreshAdminEscalationPanel() {
+                loadReviewEscalations();
+            }
+            var tabEsc = document.getElementById('tab-review-escalations');
+            if (tabEsc) {
+                tabEsc.addEventListener('shown.bs.tab', function () {
+                    refreshAdminEscalationPanel();
+                });
+            }
+            var aclDec = document.getElementById('aclDecision');
+            if (aclDec) {
+                aclDec.addEventListener('change', function () {
+                    var v = this.value;
+                    var rw = document.getElementById('aclReassignWrap');
+                    if (rw) rw.style.display = (v === 'APPROVE_REASSIGN') ? 'block' : 'none';
+                });
+            }
+            var aclSubmit = document.getElementById('aclResolveSubmit');
+            if (aclSubmit) {
+                aclSubmit.addEventListener('click', async function () {
+                    var requestId = document.getElementById('aclResolveRequestId').value;
+                    var decision = document.getElementById('aclDecision').value;
+                    var note = document.getElementById('aclAdminNote').value.trim();
+                    var body = { decision: decision, adminNote: note || null };
+                    if (decision === 'APPROVE_REASSIGN') {
+                        var nid = document.getElementById('aclNewAssignee').value;
+                        if (!nid) { alert('Chọn compliance nhận.'); return; }
+                        var iso = aclToIsoUtcFromLocal(document.getElementById('aclDeadline').value);
+                        if (!iso) { alert('Chọn hạn xử lý.'); return; }
+                        body.newAssigneeId = nid;
+                        body.reviewDeadlineAtUtc = iso;
+                    }
+                    try {
+                        await ApiService.adminResolveComplianceLockRequest(requestId, body);
+                        alert('Đã xử lý.');
+                        var modalEl = document.getElementById('aclResolveModal');
+                        var mi = bootstrap.Modal.getInstance(modalEl);
+                        if (mi) mi.hide();
+                        refreshAdminEscalationPanel();
+                    } catch (e) { alert(e.message || e); }
+                });
+            }
+            var caaSubmit = document.getElementById('caaResolveSubmit');
+            if (caaSubmit) {
+                caaSubmit.addEventListener('click', async function () {
+                    var requestId = document.getElementById('caaResolveRequestId').value;
+                    var decision = document.getElementById('caaDecision').value;
+                    var note = document.getElementById('caaAdminNote').value.trim();
+                    var kind = document.getElementById('caaResolveKind').value;
+                    var body = { decision: decision, adminNote: note || null };
+                    if (decision === 'APPROVE' && kind === 'SUSPEND_AUTHOR_WRITING') {
+                        var iso = aclToIsoUtcFromLocal(document.getElementById('caaSuspendUntilLocal').value);
+                        if (!iso) { alert('Chọn thời điểm kết thúc tạm khóa viết.'); return; }
+                        body.suspendUntilUtc = iso;
+                    }
+                    try {
+                        await ApiService.adminResolveComplianceActionRequest(requestId, body);
+                        alert('Đã xử lý.');
+                        var mel = document.getElementById('caaResolveModal');
+                        var mi = bootstrap.Modal.getInstance(mel);
+                        if (mi) mi.hide();
+                        refreshAdminEscalationPanel();
+                    } catch (e) { alert(e.message || e); }
+                });
+            }
+            var btnReloadEsc = document.getElementById('btnReloadEscalations');
+            if (btnReloadEsc) btnReloadEsc.addEventListener('click', loadReviewEscalations);
+            var tabEscLog = document.getElementById('tab-review-escalation-log');
+            if (tabEscLog) tabEscLog.addEventListener('shown.bs.tab', loadReviewEscalationLog);
+            var btnEscLogApply = document.getElementById('btnEscLogApply');
+            if (btnEscLogApply) btnEscLogApply.addEventListener('click', function () { escalationLogPage = 1; loadReviewEscalationLog(); });
+            var btnEscLogReload = document.getElementById('btnEscLogReload');
+            if (btnEscLogReload) btnEscLogReload.addEventListener('click', loadReviewEscalationLog);
+            var btnEscLogPrev = document.getElementById('btnEscLogPrev');
+            if (btnEscLogPrev) btnEscLogPrev.addEventListener('click', function () { if (btnEscLogPrev.disabled) return; loadReviewEscalationLog(escalationLogPage - 1); });
+            var btnEscLogNext = document.getElementById('btnEscLogNext');
+            if (btnEscLogNext) btnEscLogNext.addEventListener('click', function () { if (btnEscLogNext.disabled) return; loadReviewEscalationLog(escalationLogPage + 1); });
+            document.querySelectorAll('.esc-view-mode').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    document.querySelectorAll('.esc-view-mode').forEach(function (b) { b.classList.remove('active'); });
+                    btn.classList.add('active');
+                    escalationListMode = btn.getAttribute('data-esc-view') || 'pending';
+                    var wrap = document.getElementById('escPendingOnlyWrap');
+                    var hh = document.getElementById('escHistoryHint');
+                    if (escalationListMode === 'history') {
+                        if (wrap) wrap.style.display = 'none';
+                        if (hh) hh.style.display = 'block';
+                    } else {
+                        if (wrap) wrap.style.display = '';
+                        if (hh) hh.style.display = 'none';
+                    }
+                    loadReviewEscalations();
+                });
+            });
+            document.querySelectorAll('.esc-filter-btn').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    document.querySelectorAll('.esc-filter-btn').forEach(function (b) { b.classList.remove('active'); });
+                    btn.classList.add('active');
+                    escalationTierFilter = btn.getAttribute('data-esc-tier') || '';
+                    if (escalationListMode === 'pending') loadReviewEscalations();
+                });
+            });
+            document.querySelectorAll('input[name="resolveEscReleaseMode"]').forEach(function (el) {
+                el.addEventListener('change', function () {
+                    var assign = document.getElementById('resolveEscReleaseModeAssign').checked;
+                    var box = document.getElementById('resolveEscReleaseAssignFields');
+                    if (box) box.style.display = assign ? 'block' : 'none';
+                });
+            });
+
+            var btnApprEsc = document.getElementById('btnApproveEscalation');
+            if (btnApprEsc) {
+                btnApprEsc.addEventListener('click', async function () {
+                    if (!resolveEscalationRow) return;
+                    var note = document.getElementById('resolveEscAdminNote').value.trim();
+                    var body = { approve: true, adminNote: note || null };
+                    if (resolveEscalationRow.requestKind === 'EXTEND_DEADLINE') {
+                        var loc = document.getElementById('resolveEscConfirmedDeadline').value;
+                        var locIso = adminDatetimeLocalToIsoUtc(loc);
+                        if (locIso) body.confirmedDeadlineAt = locIso;
+                    } else if (resolveEscalationRow.requestKind === 'RELEASE_ASSIGNMENT') {
+                        var assignMode = document.getElementById('resolveEscReleaseModeAssign').checked;
+                        if (assignMode) {
+                            var uid = document.getElementById('resolveEscReassignUser').value;
+                            var rloc = document.getElementById('resolveEscReleaseDeadline').value;
+                            if (!uid || !rloc) {
+                                alert('Chọn người nhận duyệt và hạn duyệt, hoặc chọn trả về hàng đợi.');
+                                return;
+                            }
+                            var rIso = adminDatetimeLocalToIsoUtc(rloc);
+                            if (!rIso) {
+                                alert('Hạn duyệt không hợp lệ.');
+                                return;
+                            }
+                            body.reassignToUserId = uid;
+                            body.confirmedDeadlineAt = rIso;
+                        }
+                    }
+                    try {
+                        await ApiService.adminResolveReviewEscalation(resolveEscalationRow.id, body);
+                        var m = bootstrap.Modal.getInstance(document.getElementById('resolveEscalationModal'));
+                        if (m) m.hide();
+                        loadReviewEscalations();
+                    } catch (e) {
+                        alert(e.message || 'Lỗi xử lý');
+                    }
+                });
+            }
+            var btnRejEsc = document.getElementById('btnRejectEscalation');
+            if (btnRejEsc) {
+                btnRejEsc.addEventListener('click', async function () {
+                    if (!resolveEscalationRow) return;
+                    var note = document.getElementById('resolveEscAdminNote').value.trim();
+                    try {
+                        await ApiService.adminResolveReviewEscalation(resolveEscalationRow.id, { approve: false, adminNote: note || null });
+                        var m = bootstrap.Modal.getInstance(document.getElementById('resolveEscalationModal'));
+                        if (m) m.hide();
+                        loadReviewEscalations();
+                    } catch (e) {
+                        alert(e.message || 'Lỗi xử lý');
+                    }
+                });
+            }
+            document.getElementById('tab-logs').addEventListener('shown.bs.tab', function() { loadModerationLogs(1); });
+            var btnLogApply = document.getElementById('btnLogApply');
+            if (btnLogApply) btnLogApply.addEventListener('click', function () { logsCurrentPage = 1; loadModerationLogs(1); });
+            var btnLogReload = document.getElementById('btnLogReload');
+            if (btnLogReload) btnLogReload.addEventListener('click', function () { loadModerationLogs(logsCurrentPage); });
+            var btnLogPrev = document.getElementById('btnLogPrev');
+            if (btnLogPrev) btnLogPrev.addEventListener('click', function () { if (btnLogPrev.disabled) return; loadModerationLogs(logsCurrentPage - 1); });
+            var btnLogNext = document.getElementById('btnLogNext');
+            if (btnLogNext) btnLogNext.addEventListener('click', function () { if (btnLogNext.disabled) return; loadModerationLogs(logsCurrentPage + 1); });
+            document.getElementById('tab-performance').addEventListener('shown.bs.tab', function () { loadModeratorPerformance(1); });
+            var btnPerfApply = document.getElementById('btnPerfApply');
+            if (btnPerfApply) btnPerfApply.addEventListener('click', function () { loadModeratorPerformance(1); });
+            var btnPerfReload = document.getElementById('btnPerfReload');
+            if (btnPerfReload) btnPerfReload.addEventListener('click', function () { loadModeratorPerformance(); });
+            var btnPerfPrev = document.getElementById('btnPerfPrev');
+            if (btnPerfPrev) btnPerfPrev.addEventListener('click', function () { if (btnPerfPrev.disabled) return; loadModeratorPerformance(perfPage - 1); });
+            var btnPerfNext = document.getElementById('btnPerfNext');
+            if (btnPerfNext) btnPerfNext.addEventListener('click', function () { if (btnPerfNext.disabled) return; loadModeratorPerformance(perfPage + 1); });
+
+            var tabCompLogs = document.getElementById('tab-compliance-logs');
+            if (tabCompLogs) tabCompLogs.addEventListener('shown.bs.tab', function () { loadComplianceLogs(1); });
+            var btnCompLogApply = document.getElementById('btnCompLogApply');
+            if (btnCompLogApply) btnCompLogApply.addEventListener('click', function () { loadComplianceLogs(1); });
+            var btnCompLogReload = document.getElementById('btnCompLogReload');
+            if (btnCompLogReload) btnCompLogReload.addEventListener('click', function () { loadComplianceLogs(compLogsPage); });
+            var btnCompLogPrev = document.getElementById('btnCompLogPrev');
+            if (btnCompLogPrev) btnCompLogPrev.addEventListener('click', function () { if (btnCompLogPrev.disabled) return; loadComplianceLogs(compLogsPage - 1); });
+            var btnCompLogNext = document.getElementById('btnCompLogNext');
+            if (btnCompLogNext) btnCompLogNext.addEventListener('click', function () { if (btnCompLogNext.disabled) return; loadComplianceLogs(compLogsPage + 1); });
+
+            var tabCompPerf = document.getElementById('tab-compliance-performance');
+            if (tabCompPerf) tabCompPerf.addEventListener('shown.bs.tab', function () { loadCompliancePerformance(1); });
+            var btnCompPerfApply = document.getElementById('btnCompPerfApply');
+            if (btnCompPerfApply) btnCompPerfApply.addEventListener('click', function () { loadCompliancePerformance(1); });
+            var btnCompPerfReload = document.getElementById('btnCompPerfReload');
+            if (btnCompPerfReload) btnCompPerfReload.addEventListener('click', function () { loadCompliancePerformance(compPerfPage); });
+            var btnCompPerfPrev = document.getElementById('btnCompPerfPrev');
+            if (btnCompPerfPrev) btnCompPerfPrev.addEventListener('click', function () { if (btnCompPerfPrev.disabled) return; loadCompliancePerformance(compPerfPage - 1); });
+            var btnCompPerfNext = document.getElementById('btnCompPerfNext');
+            if (btnCompPerfNext) btnCompPerfNext.addEventListener('click', function () { if (btnCompPerfNext.disabled) return; loadCompliancePerformance(compPerfPage + 1); });
+            document.getElementById('tab-platform-wallet').addEventListener('shown.bs.tab', loadPlatformWallet);
+
+            var platformApplyBtn = document.getElementById('btnPlatformWalletApply');
+            if (platformApplyBtn) platformApplyBtn.addEventListener('click', applyPlatformWalletAdjust);
+
+            window.loadUnifiedContentReview = loadUnifiedContentReview;
+            window.loadModerationLogs = loadModerationLogs;
+            window.loadModeratorPerformance = loadModeratorPerformance;
+            window.loadComplianceLogs = loadComplianceLogs;
+            window.loadCompliancePerformance = loadCompliancePerformance;
+            window.loadPlatformWallet = loadPlatformWallet;
+            window.reloadActiveTab = reloadActiveTab;
+
+            var btnApply = document.getElementById('btnApplyFilter');
+            if (btnApply) btnApply.addEventListener('click', function() { reloadActiveTab(); });
+
+            syncCrPanelVisibility();
+            loadUnifiedContentReview(1);
+            loadModeratorFilterDropdown();
+            loadModeratorPerformance(1);
+            loadCompliancePerformance(1);
+            loadReviewEscalations();
+            applyAdminEscalationDeepLink();
+        })();
+    </script>
+}

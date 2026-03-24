@@ -108,7 +108,7 @@ export async function createStory(data) {
 
 /**
  * Lấy danh sách truyện có phân trang và lọc.
- * @param {Object} params - { page?, pageSize?, search?, categoryId?, authorId?, status?, sortBy?, sortOrder? }
+ * @param {Object} params - { page?, pageSize?, search?, categoryId?, categoryIds?, authorId?, status?, sortBy?, sortOrder?, includeStoryIds?, storyProgressStatus?, ageRating?, minTotalChapters?, maxTotalChapters? }
  * @returns {Promise} - PagedResultDto
  */
 export async function getStories(params = {}) {
@@ -117,10 +117,26 @@ export async function getStories(params = {}) {
     if (params.pageSize != null) q.append("pageSize", params.pageSize);
     if (params.search) q.append("search", params.search);
     if (params.categoryId) q.append("categoryId", params.categoryId);
+    const catIds = params.categoryIds;
+    if (Array.isArray(catIds) && catIds.length > 0) {
+        catIds.forEach((id) => {
+            if (id != null && String(id).trim() !== "") q.append("categoryIds", String(id).trim());
+        });
+    }
     if (params.authorId) q.append("authorId", params.authorId);
     if (params.status) q.append("status", params.status);
     if (params.sortBy) q.append("sortBy", params.sortBy);
     if (params.sortOrder) q.append("sortOrder", params.sortOrder);
+    if (params.storyProgressStatus) q.append("storyProgressStatus", String(params.storyProgressStatus).trim());
+    if (params.ageRating) q.append("ageRating", String(params.ageRating).trim());
+    if (params.minTotalChapters != null) q.append("minTotalChapters", String(params.minTotalChapters));
+    if (params.maxTotalChapters != null) q.append("maxTotalChapters", String(params.maxTotalChapters));
+    const inc = params.includeStoryIds;
+    if (Array.isArray(inc) && inc.length > 0) {
+        inc.forEach((id) => {
+            if (id != null && String(id).trim() !== "") q.append("includeStoryIds", String(id).trim());
+        });
+    }
 
     const url = q.toString() ? `/stories?${q}` : "/stories";
     const response = await axiosInstance.get(url);
@@ -130,11 +146,82 @@ export async function getStories(params = {}) {
 /**
  * Lấy truyện theo ID.
  * @param {string} id - Guid
+ * @param {Object} [options] - { recordView?: boolean } mặc định true. Khi false chỉ lấy dữ liệu, không ghi nhận lượt xem (BE vẫn chống spam 1/viewer/24h khi recordView=true).
  * @returns {Promise}
  */
-export async function getStoryById(id) {
-    const response = await axiosInstance.get(`/stories/${id}`);
+export async function getStoryById(id, options = {}) {
+    const recordView = options.recordView !== false;
+    const url = recordView ? `/stories/${id}` : `/stories/${id}?recordView=false`;
+    const response = await axiosInstance.get(url);
     return response.data;
+}
+
+const STORY_VIEW_CACHE_KEY = "story_view";
+const STORY_VIEW_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24h
+
+/**
+ * Lấy viewer key cho cache lượt xem (FE): user id nếu đăng nhập, 'anon' nếu không.
+ * @param {string|null} userId - từ useAuth().user?.id
+ * @returns {string}
+ */
+export function getViewerKeyForViewCache(userId) {
+    return userId ? `u:${userId}` : "anon";
+}
+
+/**
+ * Kiểm tra đã ghi nhận lượt xem cho story trong 24h (cache FE).
+ * @param {string} storyId - Guid
+ * @param {string} viewerKey - từ getViewerKeyForViewCache(user?.id)
+ * @returns {boolean} true nếu đã xem trong 24h
+ */
+export function hasViewedStoryInCooldown(storyId, viewerKey) {
+    try {
+        const raw = localStorage.getItem(STORY_VIEW_CACHE_KEY);
+        if (!raw) return false;
+        const data = JSON.parse(raw);
+        const key = `${storyId}_${viewerKey}`;
+        const ts = data[key];
+        if (ts == null) return false;
+        return Date.now() - ts < STORY_VIEW_COOLDOWN_MS;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Đánh dấu đã ghi nhận lượt xem cho story (cache FE 24h).
+ * @param {string} storyId - Guid
+ * @param {string} viewerKey - từ getViewerKeyForViewCache(user?.id)
+ */
+export function setStoryViewCache(storyId, viewerKey) {
+    try {
+        const raw = localStorage.getItem(STORY_VIEW_CACHE_KEY);
+        const data = raw ? JSON.parse(raw) : {};
+        data[`${storyId}_${viewerKey}`] = Date.now();
+        localStorage.setItem(STORY_VIEW_CACHE_KEY, JSON.stringify(data));
+    } catch {
+        // ignore
+    }
+}
+
+/**
+ * Gọi API chỉ ghi nhận 1 lượt xem (BE chống spam: 1 lượt/viewer/24h). Nên gọi khi FE cache báo chưa xem trong 24h.
+ * @param {string} storyId - Guid
+ * @returns {Promise<void>}
+ */
+export async function recordStoryView(storyId) {
+    await axiosInstance.post(`/stories/${storyId}/record-view`);
+}
+
+/**
+ * Lưu tiến độ đọc: đang đọc đến chapter nào. Cần đăng nhập.
+ * POST api/stories/{id}/reading-progress, body { chapterId: "guid" }.
+ * @param {string} storyId - Guid truyện
+ * @param {string} chapterId - Guid chương
+ * @returns {Promise<void>}
+ */
+export async function saveReadingProgress(storyId, chapterId) {
+    await axiosInstance.post(`/stories/${storyId}/reading-progress`, { chapterId });
 }
 
 /**
@@ -262,6 +349,26 @@ export async function unpublishStory(id) {
 }
 
 /**
+ * Theo dõi truyện (chỉ story PUBLISHED). Khi có chương mới sẽ nhận thông báo. [Authorize]
+ * @param {string} storyId - Guid
+ * @returns {Promise<{ following: boolean, message: string }>}
+ */
+export async function followStory(storyId) {
+    const response = await axiosInstance.post(`/stories/${storyId}/follow`);
+    return response.data;
+}
+
+/**
+ * Bỏ theo dõi truyện. [Authorize]
+ * @param {string} storyId - Guid
+ * @returns {Promise<{ following: boolean, message: string }>}
+ */
+export async function unfollowStory(storyId) {
+    const response = await axiosInstance.delete(`/stories/${storyId}/follow`);
+    return response.data;
+}
+
+/**
  * Duyệt truyện (phê duyệt / approve) – gọi POST /stories/{id}/publish, chuyển status sang PUBLISHED.
  * @param {string} id - Guid truyện
  * @returns {Promise}
@@ -287,4 +394,71 @@ export async function rejectStory(id, storyData) {
         storyProgressStatus: storyData.storyProgressStatus ?? storyData.StoryProgressStatus ?? 'ONGOING',
         status: 'REJECTED',
     });
+}
+
+/**
+ * Đánh giá truyện (1–5 sao). Bắt buộc đăng nhập. BE chặn nếu chưa đọc (chưa có log đọc chapter/story).
+ * @param {string} storyId - Guid truyện
+ * @param {Object} payload - { starValue: number (1..5), reviewText?: string }
+ * @returns {Promise<{ avgRating: number, ratingCount: number }>}
+ * @throws Nếu 400: message thường là "Bạn cần đọc truyện trước khi đánh giá."
+ */
+export async function rateStory(storyId, payload) {
+    const starValue = Number(payload.starValue);
+    if (starValue < 1 || starValue > 5) {
+        throw new Error('Số sao phải từ 1 đến 5.');
+    }
+    const response = await axiosInstance.post(`/stories/${storyId}/ratings`, {
+        starValue,
+        reviewText: payload.reviewText != null ? String(payload.reviewText).trim() || null : null,
+    });
+    return response.data;
+}
+
+/**
+ * Lấy lịch sử đánh giá của story (AllowAnonymous).
+ * @param {string} storyId - Guid
+ * @returns {Promise<Array<{ id, userId?, userDisplayName, starValue, reviewText?, createdAt? }>>}
+ */
+export async function getStoryRatings(storyId) {
+    const response = await axiosInstance.get(`/stories/${storyId}/ratings`);
+    return Array.isArray(response.data) ? response.data : [];
+}
+
+// --- Comments (GET/POST /api/stories/{id}/comments, POST like) ---
+
+/**
+ * Lấy danh sách comment của story (AllowAnonymous). Có đăng nhập thì mỗi comment có userHasLiked.
+ * @param {string} storyId - Guid
+ * @returns {Promise<Array>} StoryCommentDto[]
+ */
+export async function getStoryComments(storyId) {
+    const response = await axiosInstance.get(`/stories/${storyId}/comments`);
+    return Array.isArray(response.data) ? response.data : [];
+}
+
+/**
+ * Tạo comment hoặc reply (parentId). Bắt buộc login + đã đọc ít nhất 1 chapter.
+ * @param {string} storyId - Guid
+ * @param {Object} payload - { content: string, parentId?: string (Guid) }
+ * @returns {Promise<object>} Created comment DTO
+ */
+export async function addStoryComment(storyId, payload) {
+    const content = (payload.content ?? '').trim();
+    if (!content) throw new Error('Nội dung comment không được để trống.');
+    const body = { content };
+    if (payload.parentId) body.parentId = payload.parentId;
+    const response = await axiosInstance.post(`/stories/${storyId}/comments`, body);
+    return response.data;
+}
+
+/**
+ * Bật/tắt like comment. 1 user chỉ 1 lần/comment. [Authorize]
+ * @param {string} storyId - Guid
+ * @param {string} commentId - Guid
+ * @returns {Promise<{ liked: boolean, likesCount: number }>}
+ */
+export async function toggleCommentLike(storyId, commentId) {
+    const response = await axiosInstance.post(`/stories/${storyId}/comments/${commentId}/like`);
+    return response.data;
 }

@@ -39,7 +39,25 @@ public partial class stories
 
     public DateTime? updated_at { get; set; }
 
+    /// <summary>Thời điểm tác giả gửi duyệt lần này (UTC). Không cập nhật khi sửa nội dung lúc đang chờ duyệt.</summary>
+    public DateTime? submitted_for_review_at { get; set; }
+
     public DateTime? published_at { get; set; }
+
+    /// <summary>Compliance: chặn thêm comment trên truyện (độc giả không đăng comment mới).</summary>
+    public bool comments_disabled { get; set; }
+
+    /// <summary>Compliance: ẩn truyện khỏi người xem thường (trừ tác giả / admin / compliance).</summary>
+    public bool compliance_hidden { get; set; }
+
+    /// <summary>Compliance: gắn cờ cần theo dõi / xử lý lâu hơn.</summary>
+    public bool compliance_flagged { get; set; }
+
+    public string? compliance_flag_note { get; set; }
+
+    public DateTime? compliance_flagged_at { get; set; }
+
+    public Guid? compliance_flagged_by { get; set; }
 
     public virtual users? author { get; set; }
 
@@ -53,7 +71,13 @@ public partial class stories
 
     public virtual ICollection<ratings> ratings { get; set; } = new List<ratings>();
 
+    public virtual ICollection<story_character_memory> story_character_memory { get; set; } = new List<story_character_memory>();
+
     public virtual ICollection<story_commitments> story_commitments { get; set; } = new List<story_commitments>();
+
+    public virtual ICollection<story_event_memory> story_event_memory { get; set; } = new List<story_event_memory>();
+
+    public virtual ICollection<story_story_state> story_story_state { get; set; } = new List<story_story_state>();
 
     public virtual ICollection<story_versions> story_versions { get; set; } = new List<story_versions>();
 

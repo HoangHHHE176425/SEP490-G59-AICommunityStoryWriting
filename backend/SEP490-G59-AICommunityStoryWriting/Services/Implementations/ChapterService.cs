@@ -1,8 +1,13 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Repositories;
 using Services.DTOs.Chapters;
+using Services.DTOs.Notifications;
 using Services.DTOs.Stories;
 using Services.Interfaces;
 
@@ -10,15 +15,39 @@ namespace Services.Implementations
 {
     public class ChapterService : IChapterService
     {
+        /// <summary>Gắn vào <see cref="InvalidOperationException.Data"/> khi cần client xác nhận xóa kèm version (409).</summary>
+        internal const string DeleteRequiresVersionsConfirmationCode = "CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED";
+
         private readonly IChapterRepository _chapterRepository;
+        private readonly IChapterVersionRepository _versionRepository;
+        private readonly IAiGeneratedContentRepository _aiContentRepository;
+        private readonly IServiceScopeFactory? _scopeFactory;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
+        private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly ILogger<ChapterService> _logger;
 
-        public ChapterService(IChapterRepository chapterRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null)
+        public ChapterService(IChapterRepository chapterRepository, IChapterVersionRepository versionRepository, IAiGeneratedContentRepository aiContentRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
         {
             _chapterRepository = chapterRepository;
+            _versionRepository = versionRepository;
+            _aiContentRepository = aiContentRepository;
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
+            _notificationHubNotifier = notificationHubNotifier;
+        }
+
+        // Overload for DI setups that also provide IServiceScopeFactory.
+        public ChapterService(
+            IChapterRepository chapterRepository,
+            IChapterVersionRepository versionRepository,
+            IAiGeneratedContentRepository aiContentRepository,
+            IServiceScopeFactory scopeFactory,
+            ILogger<ChapterService> logger,
+            IModerationHubNotifier? moderationHubNotifier = null,
+            INotificationHubNotifier? notificationHubNotifier = null)
+            : this(chapterRepository, versionRepository, aiContentRepository, logger, moderationHubNotifier, notificationHubNotifier)
+        {
+            _scopeFactory = scopeFactory;
         }
 
         public ChapterResponseDto Create(CreateChapterRequestDto request)
@@ -28,6 +57,9 @@ namespace Services.Implementations
             {
                 throw new InvalidOperationException($"Story with ID {request.StoryId} not found.");
             }
+
+            if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
+                throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin).");
 
             var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(request.StoryId, request.OrderIndex);
             if (existingChapter != null)
@@ -53,7 +85,18 @@ namespace Services.Implementations
                 coinPrice = 0; // Force coin price to 0 for FREE chapters
             }
 
-            var wordCount = CalculateWordCount(request.Content);
+            var content = request.Content;
+            if (request.AiGeneratedContentId.HasValue)
+            {
+                var aiDraft = _aiContentRepository.GetById(request.AiGeneratedContentId.Value);
+                if (aiDraft != null && aiDraft.story_id == request.StoryId && !string.IsNullOrWhiteSpace(aiDraft.ai_output))
+                {
+                    if (string.IsNullOrWhiteSpace(content))
+                        content = aiDraft.ai_output;
+                }
+            }
+
+            var wordCount = CalculateWordCount(content);
 
             // Determine status - default to DRAFT if not specified or invalid
             var status = "DRAFT";
@@ -73,7 +116,7 @@ namespace Services.Implementations
                 id = Guid.NewGuid(),
                 story_id = request.StoryId,
                 title = request.Title,
-                content = request.Content,
+                content = content,
                 order_index = request.OrderIndex,
                 status = status,
                 access_type = accessType,
@@ -86,20 +129,32 @@ namespace Services.Implementations
                 updated_at = DateTime.Now
             };
 
+            if (request.AiSimilarityPercent.HasValue)
+                chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
+
             _chapterRepository.Add(chapter);
+
+            if (request.AiGeneratedContentId.HasValue)
+                _aiContentRepository.UpdateChapterId(request.AiGeneratedContentId.Value, chapter.id, chapter.order_index);
 
             try
             {
                 UpdateStoryChapterStats(request.StoryId);
 
-                // If chapter is published, update story's last_published_at and notify followers
+                // If chapter is published, update story's last_published_at and notify followers (DB + real-time)
                 if (status == "PUBLISHED" && story != null)
                 {
                     story.last_published_at = DateTime.Now;
                     StoryDAO.Update(story);
                     Console.WriteLine($"[CONSOLE] ChapterService.Create PUBLISHED -> NotifyStoryFollowersNewChapter StoryId={request.StoryId} ChapterId={chapter.id}");
                     _logger.LogInformation("ChapterService.Create calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", request.StoryId, chapter.id);
-                    NotificationDAO.NotifyStoryFollowersNewChapter(request.StoryId, chapter.id, request.Title, story.title, _logger);
+                    var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(request.StoryId, chapter.id, request.Title, story.title, _logger);
+                    _ = PushNotificationsToFollowersAsync(createdNotifications);
+                    if (story.author_id.HasValue)
+                    {
+                        var authorNotifications = NotificationDAO.NotifyAuthorFollowersNewChapter(story.author_id.Value, request.StoryId, chapter.id, request.Title, story.title, _logger);
+                        _ = PushNotificationsToFollowersAsync(authorNotifications);
+                    }
                 }
             }
             catch (Exception)
@@ -143,10 +198,19 @@ namespace Services.Implementations
             {
                 var searchLower = query.Search.Trim().ToLower();
                 chaptersQuery = chaptersQuery.Where(c =>
-                    (c.title != null && c.title.ToLower().Contains(searchLower)));
+                    (c.title != null && c.title.ToLower().Contains(searchLower)) ||
+                    (c.story != null && c.story.title != null && c.story.title.ToLower().Contains(searchLower)));
             }
 
-            if (query.StatusIn != null && query.StatusIn.Count > 0)
+            if (query.PendingVersionChapterIds != null && query.PendingVersionChapterIds.Count > 0)
+            {
+                var ids = query.PendingVersionChapterIds;
+                // Hiển thị chapter chờ duyệt: (1) chapter gốc PENDING_REVIEW hoặc (2) chapter có ít nhất một version PENDING_REVIEW (kể cả chapter đang DRAFT).
+                chaptersQuery = chaptersQuery.Where(c =>
+                    c.status == "PENDING_REVIEW" ||
+                    ids.Contains(c.id));
+            }
+            else if (query.StatusIn != null && query.StatusIn.Count > 0)
             {
                 var statusList = query.StatusIn;
                 chaptersQuery = chaptersQuery.Where(c => c.status != null && statusList.Contains(c.status));
@@ -208,6 +272,9 @@ namespace Services.Implementations
                 return dto;
             }).ToList();
 
+            EnrichChapterListItemsWithReviewSla(chapterList, items);
+            EnrichModeratorRejectionHistoryForChapterList(chapterList, items);
+
             return new PagedResultDto<ChapterListItemDto>
             {
                 Items = items,
@@ -231,13 +298,32 @@ namespace Services.Implementations
             return dto;
         }
 
+        public (string? reason, DateTime? rejectedAt) GetLatestRejectionForChapter(Guid chapterId)
+        {
+            return DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", chapterId);
+        }
+
         public IEnumerable<ChapterListItemDto> GetByStoryId(Guid storyId)
         {
             var chapterList = _chapterRepository.GetByStoryId(storyId)
                 .OrderBy(c => c.order_index)
                 .ToList();
 
-            return chapterList.Select(c => MapToListItemDto(c));
+            var storyTitle = StoryDAO.GetById(storyId)?.title;
+            var items = chapterList.Select(c =>
+            {
+                var dto = MapToListItemDto(c, storyTitle);
+                if (string.Equals(c.status, "REJECTED", StringComparison.OrdinalIgnoreCase))
+                {
+                    var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", c.id);
+                    dto.RejectionReason = reason;
+                    dto.RejectedAt = rejectedAt;
+                }
+                return dto;
+            }).ToList();
+            EnrichChapterListItemsWithReviewSla(chapterList, items);
+            EnrichModeratorRejectionHistoryForChapterList(chapterList, items);
+            return items;
         }
 
         public ChapterResponseDto? GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex)
@@ -330,7 +416,15 @@ namespace Services.Implementations
                 var newStatus = request.Status.ToUpper();
                 var oldStatus = chapter.status?.ToUpper() ?? "DRAFT";
 
+                if (newStatus == "PENDING_REVIEW")
+                    EnsureCanSubmitForReview(chapter);
+
                 chapter.status = newStatus;
+
+                if (newStatus == "PENDING_REVIEW" && oldStatus != "PENDING_REVIEW")
+                    chapter.submitted_for_review_at = DateTime.UtcNow;
+                else if (oldStatus == "PENDING_REVIEW" && newStatus != "PENDING_REVIEW")
+                    chapter.submitted_for_review_at = null;
 
                 // If changing to PUBLISHED, set published_at
                 if (newStatus == "PUBLISHED" && oldStatus != "PUBLISHED")
@@ -349,6 +443,9 @@ namespace Services.Implementations
 
             if (request.IsAiClean.HasValue)
                 chapter.is_ai_clean = request.IsAiClean.Value;
+
+            if (request.AiSimilarityPercent.HasValue)
+                chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
 
             if (request.Content != null)
             {
@@ -374,7 +471,13 @@ namespace Services.Implementations
                         }
                         Console.WriteLine($"[CONSOLE] ChapterService.Update PUBLISHED -> NotifyStoryFollowersNewChapter StoryId={chapter.story_id} ChapterId={chapter.id}");
                         _logger.LogInformation("ChapterService.Update calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id, chapter.id);
-                        NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapter.id, chapter.title, story?.title, _logger);
+                        var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(chapter.story_id.Value, chapter.id, chapter.title, story?.title, _logger);
+                        _ = PushNotificationsToFollowersAsync(createdNotifications);
+                        if (story?.author_id != null)
+                        {
+                            var authorNotifications = NotificationDAO.NotifyAuthorFollowersNewChapter(story.author_id.Value, chapter.story_id.Value, chapter.id, chapter.title, story.title, _logger);
+                            _ = PushNotificationsToFollowersAsync(authorNotifications);
+                        }
                     }
                 }
                 catch (Exception)
@@ -387,13 +490,34 @@ namespace Services.Implementations
             return true;
         }
 
-        public bool Delete(Guid id)
+        public bool Delete(Guid id, bool deleteIncludingVersions = false)
         {
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
 
+            var statusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
+            if (statusUpper != "DRAFT")
+                throw new InvalidOperationException("Chỉ được xóa chương khi ở trạng thái Bản nháp. Chương hiện tại: " + (chapter.status ?? "—"));
+
+            var versionCount = _versionRepository.GetByChapterId(id).Count();
+            if (versionCount > 0 && !deleteIncludingVersions)
+                ThrowRequiresVersionsDeleteConfirmation(versionCount);
+
             var storyId = chapter.story_id;
+
+            try
+            {
+                ReviewAssignmentDAO.CompleteAssignment(ReviewAssignmentDAO.TargetTypeChapter, id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Complete review assignment on chapter delete failed (non-fatal). ChapterId={ChapterId}", id);
+            }
+
+            _aiContentRepository.DeleteAllByChapterId(id);
+            if (versionCount > 0)
+                _versionRepository.DeleteAllByChapterId(id);
 
             _chapterRepository.Delete(id);
 
@@ -419,9 +543,18 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
 
+            // Khi đã có phiên bản nào của chương đang chờ duyệt thì không cho gửi duyệt chapter gốc.
+            var versionsPending = _versionRepository.GetByChapterId(id)
+                .Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+            if (versionsPending)
+                throw new InvalidOperationException("Chỉ được gửi một bản duyệt: bản gốc chương hoặc một phiên bản. Đã có phiên bản đang chờ duyệt.");
+
+            EnsureCanSubmitForReview(chapter);
+
             // Author "Publish" = gửi chờ duyệt. Chỉ moderator approve mới chuyển sang PUBLISHED và set published_at.
             chapter.status = "PENDING_REVIEW";
             chapter.updated_at = DateTime.Now;
+            chapter.submitted_for_review_at = DateTime.UtcNow;
             // published_at và story.last_published_at chỉ set khi moderator approve (ModerationService.ApproveChapter)
 
             _chapterRepository.Update(chapter);
@@ -435,8 +568,14 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
 
+            if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, id))
+                throw new InvalidOperationException("Kiểm duyệt viên đã nhận duyệt đơn này, bạn không thể hủy xuất bản. Vui lòng chờ kết quả duyệt.");
+
+            EnsureCanUnpublish(chapter);
+
             chapter.status = "DRAFT";
             chapter.updated_at = DateTime.Now;
+            chapter.submitted_for_review_at = null;
 
             _chapterRepository.Update(chapter);
 
@@ -471,6 +610,84 @@ namespace Services.Implementations
             }
 
             return true;
+        }
+
+        private static void ThrowRequiresVersionsDeleteConfirmation(int versionCount)
+        {
+            var ex = new InvalidOperationException(
+                "Chương có phiên bản (nháp / chỉnh sửa) đã lưu. Vui lòng xác nhận trên giao diện: nếu đồng ý, hệ thống sẽ xóa luôn toàn bộ phiên bản và chương.");
+            ex.Data["ErrorCode"] = DeleteRequiresVersionsConfirmationCode;
+            ex.Data["VersionCount"] = versionCount;
+            throw ex;
+        }
+
+        /// <summary>Tác giả chỉ được gửi xuất bản chương theo thứ tự 1, 2, 3... Chương trước phải đã gửi (PUBLISHED, PENDING_REVIEW, hoặc có ít nhất một version PENDING_REVIEW) thì mới gửi được chương tiếp theo.</summary>
+        private void EnsureCanSubmitForReview(chapters chapter)
+        {
+            if (chapter.order_index <= 0)
+                return;
+            var storyId = chapter.story_id ?? Guid.Empty;
+            var previous = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, chapter.order_index - 1);
+            if (previous == null)
+            {
+                throw new InvalidOperationException(
+                    "Phải gửi xuất bản chương theo thứ tự. Chương " + (chapter.order_index) + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
+            }
+            var prevStatus = (previous.status ?? "").Trim().ToUpperInvariant();
+            var prevHasPendingVersion = _versionRepository.GetByChapterId(previous.id).Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+            if (prevStatus != "PUBLISHED" && prevStatus != "PENDING_REVIEW" && !prevHasPendingVersion)
+            {
+                throw new InvalidOperationException(
+                    "Phải gửi xuất bản chương theo thứ tự. Chương " + (chapter.order_index) + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
+            }
+        }
+
+        /// <summary>Hủy xuất bản phải theo thứ tự ngược: chỉ được hủy chương N nếu không còn chương nào có thứ tự > N đang xuất bản hoặc chờ duyệt.</summary>
+        private void EnsureCanUnpublish(chapters chapter)
+        {
+            var storyId = chapter.story_id ?? Guid.Empty;
+            if (storyId == Guid.Empty) return;
+            var allChapters = _chapterRepository.GetByStoryId(storyId).OrderBy(c => c.order_index).ToList();
+            var currentIndex = chapter.order_index;
+            foreach (var c in allChapters)
+            {
+                if (c.order_index <= currentIndex) continue;
+                var status = (c.status ?? "").Trim().ToUpperInvariant();
+                if (status == "PUBLISHED" || status == "PENDING_REVIEW")
+                    throw new InvalidOperationException("Hủy xuất bản phải theo thứ tự ngược. Phải hủy chương " + (c.order_index + 1) + " trước rồi mới hủy chương " + (currentIndex + 1) + ".");
+                var hasPendingVersion = _versionRepository.GetByChapterId(c.id).Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
+                if (hasPendingVersion)
+                    throw new InvalidOperationException("Hủy xuất bản phải theo thứ tự ngược. Chương " + (c.order_index + 1) + " đang có phiên bản chờ duyệt, phải xử lý trước rồi mới hủy chương " + (currentIndex + 1) + ".");
+            }
+        }
+
+        /// <summary>Gửi real-time (SignalR) từng thông báo tới user theo dõi truyện. Gọi fire-and-forget từ Create/Update.</summary>
+        private async Task PushNotificationsToFollowersAsync(List<notifications> created)
+        {
+            if (created == null || created.Count == 0 || _notificationHubNotifier == null)
+                return;
+            foreach (var n in created)
+            {
+                if (n.user_id == null) continue;
+                try
+                {
+                    var dto = new NotificationDto
+                    {
+                        Id = n.id,
+                        Type = n.type,
+                        Title = n.title,
+                        Content = n.content,
+                        LinkUrl = n.link_url,
+                        IsRead = n.is_read == true,
+                        CreatedAt = n.created_at
+                    };
+                    await _notificationHubNotifier.NotifyUserAsync(n.user_id.Value, dto);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Push notification to follower failed. UserId={UserId} NotificationId={NotificationId}", n.user_id, n.id);
+                }
+            }
         }
 
         private int CalculateWordCount(string? content)
@@ -517,6 +734,7 @@ namespace Services.Implementations
                 CoinPrice = chapter.coin_price,
                 WordCount = chapter.word_count,
                 AiContributionRatio = chapter.ai_contribution_ratio,
+                AiSimilarityPercent = chapter.ai_similarity_percent,
                 IsAiClean = chapter.is_ai_clean ?? false,
                 PublishedAt = chapter.published_at,
                 CreatedAt = chapter.created_at,
@@ -537,9 +755,111 @@ namespace Services.Implementations
                 AccessType = chapter.access_type,
                 CoinPrice = chapter.coin_price,
                 WordCount = chapter.word_count,
+                AiSimilarityPercent = chapter.ai_similarity_percent,
+                AiContributionRatio = chapter.ai_contribution_ratio,
                 PublishedAt = chapter.published_at,
-                CreatedAt = chapter.created_at
+                CreatedAt = chapter.created_at,
+                UpdatedAt = chapter.updated_at
             };
+        }
+
+        /// <summary>
+        /// Điền PendingSince, DeadlineAt (SLA), TimeStatus, ClaimedAt, ClaimedByDisplayName cho list API
+        /// (cùng quy tắc queue moderator; tránh gán mốc sai cho chương không liên quan duyệt).
+        /// </summary>
+        private static void EnrichChapterListItemsWithReviewSla(IReadOnlyList<chapters> chapterEntities, List<ChapterListItemDto> items)
+        {
+            if (chapterEntities.Count == 0 || items.Count != chapterEntities.Count)
+                return;
+
+            var ids = chapterEntities.Select(c => c.id).ToList();
+            var claims = ReviewAssignmentDAO.GetActiveClaimInfosByTargetIds(ReviewAssignmentDAO.TargetTypeChapter, ids);
+            var pendingVersionMaxCreated = ChapterVersionDAO.GetMaxPendingReviewCreatedAtByChapterIds(ids);
+
+            for (var i = 0; i < items.Count; i++)
+            {
+                var c = chapterEntities[i];
+                var dto = items[i];
+                var hasPendingVersion = pendingVersionMaxCreated.ContainsKey(c.id);
+                var hasClaim = claims.ContainsKey(c.id);
+                var pendingReviewStatus = string.Equals(c.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase);
+                if (!pendingReviewStatus && !hasPendingVersion && !hasClaim)
+                    continue;
+
+                DateTime? authorSubmitted = null;
+                if (c.submitted_for_review_at.HasValue)
+                    authorSubmitted = ModeratorReviewSlaHelper.NormalizeToUtc(c.submitted_for_review_at.Value);
+                else
+                {
+                    var rawBase = c.updated_at ?? c.created_at;
+                    var baseUtc = rawBase.HasValue ? ModeratorReviewSlaHelper.NormalizeToUtc(rawBase.Value) : (DateTime?)null;
+                    if (pendingVersionMaxCreated.TryGetValue(c.id, out var maxPendingRaw))
+                    {
+                        var maxPending = ModeratorReviewSlaHelper.NormalizeToUtc(maxPendingRaw);
+                        if (baseUtc.HasValue)
+                            authorSubmitted = maxPending > baseUtc.Value ? maxPending : baseUtc.Value;
+                        else
+                            authorSubmitted = maxPending;
+                    }
+                    else
+                        authorSubmitted = baseUtc;
+                }
+
+                dto.PendingSince = authorSubmitted;
+
+                (Guid AssigneeId, DateTime AssignedAt, string DisplayName, DateTime? ReviewDeadlineAt)? claim = null;
+                if (claims.TryGetValue(c.id, out var tuple))
+                    claim = tuple;
+
+                if (claim.HasValue)
+                {
+                    dto.ClaimedAt = claim.Value.AssignedAt;
+                    dto.ClaimedByDisplayName = claim.Value.DisplayName;
+                }
+
+                var fallbackDeadline = ResolveChapterListReviewDeadlineUtc(authorSubmitted, claim);
+                dto.DeadlineAt = fallbackDeadline;
+                dto.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
+            }
+        }
+
+        /// <summary>Gắn toàn bộ lần từ chối chương gốc từ moderation_logs (không chỉ lần mới nhất).</summary>
+        private static void EnrichModeratorRejectionHistoryForChapterList(IReadOnlyList<chapters> chapterEntities, List<ChapterListItemDto> items)
+        {
+            if (chapterEntities.Count == 0 || items.Count != chapterEntities.Count)
+                return;
+
+            var ids = chapterEntities.Select(c => c.id).ToList();
+            var map = ModerationLogDAO.GetRejectionHistoriesByTargetIds(ReviewAssignmentDAO.TargetTypeChapter, ids);
+            for (var i = 0; i < items.Count; i++)
+            {
+                var chapterId = items[i].Id;
+                if (!map.TryGetValue(chapterId, out var tuples) || tuples.Count == 0)
+                    continue;
+                items[i].ModeratorRejectionHistory = tuples.Select(t => new ChapterRejectionHistoryItemDto
+                {
+                    Reason = t.Reason,
+                    RejectedAt = t.RejectedAt,
+                    ModeratorId = t.ModeratorId
+                }).ToList();
+            }
+        }
+
+        /// <summary>Đã nhận duyệt: ưu tiên hạn moderator; bản cũ: assigned_at + 7 ngày. Chưa nhận: mốc gửi + 7 ngày.</summary>
+        private static DateTime? ResolveChapterListReviewDeadlineUtc(
+            DateTime? pendingSince,
+            (Guid AssigneeId, DateTime AssignedAt, string DisplayName, DateTime? ReviewDeadlineAt)? claim)
+        {
+            if (claim.HasValue)
+            {
+                if (claim.Value.ReviewDeadlineAt.HasValue)
+                    return ModeratorReviewSlaHelper.NormalizeToUtc(claim.Value.ReviewDeadlineAt.Value);
+                return claim.Value.AssignedAt.AddDays(ModeratorReviewSlaHelper.PolicyDaysAfterAuthorSubmit);
+            }
+
+            if (pendingSince.HasValue)
+                return pendingSince.Value.AddDays(ModeratorReviewSlaHelper.PolicyDaysAfterAuthorSubmit);
+            return null;
         }
     }
 }
