@@ -202,15 +202,20 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     /** Danh sách version của chương (khi ở chế độ version) — dùng validate số version không trùng + trạng thái (pending_review) */
     const [existingVersionsForChapter, setExistingVersionsForChapter] = useState([]);
     const [versionNumberError, setVersionNumberError] = useState('');
-    /** Điều kiện gửi xuất bản version: publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion (chương trước có version chờ duyệt). */
+    /** Điều kiện gửi xuất bản version: chương trước đã duyệt/từ chối + không có version chờ duyệt ở chương trước (đồng bộ ChapterListManager). */
     const [versionPublishEligibility, setVersionPublishEligibility] = useState({
-        publishedOrderIndices: new Set(),
-        pendingOrderIndices: new Set(),
+        prevSequentialOk: false,
         prevHasPendingVersion: false,
     });
     /** Đã load xong dữ liệu để tính canSubmitVersion (tránh nút Xuất bản bật sẵn rồi mới disable). */
     const [versionEligibilityLoaded, setVersionEligibilityLoaded] = useState(false);
     const [versionsForChapterLoaded, setVersionsForChapterLoaded] = useState(false);
+    /** Chương thường (tạo mới / chỉnh sửa): điều kiện gửi xuất bản theo thứ tự + không có phiên bản chờ duyệt ở chương hiện tại. */
+    const [normalPublishEligibility, setNormalPublishEligibility] = useState({
+        loaded: false,
+        prevSequentialOk: true,
+        selfHasPendingVersion: false,
+    });
 
     const [showSettings, setShowSettings] = useState(false);
     const [editorSettings, setEditorSettings] = useState({
@@ -337,56 +342,105 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             .finally(() => setVersionsForChapterLoaded(true));
     }, [isVersionMode, sourceChapterForVersion?.id, sourceChapterForVersion?.Id, editingVersion]);
 
-    // Load điều kiện gửi xuất bản version (thứ tự 1,2,3... và không trùng phiên bản chờ duyệt) — dùng đúng API có status như ChapterListManager
+    // Load điều kiện gửi xuất bản version — đồng bộ ChapterListManager (chương trước đã published/rejected, không có version pending ở chương trước)
     useEffect(() => {
         if (!isVersionMode || !storyId || !sourceChapterForVersion) {
-            setVersionPublishEligibility({ publishedOrderIndices: new Set(), pendingOrderIndices: new Set(), prevHasPendingVersion: false });
+            setVersionPublishEligibility({ prevSequentialOk: false, prevHasPendingVersion: false });
             setVersionEligibilityLoaded(false);
             return;
         }
         setVersionEligibilityLoaded(false);
         const chapterNumber = Number(sourceChapterForVersion.number ?? 1);
-        const prevOrderIndex = chapterNumber - 2; // 0-based index của chương trước
-        const markLoaded = (publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion) => {
-            setVersionPublishEligibility({ publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion });
-            setVersionEligibilityLoaded(true);
-        };
-        // Gọi riêng PUBLISHED và PENDING_REVIEW giống ChapterListManager để đảm bảo đúng tập chương đã gửi/chờ duyệt
-        Promise.all([
-            getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
-            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 }),
-            getChapters({ storyId, page: 1, pageSize: 500 }),
-        ])
-            .then(([publishedRes, pendingRes, allRes]) => {
-                const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
-                const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
-                const publishedOrderIndices = new Set(
-                    publishedList.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0))
-                );
-                const pendingOrderIndices = new Set(
-                    pendingList.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0))
-                );
+        const prevOrderIndex = chapterNumber - 2;
+        getChapters({ storyId, page: 1, pageSize: 500 })
+            .then((allRes) => {
                 const allItems = allRes?.items ?? allRes?.Items ?? [];
                 const arr = Array.isArray(allItems) ? allItems : [];
+                if (chapterNumber <= 1) {
+                    setVersionPublishEligibility({ prevSequentialOk: true, prevHasPendingVersion: false });
+                    setVersionEligibilityLoaded(true);
+                    return;
+                }
                 const prevChapter = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === prevOrderIndex);
                 if (!prevChapter) {
-                    markLoaded(publishedOrderIndices, pendingOrderIndices, false);
+                    setVersionPublishEligibility({ prevSequentialOk: false, prevHasPendingVersion: false });
+                    setVersionEligibilityLoaded(true);
                     return;
                 }
                 const prevChapterId = prevChapter.id ?? prevChapter.Id;
+                const prevSt = String(prevChapter.status ?? prevChapter.Status ?? '').toLowerCase();
+                const prevProcessed = prevSt === 'published' || prevSt === 'rejected';
                 getChapterVersions(prevChapterId)
                     .then((verList) => {
                         const vArr = Array.isArray(verList) ? verList : [];
                         const prevHasPendingVersion = vArr.some((v) => ((v.status ?? v.Status ?? '').toString().toLowerCase() === 'pending_review'));
-                        markLoaded(publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion);
+                        const prevSequentialOk = prevProcessed && !prevHasPendingVersion;
+                        setVersionPublishEligibility({ prevSequentialOk, prevHasPendingVersion });
+                        setVersionEligibilityLoaded(true);
                     })
-                    .catch(() => markLoaded(publishedOrderIndices, pendingOrderIndices, false));
+                    .catch(() => {
+                        setVersionPublishEligibility({ prevSequentialOk: false, prevHasPendingVersion: false });
+                        setVersionEligibilityLoaded(true);
+                    });
             })
             .catch(() => {
-                setVersionPublishEligibility({ publishedOrderIndices: new Set(), pendingOrderIndices: new Set(), prevHasPendingVersion: false });
+                setVersionPublishEligibility({ prevSequentialOk: false, prevHasPendingVersion: false });
                 setVersionEligibilityLoaded(true);
             });
     }, [isVersionMode, storyId, sourceChapterForVersion]);
+
+    // Điều kiện Xuất bản chương thường (tạo mới / sửa) — cùng quy tắc tuần tự với ChapterListManager
+    useEffect(() => {
+        if (isVersionMode || !storyId) {
+            setNormalPublishEligibility({ loaded: false, prevSequentialOk: true, selfHasPendingVersion: false });
+            return;
+        }
+        const num = Number(chapterData.number);
+        if (!Number.isInteger(num) || num < 1) {
+            setNormalPublishEligibility({ loaded: true, prevSequentialOk: false, selfHasPendingVersion: false });
+            return;
+        }
+        setNormalPublishEligibility((p) => ({ ...p, loaded: false }));
+        const currentChapterId = chapter?.id ?? chapter?.Id ?? null;
+        getChapters({ storyId, page: 1, pageSize: 500 })
+            .then(async (allRes) => {
+                const allItems = allRes?.items ?? allRes?.Items ?? [];
+                const arr = Array.isArray(allItems) ? allItems : [];
+                let selfHasPendingVersion = false;
+                if (currentChapterId) {
+                    try {
+                        const selfVers = await getChapterVersions(currentChapterId);
+                        const sv = Array.isArray(selfVers) ? selfVers : [];
+                        selfHasPendingVersion = sv.some((v) => String(v.status ?? v.Status ?? '').toLowerCase() === 'pending_review');
+                    } catch {
+                        selfHasPendingVersion = false;
+                    }
+                }
+                if (num === 1) {
+                    setNormalPublishEligibility({ loaded: true, prevSequentialOk: true, selfHasPendingVersion });
+                    return;
+                }
+                const prevOrderIndex = num - 2;
+                const prevChapter = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === prevOrderIndex);
+                if (!prevChapter) {
+                    setNormalPublishEligibility({ loaded: true, prevSequentialOk: false, selfHasPendingVersion });
+                    return;
+                }
+                const prevChapterId = prevChapter.id ?? prevChapter.Id;
+                const prevSt = String(prevChapter.status ?? prevChapter.Status ?? '').toLowerCase();
+                const prevProcessed = prevSt === 'published' || prevSt === 'rejected';
+                try {
+                    const prevVers = await getChapterVersions(prevChapterId);
+                    const pv = Array.isArray(prevVers) ? prevVers : [];
+                    const prevHasPendingVersion = pv.some((v) => String(v.status ?? v.Status ?? '').toLowerCase() === 'pending_review');
+                    const prevSequentialOk = prevProcessed && !prevHasPendingVersion;
+                    setNormalPublishEligibility({ loaded: true, prevSequentialOk, selfHasPendingVersion });
+                } catch {
+                    setNormalPublishEligibility({ loaded: true, prevSequentialOk: false, selfHasPendingVersion });
+                }
+            })
+            .catch(() => setNormalPublishEligibility({ loaded: true, prevSequentialOk: false, selfHasPendingVersion: false }));
+    }, [isVersionMode, storyId, chapterData.number, chapter?.id, chapter?.Id]);
 
     // Load danh sách chương để tính số chương tiếp theo (thêm mới) và validate trùng (số 1-based)
     useEffect(() => {
@@ -555,14 +609,9 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
 
     const currentChapterNumber = chapter ? Number(chapter.number ?? chapter.chapterNumber ?? (chapter.orderIndex ?? chapter.OrderIndex ?? 0) + 1) : null;
 
-    /** Điều kiện gửi xuất bản version — giống ChapterListManager: thứ tự 1,2,3...; chương gốc không chờ duyệt; chỉ một phiên bản chờ duyệt. */
+    /** Điều kiện gửi xuất bản version — giống ChapterListManager: thứ tự + chương trước đã duyệt/từ chối; chương gốc không chờ duyệt; chỉ một phiên bản chờ duyệt. */
     const chapterNumberForVersion = isVersionMode ? Number(sourceChapterForVersion?.number ?? 1) : 0;
-    const prevOrderIndexVersion = chapterNumberForVersion - 2;
-    const canSubmitForPublishVersion =
-        chapterNumberForVersion === 1 ||
-        versionPublishEligibility.publishedOrderIndices.has(prevOrderIndexVersion) ||
-        versionPublishEligibility.pendingOrderIndices.has(prevOrderIndexVersion) ||
-        versionPublishEligibility.prevHasPendingVersion;
+    const canSubmitForPublishVersion = versionPublishEligibility.prevSequentialOk;
     const hasOtherPendingVersion =
         existingVersionsForChapter.some(
             (v) => (v.status ?? '').toString().toLowerCase() === 'pending_review' && (v.id ?? '') !== (editingVersion?.id ?? editingVersion?.Id ?? '')
@@ -587,12 +636,32 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 : editingVersionIsPendingReview
                     ? 'Phiên bản này đang chờ duyệt, không thể gửi lại.'
                     : !canSubmitForPublishVersion
-                        ? `Phải gửi chương ${chapterNumberForVersion - 1} trước khi gửi chương ${chapterNumberForVersion}.`
+                        ? `Chỉ được gửi khi chương ${chapterNumberForVersion - 1} đã có kết quả duyệt hoặc từ chối duyệt.`
                         : chapterIsPendingReviewVersion
                             ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.'
                             : hasOtherPendingVersion
                                 ? 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.'
                                 : 'Gửi phiên bản lên để duyệt xuất bản';
+
+    const chapterIsPendingReviewEdit = (chapter?.status ?? '').toString().toLowerCase() === 'pending_review';
+    const chapterIsPublishedEdit = (chapter?.status ?? '').toString().toLowerCase() === 'published';
+    const canSubmitNormalChapterPublish =
+        normalPublishEligibility.loaded &&
+        normalPublishEligibility.prevSequentialOk &&
+        !normalPublishEligibility.selfHasPendingVersion &&
+        !chapterIsPendingReviewEdit &&
+        !chapterIsPublishedEdit;
+    const normalChapterPublishTooltip = !normalPublishEligibility.loaded
+        ? 'Đang kiểm tra điều kiện gửi xuất bản...'
+        : chapterIsPublishedEdit
+            ? 'Chương đã xuất bản.'
+            : chapterIsPendingReviewEdit
+                ? 'Chương đang chờ duyệt.'
+                : normalPublishEligibility.selfHasPendingVersion
+                    ? 'Đã có phiên bản đang chờ duyệt, không thể gửi chương gốc.'
+                    : !normalPublishEligibility.prevSequentialOk
+                        ? `Chỉ được gửi khi chương ${(Number(chapterData.number) || 1) - 1} đã có kết quả duyệt hoặc từ chối duyệt.`
+                        : 'Gửi chương lên để duyệt xuất bản';
 
     const validateChapterNumber = (num) => {
         const n = Number(num);
@@ -645,6 +714,10 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 return;
             }
             setChapterNumberError('');
+        }
+        if (!isVersionMode && saveStatus === 'published' && (!normalPublishEligibility.loaded || !canSubmitNormalChapterPublish)) {
+            showToast(normalChapterPublishTooltip, 'error');
+            return;
         }
         const wordCount = countWords(chapterData.content);
         if (wordCount < 500) {
@@ -843,6 +916,11 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     const confirmAiCompareSave = async () => {
         const status = aiCompareModal.pendingSaveStatus;
         if (!status) return;
+        if (!isVersionMode && status === 'published' && (!normalPublishEligibility.loaded || !canSubmitNormalChapterPublish)) {
+            showToast(normalChapterPublishTooltip, 'error');
+            closeAiCompareModalOnly();
+            return;
+        }
         const hasPct =
             aiCompareModal.data?.hasBothContents &&
             Number.isFinite(Number(aiCompareModal.data?.similarityScore));
@@ -1561,8 +1639,13 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                     </button>
                                     <button
                                         onClick={() => handleSave('published')}
-                                        disabled={isSaving || aiCompareModal.open || (isVersionMode && !canSubmitVersion)}
-                                        title={isVersionMode ? versionPublishTooltip : undefined}
+                                        disabled={
+                                            isSaving ||
+                                            aiCompareModal.open ||
+                                            (isVersionMode && !canSubmitVersion) ||
+                                            (!isVersionMode && (!normalPublishEligibility.loaded || !canSubmitNormalChapterPublish))
+                                        }
+                                        title={isVersionMode ? versionPublishTooltip : normalChapterPublishTooltip}
                                         className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
                                         <Save style={{ width: '16px', height: '16px' }} />
