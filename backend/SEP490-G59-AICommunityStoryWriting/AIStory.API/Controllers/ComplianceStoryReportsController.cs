@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.StoryReports;
 using Services.Interfaces;
@@ -289,6 +289,44 @@ public class ComplianceStoryReportsController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>Đơn gỡ lock do chính tôi gửi (mọi trạng thái, kèm ghi chú khi admin xử lý).</summary>
+    [HttpGet("my-lock-requests")]
+    public async Task<IActionResult> ListMyLockRequests()
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue)
+            return Unauthorized();
+        try
+        {
+            var list = await _storyReportService.ListMyComplianceLockRequestsAsync(userId.Value);
+            return Ok(list);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ListMyLockRequests failed");
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>Đơn BAN / tạm đình chỉ viết do chính tôi gửi (mọi trạng thái).</summary>
+    [HttpGet("my-admin-action-requests")]
+    public async Task<IActionResult> ListMyAdminActionRequests()
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue)
+            return Unauthorized();
+        try
+        {
+            var list = await _storyReportService.ListMyComplianceAdminActionRequestsAsync(userId.Value);
+            return Ok(list);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ListMyAdminActionRequests failed");
+            return StatusCode(500, new { message = ex.Message });
         }
     }
 

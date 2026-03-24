@@ -2,16 +2,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     RotateCcw,
     X,
-    Eye,
+    Info,
+    Globe,
+    GlobeLock,
     Undo2,
     CheckCheck,
     Flag,
     FlagOff,
     MessageSquare,
     MessageSquareOff,
-    EyeOff,
     ShieldAlert,
     LockOpen,
+    History,
+    ClipboardList,
 } from 'lucide-react';
 import { Pagination } from '../../../components/pagination/Pagination';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -28,6 +31,9 @@ import {
     getAdminCompliancePerformance,
     getComplianceCommentReports,
     getComplianceStoryReports,
+    getComplianceUserViolations,
+    getMyComplianceAdminActionRequests,
+    getMyComplianceLockRequests,
     requestComplianceStoryRelease,
     requestComplianceCommentAdminAction,
     requestComplianceStoryAdminAction,
@@ -86,6 +92,18 @@ function pick(obj, a, b) {
     return obj?.[a] ?? obj?.[b];
 }
 
+/** Tránh truthy nhầm từ chuỗi "false" / giá trị lạ từ API. */
+function coerceBool(v) {
+    if (v === true || v === 1) return true;
+    if (v === false || v === 0) return false;
+    if (typeof v === 'string') {
+        const s = v.trim().toLowerCase();
+        if (s === 'true' || s === '1') return true;
+        if (s === 'false' || s === '0' || s === '') return false;
+    }
+    return Boolean(v);
+}
+
 function normalizeStoryQueueItem(x) {
     const contributors = pick(x, 'contributors', 'Contributors');
     const openReportIds = pick(x, 'openReportIds', 'OpenReportIds');
@@ -93,17 +111,18 @@ function normalizeStoryQueueItem(x) {
     return {
         storyId: pick(x, 'storyId', 'StoryId'),
         storyTitle: pick(x, 'storyTitle', 'StoryTitle'),
+        authorId: pick(x, 'authorId', 'AuthorId') ?? null,
         authorDisplayName: pick(x, 'authorDisplayName', 'AuthorDisplayName'),
         reportCount: Number(pick(x, 'reportCount', 'ReportCount') ?? 0) || 0,
         priorityScore: Number(pick(x, 'priorityScore', 'PriorityScore') ?? 0) || 0,
         maxSeverityScore: Number(pick(x, 'maxSeverityScore', 'MaxSeverityScore') ?? 0) || 0,
         timeWeight: Number(pick(x, 'timeWeight', 'TimeWeight') ?? 0) || 0,
-        isComplianceLocked: Boolean(pick(x, 'isComplianceLocked', 'IsComplianceLocked')),
+        isComplianceLocked: coerceBool(pick(x, 'isComplianceLocked', 'IsComplianceLocked')),
         complianceClaimedByDisplayName: pick(x, 'complianceClaimedByDisplayName', 'ComplianceClaimedByDisplayName'),
         complianceHandlingSlaMessageVi: pick(x, 'complianceHandlingSlaMessageVi', 'ComplianceHandlingSlaMessageVi'),
-        complianceFlagged: Boolean(pick(x, 'complianceFlagged', 'ComplianceFlagged')),
-        commentsDisabled: Boolean(pick(x, 'commentsDisabled', 'CommentsDisabled')),
-        complianceHidden: Boolean(pick(x, 'complianceHidden', 'ComplianceHidden')),
+        complianceFlagged: coerceBool(pick(x, 'complianceFlagged', 'ComplianceFlagged')),
+        commentsDisabled: coerceBool(pick(x, 'commentsDisabled', 'CommentsDisabled')),
+        complianceHidden: coerceBool(pick(x, 'complianceHidden', 'ComplianceHidden')),
         distinctReasonCodes: Array.isArray(distinctReasons) ? distinctReasons : [],
         contributors: Array.isArray(contributors) ? contributors : [],
         openReportIds: Array.isArray(openReportIds) ? openReportIds : [],
@@ -114,15 +133,16 @@ function normalizeStoryReportRow(x) {
     return {
         storyId: pick(x, 'storyId', 'StoryId') ?? pick(x, 'targetId', 'TargetId'),
         storyTitle: pick(x, 'storyTitle', 'StoryTitle'),
+        authorId: pick(x, 'authorId', 'AuthorId') ?? null,
         severityScore: Number(pick(x, 'severityScore', 'SeverityScore') ?? 0) || 0,
         status: pick(x, 'status', 'Status'),
         createdAtUtc: pick(x, 'createdAtUtc', 'CreatedAtUtc'),
-        isComplianceLocked: Boolean(pick(x, 'isComplianceLocked', 'IsComplianceLocked')),
+        isComplianceLocked: coerceBool(pick(x, 'isComplianceLocked', 'IsComplianceLocked')),
         complianceClaimedByDisplayName: pick(x, 'complianceClaimedByDisplayName', 'ComplianceClaimedByDisplayName'),
         complianceHandlingSlaMessageVi: pick(x, 'complianceHandlingSlaMessageVi', 'ComplianceHandlingSlaMessageVi'),
-        complianceFlagged: Boolean(pick(x, 'complianceFlagged', 'ComplianceFlagged')),
-        commentsDisabled: Boolean(pick(x, 'commentsDisabled', 'CommentsDisabled')),
-        complianceHidden: Boolean(pick(x, 'complianceHidden', 'ComplianceHidden')),
+        complianceFlagged: coerceBool(pick(x, 'complianceFlagged', 'ComplianceFlagged')),
+        commentsDisabled: coerceBool(pick(x, 'commentsDisabled', 'CommentsDisabled')),
+        complianceHidden: coerceBool(pick(x, 'complianceHidden', 'ComplianceHidden')),
     };
 }
 
@@ -134,6 +154,7 @@ function groupStoryRows(rawRows) {
         const prev = m.get(storyId) || {
             storyId,
             storyTitle: row.storyTitle || '—',
+            authorId: row.authorId ?? null,
             authorDisplayName: row.authorDisplayName || null,
             reportCount: 0,
             priorityScore: 0,
@@ -157,7 +178,9 @@ function groupStoryRows(rawRows) {
         prev.complianceHandlingSlaMessageVi = prev.complianceHandlingSlaMessageVi || row.complianceHandlingSlaMessageVi;
         prev.complianceFlagged = prev.complianceFlagged || row.complianceFlagged;
         prev.commentsDisabled = prev.commentsDisabled || row.commentsDisabled;
-        prev.complianceHidden = prev.complianceHidden || row.complianceHidden;
+        if (row.authorId) prev.authorId = row.authorId;
+        // Cùng một truyện: mọi dòng có cùng snapshot DB; gán theo bản ghi cuối để tránh OR khiến cờ "ẩn" bị kẹt true.
+        prev.complianceHidden = row.complianceHidden;
         m.set(storyId, prev);
     }
     return Array.from(m.values());
@@ -251,6 +274,34 @@ function statusViLabel(status) {
     return status || '—';
 }
 
+function penaltyTypeVi(p) {
+    const u = String(p ?? '').trim().toUpperCase();
+    const map = {
+        COMMENTS_DISABLED: 'Khóa bình luận',
+        COMMENTS_ENABLED: 'Mở bình luận',
+        STORY_HIDDEN_COMPLIANCE: 'Ẩn truyện (compliance)',
+        STORY_UNHIDDEN_COMPLIANCE: 'Hiện lại truyện',
+        BAN: 'Chặn tài khoản (admin)',
+        SUSPEND_AUTHOR_WRITING: 'Tạm đình chỉ quyền viết',
+    };
+    return map[u] || (p || '—');
+}
+
+function complianceRequestStatusVi(s) {
+    const u = String(s ?? '').trim().toUpperCase();
+    if (u === 'PENDING') return 'Chờ xử lý';
+    if (u === 'APPROVED') return 'Đã chấp nhận';
+    if (u === 'REJECTED') return 'Từ chối';
+    return s || '—';
+}
+
+function complianceAdminActionKindVi(k) {
+    const u = String(k ?? '').trim().toUpperCase();
+    if (u === 'BAN_USER') return 'Chặn tài khoản';
+    if (u === 'SUSPEND_AUTHOR_WRITING') return 'Tạm đình chỉ quyền viết';
+    return k || '—';
+}
+
 function Modal({ title, onClose, children, maxWidth = 1100 }) {
     return (
         <div className="fixed inset-0 z-[1200] bg-slate-900/45 flex items-center justify-center p-3">
@@ -312,6 +363,13 @@ export default function ViolationManagement() {
     const [pendingReleaseByStory, setPendingReleaseByStory] = useState({});
     const [storyActionConfirm, setStoryActionConfirm] = useState(null);
     const [storyActionBusy, setStoryActionBusy] = useState(false);
+    const [accountViolationModal, setAccountViolationModal] = useState(null);
+    const [accountViolationRows, setAccountViolationRows] = useState([]);
+    const [accountViolationLoading, setAccountViolationLoading] = useState(false);
+    const [myRequestsModalOpen, setMyRequestsModalOpen] = useState(false);
+    const [myLockRequests, setMyLockRequests] = useState([]);
+    const [myAdminRequests, setMyAdminRequests] = useState([]);
+    const [myRequestsLoading, setMyRequestsLoading] = useState(false);
 
     const currentUserId = user?.id ?? user?.Id ?? null;
     const releaseStorageKey = useMemo(
@@ -444,6 +502,48 @@ export default function ViolationManagement() {
             await loadData(currentPage);
         } catch (e) {
             alert(e?.response?.data?.message ?? e?.message ?? 'Thao tác thất bại.');
+        }
+    };
+
+    const openAccountViolationHistory = async (row) => {
+        const userId = row?.authorId;
+        if (!userId) {
+            alert('Chưa có định danh tác giả trên dòng này; không thể tải lịch sử vi phạm.');
+            return;
+        }
+        setAccountViolationModal({
+            userId,
+            displayName: row.authorDisplayName || 'Tác giả',
+        });
+        setAccountViolationLoading(true);
+        setAccountViolationRows([]);
+        try {
+            const data = await getComplianceUserViolations(userId, 80);
+            setAccountViolationRows(Array.isArray(data) ? data : []);
+        } catch (e) {
+            alert(e?.response?.data?.message ?? e?.message ?? 'Không tải được lịch sử vi phạm.');
+            setAccountViolationRows([]);
+        } finally {
+            setAccountViolationLoading(false);
+        }
+    };
+
+    const openMyRequestsModal = async () => {
+        setMyRequestsModalOpen(true);
+        setMyRequestsLoading(true);
+        try {
+            const [locks, actions] = await Promise.all([
+                getMyComplianceLockRequests(),
+                getMyComplianceAdminActionRequests(),
+            ]);
+            setMyLockRequests(Array.isArray(locks) ? locks : []);
+            setMyAdminRequests(Array.isArray(actions) ? actions : []);
+        } catch (e) {
+            alert(e?.response?.data?.message ?? e?.message ?? 'Không tải được đơn đã gửi.');
+            setMyLockRequests([]);
+            setMyAdminRequests([]);
+        } finally {
+            setMyRequestsLoading(false);
         }
     };
 
@@ -660,7 +760,16 @@ export default function ViolationManagement() {
                                         <td style={td}>{r.isComplianceLocked ? `Đã lock - ${r.complianceClaimedByDisplayName || '—'}` : 'Chưa lock'}</td>
                                         <td style={td}>
                                             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                                                <button style={iconBtn} title="Xem chi tiết báo cáo" onClick={() => openStoryTicketsModal(r)}><Eye size={16} /></button>
+                                                <button style={iconBtn} title="Xem chi tiết báo cáo" onClick={() => openStoryTicketsModal(r)}><Info size={16} /></button>
+                                                <button
+                                                    type="button"
+                                                    style={!r.authorId ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn}
+                                                    title={r.authorId ? 'Lịch sử vi phạm tài khoản tác giả' : 'Chưa có id tác giả'}
+                                                    onClick={() => openAccountViolationHistory(r)}
+                                                    disabled={!r.authorId}
+                                                >
+                                                    <History size={16} />
+                                                </button>
                                                 <button
                                                     style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn}
                                                     title={hasPendingReleaseRequest ? 'Đang chờ admin xử lý yêu cầu hủy nhận duyệt' : 'Trả đơn về hàng đợi'}
@@ -704,7 +813,7 @@ export default function ViolationManagement() {
                                                         : 'Bạn có chắc muốn ẩn truyện khỏi người dùng thường?',
                                                     run: () => actionWithReload(() => setComplianceStoryHidden(r.storyId, { value: !r.complianceHidden })),
                                                 })} disabled={hasPendingReleaseRequest}>
-                                                    {r.complianceHidden ? <EyeOff size={16} /> : <Eye size={16} />}
+                                                    {r.complianceHidden ? <GlobeLock size={16} /> : <Globe size={16} />}
                                                 </button>
                                                 <button
                                                     style={hasPendingReleaseRequest ? { ...iconBtn, opacity: 0.45, cursor: 'not-allowed' } : iconBtn}
@@ -799,13 +908,21 @@ export default function ViolationManagement() {
             <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <h2 className="text-lg font-bold text-slate-900 mb-3">Bộ lọc và điều hướng</h2>
                 {activeTab === 'story-reports' && (
-                    <div className="mb-3">
+                    <div className="mb-3 flex flex-wrap gap-2 items-center">
                         <button
                             type="button"
                             onClick={loadClaimableStories}
                             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sky-500 text-white text-sm font-semibold hover:bg-sky-600"
                         >
                             {claimPickerLoading ? 'Đang tải...' : 'Nhận duyệt đơn'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={openMyRequestsModal}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50"
+                        >
+                            <ClipboardList size={16} />
+                            Đơn đã gửi admin
                         </button>
                     </div>
                 )}
@@ -1127,6 +1244,145 @@ export default function ViolationManagement() {
                             </button>
                         </div>
                     </div>
+                </Modal>
+            )}
+
+            {accountViolationModal && (
+                <Modal
+                    title={`Lịch sử vi phạm — ${accountViolationModal.displayName}`}
+                    maxWidth={720}
+                    onClose={() => {
+                        setAccountViolationModal(null);
+                        setAccountViolationRows([]);
+                    }}
+                >
+                    {accountViolationLoading ? (
+                        <div className="text-sm text-slate-600">Đang tải...</div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full border-collapse text-sm">
+                                <thead>
+                                    <tr className="bg-slate-50">
+                                        <th style={th}>Thời điểm</th>
+                                        <th style={th}>Loại hình</th>
+                                        <th style={th}>Mô tả</th>
+                                        <th style={th}>Người thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {accountViolationRows.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={4} className="p-4 text-center text-slate-500">Chưa có bản ghi violation_logs cho tài khoản này.</td>
+                                        </tr>
+                                    ) : (
+                                        accountViolationRows.map((row) => (
+                                            <tr key={String(row.id ?? row.Id)} className="border-t border-slate-200">
+                                                <td style={td}>{formatDate(row.createdAtUtc ?? row.CreatedAtUtc)}</td>
+                                                <td style={td}>{penaltyTypeVi(row.penaltyType ?? row.PenaltyType)}</td>
+                                                <td style={td}>{row.reason ?? row.Reason ?? '—'}</td>
+                                                <td style={td}>{row.complianceOfficerDisplayName ?? row.ComplianceOfficerDisplayName ?? '—'}</td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </Modal>
+            )}
+
+            {myRequestsModalOpen && (
+                <Modal title="Đơn đã gửi lên quản trị viên" maxWidth={900} onClose={() => setMyRequestsModalOpen(false)}>
+                    {myRequestsLoading ? (
+                        <div className="text-sm text-slate-600">Đang tải...</div>
+                    ) : (
+                        <div className="space-y-8">
+                            <section>
+                                <h4 className="text-base font-bold text-slate-900 mb-2">Yêu cầu gỡ lock / giao lại</h4>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full border-collapse text-sm">
+                                        <thead>
+                                            <tr className="bg-slate-50">
+                                                <th style={th}>Truyện</th>
+                                                <th style={th}>Trạng thái</th>
+                                                <th style={th}>Gửi lúc</th>
+                                                <th style={th}>Ghi chú / lý do từ chối</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {myLockRequests.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={4} className="p-4 text-center text-slate-500">Chưa có đơn.</td>
+                                                </tr>
+                                            ) : (
+                                                myLockRequests.map((row) => {
+                                                    const st = String(row.status ?? row.Status ?? '').toUpperCase();
+                                                    const rejected = st === 'REJECTED';
+                                                    return (
+                                                        <tr key={String(row.id ?? row.Id)} className="border-t border-slate-200">
+                                                            <td style={td}>{row.storyTitle ?? row.StoryTitle ?? '—'}</td>
+                                                            <td style={td}>
+                                                                <span style={rejected ? { color: '#991b1b', fontWeight: 600 } : undefined}>
+                                                                    {complianceRequestStatusVi(row.status ?? row.Status)}
+                                                                </span>
+                                                            </td>
+                                                            <td style={td}>{formatDate(row.createdAtUtc ?? row.CreatedAtUtc)}</td>
+                                                            <td style={{ ...td, ...(rejected ? { color: '#991b1b' } : {}) }}>
+                                                                {row.resolutionNote ?? row.ResolutionNote ?? '—'}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                            <section>
+                                <h4 className="text-base font-bold text-slate-900 mb-2">Yêu cầu chặn tài khoản / tạm đình chỉ viết</h4>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full border-collapse text-sm">
+                                        <thead>
+                                            <tr className="bg-slate-50">
+                                                <th style={th}>Truyện</th>
+                                                <th style={th}>Loại</th>
+                                                <th style={th}>Trạng thái</th>
+                                                <th style={th}>Gửi lúc</th>
+                                                <th style={th}>Ghi chú / lý do từ chối</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {myAdminRequests.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={5} className="p-4 text-center text-slate-500">Chưa có đơn.</td>
+                                                </tr>
+                                            ) : (
+                                                myAdminRequests.map((row) => {
+                                                    const st = String(row.status ?? row.Status ?? '').toUpperCase();
+                                                    const rejected = st === 'REJECTED';
+                                                    return (
+                                                        <tr key={String(row.id ?? row.Id)} className="border-t border-slate-200">
+                                                            <td style={td}>{row.storyTitle ?? row.StoryTitle ?? '—'}</td>
+                                                            <td style={td}>{complianceAdminActionKindVi(row.requestKind ?? row.RequestKind)}</td>
+                                                            <td style={td}>
+                                                                <span style={rejected ? { color: '#991b1b', fontWeight: 600 } : undefined}>
+                                                                    {complianceRequestStatusVi(row.status ?? row.Status)}
+                                                                </span>
+                                                            </td>
+                                                            <td style={td}>{formatDate(row.createdAtUtc ?? row.CreatedAtUtc)}</td>
+                                                            <td style={{ ...td, ...(rejected ? { color: '#991b1b' } : {}) }}>
+                                                                {row.resolutionNote ?? row.ResolutionNote ?? '—'}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                        </div>
+                    )}
                 </Modal>
             )}
         </div>

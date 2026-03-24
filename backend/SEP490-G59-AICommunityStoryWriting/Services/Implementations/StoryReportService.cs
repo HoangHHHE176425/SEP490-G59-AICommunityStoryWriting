@@ -1,4 +1,4 @@
-﻿using BusinessObjects.Entities;
+using BusinessObjects.Entities;
 using BusinessObjects.StoryReporting;
 using DataAccessObjects.DAOs;
 using Services;
@@ -457,31 +457,59 @@ public class StoryReportService : IStoryReportService
     {
         var st = string.IsNullOrWhiteSpace(status) ? ComplianceStoryReportLockRequestDAO.StatusPending : status.Trim().ToUpperInvariant();
         var rows = ComplianceStoryReportLockRequestDAO.ListByStatus(st);
-        var list = rows.Select(x =>
-        {
-            var name = x.requester?.user_profiles?.nickname?.Trim();
-            if (string.IsNullOrEmpty(name))
-                name = x.requester?.email;
-            var createdUtc = x.created_at.Kind == DateTimeKind.Unspecified
-                ? DateTime.SpecifyKind(x.created_at, DateTimeKind.Utc)
-                : x.created_at.ToUniversalTime();
-            return new ComplianceLockRequestListItemDto
-            {
-                Id = x.id,
-                StoryId = x.story_id,
-                StoryTitle = x.story?.title,
-                RequesterId = x.requester_id,
-                RequesterEmail = x.requester?.email,
-                RequesterDisplayName = name,
-                Message = x.message,
-                Status = x.status,
-                CreatedAtUtc = createdUtc,
-                UrgencyTier = EscalationUrgencyHelper.Merge(
-                    EscalationUrgencyHelper.ComputeFromRequestAge(createdUtc, DateTime.UtcNow),
-                    x.urgency_tier)
-            };
-        }).ToList();
+        var list = rows.Select(MapComplianceLockRequestRow).ToList();
         return Task.FromResult<IReadOnlyList<ComplianceLockRequestListItemDto>>(list);
+    }
+
+    public Task<IReadOnlyList<ComplianceLockRequestListItemDto>> ListMyComplianceLockRequestsAsync(Guid requesterId)
+    {
+        var rows = ComplianceStoryReportLockRequestDAO.ListByRequesterId(requesterId);
+        var list = rows.Select(MapComplianceLockRequestRow).ToList();
+        return Task.FromResult<IReadOnlyList<ComplianceLockRequestListItemDto>>(list);
+    }
+
+    public Task<IReadOnlyList<ComplianceAdminActionRequestListItemDto>> ListMyComplianceAdminActionRequestsAsync(Guid requesterId)
+    {
+        var rows = ComplianceAdminActionRequestDAO.ListByRequesterId(requesterId);
+        var list = rows.Select(MapComplianceAdminActionRequest).ToList();
+        return Task.FromResult<IReadOnlyList<ComplianceAdminActionRequestListItemDto>>(list);
+    }
+
+    private static ComplianceLockRequestListItemDto MapComplianceLockRequestRow(compliance_story_report_lock_requests x)
+    {
+        var name = x.requester?.user_profiles?.nickname?.Trim();
+        if (string.IsNullOrEmpty(name))
+            name = x.requester?.email;
+        var createdUtc = x.created_at.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(x.created_at, DateTimeKind.Utc)
+            : x.created_at.ToUniversalTime();
+        DateTime? resolvedUtc = null;
+        if (x.resolved_at.HasValue)
+        {
+            var r = x.resolved_at.Value;
+            resolvedUtc = r.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(r, DateTimeKind.Utc)
+                : r.ToUniversalTime();
+        }
+
+        return new ComplianceLockRequestListItemDto
+        {
+            Id = x.id,
+            StoryId = x.story_id,
+            StoryTitle = x.story?.title,
+            RequesterId = x.requester_id,
+            RequesterEmail = x.requester?.email,
+            RequesterDisplayName = name,
+            Message = x.message,
+            Status = x.status,
+            CreatedAtUtc = createdUtc,
+            UrgencyTier = EscalationUrgencyHelper.Merge(
+                EscalationUrgencyHelper.ComputeFromRequestAge(createdUtc, DateTime.UtcNow),
+                x.urgency_tier),
+            ResolvedAtUtc = resolvedUtc,
+            ResolutionNote = x.resolution_note,
+            ResolutionAction = x.resolution_action
+        };
     }
 
     public Task<IReadOnlyList<ComplianceOfficerAssignmentOptionDto>> AdminListComplianceOfficersForAssignmentAsync()

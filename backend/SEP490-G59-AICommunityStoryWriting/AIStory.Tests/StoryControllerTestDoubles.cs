@@ -45,6 +45,9 @@ internal sealed class StubStoryReportService : IStoryReportService
     public Task<IReadOnlyList<ComplianceLockRequestListItemDto>> AdminListComplianceLockRequestsAsync(string? status) =>
         Task.FromResult<IReadOnlyList<ComplianceLockRequestListItemDto>>(Array.Empty<ComplianceLockRequestListItemDto>());
 
+    public Task<IReadOnlyList<ComplianceLockRequestListItemDto>> ListMyComplianceLockRequestsAsync(Guid requesterId) =>
+        Task.FromResult<IReadOnlyList<ComplianceLockRequestListItemDto>>(Array.Empty<ComplianceLockRequestListItemDto>());
+
     public Task<IReadOnlyList<ComplianceOfficerAssignmentOptionDto>> AdminListComplianceOfficersForAssignmentAsync() =>
         Task.FromResult<IReadOnlyList<ComplianceOfficerAssignmentOptionDto>>(Array.Empty<ComplianceOfficerAssignmentOptionDto>());
 
@@ -67,6 +70,9 @@ internal sealed class StubStoryReportService : IStoryReportService
         Task.FromResult<IReadOnlyList<ViolationLogListItemDto>>(Array.Empty<ViolationLogListItemDto>());
 
     public Task<IReadOnlyList<ComplianceAdminActionRequestListItemDto>> AdminListComplianceAdminActionRequestsAsync(string? status) =>
+        Task.FromResult<IReadOnlyList<ComplianceAdminActionRequestListItemDto>>(Array.Empty<ComplianceAdminActionRequestListItemDto>());
+
+    public Task<IReadOnlyList<ComplianceAdminActionRequestListItemDto>> ListMyComplianceAdminActionRequestsAsync(Guid requesterId) =>
         Task.FromResult<IReadOnlyList<ComplianceAdminActionRequestListItemDto>>(Array.Empty<ComplianceAdminActionRequestListItemDto>());
 
     public Task AdminResolveComplianceAdminActionRequestAsync(Guid requestId, Guid adminId, AdminResolveComplianceAdminActionRequestDto dto) =>

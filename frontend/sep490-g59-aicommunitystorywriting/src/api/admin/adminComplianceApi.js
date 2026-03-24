@@ -65,6 +65,24 @@ export async function setComplianceStoryHidden(storyId, body) {
     return res.data;
 }
 
+/** ADMIN/COMPLIANCE: violation_logs theo user (tác giả / tài khoản). */
+export async function getComplianceUserViolations(userId, take = 80) {
+    const res = await axiosInstance.get(`/compliance/story-reports/users/${userId}/violations?take=${encodeURIComponent(take)}`);
+    return res.data;
+}
+
+/** Đơn gỡ lock do chính tôi gửi (mọi trạng thái). */
+export async function getMyComplianceLockRequests() {
+    const res = await axiosInstance.get('/compliance/story-reports/my-lock-requests');
+    return res.data;
+}
+
+/** Đơn BAN / đình chỉ viết do chính tôi gửi (mọi trạng thái). */
+export async function getMyComplianceAdminActionRequests() {
+    const res = await axiosInstance.get('/compliance/story-reports/my-admin-action-requests');
+    return res.data;
+}
+
 export async function requestComplianceStoryAdminAction(storyId, body) {
     const res = await axiosInstance.post(`/compliance/story-reports/stories/${storyId}/admin-action-requests`, body);
     return res.data;
