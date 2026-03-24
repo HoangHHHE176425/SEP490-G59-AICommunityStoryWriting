@@ -562,7 +562,8 @@ namespace Services.Implementations
         {
             var publishedVisibleStories = _storyRepository
                 .GetAll()
-                .Where(s => string.Equals(s.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
+                // EF Core không dịch được string.Equals(..., StringComparison) sang SQL.
+                .Where(s => s.status != null && s.status.ToUpper() == "PUBLISHED")
                 .Where(s => !s.compliance_hidden);
 
             return new CommunityStatsDto
