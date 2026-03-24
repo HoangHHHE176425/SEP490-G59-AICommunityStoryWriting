@@ -338,6 +338,7 @@ export function StoryBrowse() {
 
     return (
         <div
+            className="storybrowse-compact"
             style={{
                 minHeight: '100vh',
                 backgroundColor: browsePageUi.pageBg,
