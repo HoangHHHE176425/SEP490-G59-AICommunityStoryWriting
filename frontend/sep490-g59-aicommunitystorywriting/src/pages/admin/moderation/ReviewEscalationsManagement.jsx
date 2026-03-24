@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { ShieldCheck, ListFilter } from 'lucide-react';
+import { Pagination } from '../../../components/pagination/Pagination';
 import {
     getPendingReviewEscalations,
     resolveReviewEscalation,
@@ -163,7 +164,7 @@ function historyResultBadge(st) {
     }
     if (s === 'REJECTED') {
         return (
-            <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#e2e8f0', color: '#475569' }}>
+            <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#fee2e2', color: '#991b1b' }}>
                 Từ chối
             </span>
         );
@@ -174,13 +175,13 @@ function historyResultBadge(st) {
 function logStatusBadge(st) {
     const s = String(st || '').toUpperCase();
     if (s === 'PENDING') {
-        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#fef3c7', color: '#92400e' }}>PENDING</span>;
+        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#fef3c7', color: '#92400e' }}>Chờ xử lý</span>;
     }
     if (s === 'APPROVED') {
-        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#d1fae5', color: '#065f46' }}>APPROVED</span>;
+        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#d1fae5', color: '#065f46' }}>Đã chấp nhận</span>;
     }
     if (s === 'REJECTED') {
-        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#e2e8f0', color: '#475569' }}>REJECTED</span>;
+        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#e2e8f0', color: '#475569' }}>Từ chối</span>;
     }
     return <span style={{ fontSize: '0.75rem' }}>{st || '—'}</span>;
 }
@@ -301,6 +302,11 @@ export function ReviewEscalationsManagement() {
     const [logResolvedTo, setLogResolvedTo] = useState('');
     const [logSortBy, setLogSortBy] = useState('created_at');
     const [logSortOrder, setLogSortOrder] = useState('desc');
+    const [historySearch, setHistorySearch] = useState('');
+    const [historyStatus, setHistoryStatus] = useState('');
+    const [historyRequestType, setHistoryRequestType] = useState('');
+    const [historyPage, setHistoryPage] = useState(1);
+    const [historyPageSize] = useState(10);
 
     const loadOrders = useCallback(async () => {
         setLoading(true);
@@ -642,6 +648,37 @@ export function ReviewEscalationsManagement() {
         loadLog(1);
     };
 
+    useEffect(() => {
+        setHistoryPage(1);
+    }, [historySearch, historyStatus, historyRequestType, historyPageSize, listMode, orderSourceTab]);
+
+    const historyFilteredItems = useCallback(() => {
+        if (listMode !== 'history') return [];
+        const q = historySearch.trim().toLowerCase();
+        return (Array.isArray(items) ? items : []).filter((row) => {
+            const statusRaw = String(row.status ?? row.Status ?? '').toUpperCase();
+            const reqKindRaw = String(row.requestKind ?? row.RequestKind ?? '').toUpperCase();
+            const reqTypeRaw = String(row.__reqType ?? '').toUpperCase();
+            if (historyStatus && statusRaw !== historyStatus) return false;
+            if (historyRequestType) {
+                if (orderSourceTab === 'moderator') {
+                    if (reqKindRaw !== historyRequestType) return false;
+                } else if (reqTypeRaw !== historyRequestType) return false;
+            }
+            if (!q) return true;
+            const title = String(row.storyTitle ?? row.targetTitle ?? '').toLowerCase();
+            const sender = String(row.requesterDisplayName ?? row.requesterEmail ?? row.senderName ?? '').toLowerCase();
+            const message = String(row.message ?? row.reason ?? '').toLowerCase();
+            const reqLabel = reqKindRaw === 'BAN_USER' ? 'chan tai khoan' : reqKindRaw === 'SUSPEND_AUTHOR_WRITING' ? 'tam dinh chi quyen viet' : reqKindRaw.toLowerCase();
+            return title.includes(q) || sender.includes(q) || message.includes(q) || reqLabel.includes(q);
+        });
+    }, [historySearch, historyStatus, historyRequestType, items, listMode, orderSourceTab]);
+
+    const historyItems = historyFilteredItems();
+    const historyTotalPages = Math.max(1, Math.ceil(historyItems.length / historyPageSize));
+    const safeHistoryPage = Math.min(historyPage, historyTotalPages);
+    const historyPageItems = historyItems.slice((safeHistoryPage - 1) * historyPageSize, safeHistoryPage * historyPageSize);
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* Header — cùng format Quản lý xuất bản / Category */}
@@ -672,7 +709,7 @@ export function ReviewEscalationsManagement() {
                     {...pillHoverHandlers(mainTab === 'orders')}
                 >
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        Đơn xử lý
+                        Đơn của kiểm duyệt viên
                         {counts.critical > 0 && mainTab === 'orders' && listMode === 'pending' && (
                             <span
                                 style={{
@@ -702,18 +739,10 @@ export function ReviewEscalationsManagement() {
                             style={pubTabStyle(orderSourceTab === 'compliance', '#7c3aed')}
                             {...pillHoverHandlers(orderSourceTab === 'compliance')}
                         >
-                            Đơn compliance
+                            Đơn của xử lý vi phạm viên
                         </button>
                     </div>
                 )}
-                <button
-                    type="button"
-                    onClick={() => setMainTab('log')}
-                    style={pubTabStyle(mainTab === 'log', '#475569')}
-                    {...pillHoverHandlers(mainTab === 'log')}
-                >
-                    Log đơn escalation
-                </button>
             </div>
 
             {mainTab === 'orders' && (
@@ -721,8 +750,8 @@ export function ReviewEscalationsManagement() {
                     <div style={{ padding: '1.25rem 1.5rem' }}>
                         <h2 style={{ margin: '0 0 1rem', fontSize: '1.125rem', fontWeight: 600, color: T.title }}>
                             {orderSourceTab === 'compliance'
-                                ? 'Đơn từ Compliance officer — yêu cầu gỡ lock xử lý vi phạm'
-                                : 'Đơn escalation — moderator báo không kịp hạn duyệt'}
+                                ? 'Đơn của xử lý vi phạm viên'
+                                : 'Đơn của kiểm duyệt viên'}
                         </h2>
 
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.25rem' }}>
@@ -785,11 +814,47 @@ export function ReviewEscalationsManagement() {
                         )}
 
                         {listMode === 'history' && (
-                            <p style={{ fontSize: '0.875rem', color: T.slate, margin: '0 0 1rem', lineHeight: 1.5 }}>
-                                {orderSourceTab === 'compliance'
-                                    ? 'Các đơn gỡ lock compliance đã xử lý (APPROVED/REJECTED).'
-                                    : 'Các đơn đã chấp nhận hoặc từ chối — dữ liệu lưu trong hệ thống để tra cứu.'}
-                            </p>
+                            <div style={{ marginBottom: '1rem', display: 'grid', gap: '0.75rem' }}>
+                                <p style={{ fontSize: '0.875rem', color: T.slate, margin: 0, lineHeight: 1.5 }}>
+                                    {orderSourceTab === 'compliance'
+                                        ? 'Lịch sử đơn đã xử lý của xử lý vi phạm viên.'
+                                        : 'Lịch sử đơn đã xử lý của kiểm duyệt viên.'}
+                                </p>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
+                                    <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                        Tìm kiếm
+                                        <input value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="Truyện, người gửi, lý do..." style={inputBase} />
+                                    </label>
+                                    <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                        Trạng thái
+                                        <select value={historyStatus} onChange={(e) => setHistoryStatus(e.target.value)} style={inputBase}>
+                                            <option value="">Tất cả</option>
+                                            <option value="APPROVED">Đã chấp nhận</option>
+                                            <option value="REJECTED">Từ chối</option>
+                                        </select>
+                                    </label>
+                                    <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                        Loại đơn
+                                        <select value={historyRequestType} onChange={(e) => setHistoryRequestType(e.target.value)} style={inputBase}>
+                                            <option value="">Tất cả</option>
+                                            {orderSourceTab === 'moderator' ? (
+                                                <>
+                                                    <option value="RELEASE_ASSIGNMENT">Hủy nhận duyệt</option>
+                                                    <option value="EXTEND_DEADLINE">Gia hạn</option>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <option value="LOCK">Yêu cầu gỡ lock</option>
+                                                    <option value="ADMIN_ACTION">Yêu cầu xử lý tài khoản</option>
+                                                </>
+                                            )}
+                                        </select>
+                                    </label>
+                                </div>
+                                <div style={{ fontSize: '0.8125rem', color: T.slate }}>
+                                    Tổng lọc: <strong>{historyItems.length}</strong> · Trang <strong>{safeHistoryPage}</strong>/{historyTotalPages}
+                                </div>
+                            </div>
                         )}
 
                         {error && (
@@ -821,7 +886,7 @@ export function ReviewEscalationsManagement() {
                                 <p style={{ fontSize: '0.875rem', color: T.slate, margin: 0 }}>Đang tải danh sách...</p>
                             </div>
                         ) : listMode === 'history' ? (
-                            items.length === 0 ? (
+                            historyItems.length === 0 ? (
                                 <p style={{ color: T.slate }}>
                                     Chưa có đơn nào đã xử lý. Tổng trong hệ thống: <strong>{historyTotal}</strong>
                                 </p>
@@ -838,7 +903,7 @@ export function ReviewEscalationsManagement() {
                                                     </tr>
                                                 </thead>
                                                 <tbody>
-                                                    {items.map((row) => {
+                                                    {historyPageItems.map((row) => {
                                                         const id = row.id ?? row.Id;
                                                         const status = row.status ?? row.Status;
                                                         const note = row.resolutionNote ?? row.resolution_note ?? '—';
@@ -865,20 +930,17 @@ export function ReviewEscalationsManagement() {
                                         </div>
                                     ) : (
                                         <>
-                                            <p style={{ fontSize: '0.8125rem', color: T.slate, marginBottom: 8 }}>
-                                                Tổng đơn đã xử lý: <strong>{historyTotal}</strong> — hiển thị <strong>200</strong> bản ghi mới nhất.
-                                            </p>
                                             <div style={{ overflowX: 'auto', border: `1px solid ${T.border}`, borderRadius: '12px' }}>
                                                 <table style={tableBase}>
                                                     <thead>
                                                         <tr>
-                                                            {['Kết quả', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Người xử lý', 'Xử lý lúc', 'Hạn xác nhận', 'Ghi chú admin', 'Lý do'].map((h) => (
+                                                            {['Kết quả', 'Loại', 'Tiêu đề', 'Người gửi', 'Loại đơn', 'Người xử lý', 'Xử lý lúc', 'Hạn xác nhận', 'Ghi chú admin', 'Lý do'].map((h) => (
                                                                 <th key={h} style={thBase}>{h}</th>
                                                             ))}
                                                         </tr>
                                                     </thead>
                                                     <tbody>
-                                                        {items.map((row) => {
+                                                        {historyPageItems.map((row) => {
                                                             const id = row.id ?? row.Id;
                                                             const note = truncate(row.resolverNote ?? row.ResolverNote ?? '—', 160);
                                                             const reason = truncate(row.reason ?? row.Reason ?? '', 160);
@@ -901,6 +963,16 @@ export function ReviewEscalationsManagement() {
                                                 </table>
                                             </div>
                                         </>
+                                    )}
+                                    {historyTotalPages > 1 && (
+                                        <Pagination
+                                            currentPage={safeHistoryPage}
+                                            totalPages={historyTotalPages}
+                                            totalItems={historyItems.length}
+                                            itemsPerPage={historyPageSize}
+                                            onPageChange={setHistoryPage}
+                                            itemLabel="đơn"
+                                        />
                                     )}
                                 </>
                             )
@@ -1650,11 +1722,11 @@ export function ReviewEscalationsManagement() {
                                 && String(complianceResolveRow.requestKind ?? '').toUpperCase() === 'SUSPEND_AUTHOR_WRITING'
                                 && complianceDecision === 'APPROVE' && (
                                     <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                        Thời điểm kết thúc đình chỉ (tuỳ chọn)
+                                        Thời điểm kết thúc đình chỉ
                                         <input
                                             type="datetime-local"
                                             value={complianceSuspendUntilUtc}
-                                            onChange={(e) => setComplianceSuspendUntilUtc(e.target.value)}
+                                            readOnly
                                             style={inputBase}
                                         />
                                     </label>
