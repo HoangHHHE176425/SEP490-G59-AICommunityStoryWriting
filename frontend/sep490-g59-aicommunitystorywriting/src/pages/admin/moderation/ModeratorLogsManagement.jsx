@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { getModerationLogs } from '../../../api/admin/adminModerationApi';
+import { getAdminComplianceLogs } from '../../../api/admin/adminComplianceApi';
 import { Pagination } from '../../../components/pagination/Pagination';
 
 const PAGE_SIZE = 10;
@@ -15,6 +16,23 @@ const TARGET_OPTIONS = [
     { value: '', label: 'Tất cả đối tượng' },
     { value: 'STORY', label: 'Truyện' },
     { value: 'CHAPTER', label: 'Chương' },
+];
+
+const COMPLIANCE_ACTION_OPTIONS = [
+    { value: '', label: 'Tất cả hành động' },
+    { value: 'RESOLVED', label: 'Đã xử lý' },
+    { value: 'DISMISSED', label: 'Bỏ qua' },
+    { value: 'BAN_USER', label: 'Chặn tài khoản' },
+    { value: 'SUSPEND_AUTHOR_WRITING', label: 'Tạm đình chỉ quyền viết' },
+    { value: 'APPROVE_UNLOCK', label: 'Duyệt gỡ khóa' },
+    { value: 'APPROVE_REASSIGN', label: 'Duyệt giao lại' },
+    { value: 'REJECT', label: 'Từ chối' },
+    { value: 'COMMENTS_DISABLED', label: 'Khóa bình luận truyện' },
+    { value: 'COMMENTS_ENABLED', label: 'Mở lại bình luận truyện' },
+    { value: 'STORY_HIDDEN_COMPLIANCE', label: 'Ẩn truyện khỏi công khai' },
+    { value: 'STORY_UNHIDDEN_COMPLIANCE', label: 'Hiện lại truyện công khai' },
+    { value: 'COMMENT_HIDDEN', label: 'Ẩn chuỗi bình luận' },
+    { value: 'COMMENT_UNHIDDEN', label: 'Hiện lại chuỗi bình luận' },
 ];
 
 function formatDate(value) {
@@ -38,7 +56,48 @@ function actionLabel(item) {
     return item?.action || '—';
 }
 
+function complianceSourceLabel(v) {
+    const s = String(v ?? '').trim().toUpperCase();
+    if (s === 'REPORT_RESOLUTION') return 'Xử lý báo cáo';
+    if (s === 'ADMIN_ACTION_REQUEST') return 'Yêu cầu hành động tài khoản';
+    if (s === 'LOCK_REQUEST') return 'Yêu cầu gỡ khóa đơn';
+    if (s === 'VIOLATION_ACTION') return 'Thao tác trực tiếp';
+    return v || '—';
+}
+
+function complianceActionLabel(v) {
+    const s = String(v ?? '').trim().toUpperCase();
+    if (s === 'RESOLVED') return 'Đã xử lý';
+    if (s === 'DISMISSED') return 'Bỏ qua';
+    if (s === 'BAN_USER') return 'Chặn tài khoản';
+    if (s === 'SUSPEND_AUTHOR_WRITING') return 'Tạm đình chỉ quyền viết';
+    if (s === 'APPROVE_UNLOCK') return 'Duyệt gỡ khóa';
+    if (s === 'APPROVE_REASSIGN') return 'Duyệt giao lại';
+    if (s === 'REJECT') return 'Từ chối';
+    if (s === 'COMMENTS_DISABLED') return 'Khóa bình luận truyện';
+    if (s === 'COMMENTS_ENABLED') return 'Mở lại bình luận truyện';
+    if (s === 'STORY_HIDDEN_COMPLIANCE') return 'Ẩn truyện khỏi công khai';
+    if (s === 'STORY_UNHIDDEN_COMPLIANCE') return 'Hiện lại truyện công khai';
+    if (s === 'COMMENT_HIDDEN') return 'Ẩn chuỗi bình luận';
+    if (s === 'COMMENT_UNHIDDEN') return 'Hiện lại chuỗi bình luận';
+    return v || '—';
+}
+
+function complianceStatusLabel(v) {
+    const s = String(v ?? '').trim().toUpperCase();
+    if (s === 'NEW') return 'Mới';
+    if (s === 'IN_REVIEW') return 'Đang xử lý';
+    if (s === 'RESOLVED') return 'Đã xử lý';
+    if (s === 'DISMISSED') return 'Bỏ qua';
+    if (s === 'PENDING') return 'Chờ xử lý';
+    if (s === 'APPROVED') return 'Đã chấp nhận';
+    if (s === 'REJECTED') return 'Từ chối';
+    if (s === 'DONE') return 'Đã thực hiện';
+    return v || '—';
+}
+
 export function ModeratorLogsManagement() {
+    const [logType, setLogType] = useState('moderator'); // moderator | compliance
     const [allRows, setAllRows] = useState([]);
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
@@ -88,7 +147,10 @@ export function ModeratorLogsManagement() {
             if (search) {
                 const text = [
                     x.moderatorName,
+                    x.complianceUserName,
                     x.rejectionReason,
+                    x.message,
+                    x.source,
                     x.targetTitle,
                     x.action,
                     x.targetType,
@@ -99,7 +161,7 @@ export function ModeratorLogsManagement() {
         });
     };
 
-    const toUiRow = (x) => ({
+    const toUiModeratorRow = (x) => ({
         id: x?.id ?? x?.Id,
         targetId: x?.targetId ?? x?.TargetId ?? null,
         targetType: x?.targetType ?? x?.TargetType ?? '',
@@ -109,6 +171,16 @@ export function ModeratorLogsManagement() {
         moderatorName: x?.moderatorName ?? x?.ModeratorName ?? '',
         createdAt: x?.createdAt ?? x?.CreatedAt ?? null,
         rejectionReason: x?.rejectionReason ?? x?.RejectionReason ?? '',
+    });
+
+    const toUiComplianceRow = (x) => ({
+        id: x?.rowId ?? x?.RowId,
+        createdAt: x?.createdAtUtc ?? x?.CreatedAtUtc ?? null,
+        complianceUserName: x?.complianceUserName ?? x?.ComplianceUserName ?? '',
+        source: x?.source ?? x?.Source ?? '',
+        action: x?.action ?? x?.Action ?? '',
+        status: x?.status ?? x?.Status ?? '',
+        message: x?.message ?? x?.Message ?? '',
     });
 
     const computeFilteredPage = (sourceRows, page = 1, activeFilters = appliedFilters) => {
@@ -127,23 +199,24 @@ export function ModeratorLogsManagement() {
         setLoading(true);
         setError(null);
         try {
-            // Không dùng filter BE. Chỉ lấy raw data rồi filter hoàn toàn ở FE.
             let merged = [];
             let page = 1;
             const pageSize = 100;
             while (true) {
-                const res = await getModerationLogs({ page, pageSize, sortBy: 'created_at', sortOrder: 'desc' });
+                const res = logType === 'moderator'
+                    ? await getModerationLogs({ page, pageSize, sortBy: 'created_at', sortOrder: 'desc' })
+                    : await getAdminComplianceLogs({ page, pageSize, sortBy: 'created_at', sortOrder: 'desc' });
                 const chunk = res?.items ?? res?.Items ?? [];
                 if (Array.isArray(chunk) && chunk.length) merged = merged.concat(chunk);
                 if (!Array.isArray(chunk) || chunk.length < pageSize) break;
                 page += 1;
             }
 
-            const normalizedRows = merged.map(toUiRow);
+            const normalizedRows = (logType === 'moderator' ? merged.map(toUiModeratorRow) : merged.map(toUiComplianceRow));
             setAllRows(normalizedRows);
             computeFilteredPage(normalizedRows, 1, appliedFilters);
         } catch (e) {
-            setError(e?.response?.data?.message ?? e?.message ?? 'Không tải được log kiểm duyệt.');
+            setError(e?.response?.data?.message ?? e?.message ?? 'Không tải được nhật ký kiểm duyệt.');
             setAllRows([]);
             setRows([]);
             setTotalCount(0);
@@ -156,7 +229,7 @@ export function ModeratorLogsManagement() {
     useEffect(() => {
         loadData();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [logType]);
 
     // Auto filter realtime: thay đổi filter là áp dụng ngay, không cần bấm "Lọc".
     useEffect(() => {
@@ -185,36 +258,75 @@ export function ModeratorLogsManagement() {
             <div>
                 <h1 className="text-2xl font-bold text-slate-900 mb-1">Nhật ký kiểm duyệt</h1>
                 <p className="text-sm text-slate-500">
-                    Theo dõi lịch sử duyệt/từ chối của kiểm duyệt viên theo thời gian thực.
+                    Theo dõi lịch sử hoạt động của kiểm duyệt viên và xử lý vi phạm viên theo thời gian thực.
                 </p>
             </div>
 
             <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-lg font-bold text-slate-900 m-0">Nhật ký kiểm duyệt của kiểm duyệt viên</h2>
+                    <h2 className="text-lg font-bold text-slate-900 m-0">
+                        {logType === 'moderator'
+                            ? 'Nhật ký kiểm duyệt của kiểm duyệt viên'
+                            : 'Nhật ký kiểm duyệt của xử lý vi phạm viên'}
+                    </h2>
                     <span className="text-sm text-slate-500">Tổng: {totalCount}</span>
                 </div>
-                <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+                <div className="flex gap-2 flex-wrap mb-3">
+                    <button
+                        type="button"
+                        onClick={() => setLogType('moderator')}
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${logType === 'moderator'
+                            ? 'bg-primary/15 border-primary/40 text-emerald-700'
+                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                            }`}
+                    >
+                        Nhật ký kiểm duyệt viên
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setLogType('compliance')}
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${logType === 'compliance'
+                            ? 'bg-primary/15 border-primary/40 text-emerald-700'
+                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                            }`}
+                    >
+                        Nhật ký xử lý vi phạm viên
+                    </button>
+                </div>
+                <div className={`grid grid-cols-1 ${logType === 'moderator' ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-3`}>
                     <input
                         value={filters.search}
                         onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
-                        placeholder="Tìm theo moderator, lý do, tiêu đề truyện/chương..."
+                        placeholder={logType === 'moderator' ? 'Tìm theo moderator, lý do, tiêu đề truyện/chương...' : 'Tìm theo xử lý vi phạm viên, nguồn, hành động...'}
                         style={inputStyle}
                     />
-                    <select
-                        value={filters.action}
-                        onChange={(e) => setFilters((p) => ({ ...p, action: e.target.value }))}
-                        style={inputStyle}
-                    >
-                        {ACTION_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
-                    </select>
-                    <select
-                        value={filters.targetType}
-                        onChange={(e) => setFilters((p) => ({ ...p, targetType: e.target.value }))}
-                        style={inputStyle}
-                    >
-                        {TARGET_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
-                    </select>
+                    {logType === 'moderator' && (
+                        <select
+                            value={filters.action}
+                            onChange={(e) => setFilters((p) => ({ ...p, action: e.target.value }))}
+                            style={inputStyle}
+                        >
+                            {ACTION_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
+                        </select>
+                    )}
+                    {logType === 'moderator' && (
+                        <select
+                            value={filters.targetType}
+                            onChange={(e) => setFilters((p) => ({ ...p, targetType: e.target.value }))}
+                            style={inputStyle}
+                        >
+                            {TARGET_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
+                        </select>
+                    )}
+                    {logType === 'compliance' && (
+                        <select
+                            value={filters.action}
+                            onChange={(e) => setFilters((p) => ({ ...p, action: e.target.value }))}
+                            style={inputStyle}
+                        >
+                            {COMPLIANCE_ACTION_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
+                        </select>
+                    )}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                         <label style={{ fontSize: '0.75rem', color: '#64748b' }}>Từ ngày</label>
                         <input
@@ -256,32 +368,60 @@ export function ModeratorLogsManagement() {
                     <div className="overflow-x-auto">
                         <table className="w-full border-collapse">
                             <thead>
-                                <tr className="bg-slate-50">
-                                    <th style={th}>THỜI ĐIỂM</th>
-                                    <th style={th}>MODERATOR</th>
-                                    <th style={th}>ĐỐI TƯỢNG</th>
-                                    <th style={th}>TIÊU ĐỀ</th>
-                                    <th style={th}>HÀNH ĐỘNG</th>
-                                    <th style={th}>LÝ DO</th>
-                                </tr>
+                                {logType === 'moderator' ? (
+                                    <tr className="bg-slate-50">
+                                        <th style={th}>THỜI ĐIỂM</th>
+                                        <th style={th}>MODERATOR</th>
+                                        <th style={th}>ĐỐI TƯỢNG</th>
+                                        <th style={th}>TIÊU ĐỀ</th>
+                                        <th style={th}>HÀNH ĐỘNG</th>
+                                        <th style={th}>LÝ DO</th>
+                                    </tr>
+                                ) : (
+                                    <tr className="bg-slate-50">
+                                        <th style={th}>THỜI ĐIỂM</th>
+                                        <th style={th}>XỬ LÝ VI PHẠM VIÊN</th>
+                                        <th style={th}>NGUỒN</th>
+                                        <th style={th}>HÀNH ĐỘNG</th>
+                                        <th style={th}>TRẠNG THÁI</th>
+                                        <th style={th}>NỘI DUNG</th>
+                                    </tr>
+                                )}
                             </thead>
                             <tbody>
-                                {rows.map((r) => (
-                                    <tr key={r.id ?? `${r.targetId}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
-                                        <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDate(r.createdAt)}</td>
-                                        <td style={td}>{r.moderatorName || '—'}</td>
-                                        <td style={td}>{targetLabel(r)}</td>
-                                        <td style={td}>{r.targetTitle || '—'}</td>
-                                        <td style={{ padding: '0.75rem', color: String(r.action || '').toUpperCase() === 'REJECTED' ? '#b91c1c' : '#065f46', fontWeight: 600 }}>
-                                            {actionLabel(r)}
-                                        </td>
-                                        <td style={{ padding: '0.75rem', color: '#475569', maxWidth: 420 }}>
-                                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.rejectionReason || ''}>
-                                                {r.rejectionReason || '—'}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
+                                {logType === 'moderator' ? (
+                                    rows.map((r) => (
+                                        <tr key={r.id ?? `${r.targetId}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
+                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDate(r.createdAt)}</td>
+                                            <td style={td}>{r.moderatorName || '—'}</td>
+                                            <td style={td}>{targetLabel(r)}</td>
+                                            <td style={td}>{r.targetTitle || '—'}</td>
+                                            <td style={{ padding: '0.75rem', color: String(r.action || '').toUpperCase() === 'REJECTED' ? '#b91c1c' : '#065f46', fontWeight: 600 }}>
+                                                {actionLabel(r)}
+                                            </td>
+                                            <td style={{ padding: '0.75rem', color: '#475569', maxWidth: 420 }}>
+                                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.rejectionReason || ''}>
+                                                    {r.rejectionReason || '—'}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))
+                                ) : (
+                                    rows.map((r) => (
+                                        <tr key={r.id ?? `${r.source}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
+                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDate(r.createdAt)}</td>
+                                            <td style={td}>{r.complianceUserName || '—'}</td>
+                                            <td style={td}>{complianceSourceLabel(r.source)}</td>
+                                            <td style={td}>{complianceActionLabel(r.action)}</td>
+                                            <td style={td}>{complianceStatusLabel(r.status)}</td>
+                                            <td style={{ padding: '0.75rem', color: '#475569', maxWidth: 420 }}>
+                                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.message || ''}>
+                                                    {r.message || '—'}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     </div>

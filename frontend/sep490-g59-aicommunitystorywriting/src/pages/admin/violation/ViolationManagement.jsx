@@ -44,6 +44,7 @@ import {
     setComplianceStoryFlag,
     setComplianceStoryHidden,
 } from '../../../api/admin/adminComplianceApi';
+import { getModerationLogs } from '../../../api/admin/adminModerationApi';
 
 const PAGE_SIZE = 10;
 
@@ -417,6 +418,7 @@ export default function ViolationManagement() {
     const [commentClaimPickerLoading, setCommentClaimPickerLoading] = useState(false);
     const [commentClaimPickerStoryMeta, setCommentClaimPickerStoryMeta] = useState({});
     const [infoModal, setInfoModal] = useState(null);
+    const [adminLogType, setAdminLogType] = useState('compliance');
 
     const currentUserId = user?.id ?? user?.Id ?? null;
     const releaseStorageKey = useMemo(
@@ -486,6 +488,29 @@ export default function ViolationManagement() {
             } else if (activeTab === 'lock-requests') {
                 data = await getAdminComplianceLockRequests({ status: 'PENDING' });
             } else if (activeTab === 'compliance-logs') {
+                if (adminLogType === 'moderator') {
+                    const modRes = await getModerationLogs({
+                        page,
+                        pageSize: PAGE_SIZE,
+                        search: filters.search || undefined,
+                        sortBy: 'created_at',
+                        sortOrder: 'desc',
+                    });
+                    const modPaged = readPaged(modRes);
+                    const modItems = (modPaged.items || []).map((x) => ({
+                        rowId: x.id ?? x.Id,
+                        createdAtUtc: x.createdAt ?? x.CreatedAt,
+                        complianceUserName: x.moderatorName ?? x.ModeratorName ?? '—',
+                        source: 'MODERATION',
+                        action: x.action ?? x.Action ?? '—',
+                        status: '—',
+                    }));
+                    setRows(modItems);
+                    setTotalCount(modPaged.totalCount);
+                    setCurrentPage(modPaged.page);
+                    setLoading(false);
+                    return;
+                }
                 data = await getAdminComplianceLogs({ page, pageSize: PAGE_SIZE, search: filters.search || undefined, sortBy: 'created_at', sortOrder: 'desc' });
             } else {
                 setRows([]);
@@ -528,7 +553,7 @@ export default function ViolationManagement() {
         } finally {
             setLoading(false);
         }
-    }, [activeTab, filters.flaggedOnly, filters.search, filters.statuses, showClaimedStoryList, showClaimedCommentList]);
+    }, [activeTab, adminLogType, filters.flaggedOnly, filters.search, filters.statuses, showClaimedStoryList, showClaimedCommentList]);
 
     const isReportTab = activeTab === 'story-reports' || activeTab === 'comment-reports';
 
@@ -1273,6 +1298,30 @@ export default function ViolationManagement() {
                         </button>
                     ))}
                 </div>
+                {activeTab === 'compliance-logs' && isAdmin && (
+                    <div className="flex gap-2 flex-wrap mb-3">
+                        <button
+                            type="button"
+                            onClick={() => setAdminLogType('moderator')}
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${adminLogType === 'moderator'
+                                ? 'bg-primary/15 border-primary/40 text-emerald-700'
+                                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                                }`}
+                        >
+                            Nhật ký kiểm duyệt viên
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setAdminLogType('compliance')}
+                            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${adminLogType === 'compliance'
+                                ? 'bg-primary/15 border-primary/40 text-emerald-700'
+                                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                                }`}
+                        >
+                            Nhật ký xử lý vi phạm viên
+                        </button>
+                    </div>
+                )}
                 {isReportTab && (
                     <>
                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">

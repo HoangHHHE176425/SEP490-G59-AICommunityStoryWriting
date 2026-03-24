@@ -1,4 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using BusinessObjects;
 using DataAccessObjects.DAOs;
@@ -20,6 +20,7 @@ public class AdminComplianceStoryReportsController : ControllerBase
     private const string SrcReportResolution = "REPORT_RESOLUTION";
     private const string SrcAdminActionRequest = "ADMIN_ACTION_REQUEST";
     private const string SrcLockRequest = "LOCK_REQUEST";
+    private const string SrcViolationAction = "VIOLATION_ACTION";
     private readonly IStoryReportService _storyReportService;
     private readonly ILogger<AdminComplianceStoryReportsController> _logger;
 
@@ -256,12 +257,30 @@ public class AdminComplianceStoryReportsController : ControllerBase
                 ResolvedAtUtc = x.resolved_at
             });
 
+        var violationQ = db.violation_logs.AsNoTracking()
+            .Where(v => v.compliance_officer_id != null && v.created_at != null)
+            .Select(v => new ComplianceLogItemDto
+            {
+                Source = SrcViolationAction,
+                RowId = v.id,
+                ComplianceUserId = v.compliance_officer_id!.Value,
+                ComplianceUserName = null,
+                TargetType = v.target_type,
+                TargetId = v.target_id,
+                Status = "DONE",
+                Action = v.penalty_type,
+                Message = v.reason,
+                CreatedAtUtc = v.created_at!.Value,
+                ResolvedAtUtc = v.created_at
+            });
+
         IQueryable<ComplianceLogItemDto> q = (query.Source ?? "").Trim().ToUpperInvariant() switch
         {
             SrcReportResolution => reportsQ,
             SrcAdminActionRequest => actionQ,
             SrcLockRequest => lockQ,
-            _ => reportsQ.Concat(actionQ).Concat(lockQ)
+            SrcViolationAction => violationQ,
+            _ => reportsQ.Concat(actionQ).Concat(lockQ).Concat(violationQ)
         };
 
         if (query.ComplianceUserId.HasValue)
