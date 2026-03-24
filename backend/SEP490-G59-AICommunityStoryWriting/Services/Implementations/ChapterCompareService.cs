@@ -79,12 +79,12 @@ public class ChapterCompareService : IChapterCompareService
         int orderIndex,
         CancellationToken cancellationToken)
     {
-        var aiRecords = _aiContentRepository.GetAllByStoryIdAndChapterIndex(storyId, orderIndex);
+        var aiRecords = _aiContentRepository.GetAllByStoryIdAndChapterIndex(storyId, orderIndex, maxCount: 5);
         if (aiRecords.Count == 0 && orderIndex == 0)
-            aiRecords = _aiContentRepository.GetAllByStoryIdAndChapterIndex(storyId, 1);
+            aiRecords = _aiContentRepository.GetAllByStoryIdAndChapterIndex(storyId, 1, maxCount: 5);
         // Legacy / nhầm lẫn: một số bản ghi lưu chapter_index = số chương hiển thị (1-based, vd. 6) thay vì order_index (0-based, vd. 5).
         if (aiRecords.Count == 0 && orderIndex > 0)
-            aiRecords = _aiContentRepository.GetAllByStoryIdAndChapterIndex(storyId, orderIndex + 1);
+            aiRecords = _aiContentRepository.GetAllByStoryIdAndChapterIndex(storyId, orderIndex + 1, maxCount: 5);
 
         if (string.IsNullOrEmpty(authorContent))
             return new CompareChapterResponse
@@ -103,7 +103,13 @@ public class ChapterCompareService : IChapterCompareService
                 Message = "Chưa có bản nội dung AI (co-create) cho thứ tự chương này (chapter_index)."
             };
 
-        var aiOutputStrings = aiRecords.Select(r => r.ai_output).ToList();
+        // Reduce false positives: compare against the most recent AI baseline first
+        // instead of taking the max over a large historical set.
+        var aiOutputStrings = aiRecords
+            .OrderByDescending(r => r.created_at)
+            .Take(1)
+            .Select(r => r.ai_output)
+            .ToList();
         var (bestScore, bestAiLength) = await ContentSimilarityHelper.CompareAuthorToAiOutputsAsync(
             authorContent,
             aiOutputStrings,
