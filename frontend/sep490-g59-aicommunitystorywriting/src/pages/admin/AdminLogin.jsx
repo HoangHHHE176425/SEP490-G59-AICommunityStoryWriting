@@ -46,7 +46,13 @@ export function AdminLogin() {
     };
 
     return (
-        <div className="min-h-screen flex">
+        <div
+            className="flex"
+            style={{
+                // App đang scale global 0.88, nên tăng chiều cao container để phủ trọn viewport.
+                minHeight: 'calc(100vh / 0.88)',
+            }}
+        >
             {/* Left: branding (ẩn trên mobile) */}
             <div className="hidden lg:flex lg:w-1/2 bg-slate-900 text-white flex-col justify-center px-12 xl:px-20">
                 <div className="flex items-center gap-3 mb-6">

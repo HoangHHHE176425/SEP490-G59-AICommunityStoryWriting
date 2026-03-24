@@ -17,7 +17,7 @@ export default function Homepage() {
   const communityStats = useCommunityStats();
 
   return (
-    <div className="w-full bg-gray-50">
+    <div className="homepage-compact w-full bg-gray-50">
       <Header />
       
       {/* Hero Banner - Featured Author Stories */}
