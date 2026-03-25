@@ -2,96 +2,123 @@ using Microsoft.Extensions.Configuration;
 
 namespace Services.Helpers;
 
-/// <summary>So sánh một văn bản tác giả với nhiều bản AI (embedding cosine hoặc Jaccard từ).</summary>
+/// <summary>So sánh theo % copy chữ (text-only), không dùng semantic embedding.</summary>
 public static class ContentSimilarityHelper
 {
+    private const int NGramSize = 5;
+    private const int LongSpanMinWords = 12;
+
     /// <returns>Điểm cao nhất 0–100 và độ dài chuỗi AI tương ứng.</returns>
-    public static async Task<(double BestScore, int BestAiLength)> CompareAuthorToAiOutputsAsync(
+    public static Task<(double BestScore, int BestAiLength)> CompareAuthorToAiOutputsAsync(
         string authorContent,
         IReadOnlyList<string?> aiOutputs,
         IConfiguration configuration,
         CancellationToken cancellationToken = default)
     {
+        _ = configuration;
+        _ = cancellationToken;
         var trimmedAuthor = (authorContent ?? "").Trim();
         double bestScore = 0;
         int bestAiLength = 0;
-        var config = EmbeddingHelper.GetEmbeddingConfig(configuration);
 
-        if (config.HasValue)
+        foreach (var raw in aiOutputs)
         {
-            var (baseUrl, apiKey, model) = config.Value;
-            var embAuthor = await EmbeddingHelper.GetEmbeddingAsync(trimmedAuthor, baseUrl, apiKey, model, cancellationToken);
-            if (embAuthor.Length == 0)
+            var aiContent = (raw ?? "").Trim();
+            if (string.IsNullOrEmpty(aiContent)) continue;
+            var s = CopySimilarityPercent(trimmedAuthor, aiContent);
+            if (s > bestScore) { bestScore = s; bestAiLength = aiContent.Length; }
+        }
+
+        return Task.FromResult((bestScore, bestAiLength));
+    }
+
+    /// <summary>
+    /// Copy score = 0.7 * N-gram overlap + 0.3 * long matching spans.
+    /// N-gram bắt copy cụm từ; long span bắt copy đoạn dài liên tiếp.
+    /// </summary>
+    private static double CopySimilarityPercent(string authorText, string aiText)
+    {
+        var authorTokens = Tokenize(authorText);
+        var aiTokens = Tokenize(aiText);
+        if (authorTokens.Length == 0 || aiTokens.Length == 0) return 0;
+
+        var ngram = NGramOverlapPercent(authorTokens, aiTokens, NGramSize);
+        var span = LongSpanPercent(authorTokens, aiTokens, LongSpanMinWords);
+        var score = 0.7 * ngram + 0.3 * span;
+        return Math.Clamp(score, 0, 100);
+    }
+
+    private static double NGramOverlapPercent(string[] authorTokens, string[] aiTokens, int n)
+    {
+        if (authorTokens.Length < n || aiTokens.Length < n) return 0;
+        var aiNgrams = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i <= aiTokens.Length - n; i++)
+            aiNgrams.Add(string.Join(' ', aiTokens, i, n));
+
+        int total = authorTokens.Length - n + 1;
+        int matched = 0;
+        for (int i = 0; i <= authorTokens.Length - n; i++)
+        {
+            var gram = string.Join(' ', authorTokens, i, n);
+            if (aiNgrams.Contains(gram)) matched++;
+        }
+        return total <= 0 ? 0 : (matched * 100.0) / total;
+    }
+
+    private static double LongSpanPercent(string[] authorTokens, string[] aiTokens, int minSpanWords)
+    {
+        int n = authorTokens.Length;
+        int m = aiTokens.Length;
+        if (n == 0 || m == 0) return 0;
+
+        var dp = new int[n + 1, m + 1];
+        var covered = new bool[n];
+
+        for (int i = 1; i <= n; i++)
+        {
+            for (int j = 1; j <= m; j++)
             {
-                foreach (var raw in aiOutputs)
+                if (authorTokens[i - 1].Equals(aiTokens[j - 1], StringComparison.Ordinal))
                 {
-                    var aiContent = (raw ?? "").Trim();
-                    if (string.IsNullOrEmpty(aiContent)) continue;
-                    var s = TextSimilarityPercent(trimmedAuthor, aiContent);
-                    if (s > bestScore) { bestScore = s; bestAiLength = aiContent.Length; }
+                    dp[i, j] = dp[i - 1, j - 1] + 1;
+                    var len = dp[i, j];
+                    if (len >= minSpanWords)
+                    {
+                        var start = i - len;
+                        var end = i - 1;
+                        for (int k = start; k <= end; k++)
+                            covered[k] = true;
+                    }
+                }
+                else
+                {
+                    dp[i, j] = 0;
                 }
             }
-            else
-            {
-                foreach (var raw in aiOutputs)
-                {
-                    var aiContent = (raw ?? "").Trim();
-                    if (string.IsNullOrEmpty(aiContent)) continue;
-                    var embAi = await EmbeddingHelper.GetEmbeddingAsync(aiContent, baseUrl, apiKey, model, cancellationToken);
-                    var s = embAi.Length > 0 ? CosineSimilarityPercent(embAuthor, embAi) : TextSimilarityPercent(trimmedAuthor, aiContent);
-                    if (s > bestScore) { bestScore = s; bestAiLength = aiContent.Length; }
-                }
-            }
-        }
-        else
-        {
-            foreach (var raw in aiOutputs)
-            {
-                var aiContent = (raw ?? "").Trim();
-                if (string.IsNullOrEmpty(aiContent)) continue;
-                var s = TextSimilarityPercent(trimmedAuthor, aiContent);
-                if (s > bestScore) { bestScore = s; bestAiLength = aiContent.Length; }
-            }
         }
 
-        return (bestScore, bestAiLength);
+        int coveredCount = covered.Count(x => x);
+        return (coveredCount * 100.0) / n;
     }
 
-    private static double CosineSimilarityPercent(float[] a, float[] b)
+    private static string[] Tokenize(string text)
     {
-        if (a.Length == 0 || a.Length != b.Length) return 0;
-        double dot = 0, na = 0, nb = 0;
-        for (int i = 0; i < a.Length; i++)
-        {
-            dot += a[i] * b[i];
-            na += a[i] * a[i];
-            nb += b[i] * b[i];
-        }
-        var denom = Math.Sqrt(na) * Math.Sqrt(nb);
-        if (denom <= 0) return 0;
-        var cos = dot / denom;
-        return Math.Clamp(cos, -1, 1) * 100.0;
+        if (string.IsNullOrWhiteSpace(text))
+            return Array.Empty<string>();
+        var normalized = NormalizeText(text);
+        return normalized
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => w.Length > 0)
+            .ToArray();
     }
 
-    private static double TextSimilarityPercent(string a, string b)
+    private static string NormalizeText(string text)
     {
-        var setA = new HashSet<string>(SplitWords(a), StringComparer.OrdinalIgnoreCase);
-        var setB = new HashSet<string>(SplitWords(b), StringComparer.OrdinalIgnoreCase);
-        if (setA.Count == 0 && setB.Count == 0) return 100;
-        if (setA.Count == 0 || setB.Count == 0) return 0;
-        int intersection = setA.Count(s => setB.Contains(s));
-        int union = setA.Count + setB.Count - intersection;
-        if (union == 0) return 100;
-        return (intersection * 100.0) / union;
-    }
-
-    private static IEnumerable<string> SplitWords(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) yield break;
-        foreach (var w in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-        {
-            var t = w.Trim();
-            if (t.Length > 0) yield return t;
-        }
+        var chars = text.ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) || char.IsWhiteSpace(ch) ? ch : ' ')
+            .ToArray();
+        var compact = new string(chars);
+        var parts = compact.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(' ', parts);
     }
 }

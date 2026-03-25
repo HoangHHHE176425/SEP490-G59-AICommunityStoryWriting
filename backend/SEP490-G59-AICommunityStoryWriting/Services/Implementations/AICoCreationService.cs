@@ -16,6 +16,7 @@ namespace Services.Implementations;
 public class AICoCreationService : IAICoCreationService
 {
     private const int DefaultMaxRevisions = 2;
+    private const int MinDraftWordCount = 500;
     /// <summary>Số bản nháp (và review) chạy song song trong một vòng; 1 = tuần tự như cũ.</summary>
     // Co-create chạy tuần tự (không song song).
     private const string ActionOutline = "CO_CREATE_OUTLINE";
@@ -265,6 +266,51 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             reviewFeedback = review.Feedback;
         }
 
+        // Enforce minimum length with a single lightweight expansion pass to avoid many rewrites.
+        if (CountWords(draft) < MinDraftWordCount)
+        {
+            var swExpand = Stopwatch.StartNew();
+            draft = await RunAgent2ExpandAsync(
+                clientWriter,
+                contextBlock,
+                outlineForPrompt,
+                draft,
+                languageInstruction,
+                cancellationToken);
+            swExpand.Stop();
+            draft = StripTrailingFeedbackFromDraft(draft);
+            durations.Add(new AgentDuration { Step = "Length_Expand", DurationMs = swExpand.ElapsedMilliseconds });
+            progress?.Report(new CoCreateProgressEvent { Step = "Length_Expand", DurationMs = swExpand.ElapsedMilliseconds, Message = "Đã mở rộng nội dung để đạt độ dài tối thiểu" });
+            LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
+
+            var swExpandGuard = Stopwatch.StartNew();
+            var expandGuardrailResult = await _guardrail.CheckAsync(request.StoryId, draft, cancellationToken);
+            swExpandGuard.Stop();
+            durations.Add(new AgentDuration { Step = "Length_Expand_Guardrail", DurationMs = swExpandGuard.ElapsedMilliseconds });
+            progress?.Report(new CoCreateProgressEvent { Step = "Length_Expand_Guardrail", DurationMs = swExpandGuard.ElapsedMilliseconds, Message = "Đã kiểm tra từ cấm sau mở rộng nội dung" });
+            if (!expandGuardrailResult.Passed)
+            {
+                approved = false;
+                reviewFeedback = string.Join(" ", expandGuardrailResult.Violations.Select(v => $"[{v.Type}] {v.Message}"));
+                review = new ReviewResult(false, reviewFeedback, new List<ReviewViolation>());
+            }
+            else
+            {
+                var swExpandReview = Stopwatch.StartNew();
+                review = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, effectiveIdea, languageInstruction, cancellationToken);
+                swExpandReview.Stop();
+                durations.Add(new AgentDuration { Step = "Length_Expand_Review", DurationMs = swExpandReview.ElapsedMilliseconds });
+                progress?.Report(new CoCreateProgressEvent { Step = "Length_Expand_Review", DurationMs = swExpandReview.ElapsedMilliseconds, Message = "Đã kiểm duyệt lại sau mở rộng nội dung" });
+                LogUsage(authorUserId, request.StoryId, null, ActionReview, m3, 0, 0);
+                approved = review.Approved;
+                reviewFeedback = review.Feedback;
+            }
+        }
+
+        var finalWordCount = CountWords(draft);
+        if (finalWordCount < MinDraftWordCount)
+            throw new InvalidOperationException($"Nội dung AI tạo ra quá ngắn ({finalWordCount} từ), chưa đạt tối thiểu {MinDraftWordCount} từ. Vui lòng thử lại.");
+
         var saved = SaveAiGeneratedContentOnly(
             request.StoryId,
             authorUserId,
@@ -300,7 +346,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
     {
         if (string.IsNullOrWhiteSpace(finalContent)) return (null, null);
         var chaptersList = _chapterRepository.GetByStoryId(storyId).ToList();
-        // Khớp chapters.order_index từ FE (chương 1 → order_index 0). Ưu tiên index chương đang soạn để compare-chapter-preview khớp khi copy–paste.
+        // Khớp chapters.order_index từ FE (chương 1 → order_index 0). Ưu tiên index chương đang soạn để map đúng slot chương hiện tại.
         int nextChapterIndex;
         if (targetOrderIndex is >= 0)
             nextChapterIndex = targetOrderIndex.Value;
@@ -431,6 +477,42 @@ Expected Outcome:
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("Agent dàn ý không trả về nội dung.");
         return text.Trim();
+    }
+
+    private async Task<string> RunAgent2ExpandAsync(
+        ChatClient client,
+        string contextBlock,
+        string outline,
+        string currentDraft,
+        string languageInstruction,
+        CancellationToken ct)
+    {
+        var userPrompt =
+            $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý:\n{outline}\n\nBản nháp hiện tại:\n{currentDraft}\n\n" +
+            $"{languageInstruction}\n\n" +
+            "Yêu cầu: giữ nguyên mạch truyện, sự kiện chính và tính nhất quán của bản nháp hiện tại; chỉ mở rộng thêm chi tiết hợp lý (miêu tả, nội tâm, đối thoại, chuyển cảnh) để bản đầy đủ đạt tối thiểu 500 từ, ưu tiên khoảng 600–700 từ. " +
+            "Không viết lại theo hướng khác, không thêm plot twist lớn. Trả về toàn bộ bản nháp hoàn chỉnh, chỉ nội dung truyện.";
+
+        var messages = new List<ChatMessage>
+        {
+            new SystemChatMessage(GetAgent2FixSystemPrompt()),
+            new UserChatMessage(userPrompt)
+        };
+        var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentWriter);
+        var completion = await client.CompleteChatAsync(messages, options);
+        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
+        if (string.IsNullOrWhiteSpace(text))
+            throw new InvalidOperationException("Agent mở rộng nội dung không trả về nội dung.");
+        return text.Trim();
+    }
+
+    private static int CountWords(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return 0;
+        return text
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Length;
     }
 
     /// <summary>Nếu Agent 1 trả về ideaContradiction (JSON thuần hoặc JSON nằm trong đoạn văn) thì trả về feedback; ngược lại null.</summary>

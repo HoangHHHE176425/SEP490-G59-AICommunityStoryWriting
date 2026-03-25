@@ -7,7 +7,7 @@ using Services.Interfaces;
 
 namespace Services.Implementations;
 
-/// <summary>So sánh nội dung tác giả với <c>ai_output</c> cùng <c>story_id</c>; <c>chapter_index</c> chuẩn = <c>order_index</c> (0-based), có fallback <c>order_index+1</c> cho dữ liệu cũ. Không ghi DB — % lưu khi tạo/cập nhật chương qua <c>AiSimilarityPercent</c>.</summary>
+/// <summary>So sánh nội dung truyền vào với <c>ai_output</c> của chính <c>chapter_id</c>. Không ghi DB.</summary>
 public class ChapterCompareService : IChapterCompareService
 {
     private const double SimilarityThresholdPercent = 85.0;
@@ -38,53 +38,23 @@ public class ChapterCompareService : IChapterCompareService
         if (!chapter.story_id.HasValue)
             return new CompareChapterResponse { HasBothContents = false, Message = "Chương không gắn truyện." };
 
-        var storyId = chapter.story_id.Value;
-        var orderIndex = chapter.order_index;
-        if (orderIndex < 0)
-            return new CompareChapterResponse { HasBothContents = false, Message = "Chương có order_index không hợp lệ." };
-
-        var story = _storyRepository.GetById(storyId);
+        var story = _storyRepository.GetById(chapter.story_id.Value);
         if (story == null)
             return new CompareChapterResponse { HasBothContents = false, Message = "Truyện không tồn tại." };
 
         if (userId.HasValue && story.author_id != userId.Value)
             return new CompareChapterResponse { HasBothContents = false, Message = "Chỉ tác giả truyện được so sánh." };
-
-        var authorContent = (chapter.content ?? "").Trim();
-        return await CompareAuthorContentWithAiRecordsAsync(authorContent, storyId, orderIndex, cancellationToken);
-    }
-
-    public async Task<CompareChapterResponse> ComparePreviewAsync(CompareChapterPreviewRequest request, Guid? userId, CancellationToken cancellationToken = default)
-    {
-        if (request.StoryId == Guid.Empty)
-            return new CompareChapterResponse { HasBothContents = false, Message = "StoryId không hợp lệ." };
-
-        var story = _storyRepository.GetById(request.StoryId);
-        if (story == null)
-            return new CompareChapterResponse { HasBothContents = false, Message = "Truyện không tồn tại." };
-
-        if (userId.HasValue && story.author_id != userId.Value)
-            return new CompareChapterResponse { HasBothContents = false, Message = "Chỉ tác giả truyện được so sánh." };
-
-        if (request.OrderIndex < 0)
-            return new CompareChapterResponse { HasBothContents = false, Message = "Thứ tự chương (order_index) không hợp lệ." };
 
         var authorContent = (request.Content ?? "").Trim();
-        return await CompareAuthorContentWithAiRecordsAsync(authorContent, request.StoryId, request.OrderIndex, cancellationToken);
+        return await CompareAuthorContentWithAiRecordsByChapterIdAsync(authorContent, request.ChapterId, cancellationToken);
     }
 
-    private async Task<CompareChapterResponse> CompareAuthorContentWithAiRecordsAsync(
+    private async Task<CompareChapterResponse> CompareAuthorContentWithAiRecordsByChapterIdAsync(
         string authorContent,
-        Guid storyId,
-        int orderIndex,
+        Guid chapterId,
         CancellationToken cancellationToken)
     {
-        var aiRecords = _aiContentRepository.GetAllByStoryIdAndChapterIndex(storyId, orderIndex);
-        if (aiRecords.Count == 0 && orderIndex == 0)
-            aiRecords = _aiContentRepository.GetAllByStoryIdAndChapterIndex(storyId, 1);
-        // Legacy / nhầm lẫn: một số bản ghi lưu chapter_index = số chương hiển thị (1-based, vd. 6) thay vì order_index (0-based, vd. 5).
-        if (aiRecords.Count == 0 && orderIndex > 0)
-            aiRecords = _aiContentRepository.GetAllByStoryIdAndChapterIndex(storyId, orderIndex + 1);
+        var aiRecords = _aiContentRepository.GetAllByChapterId(chapterId);
 
         if (string.IsNullOrEmpty(authorContent))
             return new CompareChapterResponse
@@ -100,10 +70,14 @@ public class ChapterCompareService : IChapterCompareService
                 HasBothContents = false,
                 AuthorContentLength = authorContent.Length,
                 AiContentLength = 0,
-                Message = "Chưa có bản nội dung AI (co-create) cho thứ tự chương này (chapter_index)."
+                Message = "Chưa có bản nội dung AI cho chapter này."
             };
 
-        var aiOutputStrings = aiRecords.Select(r => r.ai_output).ToList();
+        // Compare against all AI outputs for this chapter and keep the highest similarity score.
+        var aiOutputStrings = aiRecords
+            .OrderByDescending(r => r.created_at)
+            .Select(r => r.ai_output)
+            .ToList();
         var (bestScore, bestAiLength) = await ContentSimilarityHelper.CompareAuthorToAiOutputsAsync(
             authorContent,
             aiOutputStrings,

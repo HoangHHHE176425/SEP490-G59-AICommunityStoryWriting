@@ -120,6 +120,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IAiConfigsRepository, AiConfigsRepository>();
             builder.Services.AddScoped<IAIUsageLimitConfigService, AIUsageLimitConfigService>();
             builder.Services.AddScoped<IChapterCompareService, ChapterCompareService>();
+            builder.Services.AddScoped<IChapterVersionAiCompareService, ChapterVersionAiCompareService>();
             builder.Services.AddSingleton<IAISuggestRateLimitService, AISuggestRateLimitService>();
 
             // Coin / PayOS

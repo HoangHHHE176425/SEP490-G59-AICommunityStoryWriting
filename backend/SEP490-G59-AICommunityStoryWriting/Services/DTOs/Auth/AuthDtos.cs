@@ -35,6 +35,18 @@ namespace Services.DTOs.Auth
         public string OtpCode { get; set; } = null!;
     }
 
+    public class ResendOtpRequest
+    {
+        [Required, EmailAddress]
+        public string Email { get; set; } = null!;
+    }
+
+    public class ResendOtpResponse
+    {
+        public string Message { get; set; } = string.Empty;
+        public int ExpiresInSeconds { get; set; }
+    }
+
     public class AuthResponse
     {
         public string AccessToken { get; set; } = null!;

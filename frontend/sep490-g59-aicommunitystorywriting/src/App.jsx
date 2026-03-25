@@ -19,6 +19,7 @@ import { StoryBrowse } from './pages/story-list/StoryBrowse';
 import AboutUs from './pages/aboutus/AboutUs';
 import PolicyPage from './pages/policy/PolicyPage';
 import Donate from './pages/donate/Donate';
+import GoogleCallback from './pages/auth/GoogleCallback';
 
 export default function App() {
   return (
@@ -35,6 +36,7 @@ export default function App() {
           <Route path="/register" element={<Register />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/verify-otp" element={<VerifyOtp />} />
+          <Route path="/auth/google/callback" element={<GoogleCallback />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/wallet" element={<Wallet />} />
           <Route path="/library" element={<Library />} />

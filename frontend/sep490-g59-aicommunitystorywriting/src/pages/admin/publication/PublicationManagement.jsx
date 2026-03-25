@@ -341,9 +341,9 @@ function mapPendingChapterToItem(c) {
     };
 }
 
-export function PublicationManagement() {
+export function PublicationManagement({ initialFilterStatus = 'pending' }) {
     const [selectedPublication, setSelectedPublication] = useState(null);
-    const [filterStatus, setFilterStatus] = useState('pending'); // 'pending' | 'approved' | 'rejected'
+    const [filterStatus, setFilterStatus] = useState(initialFilterStatus); // 'pending' | 'approved' | 'rejected'
     const [publications, setPublications] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -380,6 +380,12 @@ export function PublicationManagement() {
     const [claimCustomDeadline, setClaimCustomDeadline] = useState('');
     const [claimCommitted, setClaimCommitted] = useState(false);
     const [modalClaimBusy, setModalClaimBusy] = useState(false);
+
+    // Khi dashboard MODERATOR bấm nút, thay đổi tab ở màn publication ngay lập tức.
+    useEffect(() => {
+        if (initialFilterStatus) setFilterStatus(initialFilterStatus);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialFilterStatus]);
 
     /** Modal "Nhận duyệt đơn": gộp theo truyện — mỗi truyện 1 dòng; nhận 1 lần = claim truyện (nếu chưa) + tất cả chương chờ duyệt của truyện đó. */
     const loadClaimModalItems = useCallback(() => {
