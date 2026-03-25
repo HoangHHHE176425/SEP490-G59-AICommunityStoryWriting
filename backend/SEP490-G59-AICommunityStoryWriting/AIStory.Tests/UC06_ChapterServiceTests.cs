@@ -1,4 +1,6 @@
+using BusinessObjects;
 using BusinessObjects.Entities;
+using DataAccessObjects.DAOs;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Repositories;
@@ -10,9 +12,12 @@ namespace AIStory.Tests;
 
 public class UC06_ChapterServiceTests
 {
-    private static ChapterService CreateSut(FakeChapterRepository chapterRepo, FakeChapterVersionRepository versionRepo)
+    private static ChapterService CreateSut(
+        FakeChapterRepository chapterRepo,
+        FakeChapterVersionRepository versionRepo,
+        FakeAiGeneratedContentRepository? aiRepo = null)
     {
-        var aiRepo = new FakeAiGeneratedContentRepository();
+        aiRepo ??= new FakeAiGeneratedContentRepository();
         var scopeFactory = new FakeServiceScopeFactory();
         return new ChapterService(
             chapterRepo,
@@ -24,229 +29,301 @@ public class UC06_ChapterServiceTests
             notificationHubNotifier: null);
     }
 
-    [Fact]
-    public void EditChapter_InvalidStatus_Throws()
+    private static stories NewTestStory(Guid storyId)
     {
-        var repo = new FakeChapterRepository();
-        var ver = new FakeChapterVersionRepository();
-        var sut = CreateSut(repo, ver);
-
-        var id = Guid.NewGuid();
-        repo.Seed(new chapters { id = id, story_id = Guid.NewGuid(), title = "Old", order_index = 1, status = "DRAFT", access_type = "FREE", coin_price = 0 });
-
-        var ex = Assert.Throws<ArgumentException>(() => sut.Update(id, new UpdateChapterRequestDto
+        var suffix = storyId.ToString("N")[..16];
+        return new stories
         {
-            Title = "New",
-            Status = "NOT_A_STATUS"
-        }));
-        Assert.Contains("Invalid status", ex.Message);
+            id = storyId,
+            author_id = null,
+            title = "UT Create Chapter",
+            slug = "ut-ch-" + suffix,
+            story_progress_status = "ONGOING",
+            created_at = DateTime.UtcNow,
+            updated_at = DateTime.UtcNow
+        };
+    }
+
+    private static void InsertStory(stories story) => StoryDAO.Add(story);
+
+    private static void DeleteStoryIfExists(Guid storyId)
+    {
+        using var context = new StoryPlatformDbContext();
+        var row = context.stories.FirstOrDefault(s => s.id == storyId);
+        if (row == null)
+            return;
+        context.stories.Remove(row);
+        context.SaveChanges();
     }
 
     [Fact]
-    public void EditChapter_InvalidAccessType_Throws()
+    public void CreateChapter_StoryNotFound_Throws()
     {
         var repo = new FakeChapterRepository();
         var ver = new FakeChapterVersionRepository();
         var sut = CreateSut(repo, ver);
+        var missingStoryId = Guid.NewGuid();
 
-        var id = Guid.NewGuid();
-        repo.Seed(new chapters { id = id, story_id = Guid.NewGuid(), title = "Old", order_index = 1, status = "DRAFT", access_type = "FREE", coin_price = 0 });
-
-        var ex = Assert.Throws<ArgumentException>(() => sut.Update(id, new UpdateChapterRequestDto
+        var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(new CreateChapterRequestDto
         {
-            Title = "New",
-            AccessType = "VIP"
-        }));
-        Assert.Contains("Invalid access type", ex.Message);
-    }
-
-    [Fact]
-    public void EditChapter_SetPaidWithNonPositiveCoin_Throws()
-    {
-        var repo = new FakeChapterRepository();
-        var ver = new FakeChapterVersionRepository();
-        var sut = CreateSut(repo, ver);
-
-        var id = Guid.NewGuid();
-        repo.Seed(new chapters { id = id, story_id = Guid.NewGuid(), title = "Old", order_index = 1, status = "DRAFT", access_type = "FREE", coin_price = 0 });
-
-        var ex = Assert.Throws<ArgumentException>(() => sut.Update(id, new UpdateChapterRequestDto
-        {
-            Title = "New",
-            AccessType = "PAID",
-            CoinPrice = 0
-        }));
-        Assert.Contains("Coin price must be greater than 0", ex.Message);
-    }
-
-    [Fact]
-    public void EditChapter_SetFree_ForcesCoinPriceZero()
-    {
-        var repo = new FakeChapterRepository();
-        var ver = new FakeChapterVersionRepository();
-        var sut = CreateSut(repo, ver);
-
-        var id = Guid.NewGuid();
-        repo.Seed(new chapters { id = id, story_id = Guid.NewGuid(), title = "Old", order_index = 1, status = "DRAFT", access_type = "PAID", coin_price = 10 });
-
-        var ok = sut.Update(id, new UpdateChapterRequestDto
-        {
-            Title = "New",
-            AccessType = "FREE",
-            CoinPrice = 999
-        });
-
-        Assert.True(ok);
-        var updated = repo.GetById(id)!;
-        Assert.Equal("FREE", updated.access_type);
-        Assert.Equal(0, updated.coin_price);
-    }
-
-    [Fact]
-    public void EditChapter_UpdateCoinPriceOnFree_Throws()
-    {
-        var repo = new FakeChapterRepository();
-        var ver = new FakeChapterVersionRepository();
-        var sut = CreateSut(repo, ver);
-
-        var id = Guid.NewGuid();
-        repo.Seed(new chapters { id = id, story_id = Guid.NewGuid(), title = "Old", order_index = 1, status = "DRAFT", access_type = "FREE", coin_price = 0 });
-
-        var ex = Assert.Throws<ArgumentException>(() => sut.Update(id, new UpdateChapterRequestDto
-        {
-            Title = "New",
-            CoinPrice = 5
-        }));
-        Assert.Contains("Cannot set coin price for FREE", ex.Message);
-    }
-
-    [Fact]
-    public void EditChapter_StatusToPublished_SetsPublishedAt()
-    {
-        var repo = new FakeChapterRepository();
-        var ver = new FakeChapterVersionRepository();
-        var sut = CreateSut(repo, ver);
-
-        var id = Guid.NewGuid();
-        repo.Seed(new chapters { id = id, story_id = null, title = "Old", order_index = 1, status = "DRAFT", access_type = "FREE", coin_price = 0, published_at = null });
-
-        var ok = sut.Update(id, new UpdateChapterRequestDto
-        {
-            Title = "New",
-            Status = "PUBLISHED"
-        });
-
-        Assert.True(ok);
-        var updated = repo.GetById(id)!;
-        Assert.Equal("PUBLISHED", updated.status);
-        Assert.NotNull(updated.published_at);
-    }
-
-    [Fact]
-    public void EditChapter_StatusFromPublishedToDraft_ClearsPublishedAt()
-    {
-        var repo = new FakeChapterRepository();
-        var ver = new FakeChapterVersionRepository();
-        var sut = CreateSut(repo, ver);
-
-        var id = Guid.NewGuid();
-        repo.Seed(new chapters
-        {
-            id = id,
-            story_id = null,
-            title = "Old",
-            order_index = 1,
-            status = "PUBLISHED",
-            access_type = "FREE",
-            coin_price = 0,
-            published_at = DateTime.UtcNow.AddDays(-1)
-        });
-
-        var ok = sut.Update(id, new UpdateChapterRequestDto
-        {
-            Title = "New",
-            Status = "DRAFT"
-        });
-
-        Assert.True(ok);
-        var updated = repo.GetById(id)!;
-        Assert.Equal("DRAFT", updated.status);
-        Assert.Null(updated.published_at);
-    }
-
-    [Fact]
-    public void EditChapter_ContentProvided_RecomputesWordCount()
-    {
-        var repo = new FakeChapterRepository();
-        var ver = new FakeChapterVersionRepository();
-        var sut = CreateSut(repo, ver);
-
-        var id = Guid.NewGuid();
-        repo.Seed(new chapters { id = id, story_id = null, title = "Old", order_index = 1, status = "DRAFT", access_type = "FREE", coin_price = 0, word_count = 0 });
-
-        var ok = sut.Update(id, new UpdateChapterRequestDto
-        {
-            Title = "New",
-            Content = "hello world"
-        });
-
-        Assert.True(ok);
-        var updated = repo.GetById(id)!;
-        Assert.True(updated.word_count >= 2);
-    }
-
-    [Fact]
-    public void EditChapter_OrderIndexDuplicate_Throws()
-    {
-        var repo = new FakeChapterRepository();
-        var ver = new FakeChapterVersionRepository();
-        var sut = CreateSut(repo, ver);
-
-        var storyId = Guid.NewGuid();
-        var id1 = Guid.NewGuid();
-        var id2 = Guid.NewGuid();
-        repo.Seed(new chapters { id = id1, story_id = storyId, title = "C1", order_index = 1, status = "DRAFT", access_type = "FREE", coin_price = 0 });
-        repo.Seed(new chapters { id = id2, story_id = storyId, title = "C2", order_index = 2, status = "DRAFT", access_type = "FREE", coin_price = 0 });
-
-        var ex = Assert.Throws<InvalidOperationException>(() => sut.Update(id2, new UpdateChapterRequestDto
-        {
-            Title = "C2 updated",
+            StoryId = missingStoryId,
+            Title = "Ch1",
             OrderIndex = 1
         }));
-        Assert.Contains("already exists", ex.Message);
+
+        Assert.Contains("not found", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void DeleteChapter_WithVersions_WithoutConfirm_ThrowsConfirmationException()
+    public void CreateChapter_DuplicateOrderIndex_Throws()
     {
+        var storyId = Guid.NewGuid();
         var repo = new FakeChapterRepository();
         var ver = new FakeChapterVersionRepository();
-        var chapterId = Guid.NewGuid();
-        repo.Seed(new chapters { id = chapterId, story_id = Guid.NewGuid(), title = "C", order_index = 1, status = "DRAFT", access_type = "FREE", coin_price = 0 });
-        ver.Seed(new chapter_versions { id = Guid.NewGuid(), chapter_id = chapterId, version_number = 1, status = "DRAFT" });
         var sut = CreateSut(repo, ver);
 
-        var ex = Assert.Throws<InvalidOperationException>(() => sut.Delete(chapterId, deleteIncludingVersions: false));
-        Assert.Equal("CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED", ex.Data["ErrorCode"]?.ToString());
-        Assert.Equal(1, Convert.ToInt32(ex.Data["VersionCount"]));
-        Assert.True(repo.GetById(chapterId) != null);
+        try
+        {
+            InsertStory(NewTestStory(storyId));
+            repo.Seed(new chapters
+            {
+                id = Guid.NewGuid(),
+                story_id = storyId,
+                title = "Existing",
+                order_index = 1,
+                status = "DRAFT",
+                access_type = "FREE",
+                coin_price = 0
+            });
+
+            var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(new CreateChapterRequestDto
+            {
+                StoryId = storyId,
+                Title = "New",
+                OrderIndex = 1
+            }));
+            Assert.Contains("already exists", ex.Message);
+        }
+        finally
+        {
+            DeleteStoryIfExists(storyId);
+        }
     }
 
     [Fact]
-    public void DeleteChapter_WithVersions_WithConfirm_RemovesChapterAndVersions()
+    public void CreateChapter_InvalidAccessType_Throws()
     {
+        var storyId = Guid.NewGuid();
         var repo = new FakeChapterRepository();
         var ver = new FakeChapterVersionRepository();
-        var chapterId = Guid.NewGuid();
-        var versionId = Guid.NewGuid();
-        repo.Seed(new chapters { id = chapterId, story_id = Guid.NewGuid(), title = "C", order_index = 1, status = "DRAFT", access_type = "FREE", coin_price = 0 });
-        ver.Seed(new chapter_versions { id = versionId, chapter_id = chapterId, version_number = 1, status = "DRAFT" });
         var sut = CreateSut(repo, ver);
 
-        var ok = sut.Delete(chapterId, deleteIncludingVersions: true);
-        Assert.True(ok);
-        Assert.Null(repo.GetById(chapterId));
-        Assert.Empty(ver.GetByChapterId(chapterId));
+        try
+        {
+            InsertStory(NewTestStory(storyId));
+
+            var ex = Assert.Throws<ArgumentException>(() => sut.Create(new CreateChapterRequestDto
+            {
+                StoryId = storyId,
+                Title = "Ch1",
+                OrderIndex = 1,
+                AccessType = "VIP"
+            }));
+            Assert.Contains("Invalid access type", ex.Message);
+        }
+        finally
+        {
+            DeleteStoryIfExists(storyId);
+        }
+    }
+
+    [Fact]
+    public void CreateChapter_PaidWithNonPositiveCoin_Throws()
+    {
+        var storyId = Guid.NewGuid();
+        var repo = new FakeChapterRepository();
+        var ver = new FakeChapterVersionRepository();
+        var sut = CreateSut(repo, ver);
+
+        try
+        {
+            InsertStory(NewTestStory(storyId));
+
+            var ex = Assert.Throws<ArgumentException>(() => sut.Create(new CreateChapterRequestDto
+            {
+                StoryId = storyId,
+                Title = "Ch1",
+                OrderIndex = 1,
+                AccessType = "PAID",
+                CoinPrice = 0
+            }));
+            Assert.Contains("Coin price must be greater than 0", ex.Message);
+        }
+        finally
+        {
+            DeleteStoryIfExists(storyId);
+        }
+    }
+
+    [Fact]
+    public void CreateChapter_Free_ForcesCoinPriceZero()
+    {
+        var storyId = Guid.NewGuid();
+        var repo = new FakeChapterRepository();
+        var ver = new FakeChapterVersionRepository();
+        var sut = CreateSut(repo, ver);
+
+        try
+        {
+            InsertStory(NewTestStory(storyId));
+
+            var dto = sut.Create(new CreateChapterRequestDto
+            {
+                StoryId = storyId,
+                Title = "Ch1",
+                OrderIndex = 1,
+                AccessType = "FREE",
+                CoinPrice = 999
+            });
+
+            var stored = repo.GetById(dto.Id)!;
+            Assert.Equal("FREE", stored.access_type);
+            Assert.Equal(0, stored.coin_price);
+            Assert.Equal(0, dto.CoinPrice);
+        }
+        finally
+        {
+            DeleteStoryIfExists(storyId);
+        }
+    }
+
+    [Fact]
+    public void CreateChapter_InvalidStatus_DefaultsToDraft()
+    {
+        var storyId = Guid.NewGuid();
+        var repo = new FakeChapterRepository();
+        var ver = new FakeChapterVersionRepository();
+        var sut = CreateSut(repo, ver);
+
+        try
+        {
+            InsertStory(NewTestStory(storyId));
+
+            var dto = sut.Create(new CreateChapterRequestDto
+            {
+                StoryId = storyId,
+                Title = "Ch1",
+                OrderIndex = 1,
+                Status = "NOT_A_STATUS"
+            });
+
+            Assert.Equal("DRAFT", dto.Status);
+            Assert.Null(dto.PublishedAt);
+        }
+        finally
+        {
+            DeleteStoryIfExists(storyId);
+        }
+    }
+
+    [Fact]
+    public void CreateChapter_StatusPublished_SetsPublishedAt()
+    {
+        var storyId = Guid.NewGuid();
+        var repo = new FakeChapterRepository();
+        var ver = new FakeChapterVersionRepository();
+        var sut = CreateSut(repo, ver);
+
+        try
+        {
+            InsertStory(NewTestStory(storyId));
+
+            var dto = sut.Create(new CreateChapterRequestDto
+            {
+                StoryId = storyId,
+                Title = "Ch1",
+                OrderIndex = 1,
+                Status = "PUBLISHED"
+            });
+
+            Assert.Equal("PUBLISHED", dto.Status);
+            Assert.NotNull(dto.PublishedAt);
+            var stored = repo.GetById(dto.Id)!;
+            Assert.Equal("PUBLISHED", stored.status);
+            Assert.NotNull(stored.published_at);
+        }
+        finally
+        {
+            DeleteStoryIfExists(storyId);
+        }
+    }
+
+    [Fact]
+    public void CreateChapter_Content_SetsWordCount()
+    {
+        var storyId = Guid.NewGuid();
+        var repo = new FakeChapterRepository();
+        var ver = new FakeChapterVersionRepository();
+        var sut = CreateSut(repo, ver);
+
+        try
+        {
+            InsertStory(NewTestStory(storyId));
+
+            var dto = sut.Create(new CreateChapterRequestDto
+            {
+                StoryId = storyId,
+                Title = "Ch1",
+                OrderIndex = 1,
+                Content = "hello world"
+            });
+
+            Assert.True(dto.WordCount >= 2);
+            Assert.True(repo.GetById(dto.Id)!.word_count >= 2);
+        }
+        finally
+        {
+            DeleteStoryIfExists(storyId);
+        }
+    }
+
+    [Fact]
+    public void CreateChapter_AiGeneratedContentId_UsesAiOutputAndLinksDraft()
+    {
+        var storyId = Guid.NewGuid();
+        var aiId = Guid.NewGuid();
+        var repo = new FakeChapterRepository();
+        var ver = new FakeChapterVersionRepository();
+        var aiRepo = new FakeAiGeneratedContentRepository();
+        var sut = CreateSut(repo, ver, aiRepo);
+
+        try
+        {
+            InsertStory(NewTestStory(storyId));
+            aiRepo.Seed(new ai_generated_content
+            {
+                id = aiId,
+                story_id = storyId,
+                ai_output = "draft from ai",
+                created_at = DateTime.UtcNow
+            });
+
+            var dto = sut.Create(new CreateChapterRequestDto
+            {
+                StoryId = storyId,
+                Title = "From AI",
+                OrderIndex = 2,
+                AiGeneratedContentId = aiId,
+                Content = null
+            });
+
+            Assert.Equal("draft from ai", repo.GetById(dto.Id)!.content);
+            Assert.Equal(aiId, aiRepo.LastUpdateChapterId);
+        }
+        finally
+        {
+            DeleteStoryIfExists(storyId);
+        }
     }
 
     private sealed class FakeChapterRepository : IChapterRepository
@@ -301,12 +378,25 @@ public class UC06_ChapterServiceTests
 
     private sealed class FakeAiGeneratedContentRepository : IAiGeneratedContentRepository
     {
+        private readonly Dictionary<Guid, ai_generated_content> _byId = new();
+
+        public Guid? LastUpdateChapterId { get; private set; }
+
+        public void Seed(ai_generated_content entity) => _byId[entity.id] = entity;
+
         public ai_generated_content? GetLatestByChapterId(Guid chapterId) => null;
+
         public IReadOnlyList<ai_generated_content> GetAllByChapterId(Guid chapterId) => Array.Empty<ai_generated_content>();
-        public IReadOnlyList<ai_generated_content> GetAllByStoryIdAndChapterIndex(Guid storyId, int chapterIndex, int maxCount = 50) => Array.Empty<ai_generated_content>();
-        public ai_generated_content? GetById(Guid id) => null;
-        public void Add(ai_generated_content entity) { }
-        public void UpdateChapterId(Guid id, Guid chapterId, int chapterOrderIndex) { }
+
+        public IReadOnlyList<ai_generated_content> GetAllByStoryIdAndChapterIndex(Guid storyId, int chapterIndex, int maxCount = 50)
+            => Array.Empty<ai_generated_content>();
+
+        public ai_generated_content? GetById(Guid id) => _byId.TryGetValue(id, out var e) ? e : null;
+
+        public void Add(ai_generated_content entity) => _byId[entity.id] = entity;
+
+        public void UpdateChapterId(Guid id, Guid chapterId, int chapterOrderIndex) => LastUpdateChapterId = id;
+
         public void DeleteAllByChapterId(Guid chapterId) { }
     }
 
@@ -326,4 +416,3 @@ public class UC06_ChapterServiceTests
         }
     }
 }
-

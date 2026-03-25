@@ -1,164 +1,337 @@
-﻿using BusinessObjects.Entities;
-using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Logging.Abstractions;
-using Repositories;
-using Services.Implementations;
+﻿using AIStory.API.Controllers;
+using BusinessObjects;
+using BusinessObjects.Entities;
+using DataAccessObjects.DAOs;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Services.DTOs.Account;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Xunit;
 
 namespace AIStory.Tests;
 
 public class UC07_PersonalLibraryTests
 {
-    private static StoryService CreateSut(FakeStoryRepository storyRepo)
+    private static LibraryController CreateControllerWithUser(Guid userId)
     {
-        var chapterRepo = new FakeChapterRepository();
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        return new StoryService(
-            storyRepo,
-            chapterRepo,
-            NullLogger<StoryService>.Instance,
-            cache,
-            moderationHubNotifier: null);
+        var claims = new[] { new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()) };
+        var identity = new ClaimsIdentity(claims, "Test");
+        var principal = new ClaimsPrincipal(identity);
+        return new LibraryController
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = principal } }
+        };
+    }
+
+    private static MyLibraryResponseDto AssertOkLibrary(IActionResult result)
+    {
+        var ok = Assert.IsType<OkObjectResult>(result);
+        return Assert.IsType<MyLibraryResponseDto>(ok.Value);
     }
 
     [Fact]
-    public void SaveReadingProgress_EmptyIds_DoesNothing()
+    public void ReadPersonalLibrary_MissingSubClaim_Throws()
     {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
+        var controller = new LibraryController
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity()) }
+            }
+        };
 
-        // Guard clauses should return without throwing and without touching DB-backed DAO.
-        sut.SaveReadingProgress(Guid.Empty, Guid.Empty, Guid.Empty);
-        sut.SaveReadingProgress(Guid.NewGuid(), Guid.Empty, Guid.NewGuid());
-        sut.SaveReadingProgress(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty);
+        Assert.Throws<InvalidOperationException>(() => controller.GetMyLibrary());
     }
 
     [Fact]
-    public void SaveReadingProgress_StoryNotFound_DoesNothing()
+    public void ReadPersonalLibrary_UnparsableSubClaim_Throws()
     {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
+        var claims = new[] { new Claim(JwtRegisteredClaimNames.Sub, "not-a-guid") };
+        var controller = new LibraryController
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")) }
+            }
+        };
 
-        // StoryRepository returns null -> should return without throwing.
-        sut.SaveReadingProgress(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        Assert.Throws<InvalidOperationException>(() => controller.GetMyLibrary());
     }
 
     [Fact]
-    public void SaveReadingProgress_StoryNotPublished_DoesNothing()
+    public void ReadPersonalLibrary_NoLibraryData_ReturnsOkWithEmptyLists()
     {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
+        var userId = Guid.NewGuid();
+        var dto = AssertOkLibrary(CreateControllerWithUser(userId).GetMyLibrary());
 
+        Assert.NotNull(dto.FollowedStories);
+        Assert.NotNull(dto.FollowedAuthors);
+        Assert.NotNull(dto.ReadingHistory);
+        Assert.Empty(dto.FollowedStories);
+        Assert.Empty(dto.FollowedAuthors);
+        Assert.Empty(dto.ReadingHistory);
+    }
+
+    [Fact]
+    public void ReadPersonalLibrary_FollowedPublishedStory_AppearsInFollowedStories()
+    {
+        var readerId = Guid.NewGuid();
         var storyId = Guid.NewGuid();
-        repo.Seed(new stories
+
+        try
+        {
+            InsertUser(readerId);
+            InsertPublishedStory(storyId);
+            InsertUserLibraryFollow(readerId, storyId);
+
+            var dto = AssertOkLibrary(CreateControllerWithUser(readerId).GetMyLibrary());
+            var item = Assert.Single(dto.FollowedStories);
+            Assert.Equal(storyId, item.Id);
+            Assert.Equal("PUBLISHED", item.Status);
+        }
+        finally
+        {
+            RemoveUserLibrary(readerId, storyId, UserLibraryDAO.RelationTypeFollow);
+            DeleteStoryIfExists(storyId);
+            DeleteUserIfExists(readerId);
+        }
+    }
+
+    [Fact]
+    public void ReadPersonalLibrary_FollowedDraftStory_ExcludedFromFollowedStories()
+    {
+        var readerId = Guid.NewGuid();
+        var storyId = Guid.NewGuid();
+
+        try
+        {
+            InsertUser(readerId);
+            InsertDraftStory(storyId);
+            InsertUserLibraryFollow(readerId, storyId);
+
+            var dto = AssertOkLibrary(CreateControllerWithUser(readerId).GetMyLibrary());
+            Assert.DoesNotContain(dto.FollowedStories, x => x.Id == storyId);
+        }
+        finally
+        {
+            RemoveUserLibrary(readerId, storyId, UserLibraryDAO.RelationTypeFollow);
+            DeleteStoryIfExists(storyId);
+            DeleteUserIfExists(readerId);
+        }
+    }
+
+    [Fact]
+    public void ReadPersonalLibrary_ReadingHistory_IncludesStoryAndChapter()
+    {
+        var readerId = Guid.NewGuid();
+        var storyId = Guid.NewGuid();
+        var chapterId = Guid.NewGuid();
+        var lastRead = DateTime.UtcNow.AddMinutes(-5);
+
+        try
+        {
+            InsertUser(readerId);
+            InsertPublishedStory(storyId, title: "UT Lib Story");
+            InsertChapter(chapterId, storyId, "UT Chapter One", orderIndex: 1);
+            InsertUserLibraryReading(readerId, storyId, chapterId, lastRead);
+
+            var dto = AssertOkLibrary(CreateControllerWithUser(readerId).GetMyLibrary());
+            var row = Assert.Single(dto.ReadingHistory);
+            Assert.Equal(storyId, row.StoryId);
+            Assert.Equal("UT Lib Story", row.StoryTitle);
+            Assert.Equal(chapterId, row.LastReadChapterId);
+            Assert.Equal("UT Chapter One", row.LastReadChapterTitle);
+            Assert.Equal(1, row.LastReadChapterOrder);
+        }
+        finally
+        {
+            RemoveUserLibrary(readerId, storyId, UserLibraryDAO.RelationTypeReading);
+            DeleteChapterIfExists(chapterId);
+            DeleteStoryIfExists(storyId);
+            DeleteUserIfExists(readerId);
+        }
+    }
+
+    [Fact]
+    public void ReadPersonalLibrary_FollowedAuthor_AppearsInFollowedAuthors()
+    {
+        var readerId = Guid.NewGuid();
+        var authorId = Guid.NewGuid();
+
+        try
+        {
+            InsertUser(readerId);
+            InsertUser(authorId, emailSuffix: "author");
+            InsertFollow(readerId, authorId);
+
+            var dto = AssertOkLibrary(CreateControllerWithUser(readerId).GetMyLibrary());
+            var item = Assert.Single(dto.FollowedAuthors);
+            Assert.Equal(authorId, item.AuthorId);
+            Assert.False(string.IsNullOrWhiteSpace(item.AuthorName));
+        }
+        finally
+        {
+            RemoveFollow(readerId, authorId);
+            DeleteUserIfExists(readerId);
+            DeleteUserIfExists(authorId);
+        }
+    }
+
+    private static void InsertUser(Guid id, string emailSuffix = "reader")
+    {
+        using var ctx = new StoryPlatformDbContext();
+        ctx.users.Add(new users
+        {
+            id = id,
+            email = $"ut-lib-{emailSuffix}-{id:N}@x.test",
+            password_hash = "x",
+            status = "ACTIVE",
+            created_at = DateTime.UtcNow,
+            updated_at = DateTime.UtcNow
+        });
+        ctx.SaveChanges();
+    }
+
+    private static void InsertPublishedStory(Guid storyId, string? title = null)
+    {
+        var suffix = storyId.ToString("N")[..12];
+        StoryDAO.Add(new stories
         {
             id = storyId,
-            title = "S",
-            slug = "s",
+            author_id = null,
+            title = title ?? "UT Published",
+            slug = "ut-lib-pub-" + suffix,
+            status = "PUBLISHED",
+            story_progress_status = "ONGOING",
+            created_at = DateTime.UtcNow,
+            updated_at = DateTime.UtcNow
+        });
+    }
+
+    private static void InsertDraftStory(Guid storyId)
+    {
+        var suffix = storyId.ToString("N")[..12];
+        StoryDAO.Add(new stories
+        {
+            id = storyId,
+            author_id = null,
+            title = "UT Draft",
+            slug = "ut-lib-dr-" + suffix,
             status = "DRAFT",
             story_progress_status = "ONGOING",
-            age_rating = "ALL"
+            created_at = DateTime.UtcNow,
+            updated_at = DateTime.UtcNow
         });
-
-        // Not PUBLISHED -> should return without throwing (and avoid DB).
-        sut.SaveReadingProgress(storyId, Guid.NewGuid(), Guid.NewGuid());
     }
 
-    [Fact]
-    public void GetById_UserIdNull_DoesNotLookupLibrary()
+    private static void InsertChapter(Guid chapterId, Guid storyId, string title, int orderIndex)
     {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
-
-        var storyId = Guid.NewGuid();
-        repo.Seed(new stories
+        using var ctx = new StoryPlatformDbContext();
+        ctx.chapters.Add(new chapters
         {
-            id = storyId,
-            title = "S",
-            slug = "s",
+            id = chapterId,
+            story_id = storyId,
+            title = title,
+            order_index = orderIndex,
             status = "PUBLISHED",
-            story_progress_status = "ONGOING",
-            age_rating = "ALL"
+            access_type = "FREE",
+            coin_price = 0,
+            created_at = DateTime.UtcNow,
+            updated_at = DateTime.UtcNow
         });
-
-        // userId is null -> service should not call UserLibraryDAO.GetLastRead.
-        var dto = sut.GetById(storyId, userId: null);
-        Assert.NotNull(dto);
+        ctx.SaveChanges();
     }
 
-    [Fact]
-    public void GetById_UserIdEmptyGuid_DoesNotLookupLibrary()
+    private static void InsertUserLibraryFollow(Guid userId, Guid storyId)
     {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
-
-        var storyId = Guid.NewGuid();
-        repo.Seed(new stories
+        using var ctx = new StoryPlatformDbContext();
+        ctx.user_library.Add(new user_library
         {
-            id = storyId,
-            title = "S",
-            slug = "s",
-            status = "PUBLISHED",
-            story_progress_status = "ONGOING",
-            age_rating = "ALL"
+            user_id = userId,
+            story_id = storyId,
+            relation_type = UserLibraryDAO.RelationTypeFollow
         });
-
-        // userId is Guid.Empty -> service should not call UserLibraryDAO.GetLastRead.
-        var dto = sut.GetById(storyId, userId: Guid.Empty);
-        Assert.NotNull(dto);
+        ctx.SaveChanges();
     }
 
-    [Fact]
-    public void GetBySlug_UserIdNull_DoesNotLookupLibrary()
+    private static void InsertUserLibraryReading(Guid userId, Guid storyId, Guid chapterId, DateTime lastReadAt)
     {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
-
-        var storyId = Guid.NewGuid();
-        repo.Seed(new stories
+        using var ctx = new StoryPlatformDbContext();
+        ctx.user_library.Add(new user_library
         {
-            id = storyId,
-            title = "S",
-            slug = "my-slug",
-            status = "PUBLISHED",
-            story_progress_status = "ONGOING",
-            age_rating = "ALL"
+            user_id = userId,
+            story_id = storyId,
+            relation_type = UserLibraryDAO.RelationTypeReading,
+            last_read_chapter_id = chapterId,
+            last_read_at = lastReadAt
         });
-
-        var dto = sut.GetBySlug("my-slug", userId: null);
-        Assert.NotNull(dto);
+        ctx.SaveChanges();
     }
 
-    private sealed class FakeStoryRepository : IStoryRepository
+    private static void InsertFollow(Guid readerId, Guid authorId)
     {
-        private readonly Dictionary<Guid, stories> _store = new();
-
-        public void Seed(stories s) => _store[s.id] = s;
-
-        public IQueryable<stories> GetAll() => _store.Values.AsQueryable();
-        public stories? GetById(Guid id) => _store.TryGetValue(id, out var s) ? s : null;
-
-        public stories? GetBySlug(string slug)
-            => _store.Values.FirstOrDefault(s => string.Equals(s.slug, slug, StringComparison.OrdinalIgnoreCase));
-
-        public IReadOnlyList<Guid> GetStoryIdsByCategoryIds(IReadOnlyCollection<Guid> categoryIds) => Array.Empty<Guid>();
-        public void Add(stories story) => _store[story.id] = story;
-        public void Add(stories story, IEnumerable<Guid> categoryIds) => _store[story.id] = story;
-        public void Update(stories story) => _store[story.id] = story;
-        public void Delete(Guid id) => _store.Remove(id);
-        public void IncrementViewCount(Guid storyId) { }
+        using var ctx = new StoryPlatformDbContext();
+        ctx.follows.Add(new follows
+        {
+            user_id = readerId,
+            author_id = authorId,
+            followed_at = DateTime.UtcNow
+        });
+        ctx.SaveChanges();
     }
 
-    private sealed class FakeChapterRepository : IChapterRepository
+    private static void RemoveUserLibrary(Guid userId, Guid storyId, string relationType)
     {
-        public IQueryable<chapters> GetAll() => Array.Empty<chapters>().AsQueryable();
-        public chapters? GetById(Guid id) => null;
-        public IEnumerable<chapters> GetByStoryId(Guid storyId) => Array.Empty<chapters>();
-        public chapters? GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex) => null;
-        public void Add(chapters chapter) { }
-        public void Update(chapters chapter) { }
-        public void Delete(Guid id) { }
-        public void DeleteByStoryId(Guid storyId) { }
+        using var ctx = new StoryPlatformDbContext();
+        var row = ctx.user_library.FirstOrDefault(l =>
+            l.user_id == userId && l.story_id == storyId && l.relation_type == relationType);
+        if (row != null)
+        {
+            ctx.user_library.Remove(row);
+            ctx.SaveChanges();
+        }
+    }
+
+    private static void RemoveFollow(Guid readerId, Guid authorId)
+    {
+        using var ctx = new StoryPlatformDbContext();
+        var row = ctx.follows.FirstOrDefault(f => f.user_id == readerId && f.author_id == authorId);
+        if (row != null)
+        {
+            ctx.follows.Remove(row);
+            ctx.SaveChanges();
+        }
+    }
+
+    private static void DeleteChapterIfExists(Guid chapterId)
+    {
+        using var ctx = new StoryPlatformDbContext();
+        var row = ctx.chapters.FirstOrDefault(c => c.id == chapterId);
+        if (row == null)
+            return;
+        ctx.chapters.Remove(row);
+        ctx.SaveChanges();
+    }
+
+    private static void DeleteStoryIfExists(Guid storyId)
+    {
+        using var ctx = new StoryPlatformDbContext();
+        var row = ctx.stories.FirstOrDefault(s => s.id == storyId);
+        if (row == null)
+            return;
+        ctx.stories.Remove(row);
+        ctx.SaveChanges();
+    }
+
+    private static void DeleteUserIfExists(Guid userId)
+    {
+        using var ctx = new StoryPlatformDbContext();
+        var row = ctx.users.FirstOrDefault(u => u.id == userId);
+        if (row == null)
+            return;
+        ctx.users.Remove(row);
+        ctx.SaveChanges();
     }
 }
-
