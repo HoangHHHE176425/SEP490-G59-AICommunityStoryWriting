@@ -66,6 +66,7 @@ public class UC06_ChapterServiceTests
 
         var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(new CreateChapterRequestDto
         {
+            Id = Guid.NewGuid(),
             StoryId = missingStoryId,
             Title = "Ch1",
             OrderIndex = 1
@@ -98,6 +99,7 @@ public class UC06_ChapterServiceTests
 
             var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(new CreateChapterRequestDto
             {
+                Id = Guid.NewGuid(),
                 StoryId = storyId,
                 Title = "New",
                 OrderIndex = 1
@@ -124,6 +126,7 @@ public class UC06_ChapterServiceTests
 
             var ex = Assert.Throws<ArgumentException>(() => sut.Create(new CreateChapterRequestDto
             {
+                Id = Guid.NewGuid(),
                 StoryId = storyId,
                 Title = "Ch1",
                 OrderIndex = 1,
@@ -151,6 +154,7 @@ public class UC06_ChapterServiceTests
 
             var ex = Assert.Throws<ArgumentException>(() => sut.Create(new CreateChapterRequestDto
             {
+                Id = Guid.NewGuid(),
                 StoryId = storyId,
                 Title = "Ch1",
                 OrderIndex = 1,
@@ -177,8 +181,10 @@ public class UC06_ChapterServiceTests
         {
             InsertStory(NewTestStory(storyId));
 
+            var id = Guid.NewGuid();
             var dto = sut.Create(new CreateChapterRequestDto
             {
+                Id = id,
                 StoryId = storyId,
                 Title = "Ch1",
                 OrderIndex = 1,
@@ -190,6 +196,7 @@ public class UC06_ChapterServiceTests
             Assert.Equal("FREE", stored.access_type);
             Assert.Equal(0, stored.coin_price);
             Assert.Equal(0, dto.CoinPrice);
+            Assert.Equal(id, dto.Id);
         }
         finally
         {
@@ -209,8 +216,10 @@ public class UC06_ChapterServiceTests
         {
             InsertStory(NewTestStory(storyId));
 
+            var id = Guid.NewGuid();
             var dto = sut.Create(new CreateChapterRequestDto
             {
+                Id = id,
                 StoryId = storyId,
                 Title = "Ch1",
                 OrderIndex = 1,
@@ -219,6 +228,7 @@ public class UC06_ChapterServiceTests
 
             Assert.Equal("DRAFT", dto.Status);
             Assert.Null(dto.PublishedAt);
+            Assert.Equal(id, dto.Id);
         }
         finally
         {
@@ -238,8 +248,10 @@ public class UC06_ChapterServiceTests
         {
             InsertStory(NewTestStory(storyId));
 
+            var id = Guid.NewGuid();
             var dto = sut.Create(new CreateChapterRequestDto
             {
+                Id = id,
                 StoryId = storyId,
                 Title = "Ch1",
                 OrderIndex = 1,
@@ -251,6 +263,7 @@ public class UC06_ChapterServiceTests
             var stored = repo.GetById(dto.Id)!;
             Assert.Equal("PUBLISHED", stored.status);
             Assert.NotNull(stored.published_at);
+            Assert.Equal(id, dto.Id);
         }
         finally
         {
@@ -270,8 +283,10 @@ public class UC06_ChapterServiceTests
         {
             InsertStory(NewTestStory(storyId));
 
+            var id = Guid.NewGuid();
             var dto = sut.Create(new CreateChapterRequestDto
             {
+                Id = id,
                 StoryId = storyId,
                 Title = "Ch1",
                 OrderIndex = 1,
@@ -280,6 +295,7 @@ public class UC06_ChapterServiceTests
 
             Assert.True(dto.WordCount >= 2);
             Assert.True(repo.GetById(dto.Id)!.word_count >= 2);
+            Assert.Equal(id, dto.Id);
         }
         finally
         {
@@ -308,8 +324,10 @@ public class UC06_ChapterServiceTests
                 created_at = DateTime.UtcNow
             });
 
+            var id = Guid.NewGuid();
             var dto = sut.Create(new CreateChapterRequestDto
             {
+                Id = id,
                 StoryId = storyId,
                 Title = "From AI",
                 OrderIndex = 2,
@@ -319,6 +337,7 @@ public class UC06_ChapterServiceTests
 
             Assert.Equal("draft from ai", repo.GetById(dto.Id)!.content);
             Assert.Equal(aiId, aiRepo.LastUpdateChapterId);
+            Assert.Equal(id, dto.Id);
         }
         finally
         {
