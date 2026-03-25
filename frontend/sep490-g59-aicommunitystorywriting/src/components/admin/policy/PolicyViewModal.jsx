@@ -1,4 +1,5 @@
 import { X, FileText } from 'lucide-react';
+import { PolicyBody } from '../../policy/PolicyBody';
 
 function formatDate(value) {
     if (!value) return '—';
@@ -29,9 +30,16 @@ export function PolicyViewModal({ policy, onClose }) {
                     <span>Tạo lúc: {formatDate(policy.createdAt)}</span>
                     <span>Kích hoạt: {formatDate(policy.activatedAt)}</span>
                 </div>
-                <div className="p-6 overflow-y-auto flex-1">
-                    <div className="prose prose-slate max-w-none text-slate-700 whitespace-pre-wrap font-mono text-sm bg-slate-50 rounded-lg p-4">
-                        {policy.content || '—'}
+                <div className="p-6 overflow-y-auto flex-1 min-h-0 bg-slate-50/80">
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6 shadow-sm max-w-none">
+                        {policy.content?.trim() ? (
+                            <PolicyBody
+                                content={policy.content}
+                                className="max-w-none text-slate-800 [&_h2]:text-slate-900 [&_h3]:text-slate-900 [&_h4]:text-slate-800"
+                            />
+                        ) : (
+                            <p className="text-sm text-slate-500">Chưa có nội dung.</p>
+                        )}
                     </div>
                 </div>
                 <div className="p-4 border-t border-slate-200">

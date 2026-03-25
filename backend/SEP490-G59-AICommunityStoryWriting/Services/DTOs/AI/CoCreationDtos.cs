@@ -12,7 +12,7 @@ public class CoCreationRequest
     public string? AuthorIdea { get; set; }
 
     /// <summary>
-    /// Thứ tự chương đang soạn (0-based, trùng <c>chapters.order_index</c> và <c>compare-chapter-preview</c>).
+    /// Thứ tự chương đang soạn (0-based, trùng <c>chapters.order_index</c>).
     /// Khi có giá trị, bản <c>ai_generated_content</c> gắn đúng index này để so % khớp nội dung dán vào ô chương hiện tại (kể cả không bấm «áp dụng»).
     /// Null = giữ hành vi cũ: gán slot chương tiếp theo (max order_index + 1).
     /// </summary>
