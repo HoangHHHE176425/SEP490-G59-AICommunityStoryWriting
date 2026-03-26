@@ -542,10 +542,36 @@ export function AuthorStoryManagement({ onBack }) {
         setActiveView('comments');
     };
 
-    const handleAddChapter = (story) => {
-        setCurrentStory(story);
-        setCurrentChapter(null);
-        setActiveView('addChapter');
+    const handleAddChapter = async (story) => {
+        const storyId = story?.id ?? story?.Id;
+        if (!storyId) {
+            showToast('Không tìm thấy truyện', 'error');
+            return;
+        }
+        try {
+            const res = await getChapters({ storyId, page: 1, pageSize: 500 });
+            const items = res?.items ?? res?.Items ?? [];
+            const arr = Array.isArray(items) ? items : [];
+            const nextOrderIndex = arr.length > 0
+                ? Math.max(...arr.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0))) + 1
+                : 0;
+            const draftChapterId = crypto.randomUUID();
+            const chapterNumber = nextOrderIndex + 1;
+            setCurrentStory(story);
+            setCurrentChapter({
+                id: draftChapterId,
+                number: chapterNumber,
+                title: '',
+                content: '',
+                status: 'draft',
+                accessType: 'public',
+                price: 0,
+            });
+            setActiveView('addChapter');
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể mở tạo chương mới';
+            showToast(msg, 'error');
+        }
     };
 
     const handleEditChapter = async (chapter) => {
@@ -717,14 +743,15 @@ export function AuthorStoryManagement({ onBack }) {
             // Map accessType: 'public' -> 'FREE', 'paid' -> 'PAID'
             const apiAccessType = chapterData.accessType === 'paid' ? 'PAID' : 'FREE';
 
-            // Xác định là chỉnh sửa hay thêm mới dựa vào currentChapter hoặc chapterData.id
-            const isEditMode = currentChapter && (currentChapter.id || currentChapter.Id);
+            // Chỉ coi là chỉnh sửa khi đang ở view editChapter; addChapter luôn là tạo mới.
+            const isEditMode = activeView === 'editChapter' && currentChapter && (currentChapter.id || currentChapter.Id);
 
             if (!isEditMode) {
                 // Thêm chương mới
                 const orderIndex = (chapterData.number || 1) - 1; // number bắt đầu từ 1, orderIndex từ 0
 
                 const created = await createChapter({
+                    id: chapterData.id ?? currentChapter?.id ?? currentChapter?.Id,
                     storyId,
                     title: chapterData.title,
                     content: chapterData.content || '',
@@ -955,7 +982,7 @@ export function AuthorStoryManagement({ onBack }) {
                 <ToastContainer />
                 <ChapterEditorPage
                     story={currentStory}
-                    chapter={activeView === 'editChapter' ? currentChapter : null}
+                    chapter={(activeView === 'editChapter' || activeView === 'addChapter') ? currentChapter : null}
                     sourceChapterForVersion={activeView === 'addChapterVersion' ? sourceChapterForVersion : null}
                     editingVersion={activeView === 'addChapterVersion' ? editingVersion : null}
                     readOnly={viewChapterOnly}

@@ -407,6 +407,8 @@ public class UC06_ChapterServiceTests
 
         public IReadOnlyList<ai_generated_content> GetAllByChapterId(Guid chapterId) => Array.Empty<ai_generated_content>();
 
+        public IReadOnlyList<ai_generated_content> GetAllByDraftChapterId(Guid draftChapterId) => Array.Empty<ai_generated_content>();
+
         public IReadOnlyList<ai_generated_content> GetAllByStoryIdAndChapterIndex(Guid storyId, int chapterIndex, int maxCount = 50)
             => Array.Empty<ai_generated_content>();
 
@@ -415,6 +417,8 @@ public class UC06_ChapterServiceTests
         public void Add(ai_generated_content entity) => _byId[entity.id] = entity;
 
         public void UpdateChapterId(Guid id, Guid chapterId, int chapterOrderIndex) => LastUpdateChapterId = id;
+
+        public void BindDraftChapterId(Guid draftChapterId, Guid chapterId, int chapterOrderIndex) { }
 
         public void DeleteAllByChapterId(Guid chapterId) { }
     }

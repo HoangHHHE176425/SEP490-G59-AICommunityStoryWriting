@@ -33,7 +33,24 @@ public class ChapterCompareService : IChapterCompareService
     {
         var chapter = _chapterRepository.GetById(request.ChapterId);
         if (chapter == null)
-            return new CompareChapterResponse { HasBothContents = false, Message = "Không tìm thấy chương." };
+        {
+            var draftRecords = _aiContentRepository.GetAllByDraftChapterId(request.ChapterId);
+            if (draftRecords.Count == 0)
+                return new CompareChapterResponse { HasBothContents = false, Message = "Không tìm thấy chương." };
+
+            var storyId = draftRecords.FirstOrDefault()?.story_id;
+            if (!storyId.HasValue)
+                return new CompareChapterResponse { HasBothContents = false, Message = "Không xác định được truyện từ dữ liệu AI." };
+
+            var draftStory = _storyRepository.GetById(storyId.Value);
+            if (draftStory == null)
+                return new CompareChapterResponse { HasBothContents = false, Message = "Truyện không tồn tại." };
+            if (userId.HasValue && draftStory.author_id != userId.Value)
+                return new CompareChapterResponse { HasBothContents = false, Message = "Chỉ tác giả truyện được so sánh." };
+
+            var authorDraftContent = (request.Content ?? "").Trim();
+            return await CompareAuthorContentWithAiRecordsAsync(authorDraftContent, draftRecords, cancellationToken);
+        }
 
         if (!chapter.story_id.HasValue)
             return new CompareChapterResponse { HasBothContents = false, Message = "Chương không gắn truyện." };
@@ -46,16 +63,15 @@ public class ChapterCompareService : IChapterCompareService
             return new CompareChapterResponse { HasBothContents = false, Message = "Chỉ tác giả truyện được so sánh." };
 
         var authorContent = (request.Content ?? "").Trim();
-        return await CompareAuthorContentWithAiRecordsByChapterIdAsync(authorContent, request.ChapterId, cancellationToken);
+        var chapterRecords = _aiContentRepository.GetAllByChapterId(request.ChapterId);
+        return await CompareAuthorContentWithAiRecordsAsync(authorContent, chapterRecords, cancellationToken);
     }
 
-    private async Task<CompareChapterResponse> CompareAuthorContentWithAiRecordsByChapterIdAsync(
+    private async Task<CompareChapterResponse> CompareAuthorContentWithAiRecordsAsync(
         string authorContent,
-        Guid chapterId,
+        IReadOnlyList<BusinessObjects.Entities.ai_generated_content> aiRecords,
         CancellationToken cancellationToken)
     {
-        var aiRecords = _aiContentRepository.GetAllByChapterId(chapterId);
-
         if (string.IsNullOrEmpty(authorContent))
             return new CompareChapterResponse
             {

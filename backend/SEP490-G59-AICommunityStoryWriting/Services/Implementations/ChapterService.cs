@@ -139,6 +139,10 @@ namespace Services.Implementations
 
             _chapterRepository.Add(chapter);
 
+            // Nếu trước đó FE đã dùng draft_chapter_id để lưu AI gợi ý,
+            // map toàn bộ record draft sang chapter thật ngay khi tạo xong.
+            _aiContentRepository.BindDraftChapterId(chapter.id, chapter.id, chapter.order_index);
+
             if (request.AiGeneratedContentId.HasValue)
                 _aiContentRepository.UpdateChapterId(request.AiGeneratedContentId.Value, chapter.id, chapter.order_index);
 

@@ -519,8 +519,21 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         try {
             // Gọi index-rag nền (không chờ). Gợi ý chạy ngay; BE dùng RAG nếu đã index, không thì dùng Story Context.
             indexRag(storyId);
-            const afterChapterId = chapter?.id ?? chapter?.Id ?? null;
-            const data = await suggestNextChapter(storyId, afterChapterId);
+            const orderIdx = (Number(chapterData.number) || 1) - 1;
+            let afterChapterId = null;
+            if (orderIdx > 0) {
+                try {
+                    const chRes = await getChapters({ storyId, page: 1, pageSize: 500 });
+                    const items = chRes?.items ?? chRes?.Items ?? [];
+                    const arr = Array.isArray(items) ? items : [];
+                    const prev = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === orderIdx - 1);
+                    afterChapterId = prev?.id ?? prev?.Id ?? null;
+                } catch {
+                    afterChapterId = null;
+                }
+            }
+            const chapterIdForAi = chapter?.id ?? chapter?.Id ?? null;
+            const data = await suggestNextChapter(storyId, afterChapterId, null, chapterIdForAi);
             const list = data?.suggestions ?? data?.Suggestions ?? [];
             setSuggestions(Array.isArray(list) ? list : []);
             // Cập nhật số lượt còn lại sau khi gọi AI thành công
@@ -853,9 +866,9 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         setIsSaving(true);
         try {
             const orderIndex = (Number(chapterData.number) || 1) - 1;
+            const cid = chapter?.id ?? chapter?.Id ?? null;
             const cmp = await compareChapterPreview({
-                storyId,
-                orderIndex,
+                ...(cid ? { chapterId: cid } : { storyId, orderIndex }),
                 content: chapterData.content,
             });
             const hasBoth = Boolean(cmp?.hasBothContents ?? cmp?.HasBothContents);

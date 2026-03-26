@@ -21,6 +21,7 @@ namespace Services.Implementations
         private readonly IStoryRagService _ragService;
         private readonly IStoryMemoryEngine _memoryEngine;
         private readonly IAIUsageLogRepository _aiUsageLogRepository;
+        private readonly IAiGeneratedContentRepository _aiContentRepository;
         private readonly IConfiguration _configuration;
 
         public AINextChapterService(
@@ -29,6 +30,7 @@ namespace Services.Implementations
             IStoryRagService ragService,
             IStoryMemoryEngine memoryEngine,
             IAIUsageLogRepository aiUsageLogRepository,
+            IAiGeneratedContentRepository aiContentRepository,
             IConfiguration configuration)
         {
             _storyRepository = storyRepository;
@@ -36,6 +38,7 @@ namespace Services.Implementations
             _ragService = ragService;
             _memoryEngine = memoryEngine;
             _aiUsageLogRepository = aiUsageLogRepository;
+            _aiContentRepository = aiContentRepository;
             _configuration = configuration;
         }
 
@@ -58,7 +61,7 @@ namespace Services.Implementations
             if (!hasContent)
                 throw new InvalidOperationException("Truyện cần có ít nhất một chương đã có nội dung để gợi ý chương tiếp theo.");
 
-            await _ragService.TryEnsureIndexedAsync(request.StoryId, afterChapterId: null, cancellationToken);
+            await _ragService.TryEnsureIndexedAsync(request.StoryId, afterChapterId: request.AfterChapterId, cancellationToken);
             if (!_ragService.IsRagAvailableForStory(request.StoryId))
                 throw new InvalidOperationException("Truyện chưa được index RAG. Vui lòng cấu hình embedding (AI:EmbeddingBaseUrl, EmbeddingModel) và đảm bảo truyện có chương có nội dung.");
 
@@ -105,6 +108,37 @@ namespace Services.Implementations
                     "Không thể đọc được gợi ý từ phản hồi AI. Kiểm tra model trả về đúng JSON với mảng \"suggestions\" (title, summary, direction, key_events, characters_involved). Phản hồi AI (rút gọn): " + snippet);
             }
 
+            if (request.ChapterId.HasValue)
+            {
+                var targetChapter = _chapterRepository.GetById(request.ChapterId.Value);
+                if (targetChapter != null && targetChapter.story_id != request.StoryId)
+                    throw new InvalidOperationException("ChapterId không khớp truyện.");
+                var dtoList = suggestions.Take(3).Select(s => new NextChapterSuggestionItemDto
+                {
+                    Title = s.Title ?? "Chương tiếp theo",
+                    Summary = s.Summary ?? "",
+                    Direction = s.Direction ?? "",
+                    KeyEvents = s.KeyEvents,
+                    CharactersInvolved = s.CharactersInvolved
+                }).ToList();
+                foreach (var dto in dtoList)
+                {
+                    var json = JsonSerializer.Serialize(dto);
+                    _aiContentRepository.Add(new ai_generated_content
+                    {
+                        id = Guid.NewGuid(),
+                        chapter_id = targetChapter?.id,
+                        draft_chapter_id = targetChapter == null ? request.ChapterId.Value : null,
+                        story_id = request.StoryId,
+                        user_id = authorUserId,
+                        input_prompt = ActionType,
+                        ai_output = json,
+                        chapter_index = targetChapter?.order_index,
+                        created_at = DateTime.UtcNow
+                    });
+                }
+            }
+
             var promptTokens = completion.Usage?.InputTokenCount ?? 0;
             var completionTokens = completion.Usage?.OutputTokenCount ?? 0;
 
@@ -112,7 +146,7 @@ namespace Services.Implementations
             {
                 user_id = authorUserId,
                 story_id = request.StoryId,
-                chapter_id = chapters.LastOrDefault()?.id,
+                chapter_id = request.ChapterId ?? chapters.LastOrDefault()?.id,
                 action_type = ActionType,
                 model_name = model,
                 prompt_tokens = promptTokens,

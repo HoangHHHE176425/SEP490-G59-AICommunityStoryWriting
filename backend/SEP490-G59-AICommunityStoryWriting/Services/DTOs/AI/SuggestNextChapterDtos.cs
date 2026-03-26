@@ -1,10 +1,16 @@
 namespace Services.DTOs.AI;
 
-/// <summary>Request gợi ý 3 hướng đi cho chương tiếp theo. Luôn gợi ý sau chương mới nhất (theo thứ tự).</summary>
+/// <summary>Request gợi ý 3 hướng đi cho chương tiếp theo.</summary>
 public class SuggestNextChapterRequest
 {
     /// <summary>ID truyện (bắt buộc).</summary>
     public Guid StoryId { get; set; }
+
+    /// <summary>ID chương đang soạn (FE tạo trước khi lưu nội dung). Nếu có: lưu từng gợi ý vào <c>ai_generated_content</c> gắn <c>chapter_id</c> này.</summary>
+    public Guid? ChapterId { get; set; }
+
+    /// <summary>Gợi ý ngay sau chương này (RAG/index). Thường là chương liền trước chương đang soạn; null = sau chương cuối trong DB.</summary>
+    public Guid? AfterChapterId { get; set; }
 }
 
 /// <summary>Một gợi ý hướng đi cho chương tiếp theo (chi tiết).</summary>

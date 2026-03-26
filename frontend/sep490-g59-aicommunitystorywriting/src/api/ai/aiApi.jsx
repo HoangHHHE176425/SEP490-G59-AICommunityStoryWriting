@@ -19,9 +19,10 @@ export async function indexRag(storyId) {
  * @param {string} storyId - ID truyện (Guid)
  * @param {string|null} afterChapterId - ID chương sau đó muốn gợi ý; null = sau chương mới nhất
  * @param {string|null} prompt - Prompt tùy chọn do tác giả nhập
+ * @param {string|null} chapterId - ID chương đang soạn (FE tạo trước); BE lưu gợi ý vào ai_generated_content
  * @returns {Promise<{ suggestions: Array<{ title, summary, direction }>, contextUsed?: { storyTitle?, chaptersIncluded } }>}
  */
-export async function suggestNextChapter(storyId, afterChapterId = null, prompt = null) {
+export async function suggestNextChapter(storyId, afterChapterId = null, prompt = null, chapterId = null) {
     if (!storyId) {
         throw new Error("StoryId là bắt buộc.");
     }
@@ -29,6 +30,7 @@ export async function suggestNextChapter(storyId, afterChapterId = null, prompt 
     const body = {
         storyId,
         afterChapterId: afterChapterId || null,
+        chapterId: chapterId || null,
         // Hỗ trợ BE theo nhiều naming convention (BE có thể chọn 1 trong các field này)
         prompt: trimmedPrompt || null,
         authorPrompt: trimmedPrompt || null,
@@ -159,9 +161,11 @@ export async function coCreate(storyId, authorIdea, options = {}) {
  */
 export async function compareChapter(payload) {
     const chapterId = payload?.chapterId ?? payload?.ChapterId;
+    const content = (payload?.content ?? "").toString();
     if (!chapterId || String(chapterId).trim() === "") throw new Error("chapterId là bắt buộc.");
     const response = await axiosInstance.post("ai/compare-chapter", {
         chapterId,
+        content,
     });
     return response.data;
 }
@@ -171,9 +175,13 @@ export async function compareChapter(payload) {
  * @param {{ storyId: string, orderIndex: number, content: string }} payload
  */
 export async function compareChapterPreview(payload) {
+    const chapterId = payload?.chapterId ?? payload?.ChapterId;
+    const content = (payload?.content ?? "").toString();
+    if (chapterId != null && String(chapterId).trim() !== "") {
+        return compareChapter({ chapterId, content });
+    }
     const storyId = payload?.storyId ?? payload?.StoryId;
     const orderIndex = payload?.orderIndex ?? payload?.OrderIndex;
-    const content = (payload?.content ?? "").toString();
     if (!storyId || String(storyId).trim() === "") throw new Error("storyId là bắt buộc.");
     if (orderIndex == null || Number.isNaN(Number(orderIndex))) throw new Error("orderIndex là bắt buộc.");
     try {
