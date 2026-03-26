@@ -46,6 +46,7 @@ import {
     setComplianceStoryHidden,
 } from '../../../api/admin/adminComplianceApi';
 import { getModerationLogs } from '../../../api/admin/adminModerationApi';
+import { useToast } from '../../../components/author/story-editor/Toast';
 
 const PAGE_SIZE = 10;
 const REPORT_STATUS_FILTER_OPTIONS = [
@@ -426,6 +427,7 @@ function Modal({ title, onClose, children, maxWidth = 1100 }) {
 
 export default function ViolationManagement() {
     const { role, user } = useAuth();
+    const { showToast, ToastContainer } = useToast();
     const roleUpper = String(role ?? '').toUpperCase();
     const isAdmin = roleUpper === 'ADMIN';
     const tabs = useMemo(() => {
@@ -903,7 +905,7 @@ export default function ViolationManagement() {
             setReleaseConfirmTarget(null);
             setReleaseReason('');
             await loadData(currentPage);
-            alert('Đã gửi yêu cầu trả đơn về hàng đợi cho quản trị viên.');
+            showToast('Đã gửi yêu cầu trả đơn về hàng đợi cho quản trị viên.', 'success');
         } catch (e) {
             setReleaseFormError(e?.response?.data?.message ?? e?.message ?? 'Không thể gửi yêu cầu.');
         } finally {
@@ -2131,6 +2133,7 @@ export default function ViolationManagement() {
                     )}
                 </Modal>
             )}
+            <ToastContainer />
         </div>
     );
 }

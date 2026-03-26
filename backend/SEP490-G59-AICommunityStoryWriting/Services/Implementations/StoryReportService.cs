@@ -441,7 +441,7 @@ public class StoryReportService : IStoryReportService
         return Task.FromResult(n);
     }
 
-    public Task<Guid> RequestComplianceLockReleaseAsync(Guid storyId, Guid requesterId, RequestComplianceLockReleaseDto? dto)
+    public async Task<Guid> RequestComplianceLockReleaseAsync(Guid storyId, Guid requesterId, RequestComplianceLockReleaseDto? dto)
     {
         if (!ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, storyId, requesterId))
             throw new InvalidOperationException("Bạn không phải người đang giữ lock truyện này.");
@@ -452,7 +452,8 @@ public class StoryReportService : IStoryReportService
             requesterId,
             msg,
             EscalationUrgencyHelper.TierForComplianceLockReleaseRequest());
-        return Task.FromResult(id);
+        await NotifyAdminsComplianceReleaseRequestedAsync(storyId, requesterId, msg);
+        return id;
     }
 
     public Task<IReadOnlyList<ComplianceLockRequestListItemDto>> AdminListComplianceLockRequestsAsync(string? status)
@@ -913,6 +914,61 @@ public class StoryReportService : IStoryReportService
                     IsRead = false,
                     CreatedAt = n.created_at
                 });
+            }
+            catch
+            {
+                // best effort push; không làm fail nghiệp vụ chính.
+            }
+        }
+    }
+
+    private async Task NotifyAdminsComplianceReleaseRequestedAsync(Guid storyId, Guid requesterId, string? reason)
+    {
+        List<Guid> adminIds;
+        await using (var db = new StoryPlatformDbContext())
+        {
+            adminIds = await db.users.AsNoTracking()
+                .Where(u => (u.role ?? "").ToUpper() == "ADMIN" && (u.status ?? "").ToUpper() == "ACTIVE")
+                .Select(u => u.id)
+                .ToListAsync();
+        }
+        if (adminIds.Count == 0) return;
+
+        var story = StoryDAO.GetById(storyId);
+        var storyTitle = string.IsNullOrWhiteSpace(story?.title) ? "không rõ tiêu đề" : story!.title!;
+        var requesterName = NotificationDAO.GetUserDisplayName(requesterId);
+        var content = $"Xử lý vi phạm viên {requesterName} vừa gửi yêu cầu trả đơn về hàng đợi cho truyện \"{storyTitle}\"."
+            + (string.IsNullOrWhiteSpace(reason) ? string.Empty : $" Lý do: {reason!.Trim()}");
+
+        foreach (var adminId in adminIds.Distinct())
+        {
+            try
+            {
+                var n = new notifications
+                {
+                    id = Guid.NewGuid(),
+                    user_id = adminId,
+                    type = "COMPLIANCE_RELEASE_REQUEST",
+                    title = "Có yêu cầu trả đơn về hàng đợi",
+                    content = content,
+                    link_url = "/admin/violation",
+                    is_read = false,
+                    created_at = DateTime.UtcNow
+                };
+                NotificationDAO.Add(n);
+                if (_notificationHubNotifier != null)
+                {
+                    await _notificationHubNotifier.NotifyUserAsync(adminId, new NotificationDto
+                    {
+                        Id = n.id,
+                        Type = n.type,
+                        Title = n.title,
+                        Content = n.content,
+                        LinkUrl = n.link_url,
+                        IsRead = false,
+                        CreatedAt = n.created_at
+                    });
+                }
             }
             catch
             {
