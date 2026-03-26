@@ -4,13 +4,11 @@ using Services.Interfaces;
 
 namespace AIStory.Tests;
 
-/// <summary>Hub push no-op cho unit test StoriesController / ChaptersController.</summary>
 internal sealed class NoOpNotificationHubNotifier : INotificationHubNotifier
 {
     public Task NotifyUserAsync(Guid userId, NotificationDto notification) => Task.CompletedTask;
 }
 
-/// <summary>Stub IStoryReportService — các test UC12/UC13 không gọi báo cáo.</summary>
 internal sealed class StubStoryReportService : IStoryReportService
 {
     public IReadOnlyList<StoryReportReasonOptionDto> GetReasonOptions() => Array.Empty<StoryReportReasonOptionDto>();
