@@ -44,6 +44,9 @@ const ALL_MENU_ITEMS = [
     { id: 'ai-config', label: 'Cấu hình AI', icon: Brain },
 ];
 
+/** Yêu cầu UI: ẩn một số tab ở màn Admin. */
+const HIDE_MENU_IDS_FOR_ADMIN = new Set(['publication', 'stories', 'comments']);
+
 /** Menu theo role để tách rõ màn Admin / Moderator / Compliance. */
 const ROLE_MENU_IDS = {
     ADMIN: null, // null = full menu
@@ -57,7 +60,11 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
     const roleUpper = (role ?? user?.role ?? user?.Role ?? '').toString().toUpperCase();
     const roleMenuIds = ROLE_MENU_IDS[roleUpper] ?? ROLE_MENU_IDS.ADMIN;
     const hasLimitedMenu = !!roleMenuIds;
-    const menuItems = roleMenuIds ? ALL_MENU_ITEMS.filter((item) => roleMenuIds.has(item.id)) : ALL_MENU_ITEMS;
+    const menuItems = (() => {
+        const base = roleMenuIds ? ALL_MENU_ITEMS.filter((item) => roleMenuIds.has(item.id)) : ALL_MENU_ITEMS;
+        if (roleUpper === 'ADMIN') return base.filter((item) => !HIDE_MENU_IDS_FOR_ADMIN.has(item.id));
+        return base;
+    })();
 
     const displayName = user?.displayName ?? user?.DisplayName ?? user?.email ?? 'Admin';
     const roleLabel = ROLE_LABELS[roleUpper] ?? 'Quản trị';
@@ -104,7 +111,20 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
     const sidebarWidth = isSidebarOpen ? 256 : 80;
 
     return (
-        <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc' }}>
+        <div
+            style={{
+                minHeight: '100vh',
+                backgroundColor: '#f8fafc',
+                // Admin theme tokens (đồng nhất màu chủ đạo)
+                '--admin-primary': '#13ec5b',
+                '--admin-primary-soft': 'rgba(19, 236, 91, 0.12)',
+                '--admin-primary-ink': '#166534',
+                '--admin-border': '#e2e8f0',
+                '--admin-surface': '#ffffff',
+                '--admin-muted': '#64748b',
+                '--admin-text': '#1e293b',
+            }}
+        >
             {/* Header */}
             <header
                 style={{
@@ -113,8 +133,8 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                     left: 0,
                     right: 0,
                     height: '64px',
-                    backgroundColor: '#ffffff',
-                    borderBottom: '1px solid #e2e8f0',
+                    backgroundColor: 'var(--admin-surface)',
+                    borderBottom: '1px solid var(--admin-border)',
                     zIndex: 50,
                     display: 'flex',
                     alignItems: 'center',
@@ -152,9 +172,9 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                         >
                             <Menu style={{ width: '20px', height: '20px', color: '#1e293b' }} />
                         </button>
-                        <h1 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1e293b', margin: 0 }}>
+                        <h1 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--admin-text)', margin: 0 }}>
                             {roleUpper === 'MODERATOR' ? 'Moderator' : roleUpper === 'COMPLIANCE' ? 'Compliance' : 'Admin'}{' '}
-                            <span style={{ color: '#13ec5b' }}>Panel</span>
+                            <span style={{ color: 'var(--admin-primary)' }}>Panel</span>
                         </h1>
                     </div>
 
@@ -169,7 +189,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                                     alignItems: 'center',
                                     gap: '0.5rem',
                                     padding: '0.5rem 0.75rem',
-                                    border: '1px solid #e2e8f0',
+                                    border: '1px solid var(--admin-border)',
                                     borderRadius: '0.5rem',
                                     backgroundColor: '#f0fdf4',
                                     cursor: 'pointer',
@@ -182,8 +202,8 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                                     e.currentTarget.style.backgroundColor = '#f0fdf4';
                                 }}
                             >
-                                <Wallet style={{ width: '18px', height: '18px', color: '#16a34a' }} />
-                                <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#166534' }}>
+                                <Wallet style={{ width: '18px', height: '18px', color: 'var(--admin-primary-ink)' }} />
+                                <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--admin-primary-ink)' }}>
                                     {systemWalletBalance != null
                                         ? `${Number(systemWalletBalance).toLocaleString('vi-VN')} Coin`
                                         : '...'}
@@ -221,7 +241,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                                 alignItems: 'center',
                                 gap: '0.75rem',
                                 paddingLeft: '0.75rem',
-                                borderLeft: '1px solid #e2e8f0'
+                                borderLeft: '1px solid var(--admin-border)'
                             }}
                         >
                             <img
@@ -248,8 +268,8 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                     left: 0,
                     bottom: 0,
                     width: `${sidebarWidth}px`,
-                    backgroundColor: '#ffffff',
-                    borderRight: '1px solid #e2e8f0',
+                    backgroundColor: 'var(--admin-surface)',
+                    borderRight: '1px solid var(--admin-border)',
                     transition: 'width 0.3s ease',
                     zIndex: 40,
                     overflowY: 'auto'
@@ -272,8 +292,8 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                                     padding: '0.75rem 1rem',
                                     border: 'none',
                                     borderRadius: '0.5rem',
-                                    backgroundColor: isActive ? 'rgba(19, 236, 91, 0.1)' : 'transparent',
-                                    color: isActive ? '#13ec5b' : '#64748b',
+                                    backgroundColor: isActive ? 'var(--admin-primary-soft)' : 'transparent',
+                                    color: isActive ? 'var(--admin-primary)' : 'var(--admin-muted)',
                                     fontSize: '0.875rem',
                                     fontWeight: 500,
                                     cursor: 'pointer',
@@ -283,13 +303,13 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                                 onMouseEnter={(e) => {
                                     if (!isActive) {
                                         e.currentTarget.style.backgroundColor = '#f1f5f9';
-                                        e.currentTarget.style.color = '#1e293b';
+                                        e.currentTarget.style.color = 'var(--admin-text)';
                                     }
                                 }}
                                 onMouseLeave={(e) => {
                                     if (!isActive) {
                                         e.currentTarget.style.backgroundColor = 'transparent';
-                                        e.currentTarget.style.color = '#64748b';
+                                        e.currentTarget.style.color = 'var(--admin-muted)';
                                     }
                                 }}
                             >
@@ -415,8 +435,8 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                                         padding: '0.75rem 1rem',
                                         border: 'none',
                                         borderRadius: '0.5rem',
-                                        backgroundColor: isActive ? 'rgba(19, 236, 91, 0.1)' : 'transparent',
-                                        color: isActive ? '#13ec5b' : '#64748b',
+                                    backgroundColor: isActive ? 'var(--admin-primary-soft)' : 'transparent',
+                                    color: isActive ? 'var(--admin-primary)' : 'var(--admin-muted)',
                                         fontSize: '0.875rem',
                                         fontWeight: 500,
                                         cursor: 'pointer',

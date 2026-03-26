@@ -1,4 +1,4 @@
-import { Search, Bell, Edit, Menu, X, ChevronDown, Wallet, User, Library, LogOut } from 'lucide-react';
+import { Search, Bell, Edit, Menu, X, ChevronDown, Wallet, User, UserCircle, Library, LogOut, Book } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -225,8 +225,7 @@ export function Header() {
                             <>
                                 <Link to="/home" className="hover:text-primary transition-colors">Trang chủ</Link>
                                 <Link to="/about-us" className="hover:text-primary transition-colors">Về chúng tôi</Link>
-                                <Link to="/author" className="hover:text-primary transition-colors">Truyện của tôi</Link>
-                                <Link to="/story-list" className="hover:text-primary transition-colors">Khám phá</Link>
+                                <Link to="/story-list" className="hover:text-primary transition-colors">Kho truyện tổng</Link>
                             </>
                         ) : (
                             <>
@@ -387,6 +386,26 @@ export function Header() {
                                                     <Library className="w-4 h-4" />
                                                     Tủ sách
                                                 </Link>
+                                                {isAuthor && (
+                                                    <>
+                                                        <Link
+                                                            to="/author?view=stories"
+                                                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
+                                                            onClick={() => setIsUserMenuOpen(false)}
+                                                        >
+                                                            <Book className="w-4 h-4" />
+                                                            Truyện của tôi
+                                                        </Link>
+                                                        <Link
+                                                            to="/author?view=profile"
+                                                            className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300 hover:bg-primary/10 hover:text-primary transition-colors"
+                                                            onClick={() => setIsUserMenuOpen(false)}
+                                                        >
+                                                            <UserCircle className="w-4 h-4" />
+                                                            Hồ sơ tác giả
+                                                        </Link>
+                                                    </>
+                                                )}
                                                 <div className="border-t border-slate-700 mt-1 pt-1">
                                                     <button
                                                         onClick={handleLogout}
@@ -490,8 +509,7 @@ export function Header() {
                                 <>
                                     <Link to="/home" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Trang chủ</Link>
                                     <Link to="/about-us" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Về chúng tôi</Link>
-                                    <Link to="/author" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Truyện của tôi</Link>
-                                    <Link to="/story-list" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Khám phá</Link>
+                                    <Link to="/story-list" className="text-slate-300 hover:text-primary transition-colors font-semibold" onClick={() => setIsMenuOpen(false)}>Kho truyện tổng</Link>
                                 </>
                             ) : (
                                 <>
@@ -542,6 +560,26 @@ export function Header() {
                                         <Library className="w-4 h-4" />
                                         Tủ sách
                                     </Link>
+                                    {isAuthor && (
+                                        <>
+                                            <Link
+                                                to="/author?view=stories"
+                                                className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold"
+                                                onClick={() => setIsMenuOpen(false)}
+                                            >
+                                                <Book className="w-4 h-4" />
+                                                Truyện của tôi
+                                            </Link>
+                                            <Link
+                                                to="/author?view=profile"
+                                                className="flex items-center gap-3 text-slate-300 hover:text-primary transition-colors font-semibold"
+                                                onClick={() => setIsMenuOpen(false)}
+                                            >
+                                                <UserCircle className="w-4 h-4" />
+                                                Hồ sơ tác giả
+                                            </Link>
+                                        </>
+                                    )}
                                     <button
                                         onClick={handleLogout}
                                         className="flex items-center gap-3 text-red-600 dark:text-red-400 hover:text-red-700 transition-colors font-semibold"
