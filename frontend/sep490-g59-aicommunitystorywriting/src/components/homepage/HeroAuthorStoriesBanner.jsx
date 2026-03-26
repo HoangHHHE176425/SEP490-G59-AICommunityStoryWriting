@@ -37,7 +37,8 @@ export function HeroAuthorStoriesBanner() {
     return n > 0 ? n.toFixed(1) : '-';
   };
 
-  const [featuredAuthorStories, setFeaturedAuthorStories] = useState([
+  // NOTE: do not show mock on first paint to avoid banner "flash" when navigating to /home.
+  const FALLBACK_FEATURED_STORIES = [
     {
       id: 1,
       storyTitle: 'Hành Trình Vạn Cổ',
@@ -107,7 +108,9 @@ export function HeroAuthorStoriesBanner() {
       badge: 'AWARD WINNING',
       image: linhVuThienHa,
     },
-  ]);
+  ];
+
+  const [featuredAuthorStories, setFeaturedAuthorStories] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -217,7 +220,11 @@ export function HeroAuthorStoriesBanner() {
 
         if (!cancelled) setFeaturedAuthorStories(mapped.slice(0, 3));
       } catch (e) {
-        if (!cancelled) setLoadError(e?.message ?? 'Không tải được banner');
+        if (!cancelled) {
+          setLoadError(e?.message ?? 'Không tải được banner');
+          // Fallback only when API fails; never show mock during normal loading.
+          setFeaturedAuthorStories((prev) => (Array.isArray(prev) && prev.length ? prev : FALLBACK_FEATURED_STORIES));
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }

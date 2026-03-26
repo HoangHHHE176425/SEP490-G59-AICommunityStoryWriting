@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List, Wallet, History, Coins, ArrowDownToLine, Landmark, ShieldCheck, ShieldX, Percent } from 'lucide-react';
+import { Plus, Edit, Eye, Heart, MessageSquare, Star, ChevronRight, Book, User, LogOut, Trash2, List, Wallet, History, Coins, ArrowDownToLine, Landmark, Percent, X } from 'lucide-react';
 import { StoryEditor } from './StoryEditor';
 import { StoryInfoEditor } from './StoryInfoEditor';
 import { ChapterListManager } from '../author/ChapterListManager';
@@ -10,11 +10,13 @@ import { Header } from '../../components/homepage/Header';
 import { createStory, updateStory, getStories, getStoryById, deleteStory } from '../../api/story/storyApi';
 import { createChapter, updateChapter, getChapterById, getChapters, createChapterVersion, updateChapterVersion, getChapterVersionById, submitChapterVersion } from '../../api/chapter/chapterApi';
 import * as coinApi from '../../api/coins/coinApi';
+import { getAuthorFollowersCount } from '../../api/author/authorApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
 import { Pagination } from '../../components/pagination/Pagination';
 import { setAuthorChapterListActive } from '../../utils/authorUiFlags';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 
 function mapStoryFromApi(item) {
     const status = item.status || item.Status || '';
@@ -100,6 +102,8 @@ export function AuthorStoryManagement({ onBack }) {
 
     const STORIES_PAGE_SIZE = 10;
     const authorId = user?.id ?? user?.Id;
+    const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
 
     useEffect(() => {
         setAuthorChapterListActive(activeView === 'chapterList');
@@ -179,7 +183,9 @@ export function AuthorStoryManagement({ onBack }) {
     const [accountNumber, setAccountNumber] = useState('');
     const [accountHolderName, setAccountHolderName] = useState('');
     const [branchName, setBranchName] = useState('');
-    const [isBankVerified, setIsBankVerified] = useState(true);
+    const [profileFollowersCount, setProfileFollowersCount] = useState(0);
+    const [showBankModal, setShowBankModal] = useState(false);
+    const [showHistoryModal, setShowHistoryModal] = useState(false);
 
     // Auto-fill toBin when bank changes (if mapping exists).
     useEffect(() => {
@@ -204,8 +210,8 @@ export function AuthorStoryManagement({ onBack }) {
         return d.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     };
 
-    const verifiedBankAccounts = bankAccounts.filter((a) => a.is_verified);
-    const selectedBankAccount = verifiedBankAccounts[selectedBankAccountIdx] ?? null;
+    const withdrawBankAccounts = bankAccounts;
+    const selectedBankAccount = withdrawBankAccounts[selectedBankAccountIdx] ?? null;
 
     const buildBankInfoStringFromAccount = (acc) => {
         if (!acc) return null;
@@ -330,7 +336,29 @@ export function AuthorStoryManagement({ onBack }) {
     }, [loadStories]);
 
     useEffect(() => {
-        const shouldPoll = activeView === 'history' || activeView === 'withdraw';
+        if (!authorId) {
+            setProfileFollowersCount(0);
+            return;
+        }
+        let cancelled = false;
+        getAuthorFollowersCount(authorId)
+            .then((n) => {
+                if (!cancelled) setProfileFollowersCount(Number.isFinite(n) ? n : 0);
+            })
+            .catch(() => {
+                if (!cancelled) setProfileFollowersCount(0);
+            });
+        return () => { cancelled = true; };
+    }, [authorId]);
+
+    useEffect(() => {
+        if (activeView !== 'bank-accounts' && activeView !== 'history') return;
+        setActiveView('profile');
+        setActiveMenu('profile');
+    }, [activeView]);
+
+    useEffect(() => {
+        const shouldPoll = showHistoryModal || activeView === 'withdraw';
         if (!shouldPoll || !authorId) return;
 
         let cancelled = false;
@@ -374,7 +402,7 @@ export function AuthorStoryManagement({ onBack }) {
         // Initial load
         fetchActivity({ silent: false });
 
-        // Poll while user is viewing history/withdraw, so PROCESSING -> COMPLETED/FAILED updates automatically.
+        // Poll while history modal or withdraw tab is open, so PROCESSING -> COMPLETED/FAILED updates automatically.
         const intervalMs = 10000; // 10s
         const id = setInterval(() => {
             if (cancelled) return;
@@ -387,7 +415,7 @@ export function AuthorStoryManagement({ onBack }) {
             cancelled = true;
             clearInterval(id);
         };
-    }, [activeView, authorId]);
+    }, [activeView, authorId, showHistoryModal]);
 
     const handleCancelWithdraw = (withdrawId) => {
         if (!withdrawId) return;
@@ -438,9 +466,9 @@ export function AuthorStoryManagement({ onBack }) {
             .catch(() => setWithdrawBalance(0));
     }, [activeView, authorId]);
 
-    // Load author bank accounts from backend (remove demo data)
+    // Load author bank accounts when rút tiền hoặc popup quản lý TK mở
     useEffect(() => {
-        if ((activeView !== 'bank-accounts' && activeView !== 'withdraw') || !authorId) return;
+        if ((!showBankModal && activeView !== 'withdraw') || !authorId) return;
 
         coinApi.getAuthorBankAccounts()
             .then((res) => {
@@ -459,15 +487,13 @@ export function AuthorStoryManagement({ onBack }) {
                     : [];
 
                 setBankAccounts(normalized);
-
-                const verified = normalized.filter((a) => !!a.is_verified);
-                setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
+                setSelectedBankAccountIdx(normalized.length > 0 ? 0 : -1);
             })
-            .catch((err) => {
+            .catch(() => {
                 setBankAccounts([]);
                 setSelectedBankAccountIdx(-1);
             });
-    }, [activeView, authorId]);
+    }, [showBankModal, activeView, authorId]);
 
     /** Real-time: refetch danh sách truyện khi tab đang hiển thị (moderator duyệt/từ chối → trạng thái truyện thay đổi). */
     const STORIES_POLL_INTERVAL_MS = 1000;
@@ -509,10 +535,10 @@ export function AuthorStoryManagement({ onBack }) {
     ];
 
     const userStats = {
-        published: stories.filter(s => s.status === 'published').length,
+        published: stories.filter((s) => s.status === 'published').length,
         totalChapters: stories.reduce((acc, s) => acc + s.chapters, 0),
-        followers: 0,
-        recommendations: 0,
+        totalViews: stories.reduce((acc, s) => acc + (Number(s.totalViews) || 0), 0),
+        followers: profileFollowersCount,
     };
 
     const handleCreateStory = () => {
@@ -856,6 +882,26 @@ export function AuthorStoryManagement({ onBack }) {
 
     const { showToast, ToastContainer, clearToasts } = useToast();
 
+    useEffect(() => {
+        const view = searchParams.get('view');
+        if (!view) return;
+
+        if (view === 'profile') {
+            setActiveView('profile');
+            setActiveMenu('profile');
+            navigate('/author', { replace: true });
+            return;
+        }
+        if (view === 'stories') {
+            setActiveView('stories');
+            setActiveMenu('stories');
+            navigate('/author', { replace: true });
+            return;
+        }
+
+        navigate('/author', { replace: true });
+    }, [searchParams, navigate]);
+
     /** Chỉ xóa toasts khi vừa chuyển SANG màn danh sách chương (từ màn khác), tránh xóa mỗi lần re-render gây nhấp nháy. */
     const prevActiveViewRef = useRef(activeView);
     useEffect(() => {
@@ -1174,76 +1220,6 @@ export function AuthorStoryManagement({ onBack }) {
                             <Wallet style={{ width: '20px', height: '20px' }} />
                             Rút tiền
                         </button>
-
-                        <button
-                            onClick={() => {
-                                setActiveMenu('bank-accounts');
-                                setActiveView('bank-accounts');
-                            }}
-                            style={{
-                                width: '100%',
-                                padding: '0.875rem 1.5rem',
-                                backgroundColor: activeMenu === 'bank-accounts' ? '#f0fdf4' : 'transparent',
-                                border: 'none',
-                                borderLeft: activeMenu === 'bank-accounts' ? '3px solid #13ec5b' : '3px solid transparent',
-                                borderRadius: '9999px',
-                                marginLeft: '0.5rem',
-                                marginRight: '0.5rem',
-                                textAlign: 'left',
-                                fontSize: '0.875rem',
-                                fontWeight: activeMenu === 'bank-accounts' ? 600 : 500,
-                                color: activeMenu === 'bank-accounts' ? '#13ec5b' : '#333333',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.75rem',
-                                transition: 'all 0.2s'
-                            }}
-                            onMouseEnter={(e) => {
-                                if (activeMenu !== 'bank-accounts') e.currentTarget.style.backgroundColor = '#f9fafb';
-                            }}
-                            onMouseLeave={(e) => {
-                                if (activeMenu !== 'bank-accounts') e.currentTarget.style.backgroundColor = 'transparent';
-                            }}
-                        >
-                            <Landmark style={{ width: '20px', height: '20px' }} />
-                            Tài khoản ngân hàng
-                        </button>
-
-                        <button
-                            onClick={() => {
-                                setActiveMenu('history');
-                                setActiveView('history');
-                            }}
-                            style={{
-                                width: '100%',
-                                padding: '0.875rem 1.5rem',
-                                backgroundColor: activeMenu === 'history' ? '#f0fdf4' : 'transparent',
-                                border: 'none',
-                                borderLeft: activeMenu === 'history' ? '3px solid #13ec5b' : '3px solid transparent',
-                                borderRadius: '9999px',
-                                marginLeft: '0.5rem',
-                                marginRight: '0.5rem',
-                                textAlign: 'left',
-                                fontSize: '0.875rem',
-                                fontWeight: activeMenu === 'history' ? 600 : 500,
-                                color: activeMenu === 'history' ? '#13ec5b' : '#333333',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.75rem',
-                                transition: 'all 0.2s'
-                            }}
-                            onMouseEnter={(e) => {
-                                if (activeMenu !== 'history') e.currentTarget.style.backgroundColor = '#f9fafb';
-                            }}
-                            onMouseLeave={(e) => {
-                                if (activeMenu !== 'history') e.currentTarget.style.backgroundColor = 'transparent';
-                            }}
-                        >
-                            <History style={{ width: '20px', height: '20px' }} />
-                            Lịch sử donate và rút tiền
-                        </button>
                     </nav>
 
                     {/* Logout Section */}
@@ -1256,10 +1232,12 @@ export function AuthorStoryManagement({ onBack }) {
                             onClick={async () => {
                                 try {
                                     await logout();
-                                    onBack();
+                                    onBack?.();
+                                    navigate('/', { replace: true });
                                 } catch (error) {
                                     console.error('Logout error:', error);
-                                    onBack();
+                                    onBack?.();
+                                    navigate('/', { replace: true });
                                 }
                             }}
                             style={{
@@ -1413,7 +1391,7 @@ export function AuthorStoryManagement({ onBack }) {
                                 )}
                                 <div style={{ marginBottom: '1.25rem' }}>
                                     <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
-                                        Tài khoản ngân hàng (đã xác thực)
+                                        Tài khoản ngân hàng
                                     </label>
                                     <select
                                         value={selectedBankAccountIdx >= 0 ? String(selectedBankAccountIdx) : ''}
@@ -1432,16 +1410,16 @@ export function AuthorStoryManagement({ onBack }) {
                                         onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
                                     >
                                         <option value="">Chọn tài khoản ngân hàng</option>
-                                        {verifiedBankAccounts.map((acc, idx) => (
+                                        {withdrawBankAccounts.map((acc, idx) => (
                                             <option key={`${acc.bank_name}-${acc.account_number}-${idx}`} value={String(idx)}>
                                                 {acc.bank_name} • {maskAccountNumber(acc.account_number)} • {acc.account_holder_name}
                                             </option>
                                         ))}
                                     </select>
 
-                                    {verifiedBankAccounts.length === 0 ? (
+                                    {withdrawBankAccounts.length === 0 ? (
                                         <p style={{ fontSize: '0.8125rem', color: '#b45309', margin: '0.5rem 0 0 0' }}>
-                                            Bạn chưa có tài khoản ngân hàng đã xác thực. Vào tab <b>Tài khoản ngân hàng</b> để thêm và xác thực trước khi rút.
+                                            Bạn chưa có tài khoản ngân hàng. Mở <b>Hồ sơ tác giả</b> → <b>Tài khoản ngân hàng</b> để thêm thông tin trước khi rút.
                                         </p>
                                     ) : !selectedBankAccount ? (
                                         <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.5rem 0 0 0' }}>
@@ -1557,620 +1535,118 @@ export function AuthorStoryManagement({ onBack }) {
                                 </button>
                             </div>
                         </div>
-                    ) : activeView === 'bank-accounts' ? (
-                        <div style={{ maxWidth: '960px' }}>
-                            <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '1rem',
-                                marginBottom: '1.75rem',
-                                padding: '1.5rem 1.75rem',
-                                backgroundColor: '#ffffff',
-                                borderRadius: '16px',
-                                border: '1px solid #e5e7eb',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
-                            }}>
-                                <div style={{
-                                    width: '52px', height: '52px', borderRadius: '14px',
-                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    boxShadow: '0 4px 14px rgba(19, 236, 91, 0.3)'
-                                }}>
-                                    <Landmark style={{ width: '28px', height: '28px', color: '#ffffff' }} />
-                                </div>
-                                <div>
-                                    <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: '#1A2332', margin: 0, letterSpacing: '-0.02em' }}>
-                                        Danh sách tài khoản ngân hàng
-                                    </h2>
-                                    <p style={{ fontSize: '0.875rem', color: '#90A1B9', margin: '6px 0 0 0' }}>
-                                        Quản lý tài khoản nhận tiền và trạng thái xác thực
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div style={{
-                                backgroundColor: '#ffffff',
-                                borderRadius: '16px',
-                                padding: '1.75rem',
-                                border: '1px solid #e5e7eb',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                                marginBottom: '1.5rem'
-                            }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                                    <div style={{ gridColumn: 'span 2' }}>
-                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
-                                            Ngân hàng
-                                        </label>
-                                        <select
-                                            value={bankName}
-                                            onChange={(e) => setBankName(e.target.value)}
-                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none', backgroundColor: '#ffffff' }}
-                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
-                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
-                                        >
-                                            <option value="">Chọn ngân hàng</option>
-                                            {BANK_OPTIONS.map((b) => (
-                                                <option key={b} value={b}>{b}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
-                                            Bank BIN (toBin)
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={bankBin}
-                                            onChange={(e) => setBankBin(e.target.value.replace(/[^\d]/g, ''))}
-                                            placeholder="Ví dụ: 970422"
-                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
-                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
-                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
-                                            Số tài khoản
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={accountNumber}
-                                            onChange={(e) => setAccountNumber(e.target.value.replace(/[^\d]/g, ''))}
-                                            placeholder="Nhập số tài khoản"
-                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
-                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
-                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
-                                            Chủ tài khoản
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={accountHolderName}
-                                            onChange={(e) => setAccountHolderName(e.target.value)}
-                                            placeholder="Ví dụ: NGUYỄN VĂN A"
-                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
-                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
-                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
-                                        />
-                                    </div>
-                                    <div style={{ gridColumn: 'span 2' }}>
-                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>
-                                            Chi nhánh (tuỳ chọn)
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={branchName}
-                                            onChange={(e) => setBranchName(e.target.value)}
-                                            placeholder="Ví dụ: CN TP.HCM"
-                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
-                                            onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
-                                            onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
-                                        />
-                                    </div>
-                                    <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <input id="bank-verified-list" type="checkbox" checked={isBankVerified} onChange={(e) => setIsBankVerified(e.target.checked)} />
-                                        <label htmlFor="bank-verified-list" style={{ fontSize: '0.8125rem', color: '#64748b' }}>
-                                            Đã xác thực
-                                        </label>
-                                    </div>
-                                </div>
-
-                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-                                    <button
-                                        type="button"
-                                        onClick={async () => {
-                                            const bn = bankName.trim();
-                                            const bb = bankBin.trim();
-                                            const an = accountNumber.trim();
-                                            const ah = accountHolderName.trim();
-                                            if (!bn || !bb || !an || !ah) {
-                                                showToast('Vui lòng nhập đủ: Ngân hàng, Bank BIN/toBin, Số tài khoản, Chủ tài khoản.', 'error');
-                                                return;
-                                            }
-
-                                            const res = await coinApi.upsertAuthorBankAccount({
-                                                bankName: bn,
-                                                bankBin: bb,
-                                                accountNumber: an,
-                                                accountHolderName: ah,
-                                                branchName: branchName.trim(),
-                                                isVerified: isBankVerified,
-                                            });
-
-                                            if (!res?.success) {
-                                                showToast(res?.message ?? 'Không thể thêm tài khoản ngân hàng.', 'error');
-                                                return;
-                                            }
-
-                                            setBankName('');
-                                            setBankBin('');
-                                            setAccountNumber('');
-                                            setAccountHolderName('');
-                                            setBranchName('');
-                                            setIsBankVerified(true);
-                                            showToast('Đã thêm tài khoản ngân hàng.', 'success');
-
-                                            // Refresh list
-                                            const r = await coinApi.getAuthorBankAccounts();
-                                            if (r?.success) {
-                                                const items = r?.data ?? [];
-                                                const normalized = Array.isArray(items)
-                                                    ? items.map((acc) => ({
-                                                        ...acc,
-                                                        bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
-                                                        account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
-                                                        account_holder_name: acc.account_holder_name ?? '',
-                                                        branch_name: acc.branch_name ?? '',
-                                                        is_verified: !!acc.is_verified,
-                                                    }))
-                                                    : [];
-                                                setBankAccounts(normalized);
-                                                const verified = normalized.filter((a) => !!a.is_verified);
-                                                setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
-                                            }
-                                        }}
-                                        style={{
-                                            padding: '0.625rem 1.25rem',
-                                            backgroundColor: '#13ec5b',
-                                            border: 'none',
-                                            borderRadius: '10px',
-                                            fontSize: '0.875rem',
-                                            fontWeight: 600,
-                                            color: '#ffffff',
-                                            cursor: 'pointer',
-                                            boxShadow: '0 2px 8px rgba(19, 236, 91, 0.35)',
-                                            transition: 'all 0.2s ease'
-                                        }}
-                                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#10d452'; }}
-                                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#13ec5b'; }}
-                                    >
-                                        Thêm tài khoản
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div style={{
-                                backgroundColor: '#ffffff',
-                                borderRadius: '16px',
-                                border: '1px solid #e5e7eb',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                                overflow: 'hidden'
-                            }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                                    <thead>
-                                        <tr style={{ backgroundColor: '#f8fafc' }}>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>NGÂN HÀNG</th>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>SỐ TK</th>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>CHỦ TK</th>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>CHI NHÁNH</th>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>XÁC THỰC</th>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>CẬP NHẬT</th>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>HÀNH ĐỘNG</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {bankAccounts.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={7} style={{ padding: '2.5rem', textAlign: 'center', color: '#64748b' }}>
-                                                    Chưa có tài khoản ngân hàng nào.
-                                                </td>
-                                            </tr>
-                                        ) : (
-                                            bankAccounts.map((acc, idx) => (
-                                                <tr key={`${acc.bank_name}-${acc.account_number}-${idx}`} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                                    <td style={{ padding: '1rem 1.25rem', color: '#374151', fontWeight: 600 }}>{acc.bank_name}</td>
-                                                    <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{maskAccountNumber(acc.account_number)}</td>
-                                                    <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{acc.account_holder_name}</td>
-                                                    <td style={{ padding: '1rem 1.25rem', color: '#64748b' }}>{acc.branch_name || '—'}</td>
-                                                    <td style={{ padding: '1rem 1.25rem' }}>
-                                                        {acc.is_verified ? (
-                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.25rem 0.5rem', borderRadius: '9999px', backgroundColor: '#ecfdf5', color: '#047857', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #a7f3d0' }}>
-                                                                <ShieldCheck style={{ width: '14px', height: '14px' }} /> Verified
-                                                            </span>
-                                                        ) : (
-                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.25rem 0.5rem', borderRadius: '9999px', backgroundColor: '#fffbeb', color: '#b45309', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #fde68a' }}>
-                                                                <ShieldX style={{ width: '14px', height: '14px' }} /> Unverified
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                    <td style={{ padding: '1rem 1.25rem', textAlign: 'right', color: '#64748b' }}>{formatTime(acc.updated_at)}</td>
-                                                    <td style={{ padding: '1rem 1.25rem', textAlign: 'right' }}>
-                                                        <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
-                                                            <button
-                                                                type="button"
-                                                                onClick={async () => {
-                                                                    const nextVerified = !acc.is_verified;
-                                                                    const res = await coinApi.verifyAuthorBankAccount({ isVerified: nextVerified });
-                                                                    if (!res?.success) {
-                                                                        showToast(res?.message ?? 'Không thể cập nhật trạng thái xác thực.', 'error');
-                                                                        return;
-                                                                    }
-
-                                                                    showToast(nextVerified ? 'Đã xác thực.' : 'Đã huỷ xác thực.', 'success');
-
-                                                                    const r = await coinApi.getAuthorBankAccounts();
-                                                                    if (r?.success) {
-                                                                        const items = r?.data ?? [];
-                                                                        const normalized = Array.isArray(items)
-                                                                            ? items.map((acc) => ({
-                                                                                ...acc,
-                                                                                bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
-                                                                                account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
-                                                                                account_holder_name: acc.account_holder_name ?? '',
-                                                                                branch_name: acc.branch_name ?? '',
-                                                                                is_verified: !!acc.is_verified,
-                                                                            }))
-                                                                            : [];
-                                                                        setBankAccounts(normalized);
-                                                                        const verified = normalized.filter((a) => !!a.is_verified);
-                                                                        setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
-                                                                    }
-                                                                }}
-                                                                style={{
-                                                                    padding: '0.45rem 0.75rem',
-                                                                    borderRadius: '10px',
-                                                                    border: '1px solid #e5e7eb',
-                                                                    backgroundColor: '#ffffff',
-                                                                    cursor: 'pointer',
-                                                                    fontSize: '0.8125rem',
-                                                                    fontWeight: 600,
-                                                                    color: '#111827'
-                                                                }}
-                                                            >
-                                                                {acc.is_verified ? 'Huỷ xác thực' : 'Xác thực'}
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={async () => {
-                                                                    if (!window.confirm('Xoá tài khoản ngân hàng này?')) return;
-                                                                    const res = await coinApi.deleteAuthorBankAccount();
-                                                                    if (!res?.success) {
-                                                                        showToast(res?.message ?? 'Không thể xoá tài khoản ngân hàng.', 'error');
-                                                                        return;
-                                                                    }
-                                                                    showToast('Đã xoá tài khoản ngân hàng.', 'success');
-                                                                    const r = await coinApi.getAuthorBankAccounts();
-                                                                    if (r?.success) {
-                                                                        const items = r?.data ?? [];
-                                                                        const normalized = Array.isArray(items)
-                                                                            ? items.map((acc) => ({
-                                                                                ...acc,
-                                                                                bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
-                                                                                account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
-                                                                                account_holder_name: acc.account_holder_name ?? '',
-                                                                                branch_name: acc.branch_name ?? '',
-                                                                                is_verified: !!acc.is_verified,
-                                                                            }))
-                                                                            : [];
-                                                                        setBankAccounts(normalized);
-                                                                        const verified = normalized.filter((a) => !!a.is_verified);
-                                                                        setSelectedBankAccountIdx(verified.length > 0 ? 0 : -1);
-                                                                    }
-                                                                }}
-                                                                style={{
-                                                                    padding: '0.45rem 0.75rem',
-                                                                    borderRadius: '10px',
-                                                                    border: '1px solid #fecaca',
-                                                                    backgroundColor: '#fef2f2',
-                                                                    cursor: 'pointer',
-                                                                    fontSize: '0.8125rem',
-                                                                    fontWeight: 700,
-                                                                    color: '#b91c1c'
-                                                                }}
-                                                            >
-                                                                Xoá
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    ) : activeView === 'history' ? (
-                        <div style={{ maxWidth: '960px' }}>
-                            <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '1rem',
-                                marginBottom: '1.75rem',
-                                padding: '1.5rem 1.75rem',
-                                backgroundColor: '#ffffff',
-                                borderRadius: '16px',
-                                border: '1px solid #e5e7eb',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
-                            }}>
-                                <div style={{
-                                    width: '52px', height: '52px', borderRadius: '14px',
-                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    boxShadow: '0 4px 14px rgba(19, 236, 91, 0.3)'
-                                }}>
-                                    <History style={{ width: '28px', height: '28px', color: '#ffffff' }} />
-                                </div>
-                                <div>
-                                    <h2 style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: '#1A2332', margin: 0, letterSpacing: '-0.02em' }}>Lịch sử donate và rút tiền</h2>
-                                    <p style={{ fontSize: '0.875rem', color: '#90A1B9', margin: '6px 0 0 0' }}>Xem lịch sử nhận donate và các lần rút tiền</p>
-                                </div>
-                            </div>
-
-                            <div style={{
-                                backgroundColor: '#f0fdf4',
-                                borderRadius: '16px',
-                                padding: '1.1rem 1.25rem',
-                                border: '1px solid #bbf7d0',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-                                marginBottom: '1.25rem'
-                            }}>
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-                                    <div style={{
-                                        width: '40px',
-                                        height: '40px',
-                                        borderRadius: '14px',
-                                        backgroundColor: '#dcfce7',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        boxShadow: '0 4px 14px rgba(19,236,91,0.18)',
-                                        flexShrink: 0
-                                    }}>
-                                        <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
-                                    </div>
-                                    <div>
-                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>
-                                            Tỷ lệ chia sẻ: 70% cho author, 30% nền tảng
-                                        </div>
-                                        <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
-                                            Các khoản <b>Donate</b> trong lịch sử là phần author nhận sau khi nền tảng trừ <b>30%</b> phí.
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div style={{
-                                backgroundColor: '#ffffff',
-                                borderRadius: '16px',
-                                border: '1px solid #e5e7eb',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                                overflow: 'hidden'
-                            }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                                    <thead>
-                                        <tr style={{ backgroundColor: '#f8fafc' }}>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>THỜI GIAN</th>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>LOẠI</th>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>SỐ COIN</th>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>THỰC NHẬN</th>
-                                            <th style={{ padding: '1rem 1.25rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.8125rem', letterSpacing: '0.02em' }}>GHI CHÚ</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {authorActivityLoading ? (
-                                            <tr>
-                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
-                                            </tr>
-                                        ) : authorActivityError ? (
-                                            <tr>
-                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorActivityError}</td>
-                                            </tr>
-                                        ) : authorActivityItems.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={5} style={{ padding: '3rem 1.5rem', textAlign: 'center' }}>
-                                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
-                                                        <div style={{
-                                                            width: '56px', height: '56px', borderRadius: '50%',
-                                                            backgroundColor: '#f1f5f9',
-                                                            display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                                        }}>
-                                                            <History style={{ width: '28px', height: '28px', color: '#94a3b8' }} />
-                                                        </div>
-                                                        <p style={{ fontSize: '0.9375rem', fontWeight: 500, color: '#64748b', margin: 0 }}>Chưa có giao dịch nào</p>
-                                                        <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>Donate và rút tiền sẽ hiển thị tại đây</p>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ) : (
-                                            authorActivityItems.map((item) => {
-                                                const createdAt = item.createdAt ?? item.CreatedAt;
-                                                const timeStr = createdAt ? new Date(createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
-                                                const typeLabel = (item.type || item.Type) === 'WITHDRAW' ? 'Rút tiền' : 'Donate';
-                                                const amount = item.amount ?? item.Amount ?? 0;
-                                                const isWithdraw = (item.type || item.Type) === 'WITHDRAW';
-                                                const withdrawStatusRaw = item.withdrawStatus ?? item.WithdrawStatus;
-                                                const statusUpper = String(withdrawStatusRaw ?? '').toUpperCase();
-
-                                                // DONATE: author nhận net = amount - floor(amount * 0.3)
-                                                const netReceived = isWithdraw
-                                                    ? (statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? Number(amount) : 0)
-                                                    : Math.max(0, Number(amount) - Math.floor(Number(amount) * 0.3));
-
-                                                const statusLabel =
-                                                    statusUpper === 'PENDING' ? 'Chờ xử lý' :
-                                                        statusUpper === 'PENDING_REVIEW' ? 'Chờ xét duyệt' :
-                                                            statusUpper === 'PROCESSING' ? 'Đang xử lý' :
-                                                                statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? 'Hoàn thành' :
-                                                                    statusUpper === 'FAILED' ? 'Thất bại' :
-                                                                        statusUpper === 'CANCELLED' ? 'Đã hủy' :
-                                                                            statusUpper || '—';
-
-                                                const note = isWithdraw
-                                                    ? (['PENDING', 'PENDING_REVIEW', 'PROCESSING'].includes(statusUpper)
-                                                        ? statusLabel
-                                                        : (item.note ?? item.Note) || statusLabel)
-                                                    : (item.senderDisplayName ?? item.SenderDisplayName
-                                                        ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}`
-                                                        : (item.note ?? item.Note) || '—');
-
-                                                const canCancelWithdraw = isWithdraw && (statusUpper === 'PENDING' || statusUpper === 'PENDING_REVIEW');
-
-                                                const vndAmount = Number(amount) * COIN_RATE_VND;
-                                                const vndNet = netReceived * COIN_RATE_VND;
-                                                return (
-                                                    <tr key={item.id ?? item.Id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                                        <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{timeStr}</td>
-                                                        <td style={{ padding: '1rem 1.25rem', color: '#374151' }}>{typeLabel}</td>
-                                                        <td style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 600, color: (item.type || item.Type) === 'WITHDRAW' ? '#dc2626' : '#15803d' }}>
-                                                            <div>
-                                                                {(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin
-                                                            </div>
-                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndAmount)}</div>
-                                                        </td>
-                                                        <td style={{ padding: '1rem 1.25rem', textAlign: 'right', fontWeight: 700, color: (item.type || item.Type) === 'WITHDRAW' ? '#b91c1c' : '#16a34a' }}>
-                                                            <div>
-                                                                {isWithdraw ? (netReceived > 0 ? `+${Number(netReceived).toLocaleString()}` : '—') : `+${Number(netReceived).toLocaleString()}`} coin
-                                                            </div>
-                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                                                                {isWithdraw ? (netReceived > 0 ? `≈ ${formatVnd(vndNet)}` : '—') : `≈ ${formatVnd(vndNet)}`}
-                                                            </div>
-                                                        </td>
-                                                        <td style={{ padding: '1rem 1.25rem', color: '#64748b', maxWidth: '280px' }}>
-                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</div>
-                                                                {canCancelWithdraw && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleCancelWithdraw(item.id ?? item.Id)}
-                                                                        style={{
-                                                                            alignSelf: 'flex-start',
-                                                                            padding: '0.35rem 0.75rem',
-                                                                            borderRadius: '10px',
-                                                                            border: '1px solid #fecaca',
-                                                                            backgroundColor: '#fef2f2',
-                                                                            color: '#b91c1c',
-                                                                            fontSize: '0.75rem',
-                                                                            fontWeight: 700,
-                                                                            cursor: 'pointer'
-                                                                        }}
-                                                                    >
-                                                                        Hủy
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
                     ) : activeView === 'profile' ? (
                         <div style={{ maxWidth: '900px' }}>
-                            {/* Thành tích */}
-                            <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', padding: '1.5rem', marginBottom: '1.5rem', border: '1px solid #e0e0e0' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
-                                    <div style={{ width: '20px', height: '20px', color: '#6b7280' }}>🌱</div>
-                                    <h3 style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>Thành tích</h3>
-                                </div>
-
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-                                    <div style={{ textAlign: 'center' }}>
-                                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#d4fce3', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem' }}>
-                                            <Book style={{ width: '24px', height: '24px', color: '#13ec5b' }} />
-                                        </div>
-                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', marginBottom: '0.25rem' }}>
-                                            {userStats.published}
-                                        </div>
-                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                            Truyện đã đăng
-                                        </div>
-                                    </div>
-
-                                    <div style={{ textAlign: 'center' }}>
-                                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#d4fce3', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem' }}>
-                                            <div style={{ fontSize: '1.25rem' }}>📄</div>
-                                        </div>
-                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', marginBottom: '0.25rem' }}>
-                                            {userStats.totalChapters}
-                                        </div>
-                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                            Chương đã đăng
-                                        </div>
-                                    </div>
-
-                                    <div style={{ textAlign: 'center' }}>
-                                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#d4fce3', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem' }}>
-                                            <Heart style={{ width: '24px', height: '24px', color: '#13ec5b' }} />
-                                        </div>
-                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', marginBottom: '0.25rem' }}>
-                                            {userStats.followers}
-                                        </div>
-                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                            Người theo dõi
-                                        </div>
-                                    </div>
-
-                                    <div style={{ textAlign: 'center' }}>
-                                        <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#d4fce3', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 0.75rem' }}>
-                                            <Star style={{ width: '24px', height: '24px', color: '#13ec5b' }} />
-                                        </div>
-                                        <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', marginBottom: '0.25rem' }}>
-                                            {userStats.recommendations}
-                                        </div>
-                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                            Đề cử
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Thông tin cá nhân */}
-                            <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', padding: '1.5rem', border: '1px solid #e0e0e0' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                            {/* Thành tích + liên kết nhanh */}
+                            <div style={{
+                                backgroundColor: '#ffffff',
+                                borderRadius: '16px',
+                                padding: '1.5rem',
+                                marginBottom: '1.5rem',
+                                border: '1px solid #e5e7eb',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                            }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <div style={{ width: '20px', height: '20px', color: '#6b7280' }}>👤</div>
-                                        <h3 style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>Thông tin cá nhân</h3>
+                                        <div style={{ width: '20px', height: '20px', color: '#6b7280' }}>🌱</div>
+                                        <h3 style={{ fontSize: '1.0625rem', fontWeight: 700, color: '#1e293b', margin: 0 }}>Thành tích</h3>
                                     </div>
+                                </div>
+
+                                <div style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                                    gap: '0.75rem',
+                                    marginBottom: '1.25rem',
+                                }}
+                                >
+                                    {[
+                                        { icon: Book, color: '#059669', bg: '#ecfdf5', label: 'Truyện đã đăng', value: userStats.published },
+                                        { icon: List, color: '#7c3aed', bg: '#f5f3ff', label: 'Chương đã đăng', value: userStats.totalChapters },
+                                        { icon: Eye, color: '#0ea5e9', bg: '#f0f9ff', label: 'Lượt xem (tổng)', value: userStats.totalViews.toLocaleString('vi-VN') },
+                                        { icon: Heart, color: '#e11d48', bg: '#fff1f2', label: 'Người theo dõi', value: userStats.followers },
+                                    ].map(({ icon: Icon, color, bg, label, value }) => (
+                                        <div
+                                            key={label}
+                                            style={{
+                                                borderRadius: '14px',
+                                                border: '1px solid #e2e8f0',
+                                                padding: '1rem',
+                                                background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+                                            }}
+                                        >
+                                            <div style={{
+                                                width: '40px',
+                                                height: '40px',
+                                                borderRadius: '12px',
+                                                backgroundColor: bg,
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                marginBottom: '0.65rem',
+                                            }}
+                                            >
+                                                <Icon style={{ width: '20px', height: '20px', color }} />
+                                            </div>
+                                            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                                                {value}
+                                            </div>
+                                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.35rem', fontWeight: 500 }}>
+                                                {label}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div style={{
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    gap: '0.75rem',
+                                    paddingTop: '1rem',
+                                    borderTop: '1px solid #f1f5f9',
+                                }}
+                                >
                                     <button
+                                        type="button"
+                                        onClick={() => setShowBankModal(true)}
                                         style={{
-                                            padding: '0.5rem 1.25rem',
-                                            backgroundColor: '#13ec5b',
-                                            border: 'none',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.5rem',
+                                            padding: '0.65rem 1.1rem',
                                             borderRadius: '9999px',
+                                            border: '1px solid #bbf7d0',
+                                            backgroundColor: '#f0fdf4',
+                                            color: '#166534',
                                             fontSize: '0.875rem',
                                             fontWeight: 600,
-                                            color: '#ffffff',
-                                            cursor: 'pointer'
+                                            cursor: 'pointer',
                                         }}
                                     >
-                                        CẬP NHẬT
+                                        <Landmark style={{ width: '18px', height: '18px' }} />
+                                        Tài khoản ngân hàng
                                     </button>
-                                </div>
-
-                                <div style={{ display: 'grid', gap: '1rem' }}>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1rem', alignItems: 'center' }}>
-                                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Tên hiển thị</div>
-                                        <div style={{ fontSize: '0.875rem', color: '#333333', fontWeight: 500 }}>{userDisplayName}</div>
-                                    </div>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1rem', alignItems: 'center' }}>
-                                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Giới thiệu</div>
-                                        <div style={{ fontSize: '0.875rem', color: '#333333' }}>Đang cập nhật</div>
-                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowHistoryModal(true)}
+                                        style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.5rem',
+                                            padding: '0.65rem 1.1rem',
+                                            borderRadius: '9999px',
+                                            border: '1px solid #e2e8f0',
+                                            backgroundColor: '#f8fafc',
+                                            color: '#334155',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        <History style={{ width: '18px', height: '18px' }} />
+                                        Lịch sử donate &amp; rút tiền
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -2309,24 +1785,9 @@ export function AuthorStoryManagement({ onBack }) {
                                     <h3 style={{ fontSize: '1.125rem', color: '#6b7280', marginBottom: '0.5rem' }}>
                                         Chưa có truyện nào
                                     </h3>
-                                    <p style={{ fontSize: '0.875rem', color: '#9ca3af', marginBottom: '1.5rem' }}>
-                                        Bắt đầu sáng tác truyện đầu tiên của bạn
+                                    <p style={{ fontSize: '0.875rem', color: '#9ca3af', margin: 0 }}>
+                                        Bắt đầu sáng tác truyện đầu tiên của bạn — dùng nút &quot;+ Thêm truyện mới&quot; ở góc trên.
                                     </p>
-                                    <button
-                                        onClick={handleCreateStory}
-                                        style={{
-                                            padding: '0.75rem 1.5rem',
-                                            backgroundColor: '#13ec5b',
-                                            border: 'none',
-                                            borderRadius: '9999px',
-                                            fontSize: '0.875rem',
-                                            fontWeight: 700,
-                                            color: '#ffffff',
-                                            cursor: 'pointer'
-                                        }}
-                                    >
-                                        Tạo truyện mới
-                                    </button>
                                 </div>
                             ) : (
                                 <>
@@ -2616,6 +2077,485 @@ export function AuthorStoryManagement({ onBack }) {
                 </div>
             </div>
             <Footer />
+
+            {/* Popup: tài khoản ngân hàng */}
+            {showBankModal && (
+                <div
+                    role="presentation"
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(15, 23, 42, 0.45)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10000,
+                        padding: '1rem',
+                    }}
+                    onClick={() => setShowBankModal(false)}
+                >
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="bank-modal-title"
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '16px',
+                            maxWidth: '960px',
+                            width: '100%',
+                            maxHeight: 'min(90vh, 900px)',
+                            overflow: 'auto',
+                            boxShadow: '0 25px 50px rgba(0,0,0,0.18)',
+                            border: '1px solid #e5e7eb',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', padding: '1.25rem 1.5rem', borderBottom: '1px solid #f1f5f9' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                                <div style={{
+                                    width: '44px', height: '44px', borderRadius: '12px',
+                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    flexShrink: 0,
+                                }}
+                                >
+                                    <Landmark style={{ width: '22px', height: '22px', color: '#ffffff' }} />
+                                </div>
+                                <div style={{ minWidth: 0 }}>
+                                    <h2 id="bank-modal-title" style={{ fontSize: '1.125rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>Tài khoản ngân hàng</h2>
+                                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.35rem 0 0 0', lineHeight: 1.45 }}>
+                                        Bạn tự chịu trách nhiệm về thông tin nhập. Hệ thống không yêu cầu bước xác thực riêng trên giao diện này.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                aria-label="Đóng"
+                                onClick={() => setShowBankModal(false)}
+                                style={{
+                                    border: 'none',
+                                    background: '#f1f5f9',
+                                    borderRadius: '10px',
+                                    width: '36px',
+                                    height: '36px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    flexShrink: 0,
+                                }}
+                            >
+                                <X style={{ width: '18px', height: '18px', color: '#475569' }} />
+                            </button>
+                        </div>
+
+                        <div style={{ padding: '1.25rem 1.5rem 1.5rem' }}>
+                            <div style={{
+                                backgroundColor: '#f8fafc',
+                                borderRadius: '14px',
+                                padding: '1.25rem',
+                                border: '1px solid #e2e8f0',
+                                marginBottom: '1.25rem',
+                            }}
+                            >
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                                    <div style={{ gridColumn: 'span 2' }}>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Ngân hàng</label>
+                                        <select
+                                            value={bankName}
+                                            onChange={(e) => setBankName(e.target.value)}
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none', backgroundColor: '#ffffff' }}
+                                        >
+                                            <option value="">Chọn ngân hàng</option>
+                                            {BANK_OPTIONS.map((b) => (
+                                                <option key={b} value={b}>{b}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Bank BIN (toBin)</label>
+                                        <input
+                                            type="text"
+                                            value={bankBin}
+                                            onChange={(e) => setBankBin(e.target.value.replace(/[^\d]/g, ''))}
+                                            placeholder="Ví dụ: 970422"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Số tài khoản</label>
+                                        <input
+                                            type="text"
+                                            value={accountNumber}
+                                            onChange={(e) => setAccountNumber(e.target.value.replace(/[^\d]/g, ''))}
+                                            placeholder="Nhập số tài khoản"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Chủ tài khoản</label>
+                                        <input
+                                            type="text"
+                                            value={accountHolderName}
+                                            onChange={(e) => setAccountHolderName(e.target.value)}
+                                            placeholder="Ví dụ: NGUYỄN VĂN A"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                        />
+                                    </div>
+                                    <div style={{ gridColumn: 'span 2' }}>
+                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Chi nhánh (tuỳ chọn)</label>
+                                        <input
+                                            type="text"
+                                            value={branchName}
+                                            onChange={(e) => setBranchName(e.target.value)}
+                                            placeholder="Ví dụ: CN TP.HCM"
+                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                        />
+                                    </div>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            const bn = bankName.trim();
+                                            const bb = bankBin.trim();
+                                            const an = accountNumber.trim();
+                                            const ah = accountHolderName.trim();
+                                            if (!bn || !bb || !an || !ah) {
+                                                showToast('Vui lòng nhập đủ: Ngân hàng, Bank BIN/toBin, Số tài khoản, Chủ tài khoản.', 'error');
+                                                return;
+                                            }
+                                            const res = await coinApi.upsertAuthorBankAccount({
+                                                bankName: bn,
+                                                bankBin: bb,
+                                                accountNumber: an,
+                                                accountHolderName: ah,
+                                                branchName: branchName.trim(),
+                                                isVerified: true,
+                                            });
+                                            if (!res?.success) {
+                                                showToast(res?.message ?? 'Không thể thêm tài khoản ngân hàng.', 'error');
+                                                return;
+                                            }
+                                            setBankName('');
+                                            setBankBin('');
+                                            setAccountNumber('');
+                                            setAccountHolderName('');
+                                            setBranchName('');
+                                            showToast('Đã thêm tài khoản ngân hàng.', 'success');
+                                            const r = await coinApi.getAuthorBankAccounts();
+                                            if (r?.success) {
+                                                const items = r?.data ?? [];
+                                                const normalized = Array.isArray(items)
+                                                    ? items.map((acc) => ({
+                                                        ...acc,
+                                                        bank_bin: acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '',
+                                                        account_number: String(acc.account_number || '').replace(/[^\d]/g, ''),
+                                                        account_holder_name: acc.account_holder_name ?? '',
+                                                        branch_name: acc.branch_name ?? '',
+                                                        is_verified: !!acc.is_verified,
+                                                    }))
+                                                    : [];
+                                                setBankAccounts(normalized);
+                                                setSelectedBankAccountIdx(normalized.length > 0 ? 0 : -1);
+                                            }
+                                        }}
+                                        style={{
+                                            padding: '0.625rem 1.25rem',
+                                            backgroundColor: '#13ec5b',
+                                            border: 'none',
+                                            borderRadius: '10px',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            color: '#ffffff',
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        Thêm tài khoản
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                    <thead>
+                                        <tr style={{ backgroundColor: '#f8fafc' }}>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>NGÂN HÀNG</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>SỐ TK</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>CHỦ TK</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>CHI NHÁNH</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>CẬP NHẬT</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>HÀNH ĐỘNG</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {bankAccounts.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Chưa có tài khoản ngân hàng nào.</td>
+                                            </tr>
+                                        ) : (
+                                            bankAccounts.map((acc, idx) => (
+                                                <tr key={`${acc.bank_name}-${acc.account_number}-${idx}`} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                    <td style={{ padding: '0.85rem 1rem', color: '#374151', fontWeight: 600 }}>{acc.bank_name}</td>
+                                                    <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{maskAccountNumber(acc.account_number)}</td>
+                                                    <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{acc.account_holder_name}</td>
+                                                    <td style={{ padding: '0.85rem 1rem', color: '#64748b' }}>{acc.branch_name || '—'}</td>
+                                                    <td style={{ padding: '0.85rem 1rem', textAlign: 'right', color: '#64748b' }}>{formatTime(acc.updated_at)}</td>
+                                                    <td style={{ padding: '0.85rem 1rem', textAlign: 'right' }}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={async () => {
+                                                                if (!window.confirm('Xoá tài khoản ngân hàng này?')) return;
+                                                                const res = await coinApi.deleteAuthorBankAccount();
+                                                                if (!res?.success) {
+                                                                    showToast(res?.message ?? 'Không thể xoá tài khoản ngân hàng.', 'error');
+                                                                    return;
+                                                                }
+                                                                showToast('Đã xoá tài khoản ngân hàng.', 'success');
+                                                                const r = await coinApi.getAuthorBankAccounts();
+                                                                if (r?.success) {
+                                                                    const items = r?.data ?? [];
+                                                                    const normalized = Array.isArray(items)
+                                                                        ? items.map((a) => ({
+                                                                            ...a,
+                                                                            bank_bin: a.bank_bin || BANK_BIN_MAP[a.bank_name] || '',
+                                                                            account_number: String(a.account_number || '').replace(/[^\d]/g, ''),
+                                                                            account_holder_name: a.account_holder_name ?? '',
+                                                                            branch_name: a.branch_name ?? '',
+                                                                            is_verified: !!a.is_verified,
+                                                                        }))
+                                                                        : [];
+                                                                    setBankAccounts(normalized);
+                                                                    setSelectedBankAccountIdx(normalized.length > 0 ? 0 : -1);
+                                                                }
+                                                            }}
+                                                            style={{
+                                                                padding: '0.45rem 0.75rem',
+                                                                borderRadius: '10px',
+                                                                border: '1px solid #fecaca',
+                                                                backgroundColor: '#fef2f2',
+                                                                cursor: 'pointer',
+                                                                fontSize: '0.8125rem',
+                                                                fontWeight: 700,
+                                                                color: '#b91c1c',
+                                                            }}
+                                                        >
+                                                            Xoá
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Popup: lịch sử donate & rút tiền */}
+            {showHistoryModal && (
+                <div
+                    role="presentation"
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(15, 23, 42, 0.45)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10000,
+                        padding: '1rem',
+                    }}
+                    onClick={() => setShowHistoryModal(false)}
+                >
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="history-modal-title"
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '16px',
+                            maxWidth: '960px',
+                            width: '100%',
+                            maxHeight: 'min(90vh, 900px)',
+                            overflow: 'auto',
+                            boxShadow: '0 25px 50px rgba(0,0,0,0.18)',
+                            border: '1px solid #e5e7eb',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', padding: '1.25rem 1.5rem', borderBottom: '1px solid #f1f5f9' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                                <div style={{
+                                    width: '44px', height: '44px', borderRadius: '12px',
+                                    background: 'linear-gradient(135deg, #13ec5b 0%, #10d452 100%)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    flexShrink: 0,
+                                }}
+                                >
+                                    <History style={{ width: '22px', height: '22px', color: '#ffffff' }} />
+                                </div>
+                                <div style={{ minWidth: 0 }}>
+                                    <h2 id="history-modal-title" style={{ fontSize: '1.125rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>Lịch sử donate &amp; rút tiền</h2>
+                                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.35rem 0 0 0' }}>Theo dõi donate nhận được và các yêu cầu rút tiền.</p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                aria-label="Đóng"
+                                onClick={() => setShowHistoryModal(false)}
+                                style={{
+                                    border: 'none',
+                                    background: '#f1f5f9',
+                                    borderRadius: '10px',
+                                    width: '36px',
+                                    height: '36px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    flexShrink: 0,
+                                }}
+                            >
+                                <X style={{ width: '18px', height: '18px', color: '#475569' }} />
+                            </button>
+                        </div>
+
+                        <div style={{ padding: '1.25rem 1.5rem 1.5rem' }}>
+                            <div style={{
+                                backgroundColor: '#f0fdf4',
+                                borderRadius: '14px',
+                                padding: '1rem 1.15rem',
+                                border: '1px solid #bbf7d0',
+                                marginBottom: '1.25rem',
+                            }}
+                            >
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                    <div style={{
+                                        width: '40px', height: '40px', borderRadius: '12px', backgroundColor: '#dcfce7',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                    }}
+                                    >
+                                        <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
+                                    </div>
+                                    <div>
+                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 70% cho tác giả, 30% nền tảng</div>
+                                        <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
+                                            Các khoản <b>Donate</b> trong lịch sử là phần tác giả nhận sau khi nền tảng trừ <b>30%</b> phí.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                    <thead>
+                                        <tr style={{ backgroundColor: '#f8fafc' }}>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỜI GIAN</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>LOẠI</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>SỐ COIN</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỰC NHẬN</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>GHI CHÚ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {authorActivityLoading ? (
+                                            <tr>
+                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
+                                            </tr>
+                                        ) : authorActivityError ? (
+                                            <tr>
+                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorActivityError}</td>
+                                            </tr>
+                                        ) : authorActivityItems.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={5} style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: '#64748b' }}>Chưa có giao dịch nào.</td>
+                                            </tr>
+                                        ) : (
+                                            authorActivityItems.map((item) => {
+                                                const createdAt = item.createdAt ?? item.CreatedAt;
+                                                const timeStr = createdAt
+                                                    ? new Date(createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                                    : '—';
+                                                const typeLabel = (item.type || item.Type) === 'WITHDRAW' ? 'Rút tiền' : 'Donate';
+                                                const amount = item.amount ?? item.Amount ?? 0;
+                                                const isWithdraw = (item.type || item.Type) === 'WITHDRAW';
+                                                const withdrawStatusRaw = item.withdrawStatus ?? item.WithdrawStatus;
+                                                const statusUpper = String(withdrawStatusRaw ?? '').toUpperCase();
+                                                const netReceived = isWithdraw
+                                                    ? (statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? Number(amount) : 0)
+                                                    : Math.max(0, Number(amount) - Math.floor(Number(amount) * 0.3));
+                                                const statusLabel =
+                                                    statusUpper === 'PENDING' ? 'Chờ xử lý' :
+                                                        statusUpper === 'PENDING_REVIEW' ? 'Chờ xét duyệt' :
+                                                            statusUpper === 'PROCESSING' ? 'Đang xử lý' :
+                                                                statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? 'Hoàn thành' :
+                                                                    statusUpper === 'FAILED' ? 'Thất bại' :
+                                                                        statusUpper === 'CANCELLED' ? 'Đã hủy' :
+                                                                            statusUpper || '—';
+                                                const note = isWithdraw
+                                                    ? (['PENDING', 'PENDING_REVIEW', 'PROCESSING'].includes(statusUpper)
+                                                        ? statusLabel
+                                                        : (item.note ?? item.Note) || statusLabel)
+                                                    : (item.senderDisplayName ?? item.SenderDisplayName
+                                                        ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}`
+                                                        : (item.note ?? item.Note) || '—');
+                                                const canCancelWithdraw = isWithdraw && (statusUpper === 'PENDING' || statusUpper === 'PENDING_REVIEW');
+                                                const vndAmount = Number(amount) * COIN_RATE_VND;
+                                                const vndNet = netReceived * COIN_RATE_VND;
+                                                return (
+                                                    <tr key={item.id ?? item.Id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{timeStr}</td>
+                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{typeLabel}</td>
+                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: (item.type || item.Type) === 'WITHDRAW' ? '#dc2626' : '#15803d' }}>
+                                                            <div>{(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin</div>
+                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndAmount)}</div>
+                                                        </td>
+                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, color: (item.type || item.Type) === 'WITHDRAW' ? '#b91c1c' : '#16a34a' }}>
+                                                            <div>
+                                                                {isWithdraw ? (netReceived > 0 ? `+${Number(netReceived).toLocaleString()}` : '—') : `+${Number(netReceived).toLocaleString()}`} coin
+                                                            </div>
+                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                                                {isWithdraw ? (netReceived > 0 ? `≈ ${formatVnd(vndNet)}` : '—') : `≈ ${formatVnd(vndNet)}`}
+                                                            </div>
+                                                        </td>
+                                                        <td style={{ padding: '0.85rem 1rem', color: '#64748b', maxWidth: '280px' }}>
+                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</div>
+                                                                {canCancelWithdraw && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => handleCancelWithdraw(item.id ?? item.Id)}
+                                                                        style={{
+                                                                            alignSelf: 'flex-start',
+                                                                            padding: '0.35rem 0.75rem',
+                                                                            borderRadius: '10px',
+                                                                            border: '1px solid #fecaca',
+                                                                            backgroundColor: '#fef2f2',
+                                                                            color: '#b91c1c',
+                                                                            fontSize: '0.75rem',
+                                                                            fontWeight: 700,
+                                                                            cursor: 'pointer',
+                                                                        }}
+                                                                    >
+                                                                        Hủy
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Popup xác nhận xóa truyện */}
             {deleteStoryConfirm.open && (

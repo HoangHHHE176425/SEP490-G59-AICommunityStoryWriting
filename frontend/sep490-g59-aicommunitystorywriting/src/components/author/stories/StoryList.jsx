@@ -33,15 +33,9 @@ export function StoryList({ stories, onCreateStory, onEditStory, onDeleteStory, 
                     <h3 style={{ fontSize: '1.125rem', color: '#6b7280', marginBottom: '0.5rem' }}>
                         Chưa có truyện nào
                     </h3>
-                    <p style={{ fontSize: '0.875rem', color: '#9ca3af', marginBottom: '1.5rem' }}>
-                        Bắt đầu sáng tác truyện đầu tiên của bạn
+                    <p style={{ fontSize: '0.875rem', color: '#9ca3af', margin: 0 }}>
+                        Bắt đầu sáng tác truyện đầu tiên của bạn.
                     </p>
-                    <button
-                        onClick={onCreateStory}
-                        className="px-6 py-2.5 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all"
-                    >
-                        Tạo truyện mới
-                    </button>
                 </div>
             ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
