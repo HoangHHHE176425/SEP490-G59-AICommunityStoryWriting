@@ -1,6 +1,9 @@
-﻿using BusinessObjects.Entities;
+﻿using BusinessObjects;
+using BusinessObjects.Entities;
+using DataAccessObjects.DAOs;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.EntityFrameworkCore;
 using Repositories;
 using Services.DTOs.Stories;
 using Services.Implementations;
@@ -23,203 +26,350 @@ public class UC05_StoryServiceTests
     }
 
     [Fact]
-    public void EditStory_NotFound_ReturnsFalse()
+    public void CreateStory_AuthorNotFound_Throws()
     {
         var repo = new FakeStoryRepository();
         var sut = CreateSut(repo);
 
-        var ok = sut.Update(Guid.NewGuid(), new UpdateStoryRequestDto
-        {
-            Title = "New title",
-            Summary = "New summary",
-            CategoryIds = new List<Guid>()
-        });
+        var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(
+            new CreateStoryRequestDto
+            {
+                Title = "T",
+                Summary = "S",
+                CategoryIds = new List<Guid> { Guid.NewGuid() }
+            },
+            authorId: Guid.NewGuid(),
+            coverImageUrl: null));
 
-        Assert.False(ok);
+        Assert.Contains("không tồn tại", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void EditStory_InvalidStatus_Throws()
+    public void CreateStory_NoCategories_Throws()
     {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
+        var authorId = Guid.NewGuid();
+        try
+        {
+            InsertUser(authorId);
+            var repo = new FakeStoryRepository();
+            var sut = CreateSut(repo);
 
-        var id = Guid.NewGuid();
-        repo.Seed(new stories
+            var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(
+                new CreateStoryRequestDto
+                {
+                    Title = "T",
+                    Summary = "S",
+                    CategoryIds = new List<Guid>()
+                },
+                authorId,
+                coverImageUrl: null));
+
+            Assert.Contains("thể loại", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            DeleteUserIfExists(authorId);
+        }
+    }
+
+    [Fact]
+    public void CreateStory_CategoryNotFound_Throws()
+    {
+        var authorId = Guid.NewGuid();
+        try
+        {
+            InsertUser(authorId);
+            var repo = new FakeStoryRepository();
+            var sut = CreateSut(repo);
+
+            var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(
+                new CreateStoryRequestDto
+                {
+                    Title = "T",
+                    Summary = "S",
+                    CategoryIds = new List<Guid> { Guid.NewGuid() }
+                },
+                authorId,
+                coverImageUrl: null));
+
+            Assert.Contains("Category", ex.Message);
+            Assert.Contains("not found", ex.Message);
+        }
+        finally
+        {
+            DeleteUserIfExists(authorId);
+        }
+    }
+
+    [Fact]
+    public void CreateStory_CategoryInactive_Throws()
+    {
+        var authorId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+
+        try
+        {
+            InsertUser(authorId);
+            InsertCategory(categoryId, isActive: false);
+
+            var repo = new FakeStoryRepository();
+            var sut = CreateSut(repo);
+
+            var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(
+                new CreateStoryRequestDto
+                {
+                    Title = "T",
+                    Summary = "S",
+                    CategoryIds = new List<Guid> { categoryId }
+                },
+                authorId,
+                coverImageUrl: null));
+
+            Assert.Contains("not active", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            CategoryDAO.Delete(categoryId);
+            DeleteUserIfExists(authorId);
+        }
+    }
+
+    [Fact]
+    public void CreateStory_AuthorWritingSuspended_Throws()
+    {
+        var authorId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+
+        try
+        {
+            InsertUser(authorId);
+            InsertCategory(categoryId, isActive: true);
+            UserDAO.SetAuthorWritingSuspendedUntil(authorId, DateTime.UtcNow.AddDays(1));
+
+            var repo = new FakeStoryRepository();
+            var sut = CreateSut(repo);
+
+            var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(
+                new CreateStoryRequestDto
+                {
+                    Title = "T",
+                    Summary = "S",
+                    CategoryIds = new List<Guid> { categoryId }
+                },
+                authorId,
+                coverImageUrl: null));
+
+            Assert.Contains("tạm khóa", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            UserDAO.SetAuthorWritingSuspendedUntil(authorId, null);
+            CategoryDAO.Delete(categoryId);
+            DeleteUserIfExists(authorId);
+        }
+    }
+
+    [Fact]
+    public void CreateStory_SlugAlreadyExists_Throws()
+    {
+        var authorId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+
+        try
+        {
+            InsertUser(authorId);
+            InsertCategory(categoryId, isActive: true);
+
+            var repo = new FakeStoryRepository();
+            var existingId = Guid.NewGuid();
+            repo.Seed(new stories
+            {
+                id = existingId,
+                title = "Hello World",
+                slug = "hello-world",
+                status = "DRAFT",
+                story_progress_status = "ONGOING",
+                age_rating = "ALL"
+            });
+
+            var sut = CreateSut(repo);
+
+            var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(
+                new CreateStoryRequestDto
+                {
+                    Title = "Hello World",
+                    Summary = "S",
+                    CategoryIds = new List<Guid> { categoryId }
+                },
+                authorId,
+                coverImageUrl: null));
+
+            Assert.Contains("already exists", ex.Message);
+        }
+        finally
+        {
+            CategoryDAO.Delete(categoryId);
+            DeleteUserIfExists(authorId);
+        }
+    }
+
+    [Fact]
+    public void CreateStory_InvalidAgeRating_Throws()
+    {
+        var authorId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+
+        try
+        {
+            InsertUser(authorId);
+            InsertCategory(categoryId, isActive: true);
+
+            var repo = new FakeStoryRepository();
+            var sut = CreateSut(repo);
+
+            var ex = Assert.Throws<ArgumentException>(() => sut.Create(
+                new CreateStoryRequestDto
+                {
+                    Title = "Unique Title Xy",
+                    Summary = "S",
+                    CategoryIds = new List<Guid> { categoryId },
+                    AgeRating = "21+"
+                },
+                authorId,
+                coverImageUrl: null));
+
+            Assert.Contains("Invalid age rating", ex.Message);
+        }
+        finally
+        {
+            CategoryDAO.Delete(categoryId);
+            DeleteUserIfExists(authorId);
+        }
+    }
+
+    [Fact]
+    public void CreateStory_InvalidProgressStatus_Throws()
+    {
+        var authorId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+
+        try
+        {
+            InsertUser(authorId);
+            InsertCategory(categoryId, isActive: true);
+
+            var repo = new FakeStoryRepository();
+            var sut = CreateSut(repo);
+
+            var ex = Assert.Throws<ArgumentException>(() => sut.Create(
+                new CreateStoryRequestDto
+                {
+                    Title = "Unique Title Zz",
+                    Summary = "S",
+                    CategoryIds = new List<Guid> { categoryId },
+                    StoryProgressStatus = "INVALID"
+                },
+                authorId,
+                coverImageUrl: null));
+
+            Assert.Contains("Invalid story progress status", ex.Message);
+        }
+        finally
+        {
+            CategoryDAO.Delete(categoryId);
+            DeleteUserIfExists(authorId);
+        }
+    }
+
+    [Fact]
+    public void CreateStory_Success_PersistsDraftAndSlug()
+    {
+        var authorId = Guid.NewGuid();
+        var categoryId = Guid.NewGuid();
+
+        try
+        {
+            InsertUser(authorId);
+            InsertCategory(categoryId, isActive: true);
+
+            var repo = new FakeStoryRepository();
+            var sut = CreateSut(repo);
+
+            var dto = sut.Create(
+                new CreateStoryRequestDto
+                {
+                    Title = "Hello World",
+                    Summary = "Sum",
+                    CategoryIds = new List<Guid> { categoryId },
+                    StoryProgressStatus = "ongoing",
+                    AgeRating = "16+"
+                },
+                authorId,
+                coverImageUrl: "https://example.com/cover.png");
+
+            Assert.Equal("Hello World", dto.Title);
+            Assert.Equal("hello-world", dto.Slug);
+            Assert.Equal("DRAFT", dto.Status);
+            Assert.Equal("ONGOING", dto.StoryProgressStatus);
+            Assert.Equal("16+", dto.AgeRating);
+            Assert.Equal(authorId, dto.AuthorId);
+            Assert.Equal("https://example.com/cover.png", dto.CoverImage);
+
+            var stored = repo.GetById(dto.Id)!;
+            Assert.Equal("hello-world", stored.slug);
+            Assert.Equal(authorId, stored.author_id);
+            Assert.Equal(categoryId, Assert.Single(repo.LastAddedCategoryIds!));
+        }
+        finally
+        {
+            CategoryDAO.Delete(categoryId);
+            DeleteUserIfExists(authorId);
+        }
+    }
+
+    private static void InsertUser(Guid id)
+    {
+        using var ctx = new StoryPlatformDbContext();
+        ctx.users.Add(new users
         {
             id = id,
-            title = "Old",
-            slug = "old",
-            status = "DRAFT",
-            story_progress_status = "ONGOING",
-            age_rating = "ALL"
+            email = $"ut-story-{id:N}@x.test",
+            password_hash = "x",
+            status = "ACTIVE",
+            created_at = DateTime.UtcNow,
+            updated_at = DateTime.UtcNow
         });
-
-        var ex = Assert.Throws<ArgumentException>(() => sut.Update(id, new UpdateStoryRequestDto
-        {
-            Title = "Old",
-            Summary = "s",
-            Status = "NOT_A_STATUS",
-            CategoryIds = new List<Guid>()
-        }));
-        Assert.Contains("Invalid status", ex.Message);
+        ctx.SaveChanges();
     }
 
-    [Fact]
-    public void EditStory_InvalidAgeRating_Throws()
+    private static void InsertCategory(Guid id, bool isActive)
     {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
-
-        var id = Guid.NewGuid();
-        repo.Seed(new stories
+        var suffix = id.ToString("N")[..12];
+        CategoryDAO.Add(new categories
         {
             id = id,
-            title = "Old",
-            slug = "old",
-            status = "DRAFT",
-            story_progress_status = "ONGOING",
-            age_rating = "ALL"
+            name = "UT Cat " + suffix,
+            slug = "ut-st-cat-" + suffix,
+            is_active = isActive,
+            created_at = DateTime.UtcNow
         });
-
-        var ex = Assert.Throws<ArgumentException>(() => sut.Update(id, new UpdateStoryRequestDto
-        {
-            Title = "Old",
-            Summary = "s",
-            AgeRating = "21+",
-            CategoryIds = new List<Guid>()
-        }));
-        Assert.Contains("Invalid age rating", ex.Message);
     }
 
-    [Fact]
-    public void EditStory_InvalidProgressStatus_Throws()
+    private static void DeleteUserIfExists(Guid userId)
     {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
-
-        var id = Guid.NewGuid();
-        repo.Seed(new stories
-        {
-            id = id,
-            title = "Old",
-            slug = "old",
-            status = "DRAFT",
-            story_progress_status = "ONGOING",
-            age_rating = "ALL"
-        });
-
-        var ex = Assert.Throws<ArgumentException>(() => sut.Update(id, new UpdateStoryRequestDto
-        {
-            Title = "Old",
-            Summary = "s",
-            StoryProgressStatus = "INVALID",
-            CategoryIds = new List<Guid>()
-        }));
-        Assert.Contains("Invalid story progress status", ex.Message);
-    }
-
-    [Fact]
-    public void EditStory_TitleChange_SlugDuplicate_Throws()
-    {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
-
-        var id1 = Guid.NewGuid();
-        var id2 = Guid.NewGuid();
-
-        repo.Seed(new stories
-        {
-            id = id1,
-            title = "Hello World",
-            slug = "hello-world",
-            status = "DRAFT",
-            story_progress_status = "ONGOING",
-            age_rating = "ALL"
-        });
-        repo.Seed(new stories
-        {
-            id = id2,
-            title = "Other",
-            slug = "other",
-            status = "DRAFT",
-            story_progress_status = "ONGOING",
-            age_rating = "ALL"
-        });
-
-        var ex = Assert.Throws<InvalidOperationException>(() => sut.Update(id2, new UpdateStoryRequestDto
-        {
-            Title = "Hello World",
-            Summary = "s",
-            CategoryIds = new List<Guid>()
-        }));
-        Assert.Contains("already exists", ex.Message);
-    }
-
-    [Fact]
-    public void EditStory_ValidStatus_Uppercases()
-    {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
-
-        var id = Guid.NewGuid();
-        repo.Seed(new stories
-        {
-            id = id,
-            title = "Old",
-            slug = "old",
-            status = "DRAFT",
-            story_progress_status = "ONGOING",
-            age_rating = "ALL"
-        });
-
-        var ok = sut.Update(id, new UpdateStoryRequestDto
-        {
-            Title = "Old",
-            Summary = "s",
-            Status = "published",
-            CategoryIds = new List<Guid>()
-        });
-
-        Assert.True(ok);
-        var updated = repo.GetById(id)!;
-        Assert.Equal("PUBLISHED", updated.status);
-        Assert.NotNull(updated.updated_at);
-    }
-
-    [Fact]
-    public void EditStory_TitleChange_UpdatesSlug()
-    {
-        var repo = new FakeStoryRepository();
-        var sut = CreateSut(repo);
-
-        var id = Guid.NewGuid();
-        repo.Seed(new stories
-        {
-            id = id,
-            title = "Old",
-            slug = "old",
-            status = "DRAFT",
-            story_progress_status = "ONGOING",
-            age_rating = "ALL"
-        });
-
-        var ok = sut.Update(id, new UpdateStoryRequestDto
-        {
-            Title = "Hello World",
-            Summary = "s",
-            CategoryIds = new List<Guid>()
-        });
-
-        Assert.True(ok);
-        var updated = repo.GetById(id)!;
-        Assert.Equal("hello-world", updated.slug);
-        Assert.Equal("Hello World", updated.title);
+        using var ctx = new StoryPlatformDbContext();
+        var row = ctx.users.FirstOrDefault(u => u.id == userId);
+        if (row == null)
+            return;
+        ctx.users.Remove(row);
+        ctx.SaveChanges();
     }
 
     private sealed class FakeStoryRepository : IStoryRepository
     {
         private readonly Dictionary<Guid, stories> _store = new();
+
+        public IReadOnlyList<Guid>? LastAddedCategoryIds { get; private set; }
 
         public void Seed(stories s) => _store[s.id] = s;
 
@@ -235,16 +385,17 @@ public class UC05_StoryServiceTests
 
         public void Add(stories story) => _store[story.id] = story;
 
-        public void Add(stories story, IEnumerable<Guid> categoryIds) => _store[story.id] = story;
+        public void Add(stories story, IEnumerable<Guid> categoryIds)
+        {
+            _store[story.id] = story;
+            LastAddedCategoryIds = categoryIds.ToList();
+        }
 
         public void Update(stories story) => _store[story.id] = story;
 
         public void Delete(Guid id) => _store.Remove(id);
 
-        public void IncrementViewCount(Guid storyId)
-        {
-            // not needed for these tests
-        }
+        public void IncrementViewCount(Guid storyId) { }
     }
 
     private sealed class FakeChapterRepository : IChapterRepository
@@ -260,4 +411,5 @@ public class UC05_StoryServiceTests
     }
 }
 
-//dotnet test .\AIStory.Tests.csproj -c Release --filter FullyQualifiedName~UC11_ReadPublicStoryTests
+
+//dotnet test .\AIStory.Tests.csproj -c Release --filter FullyQualifiedName~UC05_StoryServiceTests

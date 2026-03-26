@@ -52,11 +52,16 @@ namespace Services.Implementations
 
         public ChapterResponseDto Create(CreateChapterRequestDto request)
         {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+
             var story = StoryDAO.GetById(request.StoryId);
             if (story == null)
             {
                 throw new InvalidOperationException($"Story with ID {request.StoryId} not found.");
             }
+
+            if (request.Id == Guid.Empty)
+                throw new ArgumentException("Id must be a non-empty Guid (do not leave empty).");
 
             if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
                 throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin).");
@@ -113,7 +118,7 @@ namespace Services.Implementations
 
             var chapter = new chapters
             {
-                id = Guid.NewGuid(),
+                id = request.Id,
                 story_id = request.StoryId,
                 title = request.Title,
                 content = content,

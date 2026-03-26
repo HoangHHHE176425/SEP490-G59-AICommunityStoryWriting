@@ -134,8 +134,9 @@ namespace AIStory.API.Controllers
             try
             {
                 var chapter = _chapterService.Create(request);
-                if (!string.IsNullOrWhiteSpace(request.Content) && chapter.StoryId.HasValue)
-                    TriggerPlotManagerUpdate(chapter.StoryId.Value, chapter.Id, request.Content);
+                // Chapter content may come from ai_generated_content even when request.Content is empty.
+                if (!string.IsNullOrWhiteSpace(chapter.Content) && chapter.StoryId.HasValue)
+                    TriggerPlotManagerUpdate(chapter.StoryId.Value, chapter.Id, chapter.Content);
                 return Created($"api/chapters/{chapter.Id}", chapter);
             }
             catch (InvalidOperationException ex)
@@ -887,6 +888,14 @@ namespace AIStory.API.Controllers
             try
             {
                 var ok = _chapterVersionService.SubmitForReview(versionId, authorId.Value);
+                if (ok)
+                {
+                    // Version flow: push latest submitted snapshot to memory context as well.
+                    var chapter = _chapterService.GetById(chapterId);
+                    var version = _chapterVersionService.GetById(versionId);
+                    if (chapter?.StoryId.HasValue == true && !string.IsNullOrWhiteSpace(version?.ContentSnapshot))
+                        TriggerPlotManagerUpdate(chapter.StoryId.Value, chapterId, version!.ContentSnapshot!);
+                }
                 return ok ? NoContent() : NotFound(new { message = "Version không tồn tại hoặc không thể gửi duyệt." });
             }
             catch (UnauthorizedAccessException) { return Forbid(); }
@@ -921,9 +930,10 @@ namespace AIStory.API.Controllers
                     var plotManager = scope.ServiceProvider.GetRequiredService<IPlotManagerService>();
                     await plotManager.UpdateMemoryFromChapterAsync(storyId, chapterId, content, reIndexRagAfter: true);
                 }
-                catch
+                catch (Exception ex)
                 {
                     // Best-effort; không làm fail request
+                    _logger.LogWarning(ex, "PlotManager update failed. StoryId={StoryId}, ChapterId={ChapterId}", storyId, chapterId);
                 }
             });
         }
