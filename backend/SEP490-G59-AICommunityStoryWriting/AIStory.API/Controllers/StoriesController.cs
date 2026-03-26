@@ -233,6 +233,8 @@ namespace AIStory.API.Controllers
             try
             {
                 var reportId = await _storyReportService.CreateStoryReportAsync(id, userId.Value, request);
+                if (reportId == Guid.Empty)
+                    return Conflict(new { message = "Bạn đã báo cáo truyện này trước đó." });
                 return Ok(new { id = reportId, message = "Đã gửi báo cáo." });
             }
             catch (ArgumentException ex)

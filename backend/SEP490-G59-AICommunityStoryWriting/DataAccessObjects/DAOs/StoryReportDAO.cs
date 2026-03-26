@@ -89,7 +89,7 @@ public static class StoryReportDAO
             {
                 if (context.story_report_contributors.AsNoTracking()
                         .Any(c => c.story_id == storyId && c.user_id == userId))
-                    throw new InvalidOperationException("Bạn đã báo cáo truyện này trước đó.");
+                    return Guid.Empty;
 
                 context.story_report_contributors.Add(new story_report_contributors
                 {
@@ -106,7 +106,7 @@ public static class StoryReportDAO
                 }
                 catch (DbUpdateException)
                 {
-                    throw new InvalidOperationException("Bạn đã báo cáo truyện này trước đó.");
+                    return Guid.Empty;
                 }
 
                 var open = context.reports.FirstOrDefault(r =>

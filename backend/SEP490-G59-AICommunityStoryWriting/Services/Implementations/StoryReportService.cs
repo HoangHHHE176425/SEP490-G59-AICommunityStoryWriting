@@ -51,19 +51,12 @@ public class StoryReportService : IStoryReportService
             throw new InvalidOperationException("Bạn không thể báo cáo truyện của chính mình.");
 
         var code = request.ReasonCode.Trim().ToUpperInvariant();
-        try
-        {
-            var id = StoryReportDAO.AppendStoryReportAggregated(
-                storyId,
-                reporterId,
-                code,
-                request.Description);
-            return Task.FromResult(id);
-        }
-        catch (InvalidOperationException)
-        {
-            throw;
-        }
+        var id = StoryReportDAO.AppendStoryReportAggregated(
+            storyId,
+            reporterId,
+            code,
+            request.Description);
+        return Task.FromResult(id);
     }
 
     private static Func<Guid, bool>? BuildStoryClaimPredicate(string? claimFilter, Guid? actingUserId, bool viewerIsAdmin)
