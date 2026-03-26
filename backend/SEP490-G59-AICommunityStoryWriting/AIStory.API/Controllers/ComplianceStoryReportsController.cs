@@ -1,6 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using BusinessObjects;
 using Services.DTOs.StoryReports;
+using Services.DTOs.Admin.Compliance;
 using Services.Interfaces;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -12,6 +15,11 @@ namespace AIStory.API.Controllers;
 [Authorize(Roles = "COMPLIANCE,ADMIN")]
 public class ComplianceStoryReportsController : ControllerBase
 {
+    private const string SrcReportResolution = "REPORT_RESOLUTION";
+    private const string SrcAdminActionRequest = "ADMIN_ACTION_REQUEST";
+    private const string SrcLockRequest = "LOCK_REQUEST";
+    private const string SrcViolationAction = "VIOLATION_ACTION";
+
     private readonly IStoryReportService _storyReportService;
     private readonly ILogger<ComplianceStoryReportsController> _logger;
 
@@ -45,6 +53,126 @@ public class ComplianceStoryReportsController : ControllerBase
             _logger.LogError(ex, "GetMyResolvedHistory failed");
             return StatusCode(500, new { message = "Lỗi tải lịch sử.", error = ex.Message });
         }
+    }
+
+    /// <summary>Nhật ký hoạt động của chính compliance hiện tại (bao gồm xử lý report, gửi đơn, thao tác vi phạm).</summary>
+    [HttpGet("my-activity-logs")]
+    public async Task<IActionResult> GetMyActivityLogs(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? search = null,
+        [FromQuery] string? source = null,
+        [FromQuery] string? action = null)
+    {
+        var uid = GetCurrentUserId();
+        if (!uid.HasValue)
+            return Unauthorized();
+
+        page = page < 1 ? 1 : page;
+        pageSize = pageSize is < 1 or > 100 ? 20 : pageSize;
+
+        await using var db = new StoryPlatformDbContext();
+
+        var reportsQ = db.reports.AsNoTracking()
+            .Where(r => r.compliance_resolved_by == uid.Value && r.resolved_at != null)
+            .Select(r => new ComplianceLogItemDto
+            {
+                Source = SrcReportResolution,
+                RowId = r.id,
+                TargetType = r.target_type,
+                TargetId = r.target_id,
+                Status = r.status,
+                Action = r.status,
+                Message = r.status == "RESOLVED"
+                    ? "Đã xử lý toàn bộ phiếu báo cáo đang mở."
+                    : (r.status == "DISMISSED"
+                        ? "Đã kết luận không đủ bằng chứng để xử lý."
+                        : "Đã xử lý phiếu báo cáo."),
+                CreatedAtUtc = r.resolved_at!.Value
+            });
+
+        var actionQ = db.compliance_admin_action_requests.AsNoTracking()
+            .Where(x => x.requester_id == uid.Value)
+            .Select(x => new ComplianceLogItemDto
+            {
+                Source = SrcAdminActionRequest,
+                RowId = x.id,
+                TargetType = "STORY",
+                TargetId = x.story_id,
+                Status = x.status,
+                Action = x.request_kind,
+                Message = x.message,
+                CreatedAtUtc = x.created_at
+            });
+
+        var lockQ = db.compliance_story_report_lock_requests.AsNoTracking()
+            .Where(x => x.requester_id == uid.Value)
+            .Select(x => new ComplianceLogItemDto
+            {
+                Source = SrcLockRequest,
+                RowId = x.id,
+                TargetType = "STORY",
+                TargetId = x.story_id,
+                Status = x.status,
+                Action = x.resolution_action,
+                Message = x.message,
+                CreatedAtUtc = x.created_at
+            });
+
+        var violationQ = db.violation_logs.AsNoTracking()
+            .Where(v => v.compliance_officer_id == uid.Value && v.created_at != null)
+            .Select(v => new ComplianceLogItemDto
+            {
+                Source = SrcViolationAction,
+                RowId = v.id,
+                TargetType = v.target_type,
+                TargetId = v.target_id,
+                Status = "DONE",
+                Action = v.penalty_type,
+                Message = v.reason,
+                CreatedAtUtc = v.created_at!.Value
+            });
+
+        var q = reportsQ.Concat(actionQ).Concat(lockQ).Concat(violationQ);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            if (Guid.TryParse(s, out var g))
+                q = q.Where(x => x.RowId == g || x.TargetId == g);
+            else
+                q = q.Where(x =>
+                    (x.Source != null && x.Source.Contains(s)) ||
+                    (x.Action != null && x.Action.Contains(s)) ||
+                    (x.Message != null && x.Message.Contains(s)) ||
+                    (x.Status != null && x.Status.Contains(s)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(source))
+        {
+            var src = source.Trim().ToUpper();
+            if (src != "ALL")
+                q = q.Where(x => x.Source != null && x.Source.ToUpper() == src);
+        }
+
+        if (!string.IsNullOrWhiteSpace(action))
+        {
+            var act = action.Trim().ToUpper();
+            if (act != "ALL")
+                q = q.Where(x => x.Action != null && x.Action.ToUpper() == act);
+        }
+
+        q = q.OrderByDescending(x => x.CreatedAtUtc).ThenByDescending(x => x.RowId);
+        var total = await q.CountAsync();
+        var rows = await q.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+
+        return Ok(new
+        {
+            items = rows,
+            totalCount = total,
+            page,
+            pageSize
+        });
     }
 
     [HttpGet]

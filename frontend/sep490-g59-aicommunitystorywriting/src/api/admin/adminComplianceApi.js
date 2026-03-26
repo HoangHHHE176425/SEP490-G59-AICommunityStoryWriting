@@ -167,3 +167,15 @@ export async function getAdminCompliancePerformance(params = {}) {
     const res = await axiosInstance.get(`/admin/compliance-story-reports/compliance-performance${query ? `?${query}` : ''}`);
     return res.data;
 }
+
+export async function getMyResolvedComplianceStoryReports(params = {}) {
+    const query = toQuery(params);
+    const res = await axiosInstance.get(`/compliance/story-reports/my-resolved-history${query ? `?${query}` : ''}`);
+    return res.data;
+}
+
+export async function getMyComplianceActivityLogs(params = {}) {
+    const query = toQuery(params);
+    const res = await axiosInstance.get(`/compliance/story-reports/my-activity-logs${query ? `?${query}` : ''}`);
+    return res.data;
+}

@@ -32,6 +32,7 @@ import {
     getComplianceStoryReports,
     getComplianceUserViolations,
     getMyComplianceAdminActionRequests,
+    getMyComplianceActivityLogs,
     getMyComplianceLockRequests,
     requestComplianceStoryRelease,
     requestComplianceCommentAdminAction,
@@ -54,6 +55,29 @@ const REPORT_STATUS_FILTER_OPTIONS = [
     { value: 'RESOLVED', label: 'Đã xử lý thành công' },
     { value: 'DISMISSED', label: 'Không đủ bằng chứng' },
     { value: 'ALL', label: 'Tất cả trạng thái' },
+];
+const COMPLIANCE_HISTORY_SOURCE_OPTIONS = [
+    { value: 'ALL', label: 'Tất cả nguồn' },
+    { value: 'REPORT_RESOLUTION', label: 'Xử lý phiếu báo cáo' },
+    { value: 'ADMIN_ACTION_REQUEST', label: 'Yêu cầu xử lý tài khoản' },
+    { value: 'LOCK_REQUEST', label: 'Yêu cầu gỡ/chuyển lock' },
+    { value: 'VIOLATION_ACTION', label: 'Thao tác xử lý vi phạm' },
+];
+const COMPLIANCE_HISTORY_ACTION_OPTIONS = [
+    { value: 'ALL', label: 'Tất cả hành động' },
+    { value: 'RESOLVED', label: 'Đã xử lý' },
+    { value: 'DISMISSED', label: 'Không đủ bằng chứng' },
+    { value: 'BAN_USER', label: 'Đề xuất chặn tài khoản' },
+    { value: 'SUSPEND_AUTHOR_WRITING', label: 'Đề xuất tạm đình chỉ quyền viết' },
+    { value: 'APPROVE_UNLOCK', label: 'Chấp nhận gỡ lock' },
+    { value: 'REJECT_UNLOCK', label: 'Từ chối gỡ lock' },
+    { value: 'COMMENTS_DISABLED', label: 'Tắt bình luận truyện' },
+    { value: 'COMMENTS_ENABLED', label: 'Bật lại bình luận truyện' },
+    { value: 'STORY_HIDDEN_COMPLIANCE', label: 'Ẩn truyện khỏi công khai' },
+    { value: 'STORY_UNHIDDEN_COMPLIANCE', label: 'Hiện lại truyện công khai' },
+    { value: 'COMMENT_HIDDEN', label: 'Ẩn bình luận' },
+    { value: 'COMMENT_UNHIDDEN', label: 'Hiện lại bình luận' },
+    { value: 'BAN', label: 'Chặn tài khoản' },
 ];
 
 function mapStatusFilterToApiValue(filterValue) {
@@ -348,6 +372,35 @@ function complianceRequestStatusVi(s) {
     return s || '—';
 }
 
+function complianceHistorySourceVi(s) {
+    const u = String(s ?? '').trim().toUpperCase();
+    if (u === 'REPORT_RESOLUTION') return 'Xử lý phiếu báo cáo';
+    if (u === 'ADMIN_ACTION_REQUEST') return 'Yêu cầu xử lý tài khoản';
+    if (u === 'LOCK_REQUEST') return 'Yêu cầu gỡ/chuyển lock';
+    if (u === 'VIOLATION_ACTION') return 'Thao tác xử lý vi phạm';
+    return s || '—';
+}
+
+function complianceHistoryActionVi(action, source) {
+    const src = String(source ?? '').trim().toUpperCase();
+    const act = String(action ?? '').trim().toUpperCase();
+    if (src === 'VIOLATION_ACTION') return penaltyTypeVi(action);
+    if (act === 'RESOLVED' || act === 'DISMISSED' || act === 'NEW' || act === 'IN_REVIEW') return statusViLabel(act);
+    if (act === 'PENDING' || act === 'APPROVED' || act === 'REJECTED') return complianceRequestStatusVi(act);
+    return action || '—';
+}
+
+function complianceHistoryMessageVi(item) {
+    const source = String(item?.source ?? '').trim().toUpperCase();
+    const action = String(item?.action ?? '').trim().toUpperCase();
+    if (source === 'REPORT_RESOLUTION') {
+        if (action === 'RESOLVED') return 'Đã xử lý toàn bộ phiếu báo cáo đang mở.';
+        if (action === 'DISMISSED') return 'Đã kết luận không đủ bằng chứng để xử lý.';
+        return 'Đã xử lý phiếu báo cáo.';
+    }
+    return item?.message || '—';
+}
+
 function complianceAdminActionKindVi(k) {
     const u = String(k ?? '').trim().toUpperCase();
     if (u === 'BAN_USER') return 'Chặn tài khoản';
@@ -379,6 +432,7 @@ export default function ViolationManagement() {
         const base = [
             { id: 'story-reports', label: 'Báo cáo vi phạm truyện' },
             { id: 'comment-reports', label: 'Báo cáo vi phạm bình luận' },
+            { id: 'compliance-history', label: 'Lịch sử xử lý vi phạm' },
         ];
         if (isAdmin) {
             base.push({ id: 'lock-requests', label: 'Yêu cầu gỡ khóa đơn' });
@@ -393,7 +447,13 @@ export default function ViolationManagement() {
     const [rows, setRows] = useState([]);
     const [totalCount, setTotalCount] = useState(0);
     const [currentPage, setCurrentPage] = useState(1);
-    const [filters, setFilters] = useState({ search: '', statusFilter: 'OPEN', flaggedOnly: false });
+    const [filters, setFilters] = useState({
+        search: '',
+        statusFilter: 'OPEN',
+        flaggedOnly: false,
+        historySource: 'ALL',
+        historyAction: 'ALL',
+    });
     const [selectedStory, setSelectedStory] = useState(null);
     const [storyTickets, setStoryTickets] = useState([]);
     const [storyTicketLoading, setStoryTicketLoading] = useState(false);
@@ -432,6 +492,7 @@ export default function ViolationManagement() {
     const [commentClaimPickerRows, setCommentClaimPickerRows] = useState([]);
     const [commentClaimPickerLoading, setCommentClaimPickerLoading] = useState(false);
     const [commentClaimPickerStoryMeta, setCommentClaimPickerStoryMeta] = useState({});
+    const [historyTargetStoryMetaMap, setHistoryTargetStoryMetaMap] = useState({});
     const [claimableStoryCount, setClaimableStoryCount] = useState(0);
     const [claimableCommentCount, setClaimableCommentCount] = useState(0);
     const [infoModal, setInfoModal] = useState(null);
@@ -528,6 +589,14 @@ export default function ViolationManagement() {
                     status: reportStatusApiValue,
                     search: filters.search || undefined,
                 });
+            } else if (activeTab === 'compliance-history') {
+                data = await getMyComplianceActivityLogs({
+                    page,
+                    pageSize: PAGE_SIZE,
+                    search: filters.search || undefined,
+                    source: filters.historySource && filters.historySource !== 'ALL' ? filters.historySource : undefined,
+                    action: filters.historyAction && filters.historyAction !== 'ALL' ? filters.historyAction : undefined,
+                });
             } else if (activeTab === 'lock-requests') {
                 data = await getAdminComplianceLockRequests({ status: 'PENDING' });
             } else if (activeTab === 'compliance-logs') {
@@ -596,11 +665,37 @@ export default function ViolationManagement() {
         } finally {
             setLoading(false);
         }
-    }, [activeTab, adminLogType, filters.flaggedOnly, filters.search, reportStatusApiValue, showClaimedStoryList, showClaimedCommentList]);
+    }, [activeTab, adminLogType, filters.flaggedOnly, filters.historyAction, filters.historySource, filters.search, reportStatusApiValue, showClaimedStoryList, showClaimedCommentList]);
 
     const isReportTab = activeTab === 'story-reports' || activeTab === 'comment-reports';
 
     useEffect(() => { loadData(1); }, [activeTab, loadData]);
+    useEffect(() => {
+        if (activeTab !== 'compliance-history' || !Array.isArray(rows) || rows.length === 0) return;
+        const storyIds = Array.from(new Set(
+            rows
+                .filter((x) => String(x?.targetType ?? '').trim().toUpperCase() === 'STORY')
+                .map((x) => x?.targetId)
+                .filter(Boolean),
+        ));
+        if (storyIds.length === 0) return;
+        const missing = storyIds.filter((id) => !historyTargetStoryMetaMap[id]);
+        if (missing.length === 0) return;
+        Promise.all(missing.map(async (id) => {
+            try {
+                const s = await getStoryById(id, { recordView: false });
+                return [id, (s?.title ?? s?.Title ?? '—')];
+            } catch {
+                return [id, null];
+            }
+        })).then((entries) => {
+            setHistoryTargetStoryMetaMap((prev) => {
+                const next = { ...prev };
+                for (const [id, title] of entries) next[id] = { title };
+                return next;
+            });
+        });
+    }, [activeTab, rows, historyTargetStoryMetaMap]);
     useEffect(() => {
         if (isReportTab) refreshClaimableCounts();
     }, [isReportTab, activeTab, refreshClaimableCounts]);
@@ -867,19 +962,6 @@ export default function ViolationManagement() {
 
         try {
             setClaimPickerLoading(true);
-            const mine = await getComplianceStoryReports({
-                page: 1,
-                pageSize: 1,
-                groupByStory: true,
-                claimFilter: 'mine',
-                statuses: 'NEW,IN_REVIEW',
-            });
-            const mineItems = readPaged(mine).items;
-            if (Array.isArray(mineItems) && mineItems.length > 0) {
-                setShowClaimedStoryList(true);
-                await loadData(1, { afterClaim: true });
-                return;
-            }
             const queue = await getComplianceStoryReports({
                 page: 1,
                 pageSize: 50,
@@ -931,18 +1013,6 @@ export default function ViolationManagement() {
         const onlyUnclaimedPickerRows = (list) => (Array.isArray(list) ? list : []).filter((r) => !coerceBool(r.isComplianceLocked));
         try {
             setCommentClaimPickerLoading(true);
-            const mine = await getComplianceCommentReports({
-                page: 1,
-                pageSize: 1,
-                claimFilter: 'mine',
-                status: 'NEW,IN_REVIEW',
-            });
-            const mineItems = readPaged(mine).items;
-            if (Array.isArray(mineItems) && mineItems.length > 0) {
-                setShowClaimedCommentList(true);
-                await loadData(1, { afterClaim: true });
-                return;
-            }
             const res = await getComplianceCommentReports({
                 page: 1,
                 pageSize: 80,
@@ -1294,6 +1364,49 @@ export default function ViolationManagement() {
         </div>
     );
 
+    const renderComplianceHistory = () => (
+        <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+                <thead><tr className="bg-slate-50">
+                    <th style={th}>Thời điểm</th>
+                    <th style={th}>Nguồn</th>
+                    <th style={th}>Hành động</th>
+                    <th style={th}>Đối tượng</th>
+                    <th style={th}>Nội dung</th>
+                </tr></thead>
+                <tbody>
+                    {rows.length === 0 && (
+                        <tr>
+                            <td colSpan={5} className="p-6 text-center text-sm text-slate-500">Chưa có lịch sử xử lý vi phạm.</td>
+                        </tr>
+                    )}
+                    {rows.map((r) => (
+                        <tr key={r.rowId || r.reportId || r.id} className="border-t border-slate-200 hover:bg-slate-50/70">
+                            <td style={td}>{formatDate(r.createdAtUtc || r.resolvedAtUtc)}</td>
+                            <td style={td}>{complianceHistorySourceVi(r.source)}</td>
+                            <td style={td}>{complianceHistoryActionVi(r.action, r.source)}</td>
+                            <td style={td}>
+                                {String(r.targetType || '').toUpperCase() === 'STORY' ? (
+                                    <>
+                                        <div style={{ fontWeight: 600 }}>Đối tượng: Truyện</div>
+                                        <div style={{ color: '#64748b', fontSize: 12 }}>
+                                            {historyTargetStoryMetaMap[r.targetId]?.title || '—'}
+                                        </div>
+                                    </>
+                                ) : String(r.targetType || '').toUpperCase() === 'COMMENT' ? (
+                                    <div style={{ fontWeight: 600 }}>Đối tượng: Bình luận</div>
+                                ) : (
+                                    <div style={{ fontWeight: 600 }}>{r.targetType || '—'}</div>
+                                )}
+                            </td>
+                            <td style={td}>{complianceHistoryMessageVi(r)}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+
     return (
         <div className="p-8 space-y-6">
             <div>
@@ -1391,6 +1504,32 @@ export default function ViolationManagement() {
                         )}
                     </>
                 )}
+                {activeTab === 'compliance-history' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-2">
+                        <input
+                            value={filters.search}
+                            onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
+                            placeholder="Tìm theo đối tượng, nội dung..."
+                            style={input}
+                        />
+                        <select value={filters.historySource} onChange={(e) => setFilters((p) => ({ ...p, historySource: e.target.value }))} style={input}>
+                            {COMPLIANCE_HISTORY_SOURCE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                        </select>
+                        <select value={filters.historyAction} onChange={(e) => setFilters((p) => ({ ...p, historyAction: e.target.value }))} style={input}>
+                            {COMPLIANCE_HISTORY_ACTION_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                        </select>
+                        <button
+                            onClick={() => setFilters((p) => ({ ...p, search: '', historySource: 'ALL', historyAction: 'ALL' }))}
+                            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"
+                        >
+                            <RotateCcw style={{ width: 14, height: 14 }} /> Đặt lại
+                        </button>
+                    </div>
+                )}
             </div>
 
             <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -1403,12 +1542,14 @@ export default function ViolationManagement() {
                             ? (showClaimedCommentList
                                 ? renderCommentReports()
                                 : <div className="p-8 text-center text-slate-500 text-sm">Bấm &quot;Nhận duyệt đơn&quot; để bắt đầu xử lý báo cáo bình luận và hiển thị danh sách.</div>)
-                            : activeTab === 'lock-requests' ? renderLockRequests()
-                                : activeTab === 'compliance-logs' ? (
-                                    <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-slate-50"><th style={th}>Thời điểm</th><th style={th}>Nhân viên kiểm duyệt</th><th style={th}>Nguồn</th><th style={th}>Hành động</th><th style={th}>Trạng thái</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-slate-200 hover:bg-slate-50/70"><td style={td}>{formatDate(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
-                                ) : (
-                                    <div className="p-8 text-center text-slate-500 text-sm">Không có dữ liệu hiển thị.</div>
-                                )
+                            : activeTab === 'compliance-history'
+                                ? renderComplianceHistory()
+                                : activeTab === 'lock-requests' ? renderLockRequests()
+                                    : activeTab === 'compliance-logs' ? (
+                                        <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-slate-50"><th style={th}>Thời điểm</th><th style={th}>Nhân viên kiểm duyệt</th><th style={th}>Nguồn</th><th style={th}>Hành động</th><th style={th}>Trạng thái</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-slate-200 hover:bg-slate-50/70"><td style={td}>{formatDate(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
+                                    ) : (
+                                        <div className="p-8 text-center text-slate-500 text-sm">Không có dữ liệu hiển thị.</div>
+                                    )
                 )}
                 {activeTab !== 'lock-requests' && !(activeTab === 'story-reports' && !showClaimedStoryList) && !(activeTab === 'comment-reports' && !showClaimedCommentList) && (
                     <Pagination currentPage={currentPage} totalPages={totalPages} totalItems={totalCount} itemsPerPage={PAGE_SIZE} onPageChange={(p) => loadData(p)} itemLabel="bản ghi" />
