@@ -1232,10 +1232,12 @@ export function AuthorStoryManagement({ onBack }) {
                             onClick={async () => {
                                 try {
                                     await logout();
-                                    onBack();
+                                    onBack?.();
+                                    navigate('/', { replace: true });
                                 } catch (error) {
                                     console.error('Logout error:', error);
-                                    onBack();
+                                    onBack?.();
+                                    navigate('/', { replace: true });
                                 }
                             }}
                             style={{

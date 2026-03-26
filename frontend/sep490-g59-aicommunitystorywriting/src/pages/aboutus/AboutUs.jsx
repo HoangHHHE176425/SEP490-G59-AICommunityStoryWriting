@@ -630,12 +630,7 @@ function TeamSection() {
           })}
         </div>
 
-        <div className="mt-16 text-center">
-          <p className="text-[#90A1B9] text-lg mb-6">Chúng tôi luôn tìm kiếm những tài năng mới để gia nhập đội ngũ</p>
-          <button className="px-8 py-3 bg-white border-2 border-[#13EC5B] text-[#13EC5B] rounded-xl hover:bg-[#13EC5B] hover:text-white transition-all font-bold">
-            Xem Các Vị Trí Tuyển Dụng →
-          </button>
-        </div>
+        {/* Recruitment CTA removed per request */}
       </div>
     </section>
   );

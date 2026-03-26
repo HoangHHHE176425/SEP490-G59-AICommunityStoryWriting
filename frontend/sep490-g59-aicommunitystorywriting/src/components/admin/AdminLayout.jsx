@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { getSystemWalletBalance } from '../../api/admin/walletApi';
+import { getAdminTransactions } from '../../api/admin/transactionsApi';
 import {
     LayoutDashboard,
     Bookmark,
@@ -73,6 +74,9 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
     // Số dư ví hệ thống (API: GET /api/admin/wallet/balance)
     // MODERATOR / COMPLIANCE: không xem ví hệ thống -> không gọi API.
     const [systemWalletBalance, setSystemWalletBalance] = useState(null);
+    const [notiOpen, setNotiOpen] = useState(false);
+    const [pendingWithdrawCount, setPendingWithdrawCount] = useState(0);
+    const [notiError, setNotiError] = useState('');
     useEffect(() => {
         if (hasLimitedMenu) return;
         let cancelled = false;
@@ -98,6 +102,38 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
         window.addEventListener('system-wallet:balance', handler);
         return () => window.removeEventListener('system-wallet:balance', handler);
     }, [hasLimitedMenu]);
+
+    useEffect(() => {
+        setNotiOpen(false);
+    }, [activePage]);
+
+    // Admin notifications: pending withdraw requests.
+    useEffect(() => {
+        if (hasLimitedMenu) return;
+        if (roleUpper !== 'ADMIN') return;
+
+        let cancelled = false;
+        const fetchCount = async () => {
+            try {
+                const [a, b] = await Promise.all([
+                    getAdminTransactions({ type: 'WITHDRAW', status: 'PENDING', page: 1, pageSize: 1 }).catch(() => ({ totalCount: 0 })),
+                    getAdminTransactions({ type: 'WITHDRAW', status: 'PENDING_REVIEW', page: 1, pageSize: 1 }).catch(() => ({ totalCount: 0 })),
+                ]);
+                if (cancelled) return;
+                setPendingWithdrawCount(Number(a?.totalCount ?? 0) + Number(b?.totalCount ?? 0));
+                setNotiError('');
+            } catch {
+                if (!cancelled) setNotiError('Không tải được thông báo.');
+            }
+        };
+
+        fetchCount();
+        const id = setInterval(fetchCount, 15000);
+        return () => {
+            cancelled = true;
+            clearInterval(id);
+        };
+    }, [hasLimitedMenu, roleUpper]);
 
     const handleLogout = async () => {
         try {
@@ -212,6 +248,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                         )}
 
                         <button
+                            onClick={() => setNotiOpen((v) => !v)}
                             style={{
                                 position: 'relative',
                                 padding: '0.5rem',
@@ -222,18 +259,122 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                             }}
                         >
                             <Bell style={{ width: '20px', height: '20px', color: '#1e293b' }} />
-                            <span
-                                style={{
-                                    position: 'absolute',
-                                    top: '4px',
-                                    right: '4px',
-                                    width: '8px',
-                                    height: '8px',
-                                    backgroundColor: '#ef4444',
-                                    borderRadius: '50%'
-                                }}
-                            ></span>
+                            {pendingWithdrawCount > 0 ? (
+                                <span
+                                    style={{
+                                        position: 'absolute',
+                                        top: '2px',
+                                        right: '2px',
+                                        minWidth: '16px',
+                                        height: '16px',
+                                        padding: '0 5px',
+                                        backgroundColor: '#ef4444',
+                                        color: '#ffffff',
+                                        borderRadius: '999px',
+                                        fontSize: '10px',
+                                        fontWeight: 800,
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        border: '2px solid var(--admin-surface)',
+                                    }}
+                                >
+                                    {pendingWithdrawCount > 99 ? '99+' : pendingWithdrawCount}
+                                </span>
+                            ) : null}
                         </button>
+
+                        {notiOpen && roleUpper === 'ADMIN' && !hasLimitedMenu ? (
+                            <div style={{ position: 'relative' }}>
+                                <div
+                                    onClick={() => setNotiOpen(false)}
+                                    style={{
+                                        position: 'fixed',
+                                        inset: 0,
+                                        zIndex: 55,
+                                        background: 'transparent',
+                                    }}
+                                />
+                                <div
+                                    style={{
+                                        position: 'absolute',
+                                        right: 0,
+                                        top: 'calc(100% + 10px)',
+                                        width: '340px',
+                                        zIndex: 56,
+                                        backgroundColor: 'var(--admin-surface)',
+                                        border: '1px solid var(--admin-border)',
+                                        borderRadius: '14px',
+                                        boxShadow: '0 12px 30px rgba(15, 23, 42, 0.12)',
+                                        overflow: 'hidden',
+                                    }}
+                                >
+                                    <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--admin-border)' }}>
+                                        <p style={{ margin: 0, fontSize: '12px', fontWeight: 800, color: 'var(--admin-text)' }}>Thông báo</p>
+                                        <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--admin-muted)' }}>
+                                            {notiError ? notiError : 'Cập nhật tự động mỗi 15 giây'}
+                                        </p>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            window.sessionStorage.setItem(
+                                                'admin_transactions_prefill',
+                                                JSON.stringify({ type: 'WITHDRAW', status: 'PENDING', page: 1 })
+                                            );
+                                            setNotiOpen(false);
+                                            onNavigate('transactions');
+                                        }}
+                                        style={{
+                                            width: '100%',
+                                            textAlign: 'left',
+                                            padding: '12px 14px',
+                                            border: 'none',
+                                            background: 'transparent',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'flex-start',
+                                            gap: '10px',
+                                        }}
+                                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#f8fafc')}
+                                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                                        title="Mở danh sách giao dịch và lọc rút tiền chờ duyệt"
+                                    >
+                                        <div
+                                            style={{
+                                                width: '34px',
+                                                height: '34px',
+                                                borderRadius: '10px',
+                                                backgroundColor: 'rgba(239, 68, 68, 0.10)',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                flexShrink: 0,
+                                            }}
+                                        >
+                                            <Landmark style={{ width: '18px', height: '18px', color: '#ef4444' }} />
+                                        </div>
+                                        <div style={{ minWidth: 0 }}>
+                                            <p style={{ margin: 0, fontSize: '12px', fontWeight: 800, color: 'var(--admin-text)' }}>
+                                                Yêu cầu rút tiền chờ duyệt
+                                            </p>
+                                            <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--admin-muted)' }}>
+                                                Hiện có <span style={{ fontWeight: 900, color: pendingWithdrawCount ? '#ef4444' : 'var(--admin-text)' }}>{pendingWithdrawCount}</span> yêu cầu cần xử lý
+                                            </p>
+                                        </div>
+                                    </button>
+
+                                    {pendingWithdrawCount === 0 ? (
+                                        <div style={{ padding: '12px 14px', borderTop: '1px solid var(--admin-border)' }}>
+                                            <p style={{ margin: 0, fontSize: '11px', color: 'var(--admin-muted)' }}>
+                                                Không có yêu cầu mới.
+                                            </p>
+                                        </div>
+                                    ) : null}
+                                </div>
+                            </div>
+                        ) : null}
 
                         <div
                             style={{
@@ -280,6 +421,10 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                     {menuItems.map((item) => {
                         const Icon = item.icon;
                         const isActive = activePage === item.id;
+                        const label =
+                            item.id === 'dashboard' && roleUpper === 'MODERATOR'
+                                ? 'Tổng quan kiểm duyệt'
+                                : item.label;
                         return (
                             <button
                                 key={item.id}
@@ -314,7 +459,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                                 }}
                             >
                                 <Icon style={{ width: '20px', height: '20px', flexShrink: 0 }} />
-                                {isSidebarOpen && <span>{item.label}</span>}
+                                {isSidebarOpen && <span>{label}</span>}
                             </button>
                         );
                     })}
@@ -420,6 +565,10 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                         {menuItems.map((item) => {
                             const Icon = item.icon;
                             const isActive = activePage === item.id;
+                            const label =
+                                item.id === 'dashboard' && roleUpper === 'MODERATOR'
+                                    ? 'Tổng quan kiểm duyệt'
+                                    : item.label;
                             return (
                                 <button
                                     key={item.id}
@@ -445,7 +594,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                                     }}
                                 >
                                     <Icon style={{ width: '20px', height: '20px' }} />
-                                    <span>{item.label}</span>
+                                    <span>{label}</span>
                                 </button>
                             );
                         })}
