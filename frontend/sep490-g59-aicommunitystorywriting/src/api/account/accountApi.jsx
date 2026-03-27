@@ -1,6 +1,54 @@
 import axiosInstance from "../axiosInstance";
 
+function normalizeAccountApiError(err) {
+    const status = err?.response?.status;
+    const message =
+        err?.response?.data?.message ||
+        err?.response?.data?.title ||
+        err?.message ||
+        "";
+
+    const msgLower = String(message).toLowerCase();
+
+    // SQL unique index errors from backend update profile
+    if (
+        msgLower.includes("ux_user_profiles_phone_notnull") ||
+        (msgLower.includes("duplicate key") && msgLower.includes("phone"))
+    ) {
+        return "Số điện thoại đã được sử dụng bởi tài khoản khác.";
+    }
+
+    if (
+        msgLower.includes("ux_user_profiles_id_number_notnull") ||
+        msgLower.includes("ux_user_profiles_idnumber_notnull") ||
+        (msgLower.includes("duplicate key") && (msgLower.includes("id_number") || msgLower.includes("id number")))
+    ) {
+        return "Số CCCD/CMND đã được sử dụng bởi tài khoản khác.";
+    }
+
+    if (status === 400 && msgLower.includes("duplicate key")) {
+        return "Thông tin bạn nhập đã tồn tại trong hệ thống.";
+    }
+
+    // Nhiều trường hợp backend chỉ trả lỗi EF chung, không kèm inner exception.
+    if (
+        status === 400 &&
+        (
+            msgLower.includes("an error occurred while saving the entity changes") ||
+            msgLower.includes("dbupdateexception") ||
+            msgLower.includes("see the inner exception for details")
+        )
+    ) {
+        return "Không thể lưu thay đổi. Số điện thoại hoặc CCCD/CMND có thể đã được dùng bởi tài khoản khác.";
+    }
+
+    return null;
+}
+
 function getErrorMessage(err) {
+    const normalized = normalizeAccountApiError(err);
+    if (normalized) return normalized;
+
     return (
         err?.response?.data?.message ||
         err?.response?.data?.title ||

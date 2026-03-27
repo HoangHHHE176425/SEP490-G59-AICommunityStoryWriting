@@ -73,10 +73,12 @@ function getEscalationResolveErrorMessage(err) {
 
 /** Đồng bộ token với các màn admin (PublicationManagement, CategoryManagement, …). */
 const T = {
-    green: '#13ec5b',
-    greenHover: '#10d352',
-    sky: '#0ea5e9',
-    skySoft: '#e0f2fe',
+    // Prefer AdminLayout theme tokens when present.
+    green: 'var(--admin-primary, #13ec5b)',
+    greenHover: 'var(--admin-primary, #13ec5b)',
+    // Previously used as "active tab" color; map to admin primary for consistency.
+    sky: 'var(--admin-primary, #13ec5b)',
+    skySoft: 'var(--admin-primary-soft, rgba(19, 236, 91, 0.12))',
     slate: '#64748b',
     slateDark: '#334155',
     title: '#1e293b',
@@ -732,7 +734,7 @@ export function ReviewEscalationsManagement() {
                                     padding: '0 6px',
                                     borderRadius: 999,
                                     background: '#ffffff',
-                                    color: T.sky,
+                                    color: T.green,
                                     fontSize: '0.7rem',
                                     fontWeight: 800,
                                     display: 'inline-flex',
@@ -767,7 +769,7 @@ export function ReviewEscalationsManagement() {
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.25rem' }}>
                             <button
                                 type="button"
-                                style={pubTabStyle(listMode === 'pending', '#ffc107')}
+                                style={pubTabStyle(listMode === 'pending', T.green)}
                                 {...pillHoverHandlers(listMode === 'pending')}
                                 onClick={() => setListMode('pending')}
                             >
@@ -775,7 +777,7 @@ export function ReviewEscalationsManagement() {
                             </button>
                             <button
                                 type="button"
-                                style={pubTabStyle(listMode === 'history', '#10b981')}
+                                style={pubTabStyle(listMode === 'history', T.green)}
                                 {...pillHoverHandlers(listMode === 'history')}
                                 onClick={() => setListMode('history')}
                             >
@@ -1087,11 +1089,9 @@ export function ReviewEscalationsManagement() {
             {mainTab === 'log' && (
                 <div style={{ backgroundColor: T.card, borderRadius: '12px', border: `1px solid ${T.border}`, overflow: 'hidden' }}>
                     <div style={{ padding: '1.25rem 1.5rem' }}>
-                        <h2 style={{ margin: '0 0 0.35rem', fontSize: '1.125rem', fontWeight: 600, color: T.title }}>Log đơn escalation</h2>
+                        <h2 style={{ margin: '0 0 0.35rem', fontSize: '1.125rem', fontWeight: 600, color: T.title }}>Nhật ký yêu cầu</h2>
                         <p style={{ fontSize: '0.875rem', color: T.slate, margin: '0 0 1.25rem', lineHeight: 1.55 }}>
-                            Toàn bộ yêu cầu <code style={{ background: T.bg, padding: '2px 6px', borderRadius: 4, fontSize: '0.8125rem' }}>review_escalation_requests</code>
-                            : lọc, tìm theo lý do / tiêu đề / GUID, phân trang. Lọc theo <strong>thời điểm xử lý</strong> chỉ áp dụng khi đã có{' '}
-                            <code style={{ background: T.bg, padding: '2px 6px', borderRadius: 4, fontSize: '0.8125rem' }}>resolved_at</code>.
+                            Tra cứu các yêu cầu đã tạo. Có thể lọc theo trạng thái, loại yêu cầu, đích (STORY/CHAPTER), người gửi/xử lý và thời gian tạo/xử lý.
                         </p>
 
                         <div
@@ -1103,83 +1103,78 @@ export function ReviewEscalationsManagement() {
                                 marginBottom: '1rem',
                             }}
                         >
-                            <p style={{ fontSize: '0.75rem', fontWeight: 600, color: T.slate, textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 0.75rem' }}>Bộ lọc</p>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                                <p style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slate, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>Bộ lọc</p>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowLogAdvancedFilters((v) => !v)}
+                                    style={{
+                                        padding: '0.35rem 0.75rem',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 600,
+                                        borderRadius: 9999,
+                                        border: `1px solid ${T.border}`,
+                                        background: T.card,
+                                        color: T.title,
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    {showLogAdvancedFilters ? 'Thu gọn' : 'Mở rộng'}
+                                </button>
+                            </div>
+
+                            {/* Quick filters */}
+                            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 0.8fr', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
                                     Tìm kiếm
-                                    <input value={logSearch} onChange={(e) => setLogSearch(e.target.value)} placeholder="Lý do, tiêu đề, GUID" style={inputBase} />
+                                    <input value={logSearch} onChange={(e) => setLogSearch(e.target.value)} placeholder="Lý do, tiêu đề, GUID" style={{ ...inputBase, marginTop: 6 }} />
                                 </label>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
                                     Trạng thái
-                                    <select value={logStatus} onChange={(e) => setLogStatus(e.target.value)} style={inputBase}>
+                                    <select value={logStatus} onChange={(e) => setLogStatus(e.target.value)} style={{ ...inputBase, marginTop: 6 }}>
                                         <option value="">Tất cả</option>
                                         <option value="PENDING">PENDING</option>
                                         <option value="APPROVED">APPROVED</option>
                                         <option value="REJECTED">REJECTED</option>
                                     </select>
                                 </label>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                    Loại yêu cầu
-                                    <select value={logRequestKind} onChange={(e) => setLogRequestKind(e.target.value)} style={inputBase}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
+                                    Loại
+                                    <select value={logRequestKind} onChange={(e) => setLogRequestKind(e.target.value)} style={{ ...inputBase, marginTop: 6 }}>
                                         <option value="">Tất cả</option>
                                         <option value="EXTEND_DEADLINE">Gia hạn</option>
                                         <option value="RELEASE_ASSIGNMENT">Hủy nhận</option>
                                     </select>
                                 </label>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
                                     Đích
-                                    <select value={logTargetType} onChange={(e) => setLogTargetType(e.target.value)} style={inputBase}>
+                                    <select value={logTargetType} onChange={(e) => setLogTargetType(e.target.value)} style={{ ...inputBase, marginTop: 6 }}>
                                         <option value="">Tất cả</option>
                                         <option value="STORY">STORY</option>
                                         <option value="CHAPTER">CHAPTER</option>
                                     </select>
                                 </label>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
                                     / trang
-                                    <select value={logPageSize} onChange={(e) => setLogPageSize(Number(e.target.value))} style={inputBase}>
+                                    <select value={logPageSize} onChange={(e) => setLogPageSize(Number(e.target.value))} style={{ ...inputBase, marginTop: 6 }}>
                                         <option value={20}>20</option>
                                         <option value={50}>50</option>
                                         <option value={100}>100</option>
                                     </select>
                                 </label>
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                    Người gửi (GUID)
-                                    <input value={logSenderId} onChange={(e) => setLogSenderId(e.target.value)} placeholder="senderId" style={inputBase} />
-                                </label>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                    Người xử lý (GUID)
-                                    <input value={logResolverId} onChange={(e) => setLogResolverId(e.target.value)} placeholder="resolverId" style={inputBase} />
-                                </label>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                    Tạo từ
-                                    <input type="datetime-local" value={logCreatedFrom} onChange={(e) => setLogCreatedFrom(e.target.value)} style={inputBase} />
-                                </label>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                    Tạo đến
-                                    <input type="datetime-local" value={logCreatedTo} onChange={(e) => setLogCreatedTo(e.target.value)} style={inputBase} />
-                                </label>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                    Xử lý từ
-                                    <input type="datetime-local" value={logResolvedFrom} onChange={(e) => setLogResolvedFrom(e.target.value)} style={inputBase} />
-                                </label>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                    Xử lý đến
-                                    <input type="datetime-local" value={logResolvedTo} onChange={(e) => setLogResolvedTo(e.target.value)} style={inputBase} />
-                                </label>
-                            </div>
+
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
                                     Sắp xếp
-                                    <select value={logSortBy} onChange={(e) => setLogSortBy(e.target.value)} style={{ ...inputBase, minWidth: 160 }}>
+                                    <select value={logSortBy} onChange={(e) => setLogSortBy(e.target.value)} style={{ ...inputBase, marginTop: 6, minWidth: 180 }}>
                                         <option value="created_at">Thời gian tạo</option>
                                         <option value="resolved_at">Thời gian xử lý</option>
                                     </select>
                                 </label>
-                                <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
                                     Thứ tự
-                                    <select value={logSortOrder} onChange={(e) => setLogSortOrder(e.target.value)} style={{ ...inputBase, minWidth: 160 }}>
+                                    <select value={logSortOrder} onChange={(e) => setLogSortOrder(e.target.value)} style={{ ...inputBase, marginTop: 6, minWidth: 180 }}>
                                         <option value="desc">Mới nhất trước</option>
                                         <option value="asc">Cũ nhất trước</option>
                                     </select>
@@ -1191,12 +1186,12 @@ export function ReviewEscalationsManagement() {
                                         display: 'inline-flex',
                                         alignItems: 'center',
                                         gap: 8,
-                                        padding: '0.5rem 1rem',
-                                        fontWeight: 600,
+                                        padding: '0.55rem 1rem',
+                                        fontWeight: 700,
                                         fontSize: '0.875rem',
-                                        borderRadius: 8,
+                                        borderRadius: 10,
                                         border: 'none',
-                                        background: T.sky,
+                                        background: T.green,
                                         color: '#fff',
                                         cursor: 'pointer',
                                     }}
@@ -1205,6 +1200,38 @@ export function ReviewEscalationsManagement() {
                                     Áp dụng
                                 </button>
                             </div>
+
+                            {/* Advanced filters (still full functionality) */}
+                            {showLogAdvancedFilters && (
+                                <div style={{ marginTop: '0.9rem', paddingTop: '0.9rem', borderTop: `1px dashed ${T.border}` }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
+                                            Người gửi (GUID)
+                                            <input value={logSenderId} onChange={(e) => setLogSenderId(e.target.value)} placeholder="senderId" style={{ ...inputBase, marginTop: 6 }} />
+                                        </label>
+                                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
+                                            Người xử lý (GUID)
+                                            <input value={logResolverId} onChange={(e) => setLogResolverId(e.target.value)} placeholder="resolverId" style={{ ...inputBase, marginTop: 6 }} />
+                                        </label>
+                                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
+                                            Tạo từ
+                                            <input type="datetime-local" value={logCreatedFrom} onChange={(e) => setLogCreatedFrom(e.target.value)} style={{ ...inputBase, marginTop: 6 }} />
+                                        </label>
+                                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
+                                            Tạo đến
+                                            <input type="datetime-local" value={logCreatedTo} onChange={(e) => setLogCreatedTo(e.target.value)} style={{ ...inputBase, marginTop: 6 }} />
+                                        </label>
+                                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
+                                            Xử lý từ
+                                            <input type="datetime-local" value={logResolvedFrom} onChange={(e) => setLogResolvedFrom(e.target.value)} style={{ ...inputBase, marginTop: 6 }} />
+                                        </label>
+                                        <label style={{ fontSize: '0.75rem', fontWeight: 700, color: T.slateDark }}>
+                                            Xử lý đến
+                                            <input type="datetime-local" value={logResolvedTo} onChange={(e) => setLogResolvedTo(e.target.value)} style={{ ...inputBase, marginTop: 6 }} />
+                                        </label>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
