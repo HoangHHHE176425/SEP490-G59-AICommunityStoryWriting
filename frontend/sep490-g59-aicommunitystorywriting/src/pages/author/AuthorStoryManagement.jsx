@@ -633,6 +633,11 @@ export function AuthorStoryManagement({ onBack }) {
             showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
             return;
         }
+        const statusLower = String(story?.status ?? '').toLowerCase();
+        if (statusLower === 'pending_review') {
+            showToast('Truyện đang ở trạng thái chờ duyệt, bạn không thể chỉnh sửa lúc này.', 'error');
+            return;
+        }
         if (!story?.id) return;
         try {
             const fullStory = await getStoryById(story.id);
@@ -2074,18 +2079,44 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </div>
 
                                                     {/* Status */}
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                                                            Trạng thái xuất bản
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                            <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                                                Trạng thái xuất bản
+                                                            </div>
+                                                            <div style={{
+                                                                padding: '0.25rem 0.75rem',
+                                                                backgroundColor: (story.status === 'published' || story.status === 'completed') ? '#d1fae5' : '#fef3c7',
+                                                                borderRadius: '9999px',
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 600,
+                                                                color: (story.status === 'published' || story.status === 'completed') ? '#065f46' : '#92400e'
+                                                            }}>
+                                                                {story.publishStatus}
+                                                            </div>
                                                         </div>
-                                                        <div style={{
-                                                            padding: '0.25rem 0.75rem',
-                                                            backgroundColor: (story.status === 'published' || story.status === 'completed') ? '#d1fae5' : '#fef3c7',
-                                                            borderRadius: '4px',
-                                                            fontSize: '0.75rem',
-                                                            color: (story.status === 'published' || story.status === 'completed') ? '#065f46' : '#92400e'
-                                                        }}>
-                                                            {story.publishStatus}
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                            <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                                                                Trạng thái tiến độ
+                                                            </div>
+                                                            <div style={{
+                                                                padding: '0.25rem 0.75rem',
+                                                                borderRadius: '9999px',
+                                                                fontSize: '0.75rem',
+                                                                fontWeight: 600,
+                                                                backgroundColor: story.storyProgressStatus === 'COMPLETED'
+                                                                    ? '#dcfce7'
+                                                                    : story.storyProgressStatus === 'HIATUS'
+                                                                        ? '#fee2e2'
+                                                                        : '#dbeafe',
+                                                                color: story.storyProgressStatus === 'COMPLETED'
+                                                                    ? '#166534'
+                                                                    : story.storyProgressStatus === 'HIATUS'
+                                                                        ? '#991b1b'
+                                                                        : '#1d4ed8'
+                                                            }}>
+                                                                {story.progressStatusDisplay || 'Đang ra'}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -2132,8 +2163,14 @@ export function AuthorStoryManagement({ onBack }) {
                                                     </button>
                                                     <button
                                                         onClick={() => handleEditStory(story)}
-                                                        disabled={isAuthorWritingSuspended}
-                                                        title={isAuthorWritingSuspended ? `Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.` : 'Chỉnh sửa truyện'}
+                                                        disabled={isAuthorWritingSuspended || story.status === 'pending_review'}
+                                                        title={
+                                                            isAuthorWritingSuspended
+                                                                ? `Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`
+                                                                : story.status === 'pending_review'
+                                                                    ? 'Truyện đang ở trạng thái chờ duyệt, không thể chỉnh sửa'
+                                                                    : 'Chỉnh sửa truyện'
+                                                        }
                                                         style={{
                                                             display: 'flex',
                                                             alignItems: 'center',
@@ -2146,19 +2183,19 @@ export function AuthorStoryManagement({ onBack }) {
                                                             fontSize: '0.8125rem',
                                                             fontWeight: 500,
                                                             color: '#475569',
-                                                            cursor: isAuthorWritingSuspended ? 'not-allowed' : 'pointer',
+                                                            cursor: (isAuthorWritingSuspended || story.status === 'pending_review') ? 'not-allowed' : 'pointer',
                                                             whiteSpace: 'nowrap',
                                                             transition: 'all 0.2s',
-                                                            opacity: isAuthorWritingSuspended ? 0.7 : 1
+                                                            opacity: (isAuthorWritingSuspended || story.status === 'pending_review') ? 0.7 : 1
                                                         }}
                                                         onMouseEnter={(e) => {
-                                                            if (isAuthorWritingSuspended) return;
+                                                            if (isAuthorWritingSuspended || story.status === 'pending_review') return;
                                                             e.currentTarget.style.backgroundColor = '#f1f5f9';
                                                             e.currentTarget.style.borderColor = '#13ec5b';
                                                             e.currentTarget.style.color = '#13ec5b';
                                                         }}
                                                         onMouseLeave={(e) => {
-                                                            if (isAuthorWritingSuspended) return;
+                                                            if (isAuthorWritingSuspended || story.status === 'pending_review') return;
                                                             e.currentTarget.style.backgroundColor = '#f8fafc';
                                                             e.currentTarget.style.borderColor = '#e2e8f0';
                                                             e.currentTarget.style.color = '#475569';

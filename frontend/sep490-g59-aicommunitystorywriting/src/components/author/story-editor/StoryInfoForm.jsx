@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { X, Plus, ChevronDown } from 'lucide-react';
 import { getCategoriesWithPagination } from '../../../api/category/categoryApi';
 
-export function StoryInfoForm({ formData, onChange, onImageUpload }) {
+export function StoryInfoForm({ formData, onChange, onImageUpload, readOnlyFields = false, allowProgressOptions = null }) {
 
-    const statusOptions = ['Đang ra', 'Hoàn thành', 'Tạm dừng'];
+    const statusOptions = Array.isArray(allowProgressOptions) && allowProgressOptions.length > 0
+        ? allowProgressOptions
+        : ['Đang ra', 'Hoàn thành', 'Tạm dừng'];
     const ageRatings = ['Phù hợp mọi lứa tuổi', 'Từ 13 tuổi', 'Từ 16 tuổi', 'Từ 18 tuổi'];
 
     const [categories, setCategories] = useState([]);
@@ -67,6 +69,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                             />
                             <button
                                 onClick={() => onChange('cover', '')}
+                                disabled={readOnlyFields}
                                 style={{
                                     position: 'absolute',
                                     top: '0.5rem',
@@ -77,7 +80,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                                     backgroundColor: 'rgba(0, 0, 0, 0.6)',
                                     border: 'none',
                                     color: '#ffffff',
-                                    cursor: 'pointer',
+                                    cursor: readOnlyFields ? 'not-allowed' : 'pointer',
                                     display: 'flex',
                                     alignItems: 'center',
                                     justifyContent: 'center'
@@ -97,7 +100,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                                 aspectRatio: '2/3',
                                 border: '2px dashed #d1d5db',
                                 borderRadius: '8px',
-                                cursor: 'pointer',
+                                cursor: readOnlyFields ? 'not-allowed' : 'pointer',
                                 backgroundColor: '#fafafa',
                                 transition: 'all 0.2s'
                             }}
@@ -118,6 +121,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                         type="file"
                         accept="image/*"
                         onChange={onImageUpload}
+                        disabled={readOnlyFields}
                         style={{ display: 'none' }}
                         id="cover-upload"
                     />
@@ -139,6 +143,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                             type="text"
                             value={formData.title}
                             onChange={(e) => onChange('title', e.target.value)}
+                            disabled={readOnlyFields}
                             placeholder="Nhập tên truyện"
                             style={{
                                 width: '100%',
@@ -220,6 +225,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                             <select
                                 value={formData.ageRating}
                                 onChange={(e) => onChange('ageRating', e.target.value)}
+                                disabled={readOnlyFields}
                                 style={{
                                     width: '100%',
                                     padding: '0.75rem',
@@ -229,7 +235,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                                     fontSize: '0.875rem',
                                     outline: 'none',
                                     appearance: 'none',
-                                    cursor: 'pointer'
+                                    cursor: readOnlyFields ? 'not-allowed' : 'pointer'
                                 }}
                             >
                                 {ageRatings.map(opt => (
@@ -264,7 +270,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                             {!categoriesLoading &&
                                 categories.map((cat) => {
                                     const isSelected = (formData.categories || []).map(getCategoryId).includes(cat.id);
-                                    const isDisabled = formData.categories.length >= 3 && !isSelected;
+                                    const isDisabled = readOnlyFields || (formData.categories.length >= 3 && !isSelected);
                                     return (
                                         <button
                                             key={cat.id}
@@ -308,6 +314,7 @@ export function StoryInfoForm({ formData, onChange, onImageUpload }) {
                         <textarea
                             value={formData.note}
                             onChange={(e) => onChange('note', e.target.value)}
+                            disabled={readOnlyFields}
                             placeholder="Nhập mô tả truyện"
                             rows={4}
                             style={{
