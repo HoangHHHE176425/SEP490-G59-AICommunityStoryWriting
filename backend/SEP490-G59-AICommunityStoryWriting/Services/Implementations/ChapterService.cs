@@ -441,7 +441,12 @@ namespace Services.Implementations
                 var oldStatus = chapter.status?.ToUpper() ?? "DRAFT";
 
                 if (newStatus == "PENDING_REVIEW")
+                {
+                    var updateStory = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
+                    if (updateStory?.author_id is Guid updateAuthorId && UserDAO.IsAuthorWritingSuspended(updateAuthorId))
+                        throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
                     EnsureCanSubmitForReview(chapter);
+                }
 
                 chapter.status = newStatus;
 
@@ -566,6 +571,10 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+
+            var story = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
+            if (story?.author_id is Guid authorId && UserDAO.IsAuthorWritingSuspended(authorId))
+                throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
 
             // Khi đã có phiên bản nào của chương đang chờ duyệt thì không cho gửi duyệt chapter gốc.
             var versionsPending = _versionRepository.GetByChapterId(id)

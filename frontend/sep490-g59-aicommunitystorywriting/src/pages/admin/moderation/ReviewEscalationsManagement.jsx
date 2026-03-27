@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { ShieldCheck, ListFilter } from 'lucide-react';
 import { Pagination } from '../../../components/pagination/Pagination';
+import { getActivePolicy } from '../../../api/policy/policyApi';
+import { PolicyBody } from '../../../components/policy/PolicyBody';
 import {
     getPendingReviewEscalations,
     resolveReviewEscalation,
@@ -331,6 +333,31 @@ export function ReviewEscalationsManagement() {
     const [historyRequestType, setHistoryRequestType] = useState('');
     const [historyPage, setHistoryPage] = useState(1);
     const [historyPageSize] = useState(10);
+    const [moderatorPolicyModalOpen, setModeratorPolicyModalOpen] = useState(false);
+    const [moderatorPolicyLoading, setModeratorPolicyLoading] = useState(false);
+    const [moderatorPolicyError, setModeratorPolicyError] = useState('');
+    const [moderatorAuthorPolicy, setModeratorAuthorPolicy] = useState(null);
+    const [moderatorProcessModalOpen, setModeratorProcessModalOpen] = useState(false);
+
+    const openModeratorPolicyModal = useCallback(async () => {
+        setModeratorPolicyModalOpen(true);
+        setModeratorPolicyLoading(true);
+        setModeratorPolicyError('');
+        try {
+            const authorPolicy = await getActivePolicy('AUTHOR');
+            setModeratorAuthorPolicy(authorPolicy);
+        } catch (e) {
+            const msg =
+                e?.response?.data?.message
+                ?? e?.response?.data?.Message
+                ?? e?.message
+                ?? 'Không thể tải policy tác giả.';
+            setModeratorPolicyError(msg);
+            setModeratorAuthorPolicy(null);
+        } finally {
+            setModeratorPolicyLoading(false);
+        }
+    }, []);
 
     const loadOrders = useCallback(async () => {
         setLoading(true);
@@ -736,6 +763,22 @@ export function ReviewEscalationsManagement() {
                 <p style={{ fontSize: '0.875rem', color: T.slate, margin: 0, maxWidth: '42rem', lineHeight: 1.55 }}>
                     Quản lý đơn của kiểm duyệt viên và xử lý vi phạm viên, bao gồm đơn chờ xử lý, lịch sử đã xử lý và nhật ký tra cứu.
                 </p>
+                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                        type="button"
+                        onClick={openModeratorPolicyModal}
+                        style={{ padding: '0.5rem 0.85rem', borderRadius: 8, border: `1px solid ${T.border}`, background: T.card, color: T.title, fontSize: '0.8125rem', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                        Xem chính sách hệ thống
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setModeratorProcessModalOpen(true)}
+                        style={{ padding: '0.5rem 0.85rem', borderRadius: 8, border: `1px solid ${T.border}`, background: T.card, color: T.title, fontSize: '0.8125rem', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                        Xem quy trình duyệt xuất bản
+                    </button>
+                </div>
             </div>
 
             {/* Tab cấp cao — card + pill như bộ lọc PublicationManagement */}
@@ -1881,6 +1924,104 @@ export function ReviewEscalationsManagement() {
                             >
                                 {complianceResolving ? 'Đang xử lý...' : 'Chấp nhận'}
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {moderatorPolicyModalOpen && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        zIndex: 10060,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '1rem',
+                    }}
+                    onClick={() => setModeratorPolicyModalOpen(false)}
+                >
+                    <div
+                        style={{
+                            background: T.card,
+                            borderRadius: '12px',
+                            maxWidth: 920,
+                            width: '100%',
+                            maxHeight: '85vh',
+                            overflow: 'auto',
+                            border: `1px solid ${T.border}`,
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1rem 1.25rem', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, color: T.title }}>Chính sách hệ thống cho kiểm duyệt viên</h3>
+                            <button type="button" onClick={() => setModeratorPolicyModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
+                        </div>
+                        <div style={{ padding: '1rem 1.25rem' }}>
+                            {moderatorPolicyLoading ? (
+                                <div style={{ fontSize: '0.875rem', color: T.slate }}>Đang tải policy tác giả...</div>
+                            ) : moderatorPolicyError ? (
+                                <div style={{ padding: '0.75rem 1rem', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', color: '#991b1b', fontSize: '0.875rem' }}>
+                                    {moderatorPolicyError}
+                                </div>
+                            ) : moderatorAuthorPolicy ? (
+                                <div>
+                                    <div style={{ marginBottom: 10, fontSize: '0.8125rem', color: T.slate }}>
+                                        Policy AUTHOR đang áp dụng{moderatorAuthorPolicy.version ? ` · phiên bản v${moderatorAuthorPolicy.version}` : ''}.
+                                    </div>
+                                    <PolicyBody content={moderatorAuthorPolicy.content} />
+                                </div>
+                            ) : (
+                                <div style={{ fontSize: '0.875rem', color: T.slate }}>Chưa có policy AUTHOR đang áp dụng.</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {moderatorProcessModalOpen && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        zIndex: 10060,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '1rem',
+                    }}
+                    onClick={() => setModeratorProcessModalOpen(false)}
+                >
+                    <div
+                        style={{
+                            background: T.card,
+                            borderRadius: '12px',
+                            maxWidth: 780,
+                            width: '100%',
+                            maxHeight: '85vh',
+                            overflow: 'auto',
+                            border: `1px solid ${T.border}`,
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1rem 1.25rem', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, color: T.title }}>Quy trình duyệt xuất bản dành cho kiểm duyệt viên</h3>
+                            <button type="button" onClick={() => setModeratorProcessModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
+                        </div>
+                        <div style={{ padding: '1rem 1.25rem', fontSize: '0.875rem', color: T.slateDark, lineHeight: 1.6 }}>
+                            <p style={{ margin: '0 0 8px', fontWeight: 700, color: T.title }}>Quy trình đề xuất (ngắn gọn):</p>
+                            <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 8 }}>
+                                <li>Nhận đơn chờ duyệt và kiểm tra nhanh thông tin truyện/chương, loại đơn và mức độ ưu tiên.</li>
+                                <li>Đọc nội dung cần duyệt, đối chiếu policy AUTHOR và các tiêu chí chất lượng nội dung của hệ thống.</li>
+                                <li>Đưa ra quyết định rõ ràng: chấp nhận hoặc từ chối, ghi chú ngắn gọn, đúng trọng tâm.</li>
+                                <li>Nếu cần thêm thời gian hoặc cần trả đơn, gửi yêu cầu lên quản trị viên theo đúng loại đơn.</li>
+                                <li>Hoàn tất xử lý, đảm bảo trạng thái đơn và nhật ký đã được cập nhật đầy đủ để truy vết.</li>
+                            </ol>
                         </div>
                     </div>
                 </div>

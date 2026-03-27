@@ -20,6 +20,8 @@ import { Pagination } from '../../../components/pagination/Pagination';
 import { useAuth } from '../../../contexts/AuthContext';
 import { getStoryById } from '../../../api/story/storyApi';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
+import { getActivePolicy } from '../../../api/policy/policyApi';
+import { PolicyBody } from '../../../components/policy/PolicyBody';
 import {
     adminReleaseComplianceCommentClaim,
     adminReleaseComplianceStoryClaim,
@@ -516,6 +518,12 @@ export default function ViolationManagement() {
     const [claimableCommentCount, setClaimableCommentCount] = useState(0);
     const [infoModal, setInfoModal] = useState(null);
     const [adminLogType, setAdminLogType] = useState('compliance');
+    const [violationPolicyModalOpen, setViolationPolicyModalOpen] = useState(false);
+    const [violationPolicyLoading, setViolationPolicyLoading] = useState(false);
+    const [violationPolicyError, setViolationPolicyError] = useState('');
+    const [violationPolicyData, setViolationPolicyData] = useState({ user: null, author: null });
+    const [violationPolicyTab, setViolationPolicyTab] = useState('USER');
+    const [violationProcessModalOpen, setViolationProcessModalOpen] = useState(false);
 
     const currentUserId = user?.id ?? user?.Id ?? null;
     const releaseStorageKey = useMemo(
@@ -685,6 +693,30 @@ export default function ViolationManagement() {
             setLoading(false);
         }
     }, [activeTab, adminLogType, filters.flaggedOnly, filters.historyAction, filters.historySource, filters.search, reportStatusApiValue, showClaimedStoryList, showClaimedCommentList]);
+
+    const openViolationPolicyModal = useCallback(async () => {
+        setViolationPolicyModalOpen(true);
+        setViolationPolicyTab('USER');
+        setViolationPolicyLoading(true);
+        setViolationPolicyError('');
+        try {
+            const [userPolicy, authorPolicy] = await Promise.all([
+                getActivePolicy('USER'),
+                getActivePolicy('AUTHOR'),
+            ]);
+            setViolationPolicyData({ user: userPolicy, author: authorPolicy });
+        } catch (e) {
+            const msg =
+                e?.response?.data?.message
+                ?? e?.response?.data?.Message
+                ?? e?.message
+                ?? 'Không thể tải chính sách hệ thống.';
+            setViolationPolicyError(msg);
+            setViolationPolicyData({ user: null, author: null });
+        } finally {
+            setViolationPolicyLoading(false);
+        }
+    }, []);
 
     const isReportTab = activeTab === 'story-reports' || activeTab === 'comment-reports';
 
@@ -1447,6 +1479,22 @@ export default function ViolationManagement() {
                 <p className="text-sm text-slate-500">
                     Quản lý hàng đợi báo cáo truyện và bình luận, nhận đơn kiểm duyệt và các thao tác xử lý vi phạm.
                 </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        onClick={openViolationPolicyModal}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50"
+                    >
+                        Xem chính sách hệ thống
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setViolationProcessModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50"
+                    >
+                        Xem quy trình xử lý vi phạm
+                    </button>
+                </div>
             </div>
 
             <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -1660,6 +1708,87 @@ export default function ViolationManagement() {
                             </div>
                         </div>
                     )}
+                </Modal>
+            )}
+
+            {violationPolicyModalOpen && (
+                <Modal title="Chính sách hệ thống cho xử lý vi phạm" onClose={() => setViolationPolicyModalOpen(false)} maxWidth={1000}>
+                    {violationPolicyLoading ? (
+                        <div className="text-sm text-slate-500">Đang tải chính sách...</div>
+                    ) : violationPolicyError ? (
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{violationPolicyError}</div>
+                    ) : (
+                        <div className="space-y-4">
+                            <div className="flex flex-wrap gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setViolationPolicyTab('USER')}
+                                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${violationPolicyTab === 'USER'
+                                        ? 'bg-primary/15 border-primary/40 text-emerald-700'
+                                        : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                                        }`}
+                                >
+                                    Chính sách người dùng
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setViolationPolicyTab('AUTHOR')}
+                                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${violationPolicyTab === 'AUTHOR'
+                                        ? 'bg-primary/15 border-primary/40 text-emerald-700'
+                                        : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                                        }`}
+                                >
+                                    Chính sách tác giả
+                                </button>
+                            </div>
+                            <section className="rounded-xl border border-slate-200 bg-white p-4">
+                                {violationPolicyTab === 'USER' ? (
+                                    <>
+                                        <div className="mb-2">
+                                            <div className="text-base font-bold text-slate-900">Chính sách dành cho người dùng</div>
+                                            <div className="text-xs text-slate-500">
+                                                {violationPolicyData.user?.version ? `Phiên bản: v${violationPolicyData.user.version}` : 'Chưa có phiên bản đang áp dụng'}
+                                            </div>
+                                        </div>
+                                        {violationPolicyData.user ? (
+                                            <PolicyBody content={violationPolicyData.user.content} />
+                                        ) : (
+                                            <div className="text-sm text-slate-500">Chưa có chính sách người dùng đang áp dụng.</div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="mb-2">
+                                            <div className="text-base font-bold text-slate-900">Chính sách dành cho tác giả</div>
+                                            <div className="text-xs text-slate-500">
+                                                {violationPolicyData.author?.version ? `Phiên bản: v${violationPolicyData.author.version}` : 'Chưa có phiên bản đang áp dụng'}
+                                            </div>
+                                        </div>
+                                        {violationPolicyData.author ? (
+                                            <PolicyBody content={violationPolicyData.author.content} />
+                                        ) : (
+                                            <div className="text-sm text-slate-500">Chưa có chính sách tác giả đang áp dụng.</div>
+                                        )}
+                                    </>
+                                )}
+                            </section>
+                        </div>
+                    )}
+                </Modal>
+            )}
+
+            {violationProcessModalOpen && (
+                <Modal title="Quy trình xử lý vi phạm dành cho xử lý vi phạm viên" onClose={() => setViolationProcessModalOpen(false)} maxWidth={860}>
+                    <div className="space-y-3 text-sm text-slate-700 leading-6">
+                        <p className="font-semibold text-slate-900 mb-0">Quy trình đề xuất (ngắn gọn):</p>
+                        <ol className="list-decimal pl-5 space-y-2">
+                            <li>Nhận đơn từ hàng đợi và kiểm tra nhanh mức độ ưu tiên, số người báo cáo, nội dung vi phạm.</li>
+                            <li>Mở chi tiết để đối chiếu bằng chứng: lý do báo cáo, mô tả của từng người báo cáo, ngữ cảnh truyện/bình luận.</li>
+                            <li>Thực hiện hành động phù hợp theo chính sách: ẩn/hiện truyện, khóa/mở bình luận, xử lý bình luận vi phạm.</li>
+                            <li>Nếu vượt thẩm quyền, gửi đơn lên quản trị viên với lý do rõ ràng và thông tin đầy đủ.</li>
+                            <li>Chốt đơn: chọn trạng thái xử lý phù hợp, đảm bảo ghi nhận lịch sử và thông báo cho các bên liên quan.</li>
+                        </ol>
+                    </div>
                 </Modal>
             )}
 

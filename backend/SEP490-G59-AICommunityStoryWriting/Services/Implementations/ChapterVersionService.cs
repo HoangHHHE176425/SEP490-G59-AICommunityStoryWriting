@@ -103,6 +103,8 @@ namespace Services.Implementations
             var story = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
             if (story == null || story.author_id != authorId)
                 throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được gửi duyệt.");
+            if (story.author_id is Guid storyAuthorId && UserDAO.IsAuthorWritingSuspended(storyAuthorId))
+                throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
 
             var chapterStatusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
             if (chapterStatusUpper == "PENDING_REVIEW")

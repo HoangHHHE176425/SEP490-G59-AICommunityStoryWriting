@@ -449,6 +449,9 @@ namespace Services.Implementations
                 _logger?.LogInformation("StoryService.Publish: Found story '{Title}' (ID: {StoryId}), current status: {Status}",
                     story.title, id, story.status);
 
+                if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
+                    throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin), không thể gửi xuất bản.");
+
                 // Author "Publish" = gửi chờ duyệt. Chỉ moderator approve mới chuyển sang PUBLISHED.
                 story.status = "PENDING_REVIEW";
                 story.updated_at = DateTime.Now;
