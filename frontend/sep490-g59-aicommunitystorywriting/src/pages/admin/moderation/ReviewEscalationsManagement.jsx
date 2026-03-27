@@ -963,7 +963,7 @@ export function ReviewEscalationsManagement() {
                                             <table style={tableBase}>
                                                 <thead>
                                                     <tr>
-                                                        {['Kết quả', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Lý do', 'Tạo lúc', 'Xử lý lúc', 'Ghi chú quản trị viên'].map((h) => (
+                                                        {['Kết quả', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Lý do', 'Xử lý lúc', 'Ghi chú quản trị viên'].map((h) => (
                                                             <th key={h} style={thBase}>{h}</th>
                                                         ))}
                                                     </tr>
@@ -985,8 +985,7 @@ export function ReviewEscalationsManagement() {
                                                                         : 'Trả đơn truyện về hàng đợi'}
                                                                 </td>
                                                                 <td style={{ ...tdBase, maxWidth: 260, fontSize: '0.75rem' }}>{truncate(row.message ?? '', 180) || '—'}</td>
-                                                                <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.createdAtUtc ?? row.created_at)}</td>
-                                                                <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatUtcPlus7Vi(row.resolvedAtUtc ?? row.resolved_at)}</td>
+                                                                <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.resolvedAtUtc ?? row.resolved_at)}</td>
                                                                 <td style={{ ...tdBase, maxWidth: 240, fontSize: '0.75rem' }}>{truncate(note, 180) || '—'}</td>
                                                             </tr>
                                                         );

@@ -1,8 +1,11 @@
 using System.Linq;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
+using Microsoft.EntityFrameworkCore;
 using Repositories;
 using Services;
+using Services.DTOs.Notifications;
 using Services.DTOs.Admin;
 using Services.DTOs.Moderation;
 using Services.Interfaces;
@@ -21,17 +24,20 @@ namespace Services.Implementations
         private readonly IChapterRepository _chapterRepository;
         private readonly IChapterVersionRepository _versionRepository;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
+        private readonly INotificationHubNotifier? _notificationHubNotifier;
 
         public ReviewEscalationService(
             IStoryRepository storyRepository,
             IChapterRepository chapterRepository,
             IChapterVersionRepository versionRepository,
-            IModerationHubNotifier? moderationHubNotifier = null)
+            IModerationHubNotifier? moderationHubNotifier = null,
+            INotificationHubNotifier? notificationHubNotifier = null)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
             _versionRepository = versionRepository;
             _moderationHubNotifier = moderationHubNotifier;
+            _notificationHubNotifier = notificationHubNotifier;
         }
 
         public ReviewAssignmentSelfDto GetSelfAssignment(string targetType, Guid targetId, Guid userId)
@@ -131,7 +137,60 @@ namespace Services.Implementations
                 sender_urgency_tier = EscalationUrgencyHelper.TierForModeratorRequestKind(kind)
             };
             ReviewEscalationDAO.Insert(row);
+            _ = NotifyAdminsModeratorEscalationRequestedAsync(dto.TargetId, senderId, kind, reason);
             return row.id;
+        }
+
+        private async Task NotifyAdminsModeratorEscalationRequestedAsync(Guid targetId, Guid senderId, string requestKind, string reason)
+        {
+            try
+            {
+                await using var db = new StoryPlatformDbContext();
+                var adminIds = await db.users.AsNoTracking()
+                    .Where(u => u.role != null && u.role.ToUpper() == "ADMIN" && u.status != null && u.status.ToUpper() == "ACTIVE")
+                    .Select(u => u.id)
+                    .Distinct()
+                    .ToListAsync();
+                if (adminIds.Count == 0) return;
+
+                var senderName = NotificationDAO.GetUserDisplayName(senderId);
+                var kindVi = string.Equals(requestKind, ReviewEscalationDAO.KindExtend, StringComparison.OrdinalIgnoreCase)
+                    ? "xin gia hạn duyệt"
+                    : "xin trả đơn về hàng đợi";
+
+                foreach (var adminId in adminIds)
+                {
+                    var n = new notifications
+                    {
+                        id = Guid.NewGuid(),
+                        user_id = adminId,
+                        type = "MODERATOR_ESCALATION_REQUESTED",
+                        title = "Có đơn mới từ kiểm duyệt viên",
+                        content = $"{senderName} vừa gửi đơn {kindVi}. Lý do: {reason}",
+                        link_url = "/admin?tab=review-escalations",
+                        is_read = false,
+                        created_at = DateTime.UtcNow
+                    };
+                    NotificationDAO.Add(n);
+                    if (_notificationHubNotifier != null)
+                    {
+                        await _notificationHubNotifier.NotifyUserAsync(adminId, new NotificationDto
+                        {
+                            Id = n.id,
+                            Type = n.type,
+                            Title = n.title,
+                            Content = n.content,
+                            LinkUrl = n.link_url,
+                            IsRead = false,
+                            CreatedAt = n.created_at
+                        });
+                    }
+                }
+            }
+            catch
+            {
+                // best effort push; không làm fail nghiệp vụ chính.
+            }
         }
 
         public IReadOnlyList<ReviewEscalationListItemDto> ListPendingForAdmin(string? urgencyTier = null)

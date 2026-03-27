@@ -418,6 +418,22 @@ public class CommentReportService : ICommentReportService
 
         var targetUserId = dto.TargetUserId ?? comment.user_id.Value;
         var kind = dto.RequestKind.Trim().ToUpperInvariant();
+        if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting)
+        {
+            var reason = dto.Message?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new ArgumentException("Bắt buộc nhập lý do đề xuất khi yêu cầu tạm đình chỉ quyền viết.");
+            if (!dto.ProposedSuspendUntilUtc.HasValue)
+                throw new ArgumentException("Cần ProposedSuspendUntilUtc hợp lệ (UTC).");
+            var until = dto.ProposedSuspendUntilUtc.Value;
+            if (until.Kind == DateTimeKind.Unspecified)
+                until = DateTime.SpecifyKind(until, DateTimeKind.Utc);
+            else if (until.Kind == DateTimeKind.Local)
+                until = until.ToUniversalTime();
+            if (until < DateTime.UtcNow.AddDays(1))
+                throw new ArgumentException("Thời hạn đình chỉ phải tối thiểu 1 ngày kể từ hiện tại.");
+            dto.ProposedSuspendUntilUtc = until;
+        }
         var sourceTag = $"[COMMENT_REPORT:{commentId}]";
         var enrichedMessage = string.IsNullOrWhiteSpace(dto.Message)
             ? sourceTag
@@ -433,9 +449,63 @@ public class CommentReportService : ICommentReportService
             enrichedMessage,
             dto.ProposedSuspendUntilUtc,
             urgencyTier);
+        _ = NotifyAdminsComplianceAdminActionRequestedAsync(storyId, requesterId, kind, dto.Message);
 
         await Task.Yield();
         return id;
+    }
+
+    private async Task NotifyAdminsComplianceAdminActionRequestedAsync(Guid storyId, Guid requesterId, string kind, string? reason)
+    {
+        try
+        {
+            await using var db = new StoryPlatformDbContext();
+            var adminIds = await db.users.AsNoTracking()
+                .Where(u => u.role != null && u.role.ToUpper() == "ADMIN" && u.status != null && u.status.ToUpper() == "ACTIVE")
+                .Select(u => u.id)
+                .Distinct()
+                .ToListAsync();
+            if (adminIds.Count == 0) return;
+
+            var requesterName = NotificationDAO.GetUserDisplayName(requesterId);
+            var requestKindVi = string.Equals(kind, ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting, StringComparison.OrdinalIgnoreCase)
+                ? "tạm đình chỉ quyền viết"
+                : "chặn tài khoản";
+            var note = string.IsNullOrWhiteSpace(reason) ? string.Empty : $" Lý do: {reason.Trim()}";
+
+            foreach (var adminId in adminIds)
+            {
+                var n = new notifications
+                {
+                    id = Guid.NewGuid(),
+                    user_id = adminId,
+                    type = "COMPLIANCE_ADMIN_ACTION_REQUESTED",
+                    title = "Có đơn mới từ xử lý vi phạm viên",
+                    content = $"{requesterName} vừa gửi yêu cầu {requestKindVi} từ báo cáo bình luận.{note}",
+                    link_url = $"/story/{storyId}",
+                    is_read = false,
+                    created_at = DateTime.UtcNow
+                };
+                NotificationDAO.Add(n);
+                if (_notificationHubNotifier != null)
+                {
+                    await _notificationHubNotifier.NotifyUserAsync(adminId, new NotificationDto
+                    {
+                        Id = n.id,
+                        Type = n.type,
+                        Title = n.title,
+                        Content = n.content,
+                        LinkUrl = n.link_url,
+                        IsRead = false,
+                        CreatedAt = n.created_at
+                    });
+                }
+            }
+        }
+        catch
+        {
+            // best effort push; không làm fail nghiệp vụ chính.
+        }
     }
 
     public Task<ComplianceClaimCommentResultDto> ClaimCommentReportsAsync(
@@ -527,19 +597,39 @@ public class CommentReportService : ICommentReportService
 
         // Close lock khi không còn open report.
         await MaybeCompleteCommentComplianceLockWhenNoOpenReportsAsync(commentId, complianceUserId, actorIsAdmin);
-        var reporterIds = openReports
-            .Select(r => r.reporter_id ?? Guid.Empty)
-            .Where(id => id != Guid.Empty)
-            .Distinct()
-            .ToList();
-        _ = NotifyCommentReportersBulkResolvedAsync(reporterIds, commentId, st);
+
+        // Lấy đầy đủ người báo cáo từ các report mở vừa xử lý:
+        // - reporter_id đại diện của từng row
+        // - toàn bộ contributor trong report_evidences (evidence_text chứa reporterId dạng Guid)
+        var reporterIds = new HashSet<Guid>(
+            openReports
+                .Select(r => r.reporter_id ?? Guid.Empty)
+                .Where(id => id != Guid.Empty));
+
+        var openReportIds = openReports.Select(r => r.id).Distinct().ToList();
+        if (openReportIds.Count > 0)
+        {
+            var contributorIdRaw = await context.report_evidences.AsNoTracking()
+                .Where(e => e.report_id.HasValue && openReportIds.Contains(e.report_id.Value))
+                .Select(e => e.evidence_text)
+                .ToListAsync();
+
+            foreach (var raw in contributorIdRaw)
+            {
+                if (Guid.TryParse(raw, out var uid) && uid != Guid.Empty)
+                    reporterIds.Add(uid);
+            }
+        }
+
+        if (openReports.Count > 0 && reporterIds.Count > 0)
+            _ = NotifyCommentReportersBulkResolvedAsync(reporterIds.ToList(), commentId, st);
 
         return openReports.Count;
     }
 
     private async Task NotifyCommentReportersBulkResolvedAsync(IReadOnlyCollection<Guid> reporterIds, Guid commentId, string status)
     {
-        if (reporterIds == null || reporterIds.Count == 0 || _notificationHubNotifier == null) return;
+        if (reporterIds == null || reporterIds.Count == 0) return;
         var success = string.Equals(status, "RESOLVED", StringComparison.OrdinalIgnoreCase);
         var title = success ? "Báo cáo bình luận đã được xử lý" : "Báo cáo bình luận đã được cập nhật";
         var content = success
@@ -562,16 +652,19 @@ public class CommentReportService : ICommentReportService
                     created_at = DateTime.UtcNow
                 };
                 NotificationDAO.Add(n);
-                await _notificationHubNotifier.NotifyUserAsync(userId, new NotificationDto
+                if (_notificationHubNotifier != null)
                 {
-                    Id = n.id,
-                    Type = n.type,
-                    Title = n.title,
-                    Content = n.content,
-                    LinkUrl = n.link_url,
-                    IsRead = false,
-                    CreatedAt = n.created_at
-                });
+                    await _notificationHubNotifier.NotifyUserAsync(userId, new NotificationDto
+                    {
+                        Id = n.id,
+                        Type = n.type,
+                        Title = n.title,
+                        Content = n.content,
+                        LinkUrl = n.link_url,
+                        IsRead = false,
+                        CreatedAt = n.created_at
+                    });
+                }
             }
             catch
             {

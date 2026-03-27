@@ -872,9 +872,29 @@ export default function ViolationManagement() {
         setAdminActionError('');
         const isCommentTarget = actionModal.type === 'comment';
         const requestKind = isCommentTarget ? 'BAN_USER' : adminActionForm.requestKind;
+        const reason = (adminActionForm.message || '').trim();
+        if (!reason) {
+            setAdminActionError('Bắt buộc nhập lý do đề xuất.');
+            return;
+        }
+        if (!isCommentTarget && requestKind === 'SUSPEND_AUTHOR_WRITING') {
+            if (!adminActionForm.proposedSuspendUntilUtc) {
+                setAdminActionError('Vui lòng chọn thời hạn đình chỉ.');
+                return;
+            }
+            const until = new Date(adminActionForm.proposedSuspendUntilUtc);
+            if (Number.isNaN(until.getTime())) {
+                setAdminActionError('Thời hạn đình chỉ không hợp lệ.');
+                return;
+            }
+            if (until.getTime() < Date.now() + (24 * 60 * 60 * 1000)) {
+                setAdminActionError('Thời hạn đình chỉ phải tối thiểu 1 ngày kể từ hiện tại.');
+                return;
+            }
+        }
         const payload = {
             requestKind,
-            message: adminActionForm.message || undefined,
+            message: reason,
             proposedSuspendUntilUtc: !isCommentTarget && requestKind === 'SUSPEND_AUTHOR_WRITING' && adminActionForm.proposedSuspendUntilUtc
                 ? new Date(adminActionForm.proposedSuspendUntilUtc).toISOString()
                 : undefined,

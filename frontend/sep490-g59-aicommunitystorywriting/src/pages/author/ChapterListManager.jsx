@@ -113,7 +113,17 @@ function mapChapterFromApi(item) {
 
 const CHAPTERS_PAGE_SIZE = 10;
 
-export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter, onViewChapter, onAddVersion, onEditVersion }) {
+export function ChapterListManager({
+    story,
+    onBack,
+    onAddChapter,
+    onEditChapter,
+    onViewChapter,
+    onAddVersion,
+    onEditVersion,
+    isAuthorWritingSuspended = false,
+    authorWritingSuspendedUntilLabel = '',
+}) {
     const storyId = story?.id ?? story?.Id;
     const [chapters, setChapters] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -321,8 +331,15 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
         historyEntries: null,
     });
     const [messageModal, setMessageModal] = useState({ open: false, title: '', message: '' });
+    const suspendedWriteTitle = isAuthorWritingSuspended
+        ? `Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`
+        : '';
 
     const handleDeleteChapter = (chapterId) => {
+        if (isAuthorWritingSuspended) {
+            setMessageModal({ open: true, title: 'Tạm đình chỉ quyền viết', message: suspendedWriteTitle });
+            return;
+        }
         if (!chapterId) return;
         deleteChapter(chapterId)
             .then(() => loadChapters(currentPage))
@@ -381,6 +398,11 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
     };
 
     const handleConfirmAction = () => {
+        if (isAuthorWritingSuspended) {
+            setConfirmDialog({ open: false, action: null, chapterId: null, versionId: null, versionTitle: null });
+            setMessageModal({ open: true, title: 'Tạm đình chỉ quyền viết', message: suspendedWriteTitle });
+            return;
+        }
         const { action, chapterId } = confirmDialog;
         if (!chapterId) return;
         const chapterFromList = chapters.find((c) => c.id === chapterId);
@@ -656,10 +678,29 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                             Xem lý do từ chối
                                         </button>
                                     )}
+                                    {isAuthorWritingSuspended && (
+                                        <div
+                                            style={{
+                                                marginTop: '10px',
+                                                padding: '8px 10px',
+                                                borderRadius: '8px',
+                                                border: '1px solid #fecaca',
+                                                background: '#fff1f2',
+                                                color: '#991b1b',
+                                                fontSize: '0.75rem',
+                                                fontWeight: 600,
+                                            }}
+                                            title={suspendedWriteTitle}
+                                        >
+                                            Tài khoản đang bị tạm đình chỉ quyền viết để điều tra vi phạm. Thời hạn: {authorWritingSuspendedUntilLabel || 'Đang cập nhật'}.
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <button
                                 onClick={() => onAddChapter?.(story)}
+                                disabled={isAuthorWritingSuspended}
+                                title={isAuthorWritingSuspended ? suspendedWriteTitle : 'Thêm chương mới'}
                                 style={{
                                     display: 'flex',
                                     alignItems: 'center',
@@ -671,7 +712,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                     fontSize: '0.875rem',
                                     fontWeight: 700,
                                     color: '#ffffff',
-                                    cursor: 'pointer',
+                                    cursor: isAuthorWritingSuspended ? 'not-allowed' : 'pointer',
+                                    opacity: isAuthorWritingSuspended ? 0.6 : 1,
                                     transition: 'all 0.2s',
                                     flexShrink: 0,
                                     whiteSpace: 'nowrap',
@@ -741,6 +783,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                     </p>
                                     <button
                                         onClick={() => onAddChapter?.(story)}
+                                        disabled={isAuthorWritingSuspended}
+                                        title={isAuthorWritingSuspended ? suspendedWriteTitle : 'Thêm chương mới'}
                                         style={{
                                             padding: '0.75rem 1.5rem',
                                             backgroundColor: '#13ec5b',
@@ -749,7 +793,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                             fontSize: '0.875rem',
                                             fontWeight: 700,
                                             color: '#ffffff',
-                                            cursor: 'pointer'
+                                            cursor: isAuthorWritingSuspended ? 'not-allowed' : 'pointer',
+                                            opacity: isAuthorWritingSuspended ? 0.6 : 1
                                         }}
                                     >
                                         Thêm chương mới
@@ -785,6 +830,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                     const handleCreateVersion = (e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
+                                        if (isAuthorWritingSuspended) {
+                                            setMessageModal({ open: true, title: 'Tạm đình chỉ quyền viết', message: suspendedWriteTitle });
+                                            return;
+                                        }
                                         if (chapterIsPublished) {
                                             setMessageModal({
                                                 open: true,
@@ -952,53 +1001,53 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                         </button>
                                                         <button
                                                             type="button"
-                                                            onClick={() => (chapter.status !== 'pending_review' && chapter.status !== 'published') && onEditChapter(chapter)}
-                                                            disabled={chapter.status === 'pending_review' || chapter.status === 'published'}
-                                                            title={chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể chỉnh sửa' : chapter.status === 'published' ? 'Chương đã xuất bản, không thể chỉnh sửa' : 'Chỉnh sửa chương'}
+                                                            onClick={() => (!isAuthorWritingSuspended && chapter.status !== 'pending_review' && chapter.status !== 'published') && onEditChapter(chapter)}
+                                                            disabled={isAuthorWritingSuspended || chapter.status === 'pending_review' || chapter.status === 'published'}
+                                                            title={isAuthorWritingSuspended ? suspendedWriteTitle : chapter.status === 'pending_review' ? 'Chương đang chờ duyệt, không thể chỉnh sửa' : chapter.status === 'published' ? 'Chương đã xuất bản, không thể chỉnh sửa' : 'Chỉnh sửa chương'}
                                                             style={{
                                                                 display: 'inline-flex',
                                                                 alignItems: 'center',
                                                                 gap: '0.25rem',
                                                                 padding: '0.4rem 0.75rem',
-                                                                backgroundColor: (chapter.status === 'pending_review' || chapter.status === 'published') ? '#f1f5f9' : '#f0fdf4',
-                                                                border: `1px solid ${(chapter.status === 'pending_review' || chapter.status === 'published') ? '#e2e8f0' : '#86efac'}`,
+                                                                backgroundColor: (isAuthorWritingSuspended || chapter.status === 'pending_review' || chapter.status === 'published') ? '#f1f5f9' : '#f0fdf4',
+                                                                border: `1px solid ${(isAuthorWritingSuspended || chapter.status === 'pending_review' || chapter.status === 'published') ? '#e2e8f0' : '#86efac'}`,
                                                                 borderRadius: '9999px',
                                                                 fontSize: '0.75rem',
                                                                 fontWeight: 600,
-                                                                color: (chapter.status === 'pending_review' || chapter.status === 'published') ? '#94a3b8' : '#15803d',
-                                                                cursor: (chapter.status === 'pending_review' || chapter.status === 'published') ? 'not-allowed' : 'pointer',
+                                                                color: (isAuthorWritingSuspended || chapter.status === 'pending_review' || chapter.status === 'published') ? '#94a3b8' : '#15803d',
+                                                                cursor: (isAuthorWritingSuspended || chapter.status === 'pending_review' || chapter.status === 'published') ? 'not-allowed' : 'pointer',
                                                                 transition: 'all 0.2s',
                                                                 whiteSpace: 'nowrap',
-                                                                opacity: (chapter.status === 'pending_review' || chapter.status === 'published') ? 0.8 : 1
+                                                                opacity: (isAuthorWritingSuspended || chapter.status === 'pending_review' || chapter.status === 'published') ? 0.8 : 1
                                                             }}
-                                                            onMouseEnter={(e) => { if (chapter.status !== 'pending_review' && chapter.status !== 'published') e.currentTarget.style.backgroundColor = '#dcfce7'; }}
-                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = (chapter.status === 'pending_review' || chapter.status === 'published') ? '#f1f5f9' : '#f0fdf4'; }}
+                                                            onMouseEnter={(e) => { if (!isAuthorWritingSuspended && chapter.status !== 'pending_review' && chapter.status !== 'published') e.currentTarget.style.backgroundColor = '#dcfce7'; }}
+                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = (isAuthorWritingSuspended || chapter.status === 'pending_review' || chapter.status === 'published') ? '#f1f5f9' : '#f0fdf4'; }}
                                                         >
                                                             <Pencil size={12} />
                                                             Chỉnh sửa
                                                         </button>
                                                         <button
-                                                            onClick={() => chapter.status === 'draft' && openDeleteConfirm(chapter.id)}
-                                                            disabled={chapter.status !== 'draft'}
-                                                            title={chapter.status === 'draft' ? 'Xóa chương' : 'Chỉ được xóa chương khi ở trạng thái Bản nháp'}
+                                                            onClick={() => !isAuthorWritingSuspended && chapter.status === 'draft' && openDeleteConfirm(chapter.id)}
+                                                            disabled={isAuthorWritingSuspended || chapter.status !== 'draft'}
+                                                            title={isAuthorWritingSuspended ? suspendedWriteTitle : chapter.status === 'draft' ? 'Xóa chương' : 'Chỉ được xóa chương khi ở trạng thái Bản nháp'}
                                                             style={{
                                                                 display: 'inline-flex',
                                                                 alignItems: 'center',
                                                                 gap: '0.25rem',
                                                                 padding: '0.4rem 0.75rem',
-                                                                backgroundColor: chapter.status === 'draft' ? '#fff' : '#f1f5f9',
-                                                                border: `1px solid ${chapter.status === 'draft' ? '#fecaca' : '#e2e8f0'}`,
+                                                                backgroundColor: (!isAuthorWritingSuspended && chapter.status === 'draft') ? '#fff' : '#f1f5f9',
+                                                                border: `1px solid ${(!isAuthorWritingSuspended && chapter.status === 'draft') ? '#fecaca' : '#e2e8f0'}`,
                                                                 borderRadius: '9999px',
                                                                 fontSize: '0.75rem',
                                                                 fontWeight: 600,
-                                                                color: chapter.status === 'draft' ? '#dc2626' : '#94a3b8',
-                                                                cursor: chapter.status === 'draft' ? 'pointer' : 'not-allowed',
+                                                                color: (!isAuthorWritingSuspended && chapter.status === 'draft') ? '#dc2626' : '#94a3b8',
+                                                                cursor: (!isAuthorWritingSuspended && chapter.status === 'draft') ? 'pointer' : 'not-allowed',
                                                                 transition: 'all 0.2s',
                                                                 whiteSpace: 'nowrap',
-                                                                opacity: chapter.status === 'draft' ? 1 : 0.8
+                                                                opacity: (!isAuthorWritingSuspended && chapter.status === 'draft') ? 1 : 0.8
                                                             }}
-                                                            onMouseEnter={(e) => { if (chapter.status === 'draft') e.currentTarget.style.backgroundColor = '#fef2f2'; }}
-                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = chapter.status === 'draft' ? '#fff' : '#f1f5f9'; }}
+                                                            onMouseEnter={(e) => { if (!isAuthorWritingSuspended && chapter.status === 'draft') e.currentTarget.style.backgroundColor = '#fef2f2'; }}
+                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = (!isAuthorWritingSuspended && chapter.status === 'draft') ? '#fff' : '#f1f5f9'; }}
                                                         >
                                                             <Trash2 size={12} />
                                                             Xóa
@@ -1017,9 +1066,9 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                         : 'Gửi chương lên để duyệt xuất bản';
                                                                 return (
                                                                     <button
-                                                                        onClick={() => canSubmitChapter && handlePublishChapter(chapter.id)}
-                                                                        disabled={actioningChapterId === chapter.id || !canSubmitChapter}
-                                                                        title={chapterPublishTitle}
+                                                                        onClick={() => !isAuthorWritingSuspended && canSubmitChapter && handlePublishChapter(chapter.id)}
+                                                                        disabled={isAuthorWritingSuspended || actioningChapterId === chapter.id || !canSubmitChapter}
+                                                                        title={isAuthorWritingSuspended ? suspendedWriteTitle : chapterPublishTitle}
                                                                         style={{
                                                                             display: 'inline-flex',
                                                                             alignItems: 'center',
@@ -1027,13 +1076,13 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                             gap: '0.25rem',
                                                                             width: '100%',
                                                                             padding: '0.4rem 0.75rem',
-                                                                            backgroundColor: canSubmitChapter ? '#13ec5b' : '#e2e8f0',
+                                                                            backgroundColor: (!isAuthorWritingSuspended && canSubmitChapter) ? '#13ec5b' : '#e2e8f0',
                                                                             border: 'none',
                                                                             borderRadius: '9999px',
                                                                             fontSize: '0.75rem',
                                                                             fontWeight: 600,
-                                                                            color: canSubmitChapter ? '#fff' : '#94a3b8',
-                                                                            cursor: actioningChapterId === chapter.id || !canSubmitChapter ? 'not-allowed' : 'pointer',
+                                                                            color: (!isAuthorWritingSuspended && canSubmitChapter) ? '#fff' : '#94a3b8',
+                                                                            cursor: isAuthorWritingSuspended || actioningChapterId === chapter.id || !canSubmitChapter ? 'not-allowed' : 'pointer',
                                                                             opacity: actioningChapterId === chapter.id ? 0.7 : 1,
                                                                             transition: 'all 0.2s',
                                                                             whiteSpace: 'nowrap'
@@ -1049,9 +1098,9 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                 const disabled = actioningChapterId === chapter.id || !canUnpublish;
                                                                 return (
                                                                     <button
-                                                                        onClick={() => !disabled && handleUnpublishChapter(chapter.id)}
-                                                                        disabled={disabled}
-                                                                        title={!canUnpublish ? 'Hủy xuất bản phải theo thứ tự ngược. Phải hủy các chương có thứ tự sau trước.' : 'Hủy xuất bản'}
+                                                                        onClick={() => !isAuthorWritingSuspended && !disabled && handleUnpublishChapter(chapter.id)}
+                                                                        disabled={isAuthorWritingSuspended || disabled}
+                                                                        title={isAuthorWritingSuspended ? suspendedWriteTitle : !canUnpublish ? 'Hủy xuất bản phải theo thứ tự ngược. Phải hủy các chương có thứ tự sau trước.' : 'Hủy xuất bản'}
                                                                         style={{
                                                                             display: 'inline-flex',
                                                                             alignItems: 'center',
@@ -1065,8 +1114,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                             fontSize: '0.75rem',
                                                                             fontWeight: 600,
                                                                             color: canUnpublish ? '#b45309' : '#94a3b8',
-                                                                            cursor: disabled ? 'not-allowed' : 'pointer',
-                                                                            opacity: disabled ? 0.7 : 1,
+                                                                            cursor: (isAuthorWritingSuspended || disabled) ? 'not-allowed' : 'pointer',
+                                                                            opacity: (isAuthorWritingSuspended || disabled) ? 0.7 : 1,
                                                                             transition: 'all 0.2s',
                                                                             whiteSpace: 'nowrap'
                                                                         }}
@@ -1133,31 +1182,31 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                         <button
                                                             type="button"
                                                             onClick={handleCreateVersion}
-                                                            disabled={chapterIsPublished}
-                                                            title={chapterIsPublished ? 'Chương đã xuất bản — không tạo phiên bản chỉnh sửa' : 'Tạo phiên bản chỉnh sửa (bản nháp)'}
+                                                            disabled={isAuthorWritingSuspended || chapterIsPublished}
+                                                            title={isAuthorWritingSuspended ? suspendedWriteTitle : chapterIsPublished ? 'Chương đã xuất bản — không tạo phiên bản chỉnh sửa' : 'Tạo phiên bản chỉnh sửa (bản nháp)'}
                                                             style={{
                                                                 display: 'inline-flex',
                                                                 alignItems: 'center',
                                                                 gap: '0.5rem',
                                                                 padding: '0.5rem 1rem',
-                                                                backgroundColor: chapterIsPublished ? '#e2e8f0' : '#13ec5b',
-                                                                color: chapterIsPublished ? '#94a3b8' : '#fff',
+                                                                backgroundColor: (isAuthorWritingSuspended || chapterIsPublished) ? '#e2e8f0' : '#13ec5b',
+                                                                color: (isAuthorWritingSuspended || chapterIsPublished) ? '#94a3b8' : '#fff',
                                                                 border: 'none',
                                                                 borderRadius: '9999px',
                                                                 fontSize: '0.8125rem',
                                                                 fontWeight: 700,
-                                                                cursor: chapterIsPublished ? 'not-allowed' : 'pointer',
-                                                                boxShadow: chapterIsPublished ? 'none' : '0 2px 8px rgba(19, 236, 91, 0.3)',
+                                                                cursor: (isAuthorWritingSuspended || chapterIsPublished) ? 'not-allowed' : 'pointer',
+                                                                boxShadow: (isAuthorWritingSuspended || chapterIsPublished) ? 'none' : '0 2px 8px rgba(19, 236, 91, 0.3)',
                                                                 fontFamily: "'Plus Jakarta Sans', sans-serif",
-                                                                opacity: chapterIsPublished ? 0.85 : 1,
+                                                                opacity: (isAuthorWritingSuspended || chapterIsPublished) ? 0.85 : 1,
                                                             }}
                                                             onMouseEnter={(e) => {
-                                                                if (chapterIsPublished) return;
+                                                                if (isAuthorWritingSuspended || chapterIsPublished) return;
                                                                 e.currentTarget.style.backgroundColor = '#10d452';
                                                                 e.currentTarget.style.transform = 'translateY(-1px)';
                                                             }}
                                                             onMouseLeave={(e) => {
-                                                                if (chapterIsPublished) return;
+                                                                if (isAuthorWritingSuspended || chapterIsPublished) return;
                                                                 e.currentTarget.style.backgroundColor = '#13ec5b';
                                                                 e.currentTarget.style.transform = 'translateY(0)';
                                                             }}
@@ -1313,9 +1362,9 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                     )}
                                                                                     <button
                                                                                         type="button"
-                                                                                        onClick={(e) => { e.stopPropagation(); if (vStatusLower !== 'pending_review' && vStatusLower !== 'published') onEditVersion?.(chapter, v); }}
-                                                                                        title={vStatusLower === 'pending_review' ? 'Phiên bản đang chờ duyệt, không thể chỉnh sửa' : vStatusLower === 'published' ? 'Phiên bản đã xuất bản, không thể chỉnh sửa' : 'Chỉnh sửa phiên bản'}
-                                                                                        disabled={vStatusLower === 'pending_review' || vStatusLower === 'published'}
+                                                                                        onClick={(e) => { e.stopPropagation(); if (!isAuthorWritingSuspended && vStatusLower !== 'pending_review' && vStatusLower !== 'published') onEditVersion?.(chapter, v); }}
+                                                                                        title={isAuthorWritingSuspended ? suspendedWriteTitle : vStatusLower === 'pending_review' ? 'Phiên bản đang chờ duyệt, không thể chỉnh sửa' : vStatusLower === 'published' ? 'Phiên bản đã xuất bản, không thể chỉnh sửa' : 'Chỉnh sửa phiên bản'}
+                                                                                        disabled={isAuthorWritingSuspended || vStatusLower === 'pending_review' || vStatusLower === 'published'}
                                                                                         style={{
                                                                                             display: 'inline-flex',
                                                                                             alignItems: 'center',
@@ -1341,10 +1390,11 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                         onClick={(e) => {
                                                                                             e.stopPropagation();
                                                                                             if (!v.id || vStatusLower === 'published' || vStatusLower === 'pending_review') return;
+                                                                                            if (isAuthorWritingSuspended) return;
                                                                                             openVersionDeleteConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                         }}
-                                                                                        title={vStatusLower === 'pending_review' ? 'Phiên bản đang chờ duyệt, không thể xóa' : vStatusLower === 'published' ? 'Đã xuất bản' : 'Xóa phiên bản'}
-                                                                                        disabled={vStatusLower === 'published' || vStatusLower === 'pending_review'}
+                                                                                        title={isAuthorWritingSuspended ? suspendedWriteTitle : vStatusLower === 'pending_review' ? 'Phiên bản đang chờ duyệt, không thể xóa' : vStatusLower === 'published' ? 'Đã xuất bản' : 'Xóa phiên bản'}
+                                                                                        disabled={isAuthorWritingSuspended || vStatusLower === 'published' || vStatusLower === 'pending_review'}
                                                                                         style={{
                                                                                             display: 'inline-flex',
                                                                                             alignItems: 'center',
@@ -1376,10 +1426,10 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                     type="button"
                                                                                                     onClick={(e) => {
                                                                                                         e.stopPropagation();
-                                                                                                        if (!disabledVersion) openVersionUnsubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
+                                                                                                        if (!isAuthorWritingSuspended && !disabledVersion) openVersionUnsubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                                     }}
-                                                                                                    title={!canUnpublish ? 'Hủy xuất bản phải theo thứ tự ngược. Phải hủy các chương có thứ tự sau trước.' : 'Hủy gửi duyệt phiên bản'}
-                                                                                                    disabled={disabledVersion}
+                                                                                                    title={isAuthorWritingSuspended ? suspendedWriteTitle : !canUnpublish ? 'Hủy xuất bản phải theo thứ tự ngược. Phải hủy các chương có thứ tự sau trước.' : 'Hủy gửi duyệt phiên bản'}
+                                                                                                    disabled={isAuthorWritingSuspended || disabledVersion}
                                                                                                     style={{
                                                                                                         display: 'inline-flex',
                                                                                                         alignItems: 'center',
@@ -1393,8 +1443,8 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                         fontSize: '0.75rem',
                                                                                                         fontWeight: 600,
                                                                                                         color: canUnpublish ? '#b45309' : '#94a3b8',
-                                                                                                        cursor: disabledVersion ? 'not-allowed' : 'pointer',
-                                                                                                        opacity: disabledVersion ? 0.7 : 1,
+                                                                                                        cursor: (isAuthorWritingSuspended || disabledVersion) ? 'not-allowed' : 'pointer',
+                                                                                                        opacity: (isAuthorWritingSuspended || disabledVersion) ? 0.7 : 1,
                                                                                                         whiteSpace: 'nowrap',
                                                                                                         transition: 'all 0.2s'
                                                                                                     }}
@@ -1408,11 +1458,11 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                 type="button"
                                                                                                 onClick={(e) => {
                                                                                                     e.stopPropagation();
-                                                                                                    if (vStatusLower === 'published' || !canSubmitVersion) return;
+                                                                                                    if (isAuthorWritingSuspended || vStatusLower === 'published' || !canSubmitVersion) return;
                                                                                                     openVersionSubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                                 }}
-                                                                                                title={vStatusLower === 'published' ? 'Đã xuất bản' : chapterIsPublished ? 'Chương đã xuất bản — không gửi thêm phiên bản chỉnh sửa (đã có phiên bản xuất bản).' : !canSubmitVersion ? (!canSubmitForPublish ? `Chỉ được gửi khi chương ${chapter.number - 1} đã có kết quả duyệt hoặc từ chối duyệt.` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.' : 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.') : 'Gửi duyệt phiên bản'}
-                                                                                                disabled={vStatusLower === 'published' || !canSubmitVersion}
+                                                                                                title={isAuthorWritingSuspended ? suspendedWriteTitle : vStatusLower === 'published' ? 'Đã xuất bản' : chapterIsPublished ? 'Chương đã xuất bản — không gửi thêm phiên bản chỉnh sửa (đã có phiên bản xuất bản).' : !canSubmitVersion ? (!canSubmitForPublish ? `Chỉ được gửi khi chương ${chapter.number - 1} đã có kết quả duyệt hoặc từ chối duyệt.` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.' : 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.') : 'Gửi duyệt phiên bản'}
+                                                                                                disabled={isAuthorWritingSuspended || vStatusLower === 'published' || !canSubmitVersion}
                                                                                                 style={{
                                                                                                     display: 'inline-flex',
                                                                                                     alignItems: 'center',
@@ -1420,14 +1470,14 @@ export function ChapterListManager({ story, onBack, onAddChapter, onEditChapter,
                                                                                                     gap: '0.25rem',
                                                                                                     width: '100%',
                                                                                                     padding: '0.4rem 0.75rem',
-                                                                                                    backgroundColor: (vStatusLower === 'published' || !canSubmitVersion) ? '#e2e8f0' : '#13ec5b',
+                                                                                                    backgroundColor: (isAuthorWritingSuspended || vStatusLower === 'published' || !canSubmitVersion) ? '#e2e8f0' : '#13ec5b',
                                                                                                     border: 'none',
                                                                                                     borderRadius: '9999px',
                                                                                                     fontSize: '0.75rem',
                                                                                                     fontWeight: 600,
-                                                                                                    color: (vStatusLower === 'published' || !canSubmitVersion) ? '#94a3b8' : '#fff',
-                                                                                                    cursor: (vStatusLower === 'published' || !canSubmitVersion) ? 'not-allowed' : 'pointer',
-                                                                                                    opacity: (vStatusLower === 'published' || !canSubmitVersion) ? 0.8 : 1,
+                                                                                                    color: (isAuthorWritingSuspended || vStatusLower === 'published' || !canSubmitVersion) ? '#94a3b8' : '#fff',
+                                                                                                    cursor: (isAuthorWritingSuspended || vStatusLower === 'published' || !canSubmitVersion) ? 'not-allowed' : 'pointer',
+                                                                                                    opacity: (isAuthorWritingSuspended || vStatusLower === 'published' || !canSubmitVersion) ? 0.8 : 1,
                                                                                                     whiteSpace: 'nowrap',
                                                                                                     transition: 'all 0.2s'
                                                                                                 }}

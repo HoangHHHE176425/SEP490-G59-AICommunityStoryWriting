@@ -753,8 +753,19 @@ public class StoryReportService : IStoryReportService
         var kind = (dto.RequestKind ?? "").Trim().ToUpperInvariant();
         if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting)
         {
-            if (!dto.ProposedSuspendUntilUtc.HasValue || dto.ProposedSuspendUntilUtc.Value <= DateTime.UtcNow)
-                throw new ArgumentException("Cần ProposedSuspendUntilUtc trong tương lai (UTC).");
+            var reason = dto.Message?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new ArgumentException("Bắt buộc nhập lý do đề xuất khi yêu cầu tạm đình chỉ quyền viết.");
+            if (!dto.ProposedSuspendUntilUtc.HasValue)
+                throw new ArgumentException("Cần ProposedSuspendUntilUtc hợp lệ (UTC).");
+            var until = dto.ProposedSuspendUntilUtc.Value;
+            if (until.Kind == DateTimeKind.Unspecified)
+                until = DateTime.SpecifyKind(until, DateTimeKind.Utc);
+            else if (until.Kind == DateTimeKind.Local)
+                until = until.ToUniversalTime();
+            if (until < DateTime.UtcNow.AddDays(1))
+                throw new ArgumentException("Thời hạn đình chỉ phải tối thiểu 1 ngày kể từ hiện tại.");
+            dto.ProposedSuspendUntilUtc = until;
         }
 
         var id = ComplianceAdminActionRequestDAO.CreatePending(
@@ -765,6 +776,7 @@ public class StoryReportService : IStoryReportService
             dto.Message,
             dto.ProposedSuspendUntilUtc,
             EscalationUrgencyHelper.TierForComplianceAdminActionKind(kind));
+        _ = NotifyAdminsComplianceAdminActionRequestedAsync(storyId, requesterId, kind, dto.Message);
         return Task.FromResult(id);
     }
 
@@ -963,37 +975,46 @@ public class StoryReportService : IStoryReportService
             throw new InvalidOperationException("Bạn phải đang nhận (lock) truyện này.");
         var st = NormalizeComplianceResolveStatus(dto?.Status);
         List<Guid> reporterIds;
+        var hasOpenReports = false;
         using (var context = new StoryPlatformDbContext())
         {
-            reporterIds = context.reports.AsNoTracking()
+            var openRows = context.reports.AsNoTracking()
                 .Where(r =>
                     (r.target_type ?? "") == StoryReportDAO.StoryTargetType
                     && r.target_id == storyId
                     && r.status != null
                     && (r.status.Trim().ToUpper() == "NEW" || r.status.Trim().ToUpper() == "IN_REVIEW")
-                    && r.reporter_id != null
-                    && r.reporter_id != Guid.Empty)
-                .Select(r => r.reporter_id!.Value)
+                    && r.reporter_id != null)
+                .Select(r => r.reporter_id)
+                .ToList();
+            hasOpenReports = openRows.Count > 0;
+            reporterIds = openRows
+                .Where(x => x.HasValue && x.Value != Guid.Empty)
+                .Select(x => x!.Value)
                 .Distinct()
                 .ToList();
         }
-        var contributorMap = StoryReportDAO.GetContributorsByStoryIds(new[] { storyId });
-        if (contributorMap.TryGetValue(storyId, out var contributors) && contributors != null)
+        if (hasOpenReports)
         {
-            reporterIds.AddRange(contributors
-                .Select(x => x.UserId)
-                .Where(x => x != Guid.Empty));
-            reporterIds = reporterIds.Distinct().ToList();
+            var contributorMap = StoryReportDAO.GetContributorsByStoryIds(new[] { storyId });
+            if (contributorMap.TryGetValue(storyId, out var contributors) && contributors != null)
+            {
+                reporterIds.AddRange(contributors
+                    .Select(x => x.UserId)
+                    .Where(x => x != Guid.Empty));
+                reporterIds = reporterIds.Distinct().ToList();
+            }
         }
         var n = StoryReportDAO.ResolveOpenStoryReportsForCompliance(storyId, complianceUserId, st);
         MaybeCompleteComplianceLockWhenNoOpenReports(storyId);
-        _ = NotifyReportersBulkResolvedAsync(reporterIds, storyId, st);
+        if (n > 0 && reporterIds.Count > 0)
+            _ = NotifyReportersBulkResolvedAsync(reporterIds, storyId, st);
         return Task.FromResult(n);
     }
 
     private async Task NotifyReportersBulkResolvedAsync(IReadOnlyCollection<Guid> reporterIds, Guid storyId, string status)
     {
-        if (reporterIds == null || reporterIds.Count == 0 || _notificationHubNotifier == null) return;
+        if (reporterIds == null || reporterIds.Count == 0) return;
         var success = string.Equals(status, "RESOLVED", StringComparison.OrdinalIgnoreCase);
         var title = success ? "Báo cáo truyện đã được xử lý" : "Báo cáo truyện đã được cập nhật";
         var content = success
@@ -1016,16 +1037,19 @@ public class StoryReportService : IStoryReportService
                     created_at = DateTime.UtcNow
                 };
                 NotificationDAO.Add(n);
-                await _notificationHubNotifier.NotifyUserAsync(userId, new NotificationDto
+                if (_notificationHubNotifier != null)
                 {
-                    Id = n.id,
-                    Type = n.type,
-                    Title = n.title,
-                    Content = n.content,
-                    LinkUrl = n.link_url,
-                    IsRead = false,
-                    CreatedAt = n.created_at
-                });
+                    await _notificationHubNotifier.NotifyUserAsync(userId, new NotificationDto
+                    {
+                        Id = n.id,
+                        Type = n.type,
+                        Title = n.title,
+                        Content = n.content,
+                        LinkUrl = n.link_url,
+                        IsRead = false,
+                        CreatedAt = n.created_at
+                    });
+                }
             }
             catch
             {
@@ -1086,6 +1110,59 @@ public class StoryReportService : IStoryReportService
             {
                 // best effort push; không làm fail nghiệp vụ chính.
             }
+        }
+    }
+
+    private async Task NotifyAdminsComplianceAdminActionRequestedAsync(Guid storyId, Guid requesterId, string kind, string? reason)
+    {
+        try
+        {
+            await using var db = new StoryPlatformDbContext();
+            var adminIds = await db.users.AsNoTracking()
+                .Where(u => u.role != null && u.role.ToUpper() == "ADMIN" && u.status != null && u.status.ToUpper() == "ACTIVE")
+                .Select(u => u.id)
+                .Distinct()
+                .ToListAsync();
+            if (adminIds.Count == 0) return;
+
+            var requesterName = NotificationDAO.GetUserDisplayName(requesterId);
+            var requestKindVi = string.Equals(kind, ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting, StringComparison.OrdinalIgnoreCase)
+                ? "tạm đình chỉ quyền viết"
+                : "chặn tài khoản";
+            var note = string.IsNullOrWhiteSpace(reason) ? string.Empty : $" Lý do: {reason.Trim()}";
+
+            foreach (var adminId in adminIds)
+            {
+                var n = new notifications
+                {
+                    id = Guid.NewGuid(),
+                    user_id = adminId,
+                    type = "COMPLIANCE_ADMIN_ACTION_REQUESTED",
+                    title = "Có đơn mới từ xử lý vi phạm viên",
+                    content = $"{requesterName} vừa gửi yêu cầu {requestKindVi} cho truyện đang bị báo cáo.{note}",
+                    link_url = "/admin?tab=review-escalations",
+                    is_read = false,
+                    created_at = DateTime.UtcNow
+                };
+                NotificationDAO.Add(n);
+                if (_notificationHubNotifier != null)
+                {
+                    await _notificationHubNotifier.NotifyUserAsync(adminId, new NotificationDto
+                    {
+                        Id = n.id,
+                        Type = n.type,
+                        Title = n.title,
+                        Content = n.content,
+                        LinkUrl = n.link_url,
+                        IsRead = false,
+                        CreatedAt = n.created_at
+                    });
+                }
+            }
+        }
+        catch
+        {
+            // best effort push; không làm fail nghiệp vụ chính.
         }
     }
 

@@ -311,6 +311,8 @@ namespace Services.Implementations
             var story = _storyRepository.GetById(id);
             if (story == null)
                 return false;
+            if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
+                throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
 
             var prevStatus = (story.status ?? "").Trim().ToUpperInvariant();
 
@@ -409,6 +411,8 @@ namespace Services.Implementations
             var story = _storyRepository.GetById(id);
             if (story == null)
                 return false;
+            if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
+                throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
 
             var statusUpper = (story.status ?? "").Trim().ToUpperInvariant();
             if (statusUpper != "DRAFT")
