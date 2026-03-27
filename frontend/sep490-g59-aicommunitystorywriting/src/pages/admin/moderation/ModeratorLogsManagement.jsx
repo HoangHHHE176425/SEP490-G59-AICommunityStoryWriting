@@ -3,6 +3,7 @@ import { RotateCcw } from 'lucide-react';
 import { getModerationLogs } from '../../../api/admin/adminModerationApi';
 import { getAdminComplianceLogs } from '../../../api/admin/adminComplianceApi';
 import { Pagination } from '../../../components/pagination/Pagination';
+import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 
 const PAGE_SIZE = 10;
 
@@ -24,8 +25,8 @@ const COMPLIANCE_ACTION_OPTIONS = [
     { value: 'DISMISSED', label: 'Bỏ qua' },
     { value: 'BAN_USER', label: 'Chặn tài khoản' },
     { value: 'SUSPEND_AUTHOR_WRITING', label: 'Tạm đình chỉ quyền viết' },
-    { value: 'APPROVE_UNLOCK', label: 'Duyệt gỡ khóa' },
-    { value: 'APPROVE_REASSIGN', label: 'Duyệt giao lại' },
+    { value: 'APPROVE_UNLOCK', label: 'Chấp nhận trả đơn về hàng đợi' },
+    { value: 'APPROVE_REASSIGN', label: 'Chấp nhận giao lại đơn' },
     { value: 'REJECT', label: 'Từ chối' },
     { value: 'COMMENTS_DISABLED', label: 'Khóa bình luận truyện' },
     { value: 'COMMENTS_ENABLED', label: 'Mở lại bình luận truyện' },
@@ -37,9 +38,19 @@ const COMPLIANCE_ACTION_OPTIONS = [
 
 function formatDate(value) {
     if (!value) return '—';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return '—';
-    return d.toLocaleString('vi-VN');
+    const raw = String(value).trim().replace(' ', 'T');
+    const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (!m) {
+        const d = new Date(raw);
+        return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('vi-VN');
+    }
+    const [, y, mo, d, h, mi, s = '00'] = m;
+    return `${h}:${mi}:${s} ${d}/${mo}/${y}`;
+}
+
+function formatDateByLogType(value, logType) {
+    if (logType === 'compliance') return formatApiDateTimeLocalVi(value);
+    return formatDate(value);
 }
 
 function targetLabel(item) {
@@ -60,7 +71,7 @@ function complianceSourceLabel(v) {
     const s = String(v ?? '').trim().toUpperCase();
     if (s === 'REPORT_RESOLUTION') return 'Xử lý báo cáo';
     if (s === 'ADMIN_ACTION_REQUEST') return 'Yêu cầu hành động tài khoản';
-    if (s === 'LOCK_REQUEST') return 'Yêu cầu gỡ khóa đơn';
+    if (s === 'LOCK_REQUEST') return 'Yêu cầu trả đơn về hàng đợi';
     if (s === 'VIOLATION_ACTION') return 'Thao tác trực tiếp';
     return v || '—';
 }
@@ -71,8 +82,8 @@ function complianceActionLabel(v) {
     if (s === 'DISMISSED') return 'Bỏ qua';
     if (s === 'BAN_USER') return 'Chặn tài khoản';
     if (s === 'SUSPEND_AUTHOR_WRITING') return 'Tạm đình chỉ quyền viết';
-    if (s === 'APPROVE_UNLOCK') return 'Duyệt gỡ khóa';
-    if (s === 'APPROVE_REASSIGN') return 'Duyệt giao lại';
+    if (s === 'APPROVE_UNLOCK') return 'Chấp nhận trả đơn về hàng đợi';
+    if (s === 'APPROVE_REASSIGN') return 'Chấp nhận giao lại đơn';
     if (s === 'REJECT') return 'Từ chối';
     if (s === 'COMMENTS_DISABLED') return 'Khóa bình luận truyện';
     if (s === 'COMMENTS_ENABLED') return 'Mở lại bình luận truyện';
@@ -392,7 +403,7 @@ export function ModeratorLogsManagement() {
                                 {logType === 'moderator' ? (
                                     rows.map((r) => (
                                         <tr key={r.id ?? `${r.targetId}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
-                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDate(r.createdAt)}</td>
+                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDateByLogType(r.createdAt, logType)}</td>
                                             <td style={td}>{r.moderatorName || '—'}</td>
                                             <td style={td}>{targetLabel(r)}</td>
                                             <td style={td}>{r.targetTitle || '—'}</td>
@@ -409,7 +420,7 @@ export function ModeratorLogsManagement() {
                                 ) : (
                                     rows.map((r) => (
                                         <tr key={r.id ?? `${r.source}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
-                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDate(r.createdAt)}</td>
+                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDateByLogType(r.createdAt, logType)}</td>
                                             <td style={td}>{r.complianceUserName || '—'}</td>
                                             <td style={td}>{complianceSourceLabel(r.source)}</td>
                                             <td style={td}>{complianceActionLabel(r.action)}</td>
