@@ -91,7 +91,7 @@ function parseCoCreateSseResponse(rawText) {
  * BE trả về SSE (không phải JSON thuần) — axios phải đọc text rồi parse sự kiện `result`.
  * @param {string} storyId - ID truyện (Guid)
  * @param {string|null|undefined} authorIdea - Ý tưởng của tác giả (có thể null khi BE cho phép auto)
- * @param {{ chapterOrderIndex?: number }} [options] - order_index chương đang soạn (0-based), để lưu ai_generated_content đúng slot và so % khi copy–paste
+ * @param {{ chapterOrderIndex?: number, chapterId?: string }} [options] - order_index/chapterId chương đang soạn
  * @returns {Promise<{ ideaContradictionFeedback?: string, outline: string, finalContent: string, approved: boolean, revisionCount: number, reviewFeedback?: string }>}
  */
 export async function coCreate(storyId, authorIdea, options = {}) {
@@ -105,6 +105,10 @@ export async function coCreate(storyId, authorIdea, options = {}) {
     };
     if (rawIdx !== undefined && rawIdx !== null && Number.isFinite(Number(rawIdx))) {
         payload.chapterOrderIndex = Math.max(0, Math.floor(Number(rawIdx)));
+    }
+    const rawChapterId = options?.chapterId ?? options?.ChapterId;
+    if (rawChapterId != null && String(rawChapterId).trim() !== "") {
+        payload.chapterId = String(rawChapterId).trim();
     }
     const response = await axiosInstance.post(
         "ai/co-create",
@@ -224,6 +228,38 @@ export async function checkChapter(payload) {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     return response.data;
+}
+
+/**
+ * Check từ cấm/chính sách (ưu tiên endpoint tách riêng; fallback check-chapter cũ).
+ * @param {Object} payload - { content: string, storyId?: string|null, chapterTitle?: string|null }
+ */
+export async function checkBannedWords(payload) {
+    const content = (payload?.content ?? "").toString();
+    if (!content.trim()) throw new Error("Content là bắt buộc.");
+    const body = {
+        content,
+        storyId: payload?.storyId ?? null,
+        chapterTitle: payload?.chapterTitle ?? null,
+    };
+    const token = localStorage.getItem("accessToken");
+    try {
+        const response = await axiosInstance.post("ai/check-banned-words", body, {
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        return response.data;
+    } catch (err) {
+        if (err?.response?.status !== 404) throw err;
+        const legacy = await checkChapter(payload);
+        const policyViolations = legacy?.policyViolations ?? legacy?.PolicyViolations ?? [];
+        const hasInappropriateContent = Boolean(legacy?.hasInappropriateContent ?? legacy?.HasInappropriateContent);
+        return {
+            passed: Array.isArray(policyViolations) && policyViolations.length === 0 && !hasInappropriateContent,
+            policyViolations,
+            hasInappropriateContent,
+            summary: legacy?.summary ?? legacy?.Summary ?? null,
+        };
+    }
 }
 
 /**

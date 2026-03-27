@@ -1029,6 +1029,7 @@ export function AuthorStoryManagement({ onBack }) {
                 <ChapterEditorPage
                     story={currentStory}
                     chapter={(activeView === 'editChapter' || activeView === 'addChapter') ? currentChapter : null}
+                    isCreateMode={activeView === 'addChapter'}
                     sourceChapterForVersion={activeView === 'addChapterVersion' ? sourceChapterForVersion : null}
                     editingVersion={activeView === 'addChapterVersion' ? editingVersion : null}
                     readOnly={viewChapterOnly}

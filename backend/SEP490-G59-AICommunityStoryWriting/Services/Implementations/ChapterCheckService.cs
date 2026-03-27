@@ -176,14 +176,21 @@ Không markdown. Không thêm text ngoài JSON.
                     var wordOrPhrase = item.TryGetProperty("wordOrPhrase", out var w) ? w.GetString() ?? "" : "";
                     var suggestion = item.TryGetProperty("suggestion", out var s) ? s.GetString() ?? "" : "";
                     var context = item.TryGetProperty("context", out var c) ? c.GetString() : null;
+                    var punctuationLike = IsLikelyPunctuationIssue(wordOrPhrase, suggestion, context);
 
-                    if (!IsLikelyTypoCorrection(wordOrPhrase, suggestion))
+                    if (!IsLikelyTypoCorrection(wordOrPhrase, suggestion) && !punctuationLike)
                         continue;
                     if (IsAcceptedVariantPair(wordOrPhrase, suggestion))
                         continue;
-                    if (!string.IsNullOrWhiteSpace(context) &&
+                    if (!punctuationLike &&
+                        !string.IsNullOrWhiteSpace(context) &&
                         !context.Contains(wordOrPhrase, StringComparison.OrdinalIgnoreCase))
                         continue;
+
+                    if (string.IsNullOrWhiteSpace(wordOrPhrase))
+                        wordOrPhrase = punctuationLike ? "Lỗi dấu câu" : "Lỗi chính tả";
+                    if (string.IsNullOrWhiteSpace(suggestion))
+                        suggestion = punctuationLike ? "Rà soát và chỉnh lại dấu câu ở vị trí được nêu trong ngữ cảnh." : "Rà soát và chỉnh lại từ/cụm này.";
 
                     spelling.Add(new SpellingIssue
                     {
@@ -194,7 +201,17 @@ Không markdown. Không thêm text ngoài JSON.
                 }
             }
             var summary = root.TryGetProperty("summary", out var sum) ? sum.GetString() : null;
-            return (DeduplicateIssues(spelling), summary);
+            var dedup = DeduplicateIssues(spelling);
+            if (dedup.Count == 0 && SummaryIndicatesSpellingIssue(summary))
+            {
+                dedup.Add(new SpellingIssue
+                {
+                    WordOrPhrase = "Lỗi chính tả/dấu câu",
+                    Suggestion = "AI có phát hiện lỗi nhưng chưa trả về vị trí chi tiết. Vui lòng rà soát lại theo phần tóm tắt.",
+                    Context = summary
+                });
+            }
+            return (dedup, summary);
         }
         catch
         {
@@ -259,6 +276,46 @@ Không markdown. Không thêm text ngoài JSON.
             suggestion.ToLowerInvariant(),
             maxDistance: 3);
         return dist >= 1 && dist <= 3;
+    }
+
+    private static bool IsLikelyPunctuationIssue(string wordOrPhrase, string suggestion, string? context)
+    {
+        var w = (wordOrPhrase ?? "").Trim();
+        var s = (suggestion ?? "").Trim();
+        var c = (context ?? "").Trim();
+        var full = $"{w} {s} {c}".ToLowerInvariant();
+        if (full.Length == 0) return false;
+
+        // Dấu câu xuất hiện trực tiếp.
+        if (ContainsPunctuationToken(w) || ContainsPunctuationToken(s))
+            return true;
+
+        // Hoặc mô tả bằng từ khóa.
+        return full.Contains("dấu câu")
+            || full.Contains("dấu phẩy")
+            || full.Contains("dấu chấm")
+            || full.Contains("dấu hai chấm")
+            || full.Contains("dấu chấm phẩy")
+            || full.Contains("dấu chấm hỏi")
+            || full.Contains("dấu chấm than")
+            || full.Contains("dấu ngoặc");
+    }
+
+    private static bool ContainsPunctuationToken(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        foreach (var ch in text)
+        {
+            if (char.IsPunctuation(ch)) return true;
+        }
+        return false;
+    }
+
+    private static bool SummaryIndicatesSpellingIssue(string? summary)
+    {
+        var s = (summary ?? "").Trim().ToLowerInvariant();
+        if (s.Length == 0) return false;
+        return (s.Contains("lỗi chính tả") || s.Contains("dấu câu")) && !s.Contains("không phát hiện");
     }
 
     private static int CountWords(string s)

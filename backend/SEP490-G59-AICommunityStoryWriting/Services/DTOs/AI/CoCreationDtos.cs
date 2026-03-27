@@ -17,6 +17,12 @@ public class CoCreationRequest
     /// Null = giữ hành vi cũ: gán slot chương tiếp theo (max order_index + 1).
     /// </summary>
     public int? ChapterOrderIndex { get; set; }
+
+    /// <summary>
+    /// ID chương đang soạn do FE cấp trước (draft). Nếu chương đã tồn tại, hệ thống gắn vào <c>chapter_id</c>;
+    /// nếu chưa tồn tại, sẽ lưu vào <c>draft_chapter_id</c> để bind khi tạo chương.
+    /// </summary>
+    public Guid? ChapterId { get; set; }
 }
 
 /// <summary>Response đồng sáng tác: dàn ý + nội dung cuối + trạng thái kiểm duyệt. Có thể kèm feedback khi ý tưởng tác giả mâu thuẫn với truyện.</summary>
