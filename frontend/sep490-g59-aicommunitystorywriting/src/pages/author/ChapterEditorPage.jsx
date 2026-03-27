@@ -198,6 +198,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     });
     /** Số chương (1-based) đã tồn tại — dùng để gợi ý số tiếp theo và validate không nhập trùng */
     const [existingChapterNumbers, setExistingChapterNumbers] = useState(new Set());
+    const [existingChapterTitles, setExistingChapterTitles] = useState(new Set());
     const [chapterNumberError, setChapterNumberError] = useState('');
     /** Danh sách version của chương (khi ở chế độ version) — dùng validate số version không trùng + trạng thái (pending_review) */
     const [existingVersionsForChapter, setExistingVersionsForChapter] = useState([]);
@@ -286,6 +287,9 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     const isNewChapter = !chapter;
     const isVersionMode = Boolean(sourceChapterForVersion);
     const isEditingChapterMode = !isVersionMode && !isCreateMode && Boolean(chapter);
+    const storyTotalViews = Number(story?.totalViews ?? story?.TotalViews ?? 0) || 0;
+    const canEnablePaidMode = storyTotalViews >= 500;
+    const normalizeChapterTitle = (value) => (value ?? '').toString().trim().replace(/\s+/g, ' ').toLowerCase();
 
     // Pre-fill khi ở chế độ version: chỉnh sửa version thì lấy dữ liệu version; tạo version mới thì để trống (chỉ giữ number, versionNumber)
     useEffect(() => {
@@ -449,6 +453,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     useEffect(() => {
         if (!storyId) {
             setExistingChapterNumbers(new Set());
+            setExistingChapterTitles(new Set());
             return;
         }
         getChapters({ storyId, page: 1, pageSize: 500 })
@@ -456,7 +461,15 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 const items = res?.items ?? res?.Items ?? [];
                 const arr = Array.isArray(items) ? items : [];
                 const numbers = new Set(arr.map((c) => Number((c.orderIndex ?? c.OrderIndex ?? 0) + 1)));
+                const currentChapterId = chapter?.id ?? chapter?.Id ?? null;
+                const titles = new Set(
+                    arr
+                        .filter((c) => (c?.id ?? c?.Id ?? null) !== currentChapterId)
+                        .map((c) => normalizeChapterTitle(c?.title ?? c?.Title ?? ''))
+                        .filter(Boolean),
+                );
                 setExistingChapterNumbers(numbers);
+                setExistingChapterTitles(titles);
                 if (isNewChapter && !sourceChapterForVersion) {
                     const nextNumber = arr.length > 0
                         ? Math.max(...arr.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) + 1)) + 1
@@ -464,8 +477,11 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                     setChapterData((prev) => ({ ...prev, number: nextNumber }));
                 }
             })
-            .catch(() => setExistingChapterNumbers(new Set()));
-    }, [storyId, isNewChapter, sourceChapterForVersion]);
+            .catch(() => {
+                setExistingChapterNumbers(new Set());
+                setExistingChapterTitles(new Set());
+            });
+    }, [storyId, isNewChapter, sourceChapterForVersion, chapter?.id, chapter?.Id]);
 
     // Reload chapter data when chapter prop changes (chỉnh sửa chương). Khi chapter=null mà đang ở chế độ version (sourceChapterForVersion) thì không xóa form.
     useEffect(() => {
@@ -711,6 +727,10 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             showToast('Vui lòng nhập nội dung chương', 'error');
             return;
         }
+        if (!isVersionMode && existingChapterTitles.has(normalizeChapterTitle(chapterData.title))) {
+            showToast('Tên chương đã tồn tại trong truyện này. Vui lòng đặt tên khác.', 'error');
+            return;
+        }
         if (isVersionMode) {
             if (saveStatus === 'published' && chapterIsPublishedVersion) {
                 showToast('Chương đã xuất bản không còn được gửi duyệt phiên bản chỉnh sửa.', 'error');
@@ -752,6 +772,10 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         const wordCount = countWords(chapterData.content);
         if (wordCount < 500) {
             showToast(`Nội dung chương cần ít nhất 500 từ (Hiện tại: ${wordCount} từ)`, 'error');
+            return;
+        }
+        if (!isVersionMode && chapterData.accessType === 'paid' && !canEnablePaidMode) {
+            showToast('Truyện cần tối thiểu 500 lượt xem mới được bật chế độ trả phí cho chương.', 'error');
             return;
         }
         if (!isVersionMode && chapterData.accessType === 'paid' && (!chapterData.price || chapterData.price <= 0)) {
@@ -1795,29 +1819,18 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         <input
                                             type="number"
                                             value={chapterData.number}
-                                            readOnly={readOnly}
-                                            disabled={readOnly}
-                                            onChange={(e) => {
-                                                if (readOnly) return;
-                                                const v = e.target.value === '' ? '' : Number(e.target.value);
-                                                setChapterData({ ...chapterData, number: v === '' ? '' : v });
-                                                const err = v === '' ? 'Vui lòng nhập số chương.' : validateChapterNumber(v);
-                                                setChapterNumberError(err);
-                                            }}
-                                            onBlur={() => {
-                                                const err = validateChapterNumber(chapterData.number);
-                                                setChapterNumberError(err);
-                                            }}
+                                            readOnly
+                                            disabled
                                             min="1"
                                             style={{
                                                 width: '100%',
                                                 padding: '0.75rem',
-                                                backgroundColor: readOnly ? '#f1f5f9' : '#f9fafb',
+                                                backgroundColor: '#f1f5f9',
                                                 border: `1px solid ${chapterNumberError ? '#ef4444' : '#e5e7eb'}`,
                                                 borderRadius: '8px',
                                                 fontSize: '0.875rem',
                                                 outline: 'none',
-                                                cursor: readOnly ? 'default' : undefined
+                                                cursor: 'default'
                                             }}
                                         />
                                         {chapterNumberError && (
@@ -2035,8 +2048,16 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         ) : (
                                             <button
                                                 type="button"
-                                                onClick={() => setChapterData({ ...chapterData, accessType: 'paid' })}
-                                                className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'paid' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 hover:border-slate-300'}`}
+                                                onClick={() => {
+                                                    if (!canEnablePaidMode) {
+                                                        showToast('Truyện cần tối thiểu 500 lượt xem mới được bật chế độ trả phí cho chương.', 'error');
+                                                        return;
+                                                    }
+                                                    setChapterData({ ...chapterData, accessType: 'paid' });
+                                                }}
+                                                disabled={!canEnablePaidMode && chapterData.accessType !== 'paid'}
+                                                title={!canEnablePaidMode && chapterData.accessType !== 'paid' ? 'Truyện cần tối thiểu 500 lượt xem để bật trả phí.' : undefined}
+                                                className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed ${chapterData.accessType === 'paid' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 hover:border-slate-300'}`}
                                             >
                                                 <div className={`flex items-center justify-center w-10 h-10 rounded-full ${chapterData.accessType === 'paid' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600'}`}>
                                                     <Lock style={{ width: '20px', height: '20px' }} />
@@ -2124,6 +2145,19 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                     <li>Bạn sẽ nhận 70% số xu, nền tảng giữ lại 30%</li>
                                                 </ul>
                                             </div>
+                                        </div>
+                                    )}
+                                    {!canEnablePaidMode && chapterData.accessType !== 'paid' && (
+                                        <div style={{
+                                            marginTop: '1rem',
+                                            padding: '0.75rem 1rem',
+                                            backgroundColor: '#fff7ed',
+                                            border: '1px solid #fdba74',
+                                            borderRadius: '8px',
+                                            fontSize: '0.75rem',
+                                            color: '#9a3412',
+                                        }}>
+                                            Truyện hiện có {storyTotalViews.toLocaleString('vi-VN')} lượt xem. Cần tối thiểu 500 lượt xem để bật chế độ trả phí cho chương.
                                         </div>
                                     )}
                                 </div>

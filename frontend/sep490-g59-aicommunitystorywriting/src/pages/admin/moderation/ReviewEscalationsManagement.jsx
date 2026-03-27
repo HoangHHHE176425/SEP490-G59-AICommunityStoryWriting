@@ -129,6 +129,24 @@ function kindLong(k) {
     return kindShort(k);
 }
 
+function formatUtcPlus7Vi(value) {
+    if (value == null || value === '') return '—';
+    const raw = String(value).trim().replace(' ', 'T');
+    const withUtc = /(Z|[+-]\d{2}:\d{2}|[+-]\d{4})$/i.test(raw) ? raw : `${raw}Z`;
+    const d = new Date(withUtc);
+    if (Number.isNaN(d.getTime())) return '—';
+    const vi = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+    return vi.toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    });
+}
+
 function urgencyBadge(tier) {
     const t = String(tier || '').toUpperCase();
     const map = {
@@ -284,8 +302,8 @@ export function ReviewEscalationsManagement() {
     const [resolveStoryChaptersPreview, setResolveStoryChaptersPreview] = useState(null);
     const [resolving, setResolving] = useState(false);
     const [complianceResolveRow, setComplianceResolveRow] = useState(null);
-    const [complianceDecision, setComplianceDecision] = useState('APPROVE_UNLOCK');
     const [complianceAdminNote, setComplianceAdminNote] = useState('');
+    const [complianceAdminNoteRejectError, setComplianceAdminNoteRejectError] = useState('');
     const [complianceSuspendUntilUtc, setComplianceSuspendUntilUtc] = useState('');
     const [complianceResolving, setComplianceResolving] = useState(false);
 
@@ -586,12 +604,12 @@ export function ReviewEscalationsManagement() {
         const trimmed = adminNote.trim();
         if (trimmed.length < ADMIN_REJECT_NOTE_MIN_LENGTH) {
             setAdminNoteRejectError(
-                `Khi từ chối, bắt buộc nhập lý do (ghi chú admin). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự (đã bỏ khoảng trắng đầu/cuối).`,
+                `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự (đã bỏ khoảng trắng đầu/cuối).`,
             );
             return;
         }
         if (trimmed.length > ADMIN_REJECT_NOTE_MAX_LENGTH) {
-            setAdminNoteRejectError(`Ghi chú admin không được vượt quá ${ADMIN_REJECT_NOTE_MAX_LENGTH} ký tự.`);
+            setAdminNoteRejectError(`Ghi chú quản trị viên không được vượt quá ${ADMIN_REJECT_NOTE_MAX_LENGTH} ký tự.`);
             return;
         }
         setAdminNoteRejectError('');
@@ -615,9 +633,8 @@ export function ReviewEscalationsManagement() {
 
     const openComplianceResolve = (row) => {
         setComplianceResolveRow(row);
-        const reqType = row?.__reqType;
-        setComplianceDecision(reqType === 'ADMIN_ACTION' ? 'APPROVE' : 'APPROVE_UNLOCK');
         setComplianceAdminNote('');
+        setComplianceAdminNoteRejectError('');
         setComplianceSuspendUntilUtc(toDateTimeLocalInput(row?.proposedSuspendUntilUtc ?? row?.ProposedSuspendUntilUtc));
         setResolveApiError(null);
     };
@@ -625,26 +642,42 @@ export function ReviewEscalationsManagement() {
     const closeComplianceResolve = () => {
         if (complianceResolving) return;
         setComplianceResolveRow(null);
+        setComplianceAdminNoteRejectError('');
         setResolveApiError(null);
     };
 
-    const submitComplianceResolve = async () => {
+    const submitComplianceResolve = async (decisionOverride) => {
         if (!complianceResolveRow) return;
         const id = complianceResolveRow.id ?? complianceResolveRow.Id;
         const reqType = complianceResolveRow.__reqType;
+        const decision = decisionOverride ?? (reqType === 'ADMIN_ACTION' ? 'APPROVE' : 'APPROVE_UNLOCK');
+        const trimmedNote = (complianceAdminNote || '').trim();
+        if (decision === 'REJECT') {
+            if (trimmedNote.length < ADMIN_REJECT_NOTE_MIN_LENGTH) {
+                setComplianceAdminNoteRejectError(
+                    `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự (đã bỏ khoảng trắng đầu/cuối).`,
+                );
+                return;
+            }
+            if (trimmedNote.length > ADMIN_REJECT_NOTE_MAX_LENGTH) {
+                setComplianceAdminNoteRejectError(`Ghi chú quản trị viên không được vượt quá ${ADMIN_REJECT_NOTE_MAX_LENGTH} ký tự.`);
+                return;
+            }
+        }
+        setComplianceAdminNoteRejectError('');
         setComplianceResolving(true);
         setResolveApiError(null);
         try {
             if (reqType === 'ADMIN_ACTION') {
                 await resolveAdminComplianceAdminActionRequest(id, {
-                    decision: complianceDecision,
-                    adminNote: complianceAdminNote.trim() || undefined,
+                    decision,
+                    adminNote: trimmedNote || undefined,
                     suspendUntilUtc: complianceSuspendUntilUtc ? new Date(complianceSuspendUntilUtc).toISOString() : undefined,
                 });
             } else {
                 await resolveAdminComplianceLockRequest(id, {
-                    decision: complianceDecision,
-                    adminNote: complianceAdminNote.trim() || undefined,
+                    decision,
+                    adminNote: trimmedNote || undefined,
                 });
             }
             setComplianceResolveRow(null);
@@ -753,7 +786,28 @@ export function ReviewEscalationsManagement() {
                     style={pubTabStyle(mainTab === 'orders' && orderSourceTab === 'compliance', T.sky)}
                     {...pillHoverHandlers(mainTab === 'orders' && orderSourceTab === 'compliance')}
                 >
-                    Đơn của xử lý vi phạm viên
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        Đơn của xử lý vi phạm viên
+                        {mainTab === 'orders' && listMode === 'pending' && orderSourceTab === 'compliance' && items.length > 0 && (
+                            <span
+                                style={{
+                                    minWidth: 20,
+                                    height: 20,
+                                    padding: '0 6px',
+                                    borderRadius: 999,
+                                    background: '#ffffff',
+                                    color: T.green,
+                                    fontSize: '0.7rem',
+                                    fontWeight: 800,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                }}
+                            >
+                                {items.length > 99 ? '99+' : items.length}
+                            </span>
+                        )}
+                    </span>
                 </button>
             </div>
 
@@ -856,7 +910,7 @@ export function ReviewEscalationsManagement() {
                                                 </>
                                             ) : (
                                                 <>
-                                                    <option value="LOCK">Yêu cầu gỡ lock</option>
+                                                    <option value="LOCK">Yêu cầu trả đơn về hàng đợi</option>
                                                     <option value="ADMIN_ACTION">Yêu cầu xử lý tài khoản</option>
                                                 </>
                                             )}
@@ -909,7 +963,7 @@ export function ReviewEscalationsManagement() {
                                             <table style={tableBase}>
                                                 <thead>
                                                     <tr>
-                                                        {['Kết quả', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Lý do', 'Tạo lúc', 'Xử lý lúc', 'Ghi chú admin'].map((h) => (
+                                                        {['Kết quả', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Lý do', 'Tạo lúc', 'Xử lý lúc', 'Ghi chú quản trị viên'].map((h) => (
                                                             <th key={h} style={thBase}>{h}</th>
                                                         ))}
                                                     </tr>
@@ -922,17 +976,17 @@ export function ReviewEscalationsManagement() {
                                                         return (
                                                             <tr key={id}>
                                                                 <td style={tdBase}>{historyResultBadge(status)}</td>
-                                                                <td style={tdBase}>{row.__reqType === 'ADMIN_ACTION' ? 'Yêu cầu xử lý tài khoản' : 'Yêu cầu gỡ lock'}</td>
+                                                                <td style={tdBase}>{row.__reqType === 'ADMIN_ACTION' ? 'Yêu cầu xử lý tài khoản' : 'Yêu cầu trả đơn về hàng đợi'}</td>
                                                                 <td style={tdBase}>{row.storyTitle ?? row.story?.title ?? '—'}</td>
                                                                 <td style={tdBase}>{row.requesterDisplayName ?? row.requesterEmail ?? '—'}</td>
                                                                 <td style={{ ...tdBase, fontSize: '0.75rem' }}>
                                                                     {row.__reqType === 'ADMIN_ACTION'
                                                                         ? (String(row.requestKind ?? '').toUpperCase() === 'BAN_USER' ? 'Chặn tài khoản' : 'Tạm đình chỉ quyền viết')
-                                                                        : 'Gỡ lock truyện'}
+                                                                        : 'Trả đơn truyện về hàng đợi'}
                                                                 </td>
                                                                 <td style={{ ...tdBase, maxWidth: 260, fontSize: '0.75rem' }}>{truncate(row.message ?? '', 180) || '—'}</td>
                                                                 <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.createdAtUtc ?? row.created_at)}</td>
-                                                                <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.resolvedAtUtc ?? row.resolved_at)}</td>
+                                                                <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatUtcPlus7Vi(row.resolvedAtUtc ?? row.resolved_at)}</td>
                                                                 <td style={{ ...tdBase, maxWidth: 240, fontSize: '0.75rem' }}>{truncate(note, 180) || '—'}</td>
                                                             </tr>
                                                         );
@@ -946,7 +1000,7 @@ export function ReviewEscalationsManagement() {
                                                 <table style={tableBase}>
                                                     <thead>
                                                         <tr>
-                                                            {['Kết quả', 'Loại', 'Tiêu đề', 'Người gửi', 'Loại đơn', 'Người xử lý', 'Xử lý lúc', 'Hạn xác nhận', 'Ghi chú admin', 'Lý do'].map((h) => (
+                                                            {['Kết quả', 'Loại', 'Tiêu đề', 'Người gửi', 'Loại đơn', 'Người xử lý', 'Xử lý lúc', 'Hạn xác nhận', 'Ghi chú quản trị viên', 'Lý do'].map((h) => (
                                                                 <th key={h} style={thBase}>{h}</th>
                                                             ))}
                                                         </tr>
@@ -964,7 +1018,7 @@ export function ReviewEscalationsManagement() {
                                                                     <td style={tdBase}>{row.senderName ?? row.SenderName ?? '—'}</td>
                                                                     <td style={tdBase}>{kindShort(row.requestKind ?? row.RequestKind)}</td>
                                                                     <td style={tdBase}>{row.resolverName ?? row.ResolverName ?? '—'}</td>
-                                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeLocalVi(row.resolvedAt ?? row.ResolvedAt)}</td>
+                                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatUtcPlus7Vi(row.resolvedAt ?? row.ResolvedAt)}</td>
                                                                     <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeLocalVi(row.confirmedDeadlineAt ?? row.ConfirmedDeadlineAt)}</td>
                                                                     <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{note}</td>
                                                                     <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{reason || '—'}</td>
@@ -996,8 +1050,8 @@ export function ReviewEscalationsManagement() {
                                     <thead>
                                         <tr>
                                             {(orderSourceTab === 'compliance'
-                                                ? ['Trạng thái', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Lý do', 'Tạo lúc', '']
-                                                : ['Mức độ', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Hạn hiện tại', 'Hạn đề xuất', 'Lý do', '']
+                                                ? ['Trạng thái', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Gửi lúc', 'Lý do', '']
+                                                : ['Mức độ', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Gửi lúc', 'Lý do', 'Hạn đề xuất', '']
                                             ).map((h) => (
                                                 <th key={h || 'a'} style={thBase}>{h}</th>
                                             ))}
@@ -1010,19 +1064,19 @@ export function ReviewEscalationsManagement() {
                                                 return (
                                                     <tr key={id}>
                                                         <td style={tdBase}>{logStatusBadge(row.status ?? row.Status)}</td>
-                                                        <td style={tdBase}>{row.__reqType === 'ADMIN_ACTION' ? 'Yêu cầu xử lý tài khoản' : 'Yêu cầu gỡ lock'}</td>
+                                                        <td style={tdBase}>{row.__reqType === 'ADMIN_ACTION' ? 'Yêu cầu xử lý tài khoản' : 'Yêu cầu trả đơn về hàng đợi'}</td>
                                                         <td style={tdBase}>{row.storyTitle ?? row.story?.title ?? '—'}</td>
                                                         <td style={tdBase}>{row.requesterDisplayName ?? row.requesterEmail ?? '—'}</td>
                                                         <td style={{ ...tdBase, fontSize: '0.75rem' }}>
                                                             {row.__reqType === 'ADMIN_ACTION'
                                                                 ? (String(row.requestKind ?? '').toUpperCase() === 'BAN_USER' ? 'Chặn tài khoản' : 'Tạm đình chỉ quyền viết')
-                                                                : 'Gỡ lock truyện'}
-                                                        </td>
-                                                        <td style={{ ...tdBase, maxWidth: 280, wordBreak: 'break-word', fontSize: '0.75rem' }}>
-                                                            {row.message || '—'}
+                                                                : 'Trả đơn truyện về hàng đợi'}
                                                         </td>
                                                         <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
                                                             {formatApiDateTimeLocalVi(row.createdAtUtc ?? row.created_at)}
+                                                        </td>
+                                                        <td style={{ ...tdBase, maxWidth: 280, wordBreak: 'break-word', fontSize: '0.75rem' }}>
+                                                            {row.message || '—'}
                                                         </td>
                                                         <td style={tdBase}>
                                                             <button
@@ -1052,9 +1106,17 @@ export function ReviewEscalationsManagement() {
                                                     <td style={tdBase}><TargetTitleCell row={row} /></td>
                                                     <td style={tdBase}>{row.senderName ?? row.SenderName ?? '—'}</td>
                                                     <td style={tdBase}>{kindShort(row.requestKind ?? row.RequestKind)}</td>
-                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.currentAssignmentDeadlineAt ?? row.CurrentAssignmentDeadlineAt)}</td>
-                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.proposedDeadlineAt ?? row.ProposedDeadlineAt)}</td>
+                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+                                                        {formatUtcPlus7Vi(
+                                                            row.createdAtUtc ??
+                                                            row.CreatedAtUtc ??
+                                                            row.created_at ??
+                                                            row.createdAt ??
+                                                            row.CreatedAt
+                                                        )}
+                                                    </td>
                                                     <td style={{ ...tdBase, maxWidth: 220, wordBreak: 'break-word', fontSize: '0.75rem' }}>{row.reason ?? row.Reason ?? '—'}</td>
+                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.proposedDeadlineAt ?? row.ProposedDeadlineAt)}</td>
                                                     <td style={tdBase}>
                                                         <button
                                                             type="button"
@@ -1330,7 +1392,7 @@ export function ReviewEscalationsManagement() {
                                                     <td style={{ ...tdBase, fontSize: '0.75rem' }}>{x.senderName ?? x.SenderName ?? '—'}</td>
                                                     <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(x.createdAt ?? x.CreatedAt)}</td>
                                                     <td style={{ ...tdBase, fontSize: '0.75rem' }}>{x.resolverName ?? x.ResolverName ?? '—'}</td>
-                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(x.resolvedAt ?? x.ResolvedAt)}</td>
+                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatUtcPlus7Vi(x.resolvedAt ?? x.ResolvedAt)}</td>
                                                     <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 180 }}>{reason || '—'}</td>
                                                 </tr>
                                             );
@@ -1396,7 +1458,16 @@ export function ReviewEscalationsManagement() {
                                     <strong>{resolveRow.targetTitle ?? resolveRow.TargetTitle ?? resolveRow.targetId ?? resolveRow.TargetId}</strong>
                                 </p>
                                 <p style={{ margin: 0, color: T.slate }}>
-                                    Người gửi: {resolveRow.senderName ?? resolveRow.SenderName ?? '—'} · Gửi lúc: {formatApiDateTimeLocalVi(resolveRow.createdAt ?? resolveRow.CreatedAt)}
+                                    Người gửi: {resolveRow.senderName ?? resolveRow.SenderName ?? '—'} · Thời gian gửi: {formatUtcPlus7Vi(
+                                        resolveRow.createdAtUtc ??
+                                        resolveRow.CreatedAtUtc ??
+                                        resolveRow.created_at ??
+                                        resolveRow.createdAt ??
+                                        resolveRow.CreatedAt
+                                    )}
+                                </p>
+                                <p style={{ margin: '6px 0 0', color: T.slate }}>
+                                    Lý do: {resolveRow.reason ?? resolveRow.Reason ?? '—'}
                                 </p>
                             </div>
 
@@ -1442,7 +1513,7 @@ export function ReviewEscalationsManagement() {
                                             !resolveStoryChaptersPreview.error &&
                                             (resolveStoryChaptersPreview.items?.length ?? 0) === 0 && (
                                                 <p style={{ fontSize: '0.8125rem', color: T.slate, margin: 0 }}>
-                                                    Không có chương nào đang được moderator này giữ lock trên truyện (có thể chỉ còn lock cấp truyện).
+                                                    Không có chương nào đang được moderator này nhận duyệt trên truyện này (có thể chỉ còn đơn nhận ở cấp truyện).
                                                 </p>
                                             )}
                                         {resolveStoryChaptersPreview &&
@@ -1460,7 +1531,7 @@ export function ReviewEscalationsManagement() {
                                                     <table style={{ ...tableBase, margin: 0, width: '100%' }}>
                                                         <thead>
                                                             <tr>
-                                                                {['#', 'Tiêu đề', 'Trạng thái', 'Số từ', 'Tạo lúc', 'Cập nhật', 'Gửi duyệt', 'Hạn (SLA)', 'Người nhận duyệt'].map((h) => (
+                                                                {['#', 'Tiêu đề', 'Trạng thái', 'Số từ', 'Gửi duyệt', 'Hạn (SLA)', 'Người nhận duyệt'].map((h) => (
                                                                     <th key={h} style={{ ...thBase, fontSize: '0.7rem', whiteSpace: 'nowrap', padding: '8px 6px' }}>
                                                                         {h}
                                                                     </th>
@@ -1476,8 +1547,6 @@ export function ReviewEscalationsManagement() {
                                                                 const fullTitle = (ch.title ?? ch.Title ?? '—').toString();
                                                                 const st = chapterStatusVi(ch.status ?? ch.Status);
                                                                 const wc = ch.wordCount ?? ch.WordCount;
-                                                                const created = ch.createdAt ?? ch.CreatedAt;
-                                                                const updated = ch.updatedAt ?? ch.UpdatedAt;
                                                                 const ps = ch.pendingSince ?? ch.PendingSince;
                                                                 const dl = ch.deadlineAt ?? ch.DeadlineAt;
                                                                 const claim = ch.claimedByDisplayName ?? ch.ClaimedByDisplayName;
@@ -1500,12 +1569,6 @@ export function ReviewEscalationsManagement() {
                                                                         <td style={{ ...tdBase, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>{st}</td>
                                                                         <td style={{ ...tdBase, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
                                                                             {wc != null && wc !== '' ? Number(wc).toLocaleString('vi-VN') : '—'}
-                                                                        </td>
-                                                                        <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
-                                                                            {formatApiDateTimeLocalVi(created)}
-                                                                        </td>
-                                                                        <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
-                                                                            {formatApiDateTimeLocalVi(updated)}
                                                                         </td>
                                                                         <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
                                                                             {formatApiDateTimeLocalVi(ps)}
@@ -1644,7 +1707,7 @@ export function ReviewEscalationsManagement() {
                             )}
 
                             <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                Ghi chú admin
+                                Ghi chú quản trị viên
                                 <span style={{ fontWeight: 500, color: T.slate, marginLeft: 6 }}>
                                     (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự)
                                 </span>
@@ -1656,7 +1719,7 @@ export function ReviewEscalationsManagement() {
                                         if (resolveApiError) setResolveApiError(null);
                                     }}
                                     rows={3}
-                                    placeholder="Khi chấp nhận: có thể để trống. Khi từ chối: nhập lý do rõ ràng (≥ 10 ký tự)."
+                                    placeholder="Nhập ghi chú xử lý..."
                                     style={{
                                         ...inputBase,
                                         marginTop: 6,
@@ -1715,23 +1778,41 @@ export function ReviewEscalationsManagement() {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div style={{ padding: '1rem 1.25rem', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: T.title }}>
+                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: T.title, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <ShieldCheck style={{ width: 22, height: 22, color: T.green }} />
                                 {complianceResolveRow.__reqType === 'ADMIN_ACTION'
                                     ? (String(complianceResolveRow.requestKind ?? '').toUpperCase() === 'BAN_USER'
                                         ? 'Xử lý đơn chặn tài khoản'
                                         : 'Xử lý đơn tạm đình chỉ quyền viết')
-                                    : 'Xử lý đơn gỡ lock từ compliance'}
+                                    : 'Xử lý đơn trả về hàng đợi từ xử lý vi phạm viên'}
                             </h3>
                             <button type="button" onClick={closeComplianceResolve} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
                         </div>
                         <div style={{ padding: '1rem 1.25rem', display: 'grid', gap: 10 }}>
                             <div style={{ fontSize: '0.875rem', color: T.slateDark, lineHeight: 1.5 }}>
-                                <div><strong>Truyện:</strong> {complianceResolveRow.storyTitle ?? complianceResolveRow.story?.title ?? '—'}</div>
-                                <div><strong>Người gửi:</strong> {complianceResolveRow.requesterDisplayName ?? complianceResolveRow.requesterEmail ?? '—'}</div>
-                                {complianceResolveRow.__reqType === 'ADMIN_ACTION' && (
-                                    <div><strong>Yêu cầu:</strong> {String(complianceResolveRow.requestKind ?? '').toUpperCase() === 'BAN_USER' ? 'Chặn tài khoản' : 'Tạm đình chỉ quyền viết'}</div>
-                                )}
-                                <div><strong>Lý do:</strong> {complianceResolveRow.message || '—'}</div>
+                                <p style={{ margin: '0 0 6px' }}>
+                                    <strong>
+                                        {complianceResolveRow.__reqType === 'ADMIN_ACTION'
+                                            ? 'Yêu cầu xử lý tài khoản'
+                                            : 'Yêu cầu trả đơn về hàng đợi'}
+                                    </strong>
+                                    {' — STORY — '}
+                                    <strong>{complianceResolveRow.storyTitle ?? complianceResolveRow.story?.title ?? '—'}</strong>
+                                </p>
+                                <p style={{ margin: 0, color: T.slate }}>
+                                    Người gửi: {complianceResolveRow.requesterDisplayName ?? complianceResolveRow.requesterEmail ?? '—'}
+                                    {' · '}
+                                    Thời gian gửi: {formatApiDateTimeLocalVi(
+                                        complianceResolveRow.createdAtUtc ??
+                                        complianceResolveRow.CreatedAtUtc ??
+                                        complianceResolveRow.created_at ??
+                                        complianceResolveRow.createdAt ??
+                                        complianceResolveRow.CreatedAt
+                                    )}
+                                </p>
+                                <p style={{ margin: '6px 0 0', color: T.slate }}>
+                                    Lý do: {complianceResolveRow.message || '—'}
+                                </p>
                             </div>
                             {resolveApiError ? (
                                 <div role="alert" style={{ padding: '0.75rem 1rem', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2' }}>
@@ -1739,25 +1820,9 @@ export function ReviewEscalationsManagement() {
                                     <div style={{ fontSize: '0.8125rem', color: '#7f1d1d', lineHeight: 1.45 }}>{resolveApiError.message}</div>
                                 </div>
                             ) : null}
-                            <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                Quyết định
-                                <select value={complianceDecision} onChange={(e) => setComplianceDecision(e.target.value)} style={inputBase}>
-                                    {complianceResolveRow.__reqType === 'ADMIN_ACTION' ? (
-                                        <>
-                                            <option value="APPROVE">Chấp nhận</option>
-                                            <option value="REJECT">Từ chối</option>
-                                        </>
-                                    ) : (
-                                        <>
-                                            <option value="APPROVE_UNLOCK">Chấp nhận trả hàng đợi</option>
-                                            <option value="REJECT">Từ chối</option>
-                                        </>
-                                    )}
-                                </select>
-                            </label>
                             {complianceResolveRow.__reqType === 'ADMIN_ACTION'
                                 && String(complianceResolveRow.requestKind ?? '').toUpperCase() === 'SUSPEND_AUTHOR_WRITING'
-                                && complianceDecision === 'APPROVE' && (
+                                && (
                                     <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
                                         Thời điểm kết thúc đình chỉ
                                         <input
@@ -1769,14 +1834,32 @@ export function ReviewEscalationsManagement() {
                                     </label>
                                 )}
                             <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                Ghi chú admin
+                                Ghi chú quản trị viên
+                                <span style={{ marginLeft: 6, color: T.slate, fontWeight: 500 }}>
+                                    (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự)
+                                </span>
                                 <textarea
                                     value={complianceAdminNote}
-                                    onChange={(e) => setComplianceAdminNote(e.target.value)}
+                                    onChange={(e) => {
+                                        setComplianceAdminNote(e.target.value);
+                                        if (complianceAdminNoteRejectError) setComplianceAdminNoteRejectError('');
+                                        if (resolveApiError) setResolveApiError(null);
+                                    }}
                                     rows={3}
                                     placeholder="Nhập ghi chú xử lý..."
-                                    style={{ ...inputBase, marginTop: 6, fontFamily: 'inherit', minHeight: '4.5rem' }}
+                                    style={{
+                                        ...inputBase,
+                                        marginTop: 6,
+                                        fontFamily: 'inherit',
+                                        minHeight: '4.5rem',
+                                        borderColor: complianceAdminNoteRejectError ? '#ef4444' : T.border,
+                                    }}
                                 />
+                                {complianceAdminNoteRejectError ? (
+                                    <p style={{ fontSize: '0.75rem', color: '#b91c1c', margin: '6px 0 0', fontWeight: 600 }} role="alert">
+                                        {complianceAdminNoteRejectError}
+                                    </p>
+                                ) : null}
                             </label>
                         </div>
                         <div style={{ padding: '0.75rem 1.25rem 1.25rem', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${T.border}`, background: T.bg }}>
@@ -1786,10 +1869,18 @@ export function ReviewEscalationsManagement() {
                             <button
                                 type="button"
                                 disabled={complianceResolving}
-                                onClick={submitComplianceResolve}
-                                style={{ padding: '0.5rem 1rem', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                                onClick={() => submitComplianceResolve('REJECT')}
+                                style={{ padding: '0.5rem 1rem', borderRadius: 8, border: 'none', background: '#ef4444', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
                             >
-                                {complianceResolving ? 'Đang xử lý...' : 'Xác nhận xử lý'}
+                                Từ chối
+                            </button>
+                            <button
+                                type="button"
+                                disabled={complianceResolving}
+                                onClick={() => submitComplianceResolve(complianceResolveRow.__reqType === 'ADMIN_ACTION' ? 'APPROVE' : 'APPROVE_UNLOCK')}
+                                style={{ padding: '0.5rem 1rem', borderRadius: 8, border: 'none', background: T.green, color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                {complianceResolving ? 'Đang xử lý...' : 'Chấp nhận'}
                             </button>
                         </div>
                     </div>

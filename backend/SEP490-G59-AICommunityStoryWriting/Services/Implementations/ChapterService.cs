@@ -72,6 +72,8 @@ namespace Services.Implementations
                 throw new InvalidOperationException($"Chapter with order index {request.OrderIndex} already exists for this story.");
             }
 
+            EnsureUniqueChapterTitleForStory(request.StoryId, request.Title, null);
+
             var validAccessTypes = new[] { "FREE", "PAID" };
             var accessType = request.AccessType?.ToUpper() ?? "FREE";
             if (!string.IsNullOrWhiteSpace(request.AccessType) && !validAccessTypes.Contains(accessType))
@@ -84,6 +86,10 @@ namespace Services.Implementations
             if (accessType == "PAID" && coinPrice <= 0)
             {
                 throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+            }
+            if (accessType == "PAID" && (story.total_views ?? 0) < 500)
+            {
+                throw new InvalidOperationException("Truyện cần tối thiểu 500 lượt xem mới được thiết lập chế độ trả phí cho chương.");
             }
             if (accessType == "FREE" && coinPrice > 0)
             {
@@ -365,6 +371,9 @@ namespace Services.Implementations
                 }
             }
 
+            var targetStoryId = chapter.story_id ?? Guid.Empty;
+            EnsureUniqueChapterTitleForStory(targetStoryId, request.Title, id);
+
             if (!string.IsNullOrWhiteSpace(request.Status))
             {
                 var validStatuses = new[] { "DRAFT", "PENDING_REVIEW", "REJECTED", "PUBLISHED", "HIDDEN", "ARCHIVED" };
@@ -388,6 +397,12 @@ namespace Services.Implementations
                 if (accessType == "PAID" && coinPrice <= 0)
                 {
                     throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+                }
+                if (accessType == "PAID" && !string.Equals(chapter.access_type, "PAID", StringComparison.OrdinalIgnoreCase))
+                {
+                    var story = targetStoryId == Guid.Empty ? null : StoryDAO.GetById(targetStoryId);
+                    if ((story?.total_views ?? 0) < 500)
+                        throw new InvalidOperationException("Truyện cần tối thiểu 500 lượt xem mới được thiết lập chế độ trả phí cho chương.");
                 }
                 if (accessType == "FREE")
                 {
@@ -707,6 +722,28 @@ namespace Services.Implementations
             return content
                 .Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
                 .Length;
+        }
+
+        private void EnsureUniqueChapterTitleForStory(Guid storyId, string? title, Guid? excludeChapterId)
+        {
+            var normalizedTitle = NormalizeTitle(title);
+            if (string.IsNullOrWhiteSpace(normalizedTitle))
+                return;
+
+            var duplicated = _chapterRepository
+                .GetByStoryId(storyId)
+                .Any(c => (!excludeChapterId.HasValue || c.id != excludeChapterId.Value) &&
+                          NormalizeTitle(c.title) == normalizedTitle);
+            if (duplicated)
+                throw new InvalidOperationException("Tên chương đã tồn tại trong truyện này. Vui lòng đặt tên khác.");
+        }
+
+        private static string NormalizeTitle(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return string.Empty;
+            return string.Join(" ", title.Trim().Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+                .ToLowerInvariant();
         }
 
         private void UpdateStoryChapterStats(Guid storyId)
