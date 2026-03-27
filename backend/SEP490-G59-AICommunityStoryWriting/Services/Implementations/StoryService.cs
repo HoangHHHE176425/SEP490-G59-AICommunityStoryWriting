@@ -670,6 +670,8 @@ namespace Services.Implementations
             var totalChapters = story.total_chapters ?? ChapterDAO.GetCountByStoryId(story.id);
             var publishedChaptersCount = ChapterDAO.GetPublishedCountByStoryId(story.id);
             var totalComments = CommentDAO.GetCountByStoryId(story.id);
+            // Theo dõi thực tế theo user_library (FOLLOW) để tránh lệch với cột denormalized total_favorites.
+            var totalFavorites = UserLibraryDAO.GetFollowCountByStoryId(story.id);
             var latestChapterUpdatedAt = ChapterDAO.GetLatestUpdatedAtByStoryId(story.id);
             var latestUpdatedAt = story.updated_at;
             if (latestChapterUpdatedAt.HasValue && (!latestUpdatedAt.HasValue || latestChapterUpdatedAt > latestUpdatedAt))
@@ -696,7 +698,7 @@ namespace Services.Implementations
                 PublishedChaptersCount = publishedChaptersCount,
                 TotalViews = story.total_views,
                 TotalComments = totalComments,
-                TotalFavorites = story.total_favorites,
+                TotalFavorites = totalFavorites,
                 AvgRating = story.avg_rating,
                 WordCount = story.word_count,
                 CreatedAt = story.created_at,
@@ -719,6 +721,8 @@ namespace Services.Implementations
             var totalChapters = story.total_chapters ?? ChapterDAO.GetCountByStoryId(story.id);
             var publishedChaptersCount = ChapterDAO.GetPublishedCountByStoryId(story.id);
             var totalComments = CommentDAO.GetCountByStoryId(story.id);
+            // Theo dõi thực tế theo user_library (FOLLOW) để tránh lệch với cột denormalized total_favorites.
+            var totalFavorites = UserLibraryDAO.GetFollowCountByStoryId(story.id);
             var latestChapterUpdatedAt = ChapterDAO.GetLatestUpdatedAtByStoryId(story.id);
             var latestUpdatedAt = story.updated_at;
             if (latestChapterUpdatedAt.HasValue && (!latestUpdatedAt.HasValue || latestChapterUpdatedAt > latestUpdatedAt))
@@ -750,7 +754,7 @@ namespace Services.Implementations
                 PublishedChaptersCount = publishedChaptersCount,
                 TotalViews = story.total_views,
                 TotalComments = totalComments,
-                TotalFavorites = story.total_favorites,
+                TotalFavorites = totalFavorites,
                 AvgRating = story.avg_rating,
                 CreatedAt = story.created_at,
                 UpdatedAt = story.updated_at,

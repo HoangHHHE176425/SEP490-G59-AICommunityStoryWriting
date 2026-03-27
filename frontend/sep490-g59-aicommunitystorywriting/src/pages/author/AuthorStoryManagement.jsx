@@ -55,6 +55,24 @@ function mapStoryFromApi(item) {
     const ageRatingMap = { ALL: 'Phù hợp mọi lứa tuổi', '13+': 'Từ 13 tuổi', '16+': 'Từ 16 tuổi', '18+': 'Từ 18 tuổi' };
     const rawAge = item.ageRating ?? item.AgeRating ?? 'ALL';
     const ageRating = ageRatingMap[rawAge] ?? ageRatingMap.ALL;
+    const follows = Number(
+        item.totalFavorites
+        ?? item.TotalFavorites
+        ?? item.total_favorites
+        ?? item.favoritesCount
+        ?? item.FavoritesCount
+        ?? item.followCount
+        ?? item.FollowCount
+        ?? 0
+    );
+    const ratingRaw =
+        item.avgRating
+        ?? item.AvgRating
+        ?? item.avg_rating
+        ?? item.rating
+        ?? item.Rating
+        ?? 0;
+    const rating = Number(ratingRaw);
     const isComplianceHiddenFlag = Boolean(
         item.complianceHidden
         ?? item.ComplianceHidden
@@ -73,8 +91,8 @@ function mapStoryFromApi(item) {
         status: status.toLowerCase(),
         chapters: item.publishedChaptersCount ?? item.PublishedChaptersCount ?? item.totalChapters ?? item.TotalChapters ?? 0,
         totalViews: Number(item.totalViews ?? item.TotalViews ?? 0),
-        follows: Number(item.totalFavorites ?? item.TotalFavorites ?? 0),
-        rating: item.avgRating ?? item.AvgRating ?? 0,
+        follows: Number.isFinite(follows) ? follows : 0,
+        rating: Number.isFinite(rating) ? rating : 0,
         lastUpdate: lastUpdate || 'Chưa cập nhật',
         publishStatus,
         storyProgressStatus: storyProgressStatus || 'ONGOING',
@@ -2050,7 +2068,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                                 <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Đề cử</span>
                                                             </div>
                                                             <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#333333' }}>
-                                                                0
+                                                                {Number(story.rating ?? 0) > 0 ? Number(story.rating).toFixed(1) : 0}
                                                             </div>
                                                         </div>
                                                     </div>
