@@ -51,3 +51,16 @@ export async function getReviewEscalationLog(params = {}) {
     const res = await axiosInstance.get(`/admin/moderation/review-escalations/log?${q}`);
     return res.data;
 }
+
+/**
+ * Log duyệt/từ chối của moderator.
+ * @param {Record<string, string|number|undefined>} params — page, pageSize, search, moderatorId, dateFrom, dateTo, action, targetType, targetId, processingTimeMinMs, processingTimeMaxMs, sortBy, sortOrder
+ */
+export async function getModerationLogs(params = {}) {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') q.append(k, String(v));
+    });
+    const res = await axiosInstance.get(`/admin/moderation/logs?${q}`);
+    return res.data;
+}

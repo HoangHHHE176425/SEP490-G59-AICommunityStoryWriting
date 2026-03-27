@@ -1,12 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { ShieldCheck, ListFilter } from 'lucide-react';
+import { Pagination } from '../../../components/pagination/Pagination';
+import { getActivePolicy } from '../../../api/policy/policyApi';
+import { PolicyBody } from '../../../components/policy/PolicyBody';
 import {
     getPendingReviewEscalations,
     resolveReviewEscalation,
     getReviewEscalationHistory,
     getReviewEscalationLog,
 } from '../../../api/admin/adminModerationApi';
+import {
+    getAdminComplianceLockRequests,
+    resolveAdminComplianceLockRequest,
+    getAdminComplianceAdminActionRequests,
+    resolveAdminComplianceAdminActionRequest,
+} from '../../../api/admin/adminComplianceApi';
 import { getChapterReviewContent } from '../../../api/moderator/moderatorApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
 import { localDateTimeInputToIsoUtc } from '../../../utils/moderatorReviewSla';
@@ -122,12 +131,30 @@ function kindLong(k) {
     return kindShort(k);
 }
 
+function formatUtcPlus7Vi(value) {
+    if (value == null || value === '') return '—';
+    const raw = String(value).trim().replace(' ', 'T');
+    const withUtc = /(Z|[+-]\d{2}:\d{2}|[+-]\d{4})$/i.test(raw) ? raw : `${raw}Z`;
+    const d = new Date(withUtc);
+    if (Number.isNaN(d.getTime())) return '—';
+    const vi = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+    return vi.toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    });
+}
+
 function urgencyBadge(tier) {
     const t = String(tier || '').toUpperCase();
     const map = {
         CRITICAL: { ...T.critical, label: 'Nghiêm trọng' },
         HIGH: { ...T.high, label: 'Cao' },
-        STANDARD: { ...T.standard, label: 'Chuẩn' },
+        STANDARD: { ...T.standard, label: 'Thông thường' },
     };
     const c = map[t] ?? { ...T.standard, label: tier || '—' };
     return (
@@ -159,7 +186,7 @@ function historyResultBadge(st) {
     }
     if (s === 'REJECTED') {
         return (
-            <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#e2e8f0', color: '#475569' }}>
+            <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#fee2e2', color: '#991b1b' }}>
                 Từ chối
             </span>
         );
@@ -170,13 +197,13 @@ function historyResultBadge(st) {
 function logStatusBadge(st) {
     const s = String(st || '').toUpperCase();
     if (s === 'PENDING') {
-        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#fef3c7', color: '#92400e' }}>PENDING</span>;
+        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#fef3c7', color: '#92400e' }}>Chờ xử lý</span>;
     }
     if (s === 'APPROVED') {
-        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#d1fae5', color: '#065f46' }}>APPROVED</span>;
+        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#d1fae5', color: '#065f46' }}>Đã chấp nhận</span>;
     }
     if (s === 'REJECTED') {
-        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#e2e8f0', color: '#475569' }}>REJECTED</span>;
+        return <span style={{ padding: '0.2rem 0.45rem', borderRadius: '6px', fontSize: '0.7rem', fontWeight: 700, background: '#e2e8f0', color: '#475569' }}>Từ chối</span>;
     }
     return <span style={{ fontSize: '0.75rem' }}>{st || '—'}</span>;
 }
@@ -185,6 +212,18 @@ function truncate(str, max) {
     const t = (str ?? '').toString();
     if (t.length <= max) return t;
     return `${t.slice(0, max)}…`;
+}
+
+function urgencyKeyFromRow(row) {
+    return String(row?.urgencyTier ?? row?.urgency_tier ?? 'STANDARD').toUpperCase();
+}
+
+function toDateTimeLocalInput(value) {
+    if (!value) return '';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** Nhãn trạng thái chương cho bảng tóm tắt (không tải nội dung). */
@@ -245,6 +284,7 @@ const inputBase = {
 export function ReviewEscalationsManagement() {
     /** Hai vùng chính (cùng cấu trúc màn Admin Client): đơn moderator vs log escalation. */
     const [mainTab, setMainTab] = useState('orders');
+    const [orderSourceTab, setOrderSourceTab] = useState('moderator'); // moderator | compliance
     const [listMode, setListMode] = useState('pending');
     const [tier, setTier] = useState('');
     const [loading, setLoading] = useState(true);
@@ -263,6 +303,11 @@ export function ReviewEscalationsManagement() {
     /** { loading, error, items } | null — metadata các chương khi target STORY (không nội dung) */
     const [resolveStoryChaptersPreview, setResolveStoryChaptersPreview] = useState(null);
     const [resolving, setResolving] = useState(false);
+    const [complianceResolveRow, setComplianceResolveRow] = useState(null);
+    const [complianceAdminNote, setComplianceAdminNote] = useState('');
+    const [complianceAdminNoteRejectError, setComplianceAdminNoteRejectError] = useState('');
+    const [complianceSuspendUntilUtc, setComplianceSuspendUntilUtc] = useState('');
+    const [complianceResolving, setComplianceResolving] = useState(false);
 
     /** Log tab */
     const [logLoading, setLogLoading] = useState(false);
@@ -283,12 +328,88 @@ export function ReviewEscalationsManagement() {
     const [logResolvedTo, setLogResolvedTo] = useState('');
     const [logSortBy, setLogSortBy] = useState('created_at');
     const [logSortOrder, setLogSortOrder] = useState('desc');
-    const [showLogAdvancedFilters, setShowLogAdvancedFilters] = useState(false);
+    const [historySearch, setHistorySearch] = useState('');
+    const [historyStatus, setHistoryStatus] = useState('');
+    const [historyRequestType, setHistoryRequestType] = useState('');
+    const [historyPage, setHistoryPage] = useState(1);
+    const [historyPageSize] = useState(10);
+    const [moderatorPolicyModalOpen, setModeratorPolicyModalOpen] = useState(false);
+    const [moderatorPolicyLoading, setModeratorPolicyLoading] = useState(false);
+    const [moderatorPolicyError, setModeratorPolicyError] = useState('');
+    const [moderatorAuthorPolicy, setModeratorAuthorPolicy] = useState(null);
+    const [moderatorProcessModalOpen, setModeratorProcessModalOpen] = useState(false);
+
+    const openModeratorPolicyModal = useCallback(async () => {
+        setModeratorPolicyModalOpen(true);
+        setModeratorPolicyLoading(true);
+        setModeratorPolicyError('');
+        try {
+            const authorPolicy = await getActivePolicy('AUTHOR');
+            setModeratorAuthorPolicy(authorPolicy);
+        } catch (e) {
+            const msg =
+                e?.response?.data?.message
+                ?? e?.response?.data?.Message
+                ?? e?.message
+                ?? 'Không thể tải policy tác giả.';
+            setModeratorPolicyError(msg);
+            setModeratorAuthorPolicy(null);
+        } finally {
+            setModeratorPolicyLoading(false);
+        }
+    }, []);
 
     const loadOrders = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
+            if (orderSourceTab === 'compliance') {
+                if (listMode === 'history') {
+                    const [approvedLockRes, rejectedLockRes, approvedActionRes, rejectedActionRes] = await Promise.all([
+                        getAdminComplianceLockRequests({ status: 'APPROVED' }),
+                        getAdminComplianceLockRequests({ status: 'REJECTED' }),
+                        getAdminComplianceAdminActionRequests({ status: 'APPROVED' }),
+                        getAdminComplianceAdminActionRequests({ status: 'REJECTED' }),
+                    ]);
+                    const approvedLocks = (Array.isArray(approvedLockRes) ? approvedLockRes : []).map((x) => ({ ...x, __reqType: 'LOCK' }));
+                    const rejectedLocks = (Array.isArray(rejectedLockRes) ? rejectedLockRes : []).map((x) => ({ ...x, __reqType: 'LOCK' }));
+                    const approvedActions = (Array.isArray(approvedActionRes) ? approvedActionRes : []).map((x) => ({ ...x, __reqType: 'ADMIN_ACTION' }));
+                    const rejectedActions = (Array.isArray(rejectedActionRes) ? rejectedActionRes : []).map((x) => ({ ...x, __reqType: 'ADMIN_ACTION' }));
+                    const merged = [...approvedLocks, ...rejectedLocks, ...approvedActions, ...rejectedActions].sort((a, b) => {
+                        const ta = new Date(a?.resolvedAtUtc ?? a?.resolved_at ?? a?.createdAtUtc ?? a?.created_at ?? 0).getTime();
+                        const tb = new Date(b?.resolvedAtUtc ?? b?.resolved_at ?? b?.createdAtUtc ?? b?.created_at ?? 0).getTime();
+                        return tb - ta;
+                    });
+                    setItems(merged);
+                    setHistoryTotal(merged.length);
+                    setCounts({ critical: 0, high: 0, standard: 0 });
+                    return;
+                }
+                const [pendingLockRes, pendingActionRes] = await Promise.all([
+                    getAdminComplianceLockRequests({ status: 'PENDING' }),
+                    getAdminComplianceAdminActionRequests({ status: 'PENDING' }),
+                ]);
+                const pendingLocks = (Array.isArray(pendingLockRes) ? pendingLockRes : []).map((x) => ({ ...x, __reqType: 'LOCK' }));
+                const pendingActions = (Array.isArray(pendingActionRes) ? pendingActionRes : []).map((x) => ({ ...x, __reqType: 'ADMIN_ACTION' }));
+                const pendingAll = [...pendingLocks, ...pendingActions].sort((a, b) => {
+                    const ta = new Date(a?.createdAtUtc ?? a?.created_at ?? 0).getTime();
+                    const tb = new Date(b?.createdAtUtc ?? b?.created_at ?? 0).getTime();
+                    return tb - ta;
+                });
+                const complianceCounts = pendingAll.reduce((acc, row) => {
+                    const k = urgencyKeyFromRow(row);
+                    if (k === 'CRITICAL') acc.critical += 1;
+                    else if (k === 'HIGH') acc.high += 1;
+                    else acc.standard += 1;
+                    return acc;
+                }, { critical: 0, high: 0, standard: 0 });
+                const pending = !tier
+                    ? pendingAll
+                    : pendingAll.filter((x) => urgencyKeyFromRow(x) === tier);
+                setItems(pending);
+                setCounts(complianceCounts);
+                return;
+            }
             if (listMode === 'history') {
                 const rh = await getReviewEscalationHistory(0, 200);
                 const hist = rh?.items ?? rh?.Items ?? [];
@@ -312,7 +433,7 @@ export function ReviewEscalationsManagement() {
         } finally {
             setLoading(false);
         }
-    }, [listMode, tier]);
+    }, [listMode, tier, orderSourceTab]);
 
     const loadLog = useCallback(async (pageOverride) => {
         const page = typeof pageOverride === 'number' && pageOverride >= 1 ? pageOverride : logPage;
@@ -510,12 +631,12 @@ export function ReviewEscalationsManagement() {
         const trimmed = adminNote.trim();
         if (trimmed.length < ADMIN_REJECT_NOTE_MIN_LENGTH) {
             setAdminNoteRejectError(
-                `Khi từ chối, bắt buộc nhập lý do (ghi chú admin). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự (đã bỏ khoảng trắng đầu/cuối).`,
+                `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự (đã bỏ khoảng trắng đầu/cuối).`,
             );
             return;
         }
         if (trimmed.length > ADMIN_REJECT_NOTE_MAX_LENGTH) {
-            setAdminNoteRejectError(`Ghi chú admin không được vượt quá ${ADMIN_REJECT_NOTE_MAX_LENGTH} ký tự.`);
+            setAdminNoteRejectError(`Ghi chú quản trị viên không được vượt quá ${ADMIN_REJECT_NOTE_MAX_LENGTH} ký tự.`);
             return;
         }
         setAdminNoteRejectError('');
@@ -537,19 +658,127 @@ export function ReviewEscalationsManagement() {
         }
     };
 
+    const openComplianceResolve = (row) => {
+        setComplianceResolveRow(row);
+        setComplianceAdminNote('');
+        setComplianceAdminNoteRejectError('');
+        setComplianceSuspendUntilUtc(toDateTimeLocalInput(row?.proposedSuspendUntilUtc ?? row?.ProposedSuspendUntilUtc));
+        setResolveApiError(null);
+    };
+
+    const closeComplianceResolve = () => {
+        if (complianceResolving) return;
+        setComplianceResolveRow(null);
+        setComplianceAdminNoteRejectError('');
+        setResolveApiError(null);
+    };
+
+    const submitComplianceResolve = async (decisionOverride) => {
+        if (!complianceResolveRow) return;
+        const id = complianceResolveRow.id ?? complianceResolveRow.Id;
+        const reqType = complianceResolveRow.__reqType;
+        const decision = decisionOverride ?? (reqType === 'ADMIN_ACTION' ? 'APPROVE' : 'APPROVE_UNLOCK');
+        const trimmedNote = (complianceAdminNote || '').trim();
+        if (decision === 'REJECT') {
+            if (trimmedNote.length < ADMIN_REJECT_NOTE_MIN_LENGTH) {
+                setComplianceAdminNoteRejectError(
+                    `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự (đã bỏ khoảng trắng đầu/cuối).`,
+                );
+                return;
+            }
+            if (trimmedNote.length > ADMIN_REJECT_NOTE_MAX_LENGTH) {
+                setComplianceAdminNoteRejectError(`Ghi chú quản trị viên không được vượt quá ${ADMIN_REJECT_NOTE_MAX_LENGTH} ký tự.`);
+                return;
+            }
+        }
+        setComplianceAdminNoteRejectError('');
+        setComplianceResolving(true);
+        setResolveApiError(null);
+        try {
+            if (reqType === 'ADMIN_ACTION') {
+                await resolveAdminComplianceAdminActionRequest(id, {
+                    decision,
+                    adminNote: trimmedNote || undefined,
+                    suspendUntilUtc: complianceSuspendUntilUtc ? new Date(complianceSuspendUntilUtc).toISOString() : undefined,
+                });
+            } else {
+                await resolveAdminComplianceLockRequest(id, {
+                    decision,
+                    adminNote: trimmedNote || undefined,
+                });
+            }
+            setComplianceResolveRow(null);
+            await loadOrders();
+        } catch (e) {
+            setResolveApiError({
+                title: 'Không thể xử lý đơn compliance',
+                message: getEscalationResolveErrorMessage(e),
+            });
+        } finally {
+            setComplianceResolving(false);
+        }
+    };
+
     const applyLogFilters = () => {
         setLogPage(1);
         loadLog(1);
     };
 
+    useEffect(() => {
+        setHistoryPage(1);
+    }, [historySearch, historyStatus, historyRequestType, historyPageSize, listMode, orderSourceTab]);
+
+    const historyFilteredItems = useCallback(() => {
+        if (listMode !== 'history') return [];
+        const q = historySearch.trim().toLowerCase();
+        return (Array.isArray(items) ? items : []).filter((row) => {
+            const statusRaw = String(row.status ?? row.Status ?? '').toUpperCase();
+            const reqKindRaw = String(row.requestKind ?? row.RequestKind ?? '').toUpperCase();
+            const reqTypeRaw = String(row.__reqType ?? '').toUpperCase();
+            if (historyStatus && statusRaw !== historyStatus) return false;
+            if (historyRequestType) {
+                if (orderSourceTab === 'moderator') {
+                    if (reqKindRaw !== historyRequestType) return false;
+                } else if (reqTypeRaw !== historyRequestType) return false;
+            }
+            if (!q) return true;
+            const title = String(row.storyTitle ?? row.targetTitle ?? '').toLowerCase();
+            const sender = String(row.requesterDisplayName ?? row.requesterEmail ?? row.senderName ?? '').toLowerCase();
+            const message = String(row.message ?? row.reason ?? '').toLowerCase();
+            const reqLabel = reqKindRaw === 'BAN_USER' ? 'chan tai khoan' : reqKindRaw === 'SUSPEND_AUTHOR_WRITING' ? 'tam dinh chi quyen viet' : reqKindRaw.toLowerCase();
+            return title.includes(q) || sender.includes(q) || message.includes(q) || reqLabel.includes(q);
+        });
+    }, [historySearch, historyStatus, historyRequestType, items, listMode, orderSourceTab]);
+
+    const historyItems = historyFilteredItems();
+    const historyTotalPages = Math.max(1, Math.ceil(historyItems.length / historyPageSize));
+    const safeHistoryPage = Math.min(historyPage, historyTotalPages);
+    const historyPageItems = historyItems.slice((safeHistoryPage - 1) * historyPageSize, safeHistoryPage * historyPageSize);
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* Header — cùng format Quản lý xuất bản / Category */}
             <div>
-                <h1 style={{ fontSize: '1.875rem', fontWeight: 700, color: T.title, margin: 0, marginBottom: '0.5rem' }}>Đơn báo cáo duyệt</h1>
+                <h1 style={{ fontSize: '1.875rem', fontWeight: 700, color: T.title, margin: 0, marginBottom: '0.5rem' }}>Quản lý đơn</h1>
                 <p style={{ fontSize: '0.875rem', color: T.slate, margin: 0, maxWidth: '42rem', lineHeight: 1.55 }}>
-                    Quản lý các yêu cầu từ Moderator (xin gia hạn / xin hủy nhận duyệt) và tra cứu lịch sử xử lý.
+                    Quản lý đơn của kiểm duyệt viên và xử lý vi phạm viên, bao gồm đơn chờ xử lý, lịch sử đã xử lý và nhật ký tra cứu.
                 </p>
+                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                        type="button"
+                        onClick={openModeratorPolicyModal}
+                        style={{ padding: '0.5rem 0.85rem', borderRadius: 8, border: `1px solid ${T.border}`, background: T.card, color: T.title, fontSize: '0.8125rem', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                        Xem chính sách hệ thống
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setModeratorProcessModalOpen(true)}
+                        style={{ padding: '0.5rem 0.85rem', borderRadius: 8, border: `1px solid ${T.border}`, background: T.card, color: T.title, fontSize: '0.8125rem', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                        Xem quy trình duyệt xuất bản
+                    </button>
+                </div>
             </div>
 
             {/* Tab cấp cao — card + pill như bộ lọc PublicationManagement */}
@@ -567,13 +796,13 @@ export function ReviewEscalationsManagement() {
             >
                 <button
                     type="button"
-                    onClick={() => setMainTab('orders')}
-                    style={pubTabStyle(mainTab === 'orders', T.sky)}
-                    {...pillHoverHandlers(mainTab === 'orders')}
+                    onClick={() => { setMainTab('orders'); setOrderSourceTab('moderator'); }}
+                    style={pubTabStyle(mainTab === 'orders' && orderSourceTab === 'moderator', T.sky)}
+                    {...pillHoverHandlers(mainTab === 'orders' && orderSourceTab === 'moderator')}
                 >
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                        Yêu cầu từ Moderator
-                        {counts.critical > 0 && mainTab === 'orders' && listMode === 'pending' && (
+                        Đơn của kiểm duyệt viên
+                        {counts.critical > 0 && mainTab === 'orders' && listMode === 'pending' && orderSourceTab === 'moderator' && (
                             <span
                                 style={{
                                     minWidth: 20,
@@ -596,11 +825,32 @@ export function ReviewEscalationsManagement() {
                 </button>
                 <button
                     type="button"
-                    onClick={() => setMainTab('log')}
-                    style={pubTabStyle(mainTab === 'log', '#475569')}
-                    {...pillHoverHandlers(mainTab === 'log')}
+                    onClick={() => { setMainTab('orders'); setOrderSourceTab('compliance'); }}
+                    style={pubTabStyle(mainTab === 'orders' && orderSourceTab === 'compliance', T.sky)}
+                    {...pillHoverHandlers(mainTab === 'orders' && orderSourceTab === 'compliance')}
                 >
-                    Nhật ký xử lý
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        Đơn của xử lý vi phạm viên
+                        {mainTab === 'orders' && listMode === 'pending' && orderSourceTab === 'compliance' && items.length > 0 && (
+                            <span
+                                style={{
+                                    minWidth: 20,
+                                    height: 20,
+                                    padding: '0 6px',
+                                    borderRadius: 999,
+                                    background: '#ffffff',
+                                    color: T.green,
+                                    fontSize: '0.7rem',
+                                    fontWeight: 800,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                }}
+                            >
+                                {items.length > 99 ? '99+' : items.length}
+                            </span>
+                        )}
+                    </span>
                 </button>
             </div>
 
@@ -608,7 +858,9 @@ export function ReviewEscalationsManagement() {
                 <div style={{ backgroundColor: T.card, borderRadius: '12px', border: `1px solid ${T.border}`, overflow: 'hidden' }}>
                     <div style={{ padding: '1.25rem 1.5rem' }}>
                         <h2 style={{ margin: '0 0 1rem', fontSize: '1.125rem', fontWeight: 600, color: T.title }}>
-                            Danh sách yêu cầu (Moderator)
+                            {orderSourceTab === 'compliance'
+                                ? 'Đơn của xử lý vi phạm viên'
+                                : 'Đơn của kiểm duyệt viên'}
                         </h2>
 
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.25rem' }}>
@@ -642,16 +894,16 @@ export function ReviewEscalationsManagement() {
                                         <p style={{ fontSize: '1.5rem', fontWeight: 700, color: T.high.fg, margin: '0.35rem 0 0' }}>{counts.high}</p>
                                     </div>
                                     <div style={{ borderRadius: '12px', border: `1px solid ${T.standard.border}`, background: T.standard.bg, padding: '1rem' }}>
-                                        <p style={{ fontSize: '0.75rem', color: T.standard.fg, margin: 0, fontWeight: 600 }}>Chuẩn</p>
+                                        <p style={{ fontSize: '0.75rem', color: T.standard.fg, margin: 0, fontWeight: 600 }}>Thông thường</p>
                                         <p style={{ fontSize: '1.5rem', fontWeight: 700, color: T.standard.fg, margin: '0.35rem 0 0' }}>{counts.standard}</p>
                                     </div>
                                 </div>
                                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                                     {[
                                         { key: '', label: 'Tất cả', color: T.sky },
-                                        { key: 'CRITICAL', label: 'Nghiêm trọng', color: '#ef4444' },
-                                        { key: 'HIGH', label: 'Cao', color: '#f97316' },
-                                        { key: 'STANDARD', label: 'Chuẩn', color: '#64748b' },
+                                        { key: 'CRITICAL', label: 'Chỉ nghiêm trọng', color: '#ef4444' },
+                                        { key: 'HIGH', label: 'Chỉ cao', color: '#f97316' },
+                                        { key: 'STANDARD', label: 'Chỉ thông thường', color: '#64748b' },
                                     ].map((b) => {
                                         const active = tier === b.key;
                                         return (
@@ -671,9 +923,47 @@ export function ReviewEscalationsManagement() {
                         )}
 
                         {listMode === 'history' && (
-                            <p style={{ fontSize: '0.875rem', color: T.slate, margin: '0 0 1rem', lineHeight: 1.5 }}>
-                                Các đơn đã chấp nhận hoặc từ chối — dữ liệu lưu trong hệ thống để tra cứu.
-                            </p>
+                            <div style={{ marginBottom: '1rem', display: 'grid', gap: '0.75rem' }}>
+                                <p style={{ fontSize: '0.875rem', color: T.slate, margin: 0, lineHeight: 1.5 }}>
+                                    {orderSourceTab === 'compliance'
+                                        ? 'Lịch sử đơn đã xử lý của xử lý vi phạm viên.'
+                                        : 'Lịch sử đơn đã xử lý của kiểm duyệt viên.'}
+                                </p>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
+                                    <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                        Tìm kiếm
+                                        <input value={historySearch} onChange={(e) => setHistorySearch(e.target.value)} placeholder="Truyện, người gửi, lý do..." style={inputBase} />
+                                    </label>
+                                    <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                        Trạng thái
+                                        <select value={historyStatus} onChange={(e) => setHistoryStatus(e.target.value)} style={inputBase}>
+                                            <option value="">Tất cả</option>
+                                            <option value="APPROVED">Đã chấp nhận</option>
+                                            <option value="REJECTED">Từ chối</option>
+                                        </select>
+                                    </label>
+                                    <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                        Loại đơn
+                                        <select value={historyRequestType} onChange={(e) => setHistoryRequestType(e.target.value)} style={inputBase}>
+                                            <option value="">Tất cả</option>
+                                            {orderSourceTab === 'moderator' ? (
+                                                <>
+                                                    <option value="RELEASE_ASSIGNMENT">Hủy nhận duyệt</option>
+                                                    <option value="EXTEND_DEADLINE">Gia hạn</option>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <option value="LOCK">Yêu cầu trả đơn về hàng đợi</option>
+                                                    <option value="ADMIN_ACTION">Yêu cầu xử lý tài khoản</option>
+                                                </>
+                                            )}
+                                        </select>
+                                    </label>
+                                </div>
+                                <div style={{ fontSize: '0.8125rem', color: T.slate }}>
+                                    Tổng lọc: <strong>{historyItems.length}</strong> · Trang <strong>{safeHistoryPage}</strong>/{historyTotalPages}
+                                </div>
+                            </div>
                         )}
 
                         {error && (
@@ -705,47 +995,93 @@ export function ReviewEscalationsManagement() {
                                 <p style={{ fontSize: '0.875rem', color: T.slate, margin: 0 }}>Đang tải danh sách...</p>
                             </div>
                         ) : listMode === 'history' ? (
-                            items.length === 0 ? (
+                            historyItems.length === 0 ? (
                                 <p style={{ color: T.slate }}>
                                     Chưa có đơn nào đã xử lý. Tổng trong hệ thống: <strong>{historyTotal}</strong>
                                 </p>
                             ) : (
                                 <>
-                                    <p style={{ fontSize: '0.8125rem', color: T.slate, marginBottom: 8 }}>
-                                        Tổng đơn đã xử lý: <strong>{historyTotal}</strong> — hiển thị <strong>200</strong> bản ghi mới nhất.
-                                    </p>
-                                    <div style={{ overflowX: 'auto', border: `1px solid ${T.border}`, borderRadius: '12px' }}>
-                                        <table style={tableBase}>
-                                            <thead>
-                                                <tr>
-                                                    {['Kết quả', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Người xử lý', 'Xử lý lúc', 'Hạn xác nhận', 'Ghi chú admin', 'Lý do'].map((h) => (
-                                                        <th key={h} style={thBase}>{h}</th>
-                                                    ))}
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {items.map((row) => {
-                                                    const id = row.id ?? row.Id;
-                                                    const note = truncate(row.resolverNote ?? row.ResolverNote ?? '—', 160);
-                                                    const reason = truncate(row.reason ?? row.Reason ?? '', 160);
-                                                    return (
-                                                        <tr key={id}>
-                                                            <td style={tdBase}>{historyResultBadge(row.status ?? row.Status)}</td>
-                                                            <td style={tdBase}>{row.targetType ?? row.TargetType}</td>
-                                                            <td style={tdBase}><TargetTitleCell row={row} /></td>
-                                                            <td style={tdBase}>{row.senderName ?? row.SenderName ?? '—'}</td>
-                                                            <td style={tdBase}>{kindShort(row.requestKind ?? row.RequestKind)}</td>
-                                                            <td style={tdBase}>{row.resolverName ?? row.ResolverName ?? '—'}</td>
-                                                            <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeLocalVi(row.resolvedAt ?? row.ResolvedAt)}</td>
-                                                            <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeLocalVi(row.confirmedDeadlineAt ?? row.ConfirmedDeadlineAt)}</td>
-                                                            <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{note}</td>
-                                                            <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{reason || '—'}</td>
+                                    {orderSourceTab === 'compliance' ? (
+                                        <div style={{ overflowX: 'auto', border: `1px solid ${T.border}`, borderRadius: '12px' }}>
+                                            <table style={tableBase}>
+                                                <thead>
+                                                    <tr>
+                                                        {['Kết quả', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Lý do', 'Xử lý lúc', 'Ghi chú quản trị viên'].map((h) => (
+                                                            <th key={h} style={thBase}>{h}</th>
+                                                        ))}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {historyPageItems.map((row) => {
+                                                        const id = row.id ?? row.Id;
+                                                        const status = row.status ?? row.Status;
+                                                        const note = row.resolutionNote ?? row.resolution_note ?? '—';
+                                                        return (
+                                                            <tr key={id}>
+                                                                <td style={tdBase}>{historyResultBadge(status)}</td>
+                                                                <td style={tdBase}>{row.__reqType === 'ADMIN_ACTION' ? 'Yêu cầu xử lý tài khoản' : 'Yêu cầu trả đơn về hàng đợi'}</td>
+                                                                <td style={tdBase}>{row.storyTitle ?? row.story?.title ?? '—'}</td>
+                                                                <td style={tdBase}>{row.requesterDisplayName ?? row.requesterEmail ?? '—'}</td>
+                                                                <td style={{ ...tdBase, fontSize: '0.75rem' }}>
+                                                                    {row.__reqType === 'ADMIN_ACTION'
+                                                                        ? (String(row.requestKind ?? '').toUpperCase() === 'BAN_USER' ? 'Chặn tài khoản' : 'Tạm đình chỉ quyền viết')
+                                                                        : 'Trả đơn truyện về hàng đợi'}
+                                                                </td>
+                                                                <td style={{ ...tdBase, maxWidth: 260, fontSize: '0.75rem' }}>{truncate(row.message ?? '', 180) || '—'}</td>
+                                                                <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.resolvedAtUtc ?? row.resolved_at)}</td>
+                                                                <td style={{ ...tdBase, maxWidth: 240, fontSize: '0.75rem' }}>{truncate(note, 180) || '—'}</td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div style={{ overflowX: 'auto', border: `1px solid ${T.border}`, borderRadius: '12px' }}>
+                                                <table style={tableBase}>
+                                                    <thead>
+                                                        <tr>
+                                                            {['Kết quả', 'Loại', 'Tiêu đề', 'Người gửi', 'Loại đơn', 'Người xử lý', 'Xử lý lúc', 'Hạn xác nhận', 'Ghi chú quản trị viên', 'Lý do'].map((h) => (
+                                                                <th key={h} style={thBase}>{h}</th>
+                                                            ))}
                                                         </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                                    </thead>
+                                                    <tbody>
+                                                        {historyPageItems.map((row) => {
+                                                            const id = row.id ?? row.Id;
+                                                            const note = truncate(row.resolverNote ?? row.ResolverNote ?? '—', 160);
+                                                            const reason = truncate(row.reason ?? row.Reason ?? '', 160);
+                                                            return (
+                                                                <tr key={id}>
+                                                                    <td style={tdBase}>{historyResultBadge(row.status ?? row.Status)}</td>
+                                                                    <td style={tdBase}>{row.targetType ?? row.TargetType}</td>
+                                                                    <td style={tdBase}><TargetTitleCell row={row} /></td>
+                                                                    <td style={tdBase}>{row.senderName ?? row.SenderName ?? '—'}</td>
+                                                                    <td style={tdBase}>{kindShort(row.requestKind ?? row.RequestKind)}</td>
+                                                                    <td style={tdBase}>{row.resolverName ?? row.ResolverName ?? '—'}</td>
+                                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatUtcPlus7Vi(row.resolvedAt ?? row.ResolvedAt)}</td>
+                                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeLocalVi(row.confirmedDeadlineAt ?? row.ConfirmedDeadlineAt)}</td>
+                                                                    <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{note}</td>
+                                                                    <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{reason || '—'}</td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </>
+                                    )}
+                                    {historyTotalPages > 1 && (
+                                        <Pagination
+                                            currentPage={safeHistoryPage}
+                                            totalPages={historyTotalPages}
+                                            totalItems={historyItems.length}
+                                            itemsPerPage={historyPageSize}
+                                            onPageChange={setHistoryPage}
+                                            itemLabel="đơn"
+                                        />
+                                    )}
                                 </>
                             )
                         ) : items.length === 0 ? (
@@ -755,7 +1091,10 @@ export function ReviewEscalationsManagement() {
                                 <table style={tableBase}>
                                     <thead>
                                         <tr>
-                                            {['Mức độ', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Hạn hiện tại', 'Hạn đề xuất', 'Lý do', ''].map((h) => (
+                                            {(orderSourceTab === 'compliance'
+                                                ? ['Trạng thái', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Gửi lúc', 'Lý do', '']
+                                                : ['Mức độ', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Gửi lúc', 'Lý do', 'Hạn đề xuất', '']
+                                            ).map((h) => (
                                                 <th key={h || 'a'} style={thBase}>{h}</th>
                                             ))}
                                         </tr>
@@ -763,6 +1102,45 @@ export function ReviewEscalationsManagement() {
                                     <tbody>
                                         {items.map((row) => {
                                             const id = row.id ?? row.Id;
+                                            if (orderSourceTab === 'compliance') {
+                                                return (
+                                                    <tr key={id}>
+                                                        <td style={tdBase}>{logStatusBadge(row.status ?? row.Status)}</td>
+                                                        <td style={tdBase}>{row.__reqType === 'ADMIN_ACTION' ? 'Yêu cầu xử lý tài khoản' : 'Yêu cầu trả đơn về hàng đợi'}</td>
+                                                        <td style={tdBase}>{row.storyTitle ?? row.story?.title ?? '—'}</td>
+                                                        <td style={tdBase}>{row.requesterDisplayName ?? row.requesterEmail ?? '—'}</td>
+                                                        <td style={{ ...tdBase, fontSize: '0.75rem' }}>
+                                                            {row.__reqType === 'ADMIN_ACTION'
+                                                                ? (String(row.requestKind ?? '').toUpperCase() === 'BAN_USER' ? 'Chặn tài khoản' : 'Tạm đình chỉ quyền viết')
+                                                                : 'Trả đơn truyện về hàng đợi'}
+                                                        </td>
+                                                        <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+                                                            {formatApiDateTimeLocalVi(row.createdAtUtc ?? row.created_at)}
+                                                        </td>
+                                                        <td style={{ ...tdBase, maxWidth: 280, wordBreak: 'break-word', fontSize: '0.75rem' }}>
+                                                            {row.message || '—'}
+                                                        </td>
+                                                        <td style={tdBase}>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => openComplianceResolve(row)}
+                                                                style={{
+                                                                    padding: '0.5rem 0.875rem',
+                                                                    fontSize: '0.8125rem',
+                                                                    fontWeight: 600,
+                                                                    background: '#7c3aed',
+                                                                    color: '#fff',
+                                                                    border: 'none',
+                                                                    borderRadius: 8,
+                                                                    cursor: 'pointer',
+                                                                }}
+                                                            >
+                                                                Xử lý
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            }
                                             return (
                                                 <tr key={id}>
                                                     <td style={tdBase}>{urgencyBadge(row.urgencyTier ?? row.UrgencyTier)}</td>
@@ -770,9 +1148,17 @@ export function ReviewEscalationsManagement() {
                                                     <td style={tdBase}><TargetTitleCell row={row} /></td>
                                                     <td style={tdBase}>{row.senderName ?? row.SenderName ?? '—'}</td>
                                                     <td style={tdBase}>{kindShort(row.requestKind ?? row.RequestKind)}</td>
-                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.currentAssignmentDeadlineAt ?? row.CurrentAssignmentDeadlineAt)}</td>
-                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.proposedDeadlineAt ?? row.ProposedDeadlineAt)}</td>
+                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
+                                                        {formatUtcPlus7Vi(
+                                                            row.createdAtUtc ??
+                                                            row.CreatedAtUtc ??
+                                                            row.created_at ??
+                                                            row.createdAt ??
+                                                            row.CreatedAt
+                                                        )}
+                                                    </td>
                                                     <td style={{ ...tdBase, maxWidth: 220, wordBreak: 'break-word', fontSize: '0.75rem' }}>{row.reason ?? row.Reason ?? '—'}</td>
+                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.proposedDeadlineAt ?? row.ProposedDeadlineAt)}</td>
                                                     <td style={tdBase}>
                                                         <button
                                                             type="button"
@@ -1048,7 +1434,7 @@ export function ReviewEscalationsManagement() {
                                                     <td style={{ ...tdBase, fontSize: '0.75rem' }}>{x.senderName ?? x.SenderName ?? '—'}</td>
                                                     <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(x.createdAt ?? x.CreatedAt)}</td>
                                                     <td style={{ ...tdBase, fontSize: '0.75rem' }}>{x.resolverName ?? x.ResolverName ?? '—'}</td>
-                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(x.resolvedAt ?? x.ResolvedAt)}</td>
+                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatUtcPlus7Vi(x.resolvedAt ?? x.ResolvedAt)}</td>
                                                     <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 180 }}>{reason || '—'}</td>
                                                 </tr>
                                             );
@@ -1114,7 +1500,16 @@ export function ReviewEscalationsManagement() {
                                     <strong>{resolveRow.targetTitle ?? resolveRow.TargetTitle ?? resolveRow.targetId ?? resolveRow.TargetId}</strong>
                                 </p>
                                 <p style={{ margin: 0, color: T.slate }}>
-                                    Người gửi: {resolveRow.senderName ?? resolveRow.SenderName ?? '—'} · Gửi lúc: {formatApiDateTimeLocalVi(resolveRow.createdAt ?? resolveRow.CreatedAt)}
+                                    Người gửi: {resolveRow.senderName ?? resolveRow.SenderName ?? '—'} · Thời gian gửi: {formatUtcPlus7Vi(
+                                        resolveRow.createdAtUtc ??
+                                        resolveRow.CreatedAtUtc ??
+                                        resolveRow.created_at ??
+                                        resolveRow.createdAt ??
+                                        resolveRow.CreatedAt
+                                    )}
+                                </p>
+                                <p style={{ margin: '6px 0 0', color: T.slate }}>
+                                    Lý do: {resolveRow.reason ?? resolveRow.Reason ?? '—'}
                                 </p>
                             </div>
 
@@ -1160,7 +1555,7 @@ export function ReviewEscalationsManagement() {
                                             !resolveStoryChaptersPreview.error &&
                                             (resolveStoryChaptersPreview.items?.length ?? 0) === 0 && (
                                                 <p style={{ fontSize: '0.8125rem', color: T.slate, margin: 0 }}>
-                                                    Không có chương nào đang được moderator này giữ lock trên truyện (có thể chỉ còn lock cấp truyện).
+                                                    Không có chương nào đang được moderator này nhận duyệt trên truyện này (có thể chỉ còn đơn nhận ở cấp truyện).
                                                 </p>
                                             )}
                                         {resolveStoryChaptersPreview &&
@@ -1178,7 +1573,7 @@ export function ReviewEscalationsManagement() {
                                                     <table style={{ ...tableBase, margin: 0, width: '100%' }}>
                                                         <thead>
                                                             <tr>
-                                                                {['#', 'Tiêu đề', 'Trạng thái', 'Số từ', 'Tạo lúc', 'Cập nhật', 'Gửi duyệt', 'Hạn (SLA)', 'Người nhận duyệt'].map((h) => (
+                                                                {['#', 'Tiêu đề', 'Trạng thái', 'Số từ', 'Gửi duyệt', 'Hạn (SLA)', 'Người nhận duyệt'].map((h) => (
                                                                     <th key={h} style={{ ...thBase, fontSize: '0.7rem', whiteSpace: 'nowrap', padding: '8px 6px' }}>
                                                                         {h}
                                                                     </th>
@@ -1194,8 +1589,6 @@ export function ReviewEscalationsManagement() {
                                                                 const fullTitle = (ch.title ?? ch.Title ?? '—').toString();
                                                                 const st = chapterStatusVi(ch.status ?? ch.Status);
                                                                 const wc = ch.wordCount ?? ch.WordCount;
-                                                                const created = ch.createdAt ?? ch.CreatedAt;
-                                                                const updated = ch.updatedAt ?? ch.UpdatedAt;
                                                                 const ps = ch.pendingSince ?? ch.PendingSince;
                                                                 const dl = ch.deadlineAt ?? ch.DeadlineAt;
                                                                 const claim = ch.claimedByDisplayName ?? ch.ClaimedByDisplayName;
@@ -1218,12 +1611,6 @@ export function ReviewEscalationsManagement() {
                                                                         <td style={{ ...tdBase, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>{st}</td>
                                                                         <td style={{ ...tdBase, fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
                                                                             {wc != null && wc !== '' ? Number(wc).toLocaleString('vi-VN') : '—'}
-                                                                        </td>
-                                                                        <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
-                                                                            {formatApiDateTimeLocalVi(created)}
-                                                                        </td>
-                                                                        <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
-                                                                            {formatApiDateTimeLocalVi(updated)}
                                                                         </td>
                                                                         <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
                                                                             {formatApiDateTimeLocalVi(ps)}
@@ -1362,7 +1749,7 @@ export function ReviewEscalationsManagement() {
                             )}
 
                             <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
-                                Ghi chú admin
+                                Ghi chú quản trị viên
                                 <span style={{ fontWeight: 500, color: T.slate, marginLeft: 6 }}>
                                     (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự)
                                 </span>
@@ -1374,7 +1761,7 @@ export function ReviewEscalationsManagement() {
                                         if (resolveApiError) setResolveApiError(null);
                                     }}
                                     rows={3}
-                                    placeholder="Khi chấp nhận: có thể để trống. Khi từ chối: nhập lý do rõ ràng (≥ 10 ký tự)."
+                                    placeholder="Nhập ghi chú xử lý..."
                                     style={{
                                         ...inputBase,
                                         marginTop: 6,
@@ -1412,6 +1799,229 @@ export function ReviewEscalationsManagement() {
                             >
                                 Chấp nhận
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {complianceResolveRow && (
+                <div
+                    style={{
+                        position: 'fixed', inset: 0, backgroundColor: 'rgba(0, 0, 0, 0.5)', zIndex: 10050,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem',
+                    }}
+                    onClick={() => !complianceResolving && closeComplianceResolve()}
+                >
+                    <div
+                        style={{
+                            background: T.card, borderRadius: '12px', maxWidth: 620, width: '100%', maxHeight: '85vh',
+                            overflow: 'auto', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 40px rgba(0,0,0,0.15)', border: `1px solid ${T.border}`,
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1rem 1.25rem', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: T.title, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <ShieldCheck style={{ width: 22, height: 22, color: T.green }} />
+                                {complianceResolveRow.__reqType === 'ADMIN_ACTION'
+                                    ? (String(complianceResolveRow.requestKind ?? '').toUpperCase() === 'BAN_USER'
+                                        ? 'Xử lý đơn chặn tài khoản'
+                                        : 'Xử lý đơn tạm đình chỉ quyền viết')
+                                    : 'Xử lý đơn trả về hàng đợi từ xử lý vi phạm viên'}
+                            </h3>
+                            <button type="button" onClick={closeComplianceResolve} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
+                        </div>
+                        <div style={{ padding: '1rem 1.25rem', display: 'grid', gap: 10 }}>
+                            <div style={{ fontSize: '0.875rem', color: T.slateDark, lineHeight: 1.5 }}>
+                                <p style={{ margin: '0 0 6px' }}>
+                                    <strong>
+                                        {complianceResolveRow.__reqType === 'ADMIN_ACTION'
+                                            ? 'Yêu cầu xử lý tài khoản'
+                                            : 'Yêu cầu trả đơn về hàng đợi'}
+                                    </strong>
+                                    {' — STORY — '}
+                                    <strong>{complianceResolveRow.storyTitle ?? complianceResolveRow.story?.title ?? '—'}</strong>
+                                </p>
+                                <p style={{ margin: 0, color: T.slate }}>
+                                    Người gửi: {complianceResolveRow.requesterDisplayName ?? complianceResolveRow.requesterEmail ?? '—'}
+                                    {' · '}
+                                    Thời gian gửi: {formatApiDateTimeLocalVi(
+                                        complianceResolveRow.createdAtUtc ??
+                                        complianceResolveRow.CreatedAtUtc ??
+                                        complianceResolveRow.created_at ??
+                                        complianceResolveRow.createdAt ??
+                                        complianceResolveRow.CreatedAt
+                                    )}
+                                </p>
+                                <p style={{ margin: '6px 0 0', color: T.slate }}>
+                                    Lý do: {complianceResolveRow.message || '—'}
+                                </p>
+                            </div>
+                            {resolveApiError ? (
+                                <div role="alert" style={{ padding: '0.75rem 1rem', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2' }}>
+                                    <div style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#991b1b', marginBottom: 4 }}>{resolveApiError.title}</div>
+                                    <div style={{ fontSize: '0.8125rem', color: '#7f1d1d', lineHeight: 1.45 }}>{resolveApiError.message}</div>
+                                </div>
+                            ) : null}
+                            {complianceResolveRow.__reqType === 'ADMIN_ACTION'
+                                && String(complianceResolveRow.requestKind ?? '').toUpperCase() === 'SUSPEND_AUTHOR_WRITING'
+                                && (
+                                    <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                        Thời điểm kết thúc đình chỉ
+                                        <input
+                                            type="datetime-local"
+                                            value={complianceSuspendUntilUtc}
+                                            readOnly
+                                            style={inputBase}
+                                        />
+                                    </label>
+                                )}
+                            <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
+                                Ghi chú quản trị viên
+                                <span style={{ marginLeft: 6, color: T.slate, fontWeight: 500 }}>
+                                    (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự)
+                                </span>
+                                <textarea
+                                    value={complianceAdminNote}
+                                    onChange={(e) => {
+                                        setComplianceAdminNote(e.target.value);
+                                        if (complianceAdminNoteRejectError) setComplianceAdminNoteRejectError('');
+                                        if (resolveApiError) setResolveApiError(null);
+                                    }}
+                                    rows={3}
+                                    placeholder="Nhập ghi chú xử lý..."
+                                    style={{
+                                        ...inputBase,
+                                        marginTop: 6,
+                                        fontFamily: 'inherit',
+                                        minHeight: '4.5rem',
+                                        borderColor: complianceAdminNoteRejectError ? '#ef4444' : T.border,
+                                    }}
+                                />
+                                {complianceAdminNoteRejectError ? (
+                                    <p style={{ fontSize: '0.75rem', color: '#b91c1c', margin: '6px 0 0', fontWeight: 600 }} role="alert">
+                                        {complianceAdminNoteRejectError}
+                                    </p>
+                                ) : null}
+                            </label>
+                        </div>
+                        <div style={{ padding: '0.75rem 1.25rem 1.25rem', display: 'flex', justifyContent: 'flex-end', gap: 10, borderTop: `1px solid ${T.border}`, background: T.bg }}>
+                            <button type="button" disabled={complianceResolving} onClick={closeComplianceResolve} style={{ padding: '0.5rem 1rem', borderRadius: 8, border: `1px solid ${T.border}`, background: T.card, fontWeight: 600, cursor: 'pointer', color: T.title }}>
+                                Đóng
+                            </button>
+                            <button
+                                type="button"
+                                disabled={complianceResolving}
+                                onClick={() => submitComplianceResolve('REJECT')}
+                                style={{ padding: '0.5rem 1rem', borderRadius: 8, border: 'none', background: '#ef4444', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                Từ chối
+                            </button>
+                            <button
+                                type="button"
+                                disabled={complianceResolving}
+                                onClick={() => submitComplianceResolve(complianceResolveRow.__reqType === 'ADMIN_ACTION' ? 'APPROVE' : 'APPROVE_UNLOCK')}
+                                style={{ padding: '0.5rem 1rem', borderRadius: 8, border: 'none', background: T.green, color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+                            >
+                                {complianceResolving ? 'Đang xử lý...' : 'Chấp nhận'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {moderatorPolicyModalOpen && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        zIndex: 10060,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '1rem',
+                    }}
+                    onClick={() => setModeratorPolicyModalOpen(false)}
+                >
+                    <div
+                        style={{
+                            background: T.card,
+                            borderRadius: '12px',
+                            maxWidth: 920,
+                            width: '100%',
+                            maxHeight: '85vh',
+                            overflow: 'auto',
+                            border: `1px solid ${T.border}`,
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1rem 1.25rem', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, color: T.title }}>Chính sách hệ thống cho kiểm duyệt viên</h3>
+                            <button type="button" onClick={() => setModeratorPolicyModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
+                        </div>
+                        <div style={{ padding: '1rem 1.25rem' }}>
+                            {moderatorPolicyLoading ? (
+                                <div style={{ fontSize: '0.875rem', color: T.slate }}>Đang tải policy tác giả...</div>
+                            ) : moderatorPolicyError ? (
+                                <div style={{ padding: '0.75rem 1rem', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', color: '#991b1b', fontSize: '0.875rem' }}>
+                                    {moderatorPolicyError}
+                                </div>
+                            ) : moderatorAuthorPolicy ? (
+                                <div>
+                                    <div style={{ marginBottom: 10, fontSize: '0.8125rem', color: T.slate }}>
+                                        Policy AUTHOR đang áp dụng{moderatorAuthorPolicy.version ? ` · phiên bản v${moderatorAuthorPolicy.version}` : ''}.
+                                    </div>
+                                    <PolicyBody content={moderatorAuthorPolicy.content} />
+                                </div>
+                            ) : (
+                                <div style={{ fontSize: '0.875rem', color: T.slate }}>Chưa có policy AUTHOR đang áp dụng.</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {moderatorProcessModalOpen && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                        zIndex: 10060,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '1rem',
+                    }}
+                    onClick={() => setModeratorProcessModalOpen(false)}
+                >
+                    <div
+                        style={{
+                            background: T.card,
+                            borderRadius: '12px',
+                            maxWidth: 780,
+                            width: '100%',
+                            maxHeight: '85vh',
+                            overflow: 'auto',
+                            border: `1px solid ${T.border}`,
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1rem 1.25rem', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, color: T.title }}>Quy trình duyệt xuất bản dành cho kiểm duyệt viên</h3>
+                            <button type="button" onClick={() => setModeratorProcessModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
+                        </div>
+                        <div style={{ padding: '1rem 1.25rem', fontSize: '0.875rem', color: T.slateDark, lineHeight: 1.6 }}>
+                            <p style={{ margin: '0 0 8px', fontWeight: 700, color: T.title }}>Quy trình đề xuất (ngắn gọn):</p>
+                            <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 8 }}>
+                                <li>Nhận đơn chờ duyệt và kiểm tra nhanh thông tin truyện/chương, loại đơn và mức độ ưu tiên.</li>
+                                <li>Đọc nội dung cần duyệt, đối chiếu policy AUTHOR và các tiêu chí chất lượng nội dung của hệ thống.</li>
+                                <li>Đưa ra quyết định rõ ràng: chấp nhận hoặc từ chối, ghi chú ngắn gọn, đúng trọng tâm.</li>
+                                <li>Nếu cần thêm thời gian hoặc cần trả đơn, gửi yêu cầu lên quản trị viên theo đúng loại đơn.</li>
+                                <li>Hoàn tất xử lý, đảm bảo trạng thái đơn và nhật ký đã được cập nhật đầy đủ để truy vết.</li>
+                            </ol>
                         </div>
                     </div>
                 </div>

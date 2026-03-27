@@ -30,6 +30,12 @@ import { getAuthorFollowersCount } from '../../api/author/authorApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
+import {
+    getCommentReportReasons,
+    getStoryReportReasons,
+    reportStory,
+    reportStoryComment,
+} from '../../api/report/reportApi';
 
 function formatTimeAgo(dateStr) {
     if (!dateStr) return '';
@@ -70,6 +76,38 @@ export function StoryDetail() {
     const [reviews, setReviews] = useState([]);
     const [reviewsLoading, setReviewsLoading] = useState(false);
     const [visibleReviewsCount, setVisibleReviewsCount] = useState(3);
+    const [reportSubmitting, setReportSubmitting] = useState(false);
+    const [reportError, setReportError] = useState(null);
+    const [reportReasonOptions, setReportReasonOptions] = useState({ story: [], comment: [] });
+
+    const normalizeReasonOptions = useCallback((list) => {
+        const rows = Array.isArray(list) ? list : [];
+        return rows
+            .map((x) => {
+                const value = String(x?.code ?? x?.Code ?? '').trim();
+                if (!value) return null;
+                const label = String(x?.labelVi ?? x?.LabelVi ?? x?.label ?? x?.Label ?? value).trim();
+                return { value, label };
+            })
+            .filter(Boolean);
+    }, []);
+
+    const loadReportReasons = useCallback(async (targetType) => {
+        try {
+            if (targetType === 'story') {
+                if ((reportReasonOptions.story?.length ?? 0) > 0) return;
+                const list = await getStoryReportReasons();
+                setReportReasonOptions((prev) => ({ ...prev, story: normalizeReasonOptions(list) }));
+            } else {
+                if ((reportReasonOptions.comment?.length ?? 0) > 0) return;
+                const list = await getCommentReportReasons();
+                setReportReasonOptions((prev) => ({ ...prev, comment: normalizeReasonOptions(list) }));
+            }
+        } catch (e) {
+            const msg = e?.response?.data?.message ?? e?.message ?? 'Không tải được lý do báo cáo.';
+            showToast(msg, 'error');
+        }
+    }, [normalizeReasonOptions, reportReasonOptions.comment?.length, reportReasonOptions.story?.length, showToast]);
 
     const svgAvatarDataUrl = (name) => {
         const initial = (String(name || 'T').trim()[0] || 'T').toUpperCase();
@@ -200,10 +238,10 @@ export function StoryDetail() {
                             ch?.Unlocked !== undefined;
                         const isUnlocked = Boolean(
                             ch?.isUnlocked ??
-                                ch?.IsUnlocked ??
-                                ch?.unlocked ??
-                                ch?.Unlocked ??
-                                false
+                            ch?.IsUnlocked ??
+                            ch?.unlocked ??
+                            ch?.Unlocked ??
+                            false
                         );
                         const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && (unlockKnown ? !isUnlocked : true);
                         return {
@@ -411,6 +449,8 @@ export function StoryDetail() {
 
     const handleReportComment = (commentId) => {
         setReportingCommentId(commentId);
+        setReportError(null);
+        loadReportReasons('comment');
         setIsReportCommentModalOpen(true);
     };
 
@@ -479,14 +519,58 @@ export function StoryDetail() {
         }
     };
 
-    const handleSubmitCommentReport = (payload) => {
-        console.log('Comment report submitted:', { ...payload, targetId: reportingCommentId });
-        showToast('Đã gửi báo cáo. Chúng tôi sẽ xem xét trong thời gian sớm nhất.', 'success');
+    const handleSubmitCommentReport = async (payload) => {
+        if (!storyId || !reportingCommentId) return false;
+        setReportSubmitting(true);
+        setReportError(null);
+        try {
+            const details = [
+                payload?.description,
+                payload?.evidenceLinks?.length ? `Link bằng chứng: ${payload.evidenceLinks.join(', ')}` : '',
+                payload?.evidenceImages?.length ? `Ảnh bằng chứng: ${payload.evidenceImages.join(', ')}` : '',
+            ].filter(Boolean).join('\n');
+
+            await reportStoryComment(storyId, reportingCommentId, {
+                reasonCode: payload?.reasonCode,
+                description: details || undefined,
+            });
+            showToast('Đã gửi báo cáo. Chúng tôi sẽ xem xét trong thời gian sớm nhất.', 'success');
+            return true;
+        } catch (e) {
+            const msg = e?.response?.data?.message ?? e?.message ?? 'Không gửi được báo cáo bình luận.';
+            setReportError(msg);
+            showToast(msg, 'error');
+            return false;
+        } finally {
+            setReportSubmitting(false);
+        }
     };
 
-    const handleSubmitStoryReport = (payload) => {
-        console.log('Story report submitted:', payload);
-        showToast('Đã gửi báo cáo. Chúng tôi sẽ xem xét trong thời gian sớm nhất.', 'success');
+    const handleSubmitStoryReport = async (payload) => {
+        if (!storyId) return false;
+        setReportSubmitting(true);
+        setReportError(null);
+        try {
+            const details = [
+                payload?.description,
+                payload?.evidenceLinks?.length ? `Link bằng chứng: ${payload.evidenceLinks.join(', ')}` : '',
+                payload?.evidenceImages?.length ? `Ảnh bằng chứng: ${payload.evidenceImages.join(', ')}` : '',
+            ].filter(Boolean).join('\n');
+
+            await reportStory(storyId, {
+                reasonCode: payload?.reasonCode,
+                description: details || undefined,
+            });
+            showToast('Đã gửi báo cáo. Chúng tôi sẽ xem xét trong thời gian sớm nhất.', 'success');
+            return true;
+        } catch (e) {
+            const msg = e?.response?.data?.message ?? e?.message ?? 'Không gửi được báo cáo truyện.';
+            setReportError(msg);
+            showToast(msg, 'error');
+            return false;
+        } finally {
+            setReportSubmitting(false);
+        }
     };
 
     if (loading) {
@@ -534,7 +618,11 @@ export function StoryDetail() {
                             onOpenRating={handleOpenRating}
                             hasUserRated={hasUserRated}
                             userRatingStars={userRatingStars}
-                            onOpenReport={() => setIsReportStoryModalOpen(true)}
+                            onOpenReport={() => {
+                                setReportError(null);
+                                loadReportReasons('story');
+                                setIsReportStoryModalOpen(true);
+                            }}
                             onReadStory={() => {
                                 const first = chapters[0];
                                 if (first?.chapterId && storyId) {
@@ -689,21 +777,27 @@ export function StoryDetail() {
 
             <ReportModal
                 isOpen={isReportCommentModalOpen}
-                onClose={() => { setIsReportCommentModalOpen(false); setReportingCommentId(null); }}
+                onClose={() => { setIsReportCommentModalOpen(false); setReportingCommentId(null); setReportError(null); }}
                 onSubmit={handleSubmitCommentReport}
                 title="Báo cáo bình luận"
                 type="comment"
                 targetId={reportingCommentId}
+                reasonOptions={reportReasonOptions.comment}
+                submitting={reportSubmitting}
+                errorMessage={reportError}
             />
 
             <ReportModal
                 isOpen={isReportStoryModalOpen}
-                onClose={() => setIsReportStoryModalOpen(false)}
+                onClose={() => { setIsReportStoryModalOpen(false); setReportError(null); }}
                 onSubmit={handleSubmitStoryReport}
                 title="Báo cáo truyện"
                 type="story"
                 storyId={storyId}
                 storyTitle={story?.title}
+                reasonOptions={reportReasonOptions.story}
+                submitting={reportSubmitting}
+                errorMessage={reportError}
             />
             <ToastContainer />
             <Footer />

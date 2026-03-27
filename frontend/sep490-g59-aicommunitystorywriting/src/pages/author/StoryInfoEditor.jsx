@@ -69,6 +69,13 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
         }
     };
 
+    const publishStatusUpper = String(story?.status ?? '').trim().toUpperCase();
+    const isPublishedStory = publishStatusUpper === 'PUBLISHED';
+    const progressStatusUpper = String(story?.storyProgressStatus ?? '').trim().toUpperCase();
+    const allowProgressOptions = progressStatusUpper === 'COMPLETED'
+        ? ['Hoàn thành']
+        : ['Đang ra', 'Hoàn thành', 'Tạm dừng'];
+
     return (
         <div>
             <Header />
@@ -76,6 +83,36 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
                 <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
                     {/* Header */}
                     <div style={{ marginBottom: '2rem' }}>
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.4rem',
+                                marginBottom: '0.75rem',
+                                padding: '0.45rem 0.85rem',
+                                backgroundColor: '#ffffff',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: '9999px',
+                                fontSize: '0.8125rem',
+                                fontWeight: 600,
+                                color: '#475569',
+                                cursor: 'pointer'
+                            }}
+                            onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = '#f8fafc';
+                                e.currentTarget.style.borderColor = '#13ec5b';
+                                e.currentTarget.style.color = '#13ec5b';
+                            }}
+                            onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = '#ffffff';
+                                e.currentTarget.style.borderColor = '#e2e8f0';
+                                e.currentTarget.style.color = '#475569';
+                            }}
+                        >
+                            &larr; Quay lại
+                        </button>
                         <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>
                             Chỉnh sửa thông tin truyện
                         </h2>
@@ -86,7 +123,23 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
                         formData={formData}
                         onChange={handleInputChange}
                         onImageUpload={handleImageUpload}
+                        readOnlyFields={isPublishedStory}
+                        allowProgressOptions={allowProgressOptions}
                     />
+                    {isPublishedStory && (
+                        <div style={{
+                            marginTop: '1rem',
+                            padding: '0.75rem 0.9rem',
+                            borderRadius: '8px',
+                            border: '1px solid #bfdbfe',
+                            backgroundColor: '#eff6ff',
+                            color: '#1d4ed8',
+                            fontSize: '0.8125rem',
+                            fontWeight: 600
+                        }}>
+                            Truyện đã xuất bản: chỉ được cập nhật trạng thái tiến độ (Đang ra/Tạm dừng/Hoàn thành).
+                        </div>
+                    )}
 
                     {/* Action Buttons */}
                     <div style={{

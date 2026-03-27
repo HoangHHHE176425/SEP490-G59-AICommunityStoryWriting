@@ -37,6 +37,7 @@ namespace Services.Implementations
             var story = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
             if (story == null || story.author_id != authorId)
                 throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được tạo phiên bản cho chương.");
+            EnsureStoryProgressAllowsChapterWrite(story, "tạo phiên bản chương");
 
             var nextNum = ChapterVersionDAO.GetNextVersionNumber(chapterId);
             var content = request.ContentSnapshot ?? chapter.content;
@@ -61,6 +62,9 @@ namespace Services.Implementations
             if (v == null) return false;
             if (v.author_id != authorId)
                 throw new UnauthorizedAccessException("Chỉ tác giả mới được sửa phiên bản.");
+            var chapter = v.chapter_id.HasValue ? _chapterRepository.GetById(v.chapter_id.Value) : null;
+            var story = StoryDAO.GetById(chapter?.story_id ?? Guid.Empty);
+            EnsureStoryProgressAllowsChapterWrite(story, "chỉnh sửa phiên bản chương");
             if (v.status != "DRAFT" && v.status != null)
                 throw new InvalidOperationException("Chỉ được sửa version ở trạng thái DRAFT.");
 
@@ -78,6 +82,9 @@ namespace Services.Implementations
             if (v == null) return false;
             if (v.author_id != authorId)
                 throw new UnauthorizedAccessException("Chỉ tác giả mới được xóa phiên bản.");
+            var chapter = v.chapter_id.HasValue ? _chapterRepository.GetById(v.chapter_id.Value) : null;
+            var story = StoryDAO.GetById(chapter?.story_id ?? Guid.Empty);
+            EnsureStoryProgressAllowsChapterWrite(story, "xóa phiên bản chương");
             if (v.status == "PENDING_REVIEW")
                 throw new InvalidOperationException("Không thể xóa phiên bản đang chờ duyệt.");
             if (v.status == "PUBLISHED")
@@ -103,6 +110,9 @@ namespace Services.Implementations
             var story = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
             if (story == null || story.author_id != authorId)
                 throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được gửi duyệt.");
+            if (story.author_id is Guid storyAuthorId && UserDAO.IsAuthorWritingSuspended(storyAuthorId))
+                throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
+            EnsureStoryProgressAllowsChapterWrite(story, "gửi xuất bản phiên bản chương");
 
             var chapterStatusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
             if (chapterStatusUpper == "PENDING_REVIEW")
@@ -205,6 +215,13 @@ namespace Services.Implementations
                 ReviewedAt = v.reviewed_at,
                 AiSimilarityPercent = v.ai_similarity_percent
             };
+        }
+
+        private static void EnsureStoryProgressAllowsChapterWrite(stories? story, string actionVi)
+        {
+            var progress = (story?.story_progress_status ?? "ONGOING").Trim().ToUpperInvariant();
+            if (progress == "HIATUS" || progress == "COMPLETED")
+                throw new InvalidOperationException($"Truyện đang ở trạng thái {(progress == "COMPLETED" ? "Hoàn thành" : "Tạm dừng")}, không thể {actionVi}.");
         }
 
         private static ChapterVersionDetailDto MapToDetailDto(chapter_versions v)

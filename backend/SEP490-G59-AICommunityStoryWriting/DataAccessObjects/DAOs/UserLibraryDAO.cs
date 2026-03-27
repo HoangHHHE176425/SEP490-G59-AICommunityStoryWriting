@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -105,6 +105,18 @@ namespace DataAccessObjects.DAOs
                 .Select(l => l.story_id)
                 .Distinct()
                 .ToList();
+        }
+
+        /// <summary>Lấy số user đang theo dõi một truyện (relation_type = FOLLOW).</summary>
+        public static int GetFollowCountByStoryId(Guid storyId)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.user_library
+                .AsNoTracking()
+                .Where(l => l.story_id == storyId && l.relation_type == RelationTypeFollow)
+                .Select(l => l.user_id)
+                .Distinct()
+                .Count();
         }
 
         /// <summary>Lấy danh sách lịch sử đọc: (story_id, last_read_chapter_id, last_read_at) cho user (relation_type = READING), sắp xếp last_read_at giảm dần.</summary>

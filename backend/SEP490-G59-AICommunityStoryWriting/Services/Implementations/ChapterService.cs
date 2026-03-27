@@ -65,12 +65,15 @@ namespace Services.Implementations
 
             if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
                 throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin).");
+            EnsureStoryProgressAllowsChapterWrite(story, "tạo chương");
 
             var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(request.StoryId, request.OrderIndex);
             if (existingChapter != null)
             {
                 throw new InvalidOperationException($"Chapter with order index {request.OrderIndex} already exists for this story.");
             }
+
+            EnsureUniqueChapterTitleForStory(request.StoryId, request.Title, null);
 
             var validAccessTypes = new[] { "FREE", "PAID" };
             var accessType = request.AccessType?.ToUpper() ?? "FREE";
@@ -84,6 +87,10 @@ namespace Services.Implementations
             if (accessType == "PAID" && coinPrice <= 0)
             {
                 throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+            }
+            if (accessType == "PAID" && (story.total_views ?? 0) < 500)
+            {
+                throw new InvalidOperationException("Truyện cần tối thiểu 500 lượt xem mới được thiết lập chế độ trả phí cho chương.");
             }
             if (accessType == "FREE" && coinPrice > 0)
             {
@@ -138,6 +145,10 @@ namespace Services.Implementations
                 chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
 
             _chapterRepository.Add(chapter);
+
+            // Nếu trước đó FE đã dùng draft_chapter_id để lưu AI gợi ý,
+            // map toàn bộ record draft sang chapter thật ngay khi tạo xong.
+            _aiContentRepository.BindDraftChapterId(chapter.id, chapter.id, chapter.order_index);
 
             if (request.AiGeneratedContentId.HasValue)
                 _aiContentRepository.UpdateChapterId(request.AiGeneratedContentId.Value, chapter.id, chapter.order_index);
@@ -350,6 +361,8 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+            var storyForUpdate = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryProgressAllowsChapterWrite(storyForUpdate, "chỉnh sửa chương");
 
             if (request.OrderIndex.HasValue && request.OrderIndex.Value != chapter.order_index)
             {
@@ -360,6 +373,9 @@ namespace Services.Implementations
                     throw new InvalidOperationException($"Chapter with order index {request.OrderIndex.Value} already exists for this story.");
                 }
             }
+
+            var targetStoryId = chapter.story_id ?? Guid.Empty;
+            EnsureUniqueChapterTitleForStory(targetStoryId, request.Title, id);
 
             if (!string.IsNullOrWhiteSpace(request.Status))
             {
@@ -384,6 +400,12 @@ namespace Services.Implementations
                 if (accessType == "PAID" && coinPrice <= 0)
                 {
                     throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+                }
+                if (accessType == "PAID" && !string.Equals(chapter.access_type, "PAID", StringComparison.OrdinalIgnoreCase))
+                {
+                    var story = targetStoryId == Guid.Empty ? null : StoryDAO.GetById(targetStoryId);
+                    if ((story?.total_views ?? 0) < 500)
+                        throw new InvalidOperationException("Truyện cần tối thiểu 500 lượt xem mới được thiết lập chế độ trả phí cho chương.");
                 }
                 if (accessType == "FREE")
                 {
@@ -422,7 +444,12 @@ namespace Services.Implementations
                 var oldStatus = chapter.status?.ToUpper() ?? "DRAFT";
 
                 if (newStatus == "PENDING_REVIEW")
+                {
+                    var updateStory = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
+                    if (updateStory?.author_id is Guid updateAuthorId && UserDAO.IsAuthorWritingSuspended(updateAuthorId))
+                        throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
                     EnsureCanSubmitForReview(chapter);
+                }
 
                 chapter.status = newStatus;
 
@@ -500,6 +527,8 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+            var storyForDelete = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryProgressAllowsChapterWrite(storyForDelete, "xóa chương");
 
             var statusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
             if (statusUpper != "DRAFT")
@@ -547,6 +576,11 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+
+            var story = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
+            if (story?.author_id is Guid authorId && UserDAO.IsAuthorWritingSuspended(authorId))
+                throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
+            EnsureStoryProgressAllowsChapterWrite(story, "gửi xuất bản chương");
 
             // Khi đã có phiên bản nào của chương đang chờ duyệt thì không cho gửi duyệt chapter gốc.
             var versionsPending = _versionRepository.GetByChapterId(id)
@@ -647,6 +681,13 @@ namespace Services.Implementations
             }
         }
 
+        private static void EnsureStoryProgressAllowsChapterWrite(stories? story, string actionVi)
+        {
+            var progress = (story?.story_progress_status ?? "ONGOING").Trim().ToUpperInvariant();
+            if (progress == "HIATUS" || progress == "COMPLETED")
+                throw new InvalidOperationException($"Truyện đang ở trạng thái {(progress == "COMPLETED" ? "Hoàn thành" : "Tạm dừng")}, không thể {actionVi}.");
+        }
+
         /// <summary>Hủy xuất bản phải theo thứ tự ngược: chỉ được hủy chương N nếu không còn chương nào có thứ tự > N đang xuất bản hoặc chờ duyệt.</summary>
         private void EnsureCanUnpublish(chapters chapter)
         {
@@ -703,6 +744,28 @@ namespace Services.Implementations
             return content
                 .Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
                 .Length;
+        }
+
+        private void EnsureUniqueChapterTitleForStory(Guid storyId, string? title, Guid? excludeChapterId)
+        {
+            var normalizedTitle = NormalizeTitle(title);
+            if (string.IsNullOrWhiteSpace(normalizedTitle))
+                return;
+
+            var duplicated = _chapterRepository
+                .GetByStoryId(storyId)
+                .Any(c => (!excludeChapterId.HasValue || c.id != excludeChapterId.Value) &&
+                          NormalizeTitle(c.title) == normalizedTitle);
+            if (duplicated)
+                throw new InvalidOperationException("Tên chương đã tồn tại trong truyện này. Vui lòng đặt tên khác.");
+        }
+
+        private static string NormalizeTitle(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return string.Empty;
+            return string.Join(" ", title.Trim().Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+                .ToLowerInvariant();
         }
 
         private void UpdateStoryChapterStats(Guid storyId)

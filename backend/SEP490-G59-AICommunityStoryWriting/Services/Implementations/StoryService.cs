@@ -311,6 +311,8 @@ namespace Services.Implementations
             var story = _storyRepository.GetById(id);
             if (story == null)
                 return false;
+            if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
+                throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
 
             var prevStatus = (story.status ?? "").Trim().ToUpperInvariant();
 
@@ -373,6 +375,38 @@ namespace Services.Implementations
                 }
             }
 
+            var currentPublishStatus = (story.status ?? "").Trim().ToUpperInvariant();
+            var currentProgressStatus = (story.story_progress_status ?? "ONGOING").Trim().ToUpperInvariant();
+            var requestedProgressStatus = string.IsNullOrWhiteSpace(request.StoryProgressStatus)
+                ? currentProgressStatus
+                : request.StoryProgressStatus.Trim().ToUpperInvariant();
+
+            // Truyện đã hoàn thành thì không được đổi ngược về Đang ra/Tạm dừng.
+            if (currentProgressStatus == "COMPLETED" && requestedProgressStatus != "COMPLETED")
+                throw new InvalidOperationException("Truyện đã ở trạng thái Hoàn thành, không thể chuyển về Đang ra hoặc Tạm dừng.");
+
+            // Khi truyện đã public: chỉ cho cập nhật trạng thái tiến độ (Đang ra/Hoàn thành/Tạm dừng).
+            if (currentPublishStatus == "PUBLISHED")
+            {
+                if (!string.Equals(request.Title?.Trim(), story.title?.Trim(), StringComparison.Ordinal))
+                    throw new InvalidOperationException("Truyện đã xuất bản: không được sửa tên truyện.");
+                if (!string.Equals(request.Summary?.Trim() ?? "", story.summary?.Trim() ?? "", StringComparison.Ordinal))
+                    throw new InvalidOperationException("Truyện đã xuất bản: không được sửa mô tả truyện.");
+                if (!string.IsNullOrWhiteSpace(request.AgeRating) &&
+                    !string.Equals(request.AgeRating.Trim().ToUpperInvariant(), (story.age_rating ?? "ALL").Trim().ToUpperInvariant(), StringComparison.Ordinal))
+                    throw new InvalidOperationException("Truyện đã xuất bản: không được sửa giới hạn độ tuổi.");
+                if (!string.IsNullOrWhiteSpace(request.CoverImageUrl))
+                    throw new InvalidOperationException("Truyện đã xuất bản: không được sửa ảnh bìa ở màn quản lý thông tin.");
+                if (!string.IsNullOrWhiteSpace(request.Status) &&
+                    !string.Equals(request.Status.Trim().ToUpperInvariant(), currentPublishStatus, StringComparison.Ordinal))
+                    throw new InvalidOperationException("Truyện đã xuất bản: không được sửa trạng thái xuất bản.");
+
+                var incomingCategoryIds = (request.CategoryIds ?? new List<Guid>()).Distinct().OrderBy(x => x).ToList();
+                var currentCategoryIds = (story.category?.Select(c => c.id).Distinct().OrderBy(x => x).ToList()) ?? new List<Guid>();
+                if (!incomingCategoryIds.SequenceEqual(currentCategoryIds))
+                    throw new InvalidOperationException("Truyện đã xuất bản: không được sửa thể loại chi tiết.");
+            }
+
             story.title = request.Title;
             story.summary = request.Summary;
             story.updated_at = DateTime.Now;
@@ -409,6 +443,8 @@ namespace Services.Implementations
             var story = _storyRepository.GetById(id);
             if (story == null)
                 return false;
+            if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
+                throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
 
             var statusUpper = (story.status ?? "").Trim().ToUpperInvariant();
             if (statusUpper != "DRAFT")
@@ -444,6 +480,12 @@ namespace Services.Implementations
 
                 _logger?.LogInformation("StoryService.Publish: Found story '{Title}' (ID: {StoryId}), current status: {Status}",
                     story.title, id, story.status);
+
+                if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
+                    throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin), không thể gửi xuất bản.");
+                var progress = (story.story_progress_status ?? "ONGOING").Trim().ToUpperInvariant();
+                if (progress == "HIATUS" || progress == "COMPLETED")
+                    throw new InvalidOperationException($"Truyện đang ở trạng thái {(progress == "COMPLETED" ? "Hoàn thành" : "Tạm dừng")}, không thể gửi xuất bản.");
 
                 // Author "Publish" = gửi chờ duyệt. Chỉ moderator approve mới chuyển sang PUBLISHED.
                 story.status = "PENDING_REVIEW";
@@ -663,6 +705,8 @@ namespace Services.Implementations
             var totalChapters = story.total_chapters ?? ChapterDAO.GetCountByStoryId(story.id);
             var publishedChaptersCount = ChapterDAO.GetPublishedCountByStoryId(story.id);
             var totalComments = CommentDAO.GetCountByStoryId(story.id);
+            // Theo dõi thực tế theo user_library (FOLLOW) để tránh lệch với cột denormalized total_favorites.
+            var totalFavorites = UserLibraryDAO.GetFollowCountByStoryId(story.id);
             var latestChapterUpdatedAt = ChapterDAO.GetLatestUpdatedAtByStoryId(story.id);
             var latestUpdatedAt = story.updated_at;
             if (latestChapterUpdatedAt.HasValue && (!latestUpdatedAt.HasValue || latestChapterUpdatedAt > latestUpdatedAt))
@@ -689,7 +733,7 @@ namespace Services.Implementations
                 PublishedChaptersCount = publishedChaptersCount,
                 TotalViews = story.total_views,
                 TotalComments = totalComments,
-                TotalFavorites = story.total_favorites,
+                TotalFavorites = totalFavorites,
                 AvgRating = story.avg_rating,
                 WordCount = story.word_count,
                 CreatedAt = story.created_at,
@@ -712,6 +756,8 @@ namespace Services.Implementations
             var totalChapters = story.total_chapters ?? ChapterDAO.GetCountByStoryId(story.id);
             var publishedChaptersCount = ChapterDAO.GetPublishedCountByStoryId(story.id);
             var totalComments = CommentDAO.GetCountByStoryId(story.id);
+            // Theo dõi thực tế theo user_library (FOLLOW) để tránh lệch với cột denormalized total_favorites.
+            var totalFavorites = UserLibraryDAO.GetFollowCountByStoryId(story.id);
             var latestChapterUpdatedAt = ChapterDAO.GetLatestUpdatedAtByStoryId(story.id);
             var latestUpdatedAt = story.updated_at;
             if (latestChapterUpdatedAt.HasValue && (!latestUpdatedAt.HasValue || latestChapterUpdatedAt > latestUpdatedAt))
@@ -743,7 +789,7 @@ namespace Services.Implementations
                 PublishedChaptersCount = publishedChaptersCount,
                 TotalViews = story.total_views,
                 TotalComments = totalComments,
-                TotalFavorites = story.total_favorites,
+                TotalFavorites = totalFavorites,
                 AvgRating = story.avg_rating,
                 CreatedAt = story.created_at,
                 UpdatedAt = story.updated_at,
