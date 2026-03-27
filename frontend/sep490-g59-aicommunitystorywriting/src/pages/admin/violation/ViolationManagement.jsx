@@ -272,11 +272,28 @@ function reasonCodeToViLabel(code) {
         ILLEGAL_CONTENT: 'Nội dung vi phạm pháp luật',
         COPYRIGHT: 'Vi phạm bản quyền',
         SPAM: 'Spam / quảng cáo',
+        SPAM_AD: 'Spam / quảng cáo',
         HARASSMENT: 'Quấy rối / xúc phạm',
         MISINFORMATION: 'Thông tin sai lệch',
         OTHER: 'Khác',
     };
     return map[key] || key || 'Khác';
+}
+
+function reporterRoleVi(value) {
+    const role = String(value ?? '').trim().toUpperCase();
+    if (!role) return null;
+    if (role === 'ADMIN') return 'Quản trị viên';
+    if (role === 'COMPLIANCE') return 'Xử lý vi phạm viên';
+    if (role === 'MODERATOR') return 'Kiểm duyệt viên';
+    if (role === 'AUTHOR') return 'Tác giả';
+    if (role === 'USER' || role === 'READER') return 'Người dùng';
+    return role;
+}
+
+function extractReporterRole(item) {
+    if (!item) return null;
+    return item.role ?? item.Role ?? item.userRole ?? item.UserRole ?? item.reporterRole ?? item.ReporterRole ?? null;
 }
 
 function getContributorLabel(c) {
@@ -1079,7 +1096,7 @@ export default function ViolationManagement() {
 
     const renderStoryReports = () => (
         <div className="overflow-x-auto">
-            <table className="w-full border-collapse" style={{ minWidth: 1550 }}>
+            <table className="w-full border-collapse" style={{ minWidth: 1460 }}>
                 <thead><tr className="bg-slate-50">
                     <th style={th}>Ưu tiên</th>
                     <th style={th}>Mức độ</th>
@@ -1087,16 +1104,13 @@ export default function ViolationManagement() {
                     <th style={th}>Trọng số thời gian</th>
                     <th style={th}>Truyện</th>
                     <th style={th}>Tác giả</th>
-                    <th style={th}>Vi phạm / điều hành</th>
-                    <th style={th}>Người báo</th>
-                    <th style={th}>Số phiếu mở</th>
-                    <th style={th}>Khóa đơn</th>
+                    <th style={th}>Số người báo cáo</th>
                     <th style={th}>Thao tác</th>
                 </tr></thead>
                 <tbody>
                     {rows.length === 0 && (
                         <tr>
-                            <td colSpan={11} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                            <td colSpan={8} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                         </tr>
                     )}
                     {rows.map((r) => (
@@ -1111,17 +1125,16 @@ export default function ViolationManagement() {
                                         <td style={td}>{r.timeWeight ?? 0}</td>
                                         <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                         <td style={td}>{r.authorDisplayName || '—'}</td>
-                                        <td style={td}>{(r.distinctReasonCodes ?? []).slice(0, 2).map(reasonCodeToViLabel).join(', ') || '—'}</td>
                                         <td style={td}>
                                             {(() => {
                                                 const contributors = Array.isArray(r.contributors) ? r.contributors : [];
-                                                if (contributors.length === 0) return '—';
-                                                const first = getContributorLabel(contributors[0]);
-                                                return contributors.length > 1 ? `${first} +${contributors.length - 1}` : first;
+                                                if (contributors.length === 0) return r.reportCount ?? 0;
+                                                const unique = new Set(
+                                                    contributors.map((c) => String(c?.userId ?? c?.UserId ?? c?.userEmail ?? c?.UserEmail ?? c?.userName ?? c?.UserName ?? Math.random())),
+                                                );
+                                                return unique.size;
                                             })()}
                                         </td>
-                                        <td style={td}>{(r.openReportIds ?? []).length || (r.reportCount ?? 0)}</td>
-                                        <td style={td}>{r.isComplianceLocked ? `Đã khóa — ${r.complianceClaimedByDisplayName || '—'}` : 'Chưa khóa'}</td>
                                         <td style={td}>
                                             <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
                                                 <button style={iconBtn} title="Xem chi tiết báo cáo" onClick={() => openStoryTicketsModal(r)}><Info size={16} /></button>
@@ -1211,7 +1224,7 @@ export default function ViolationManagement() {
 
     const renderCommentReports = () => (
         <div className="overflow-x-auto">
-            <table className="w-full border-collapse" style={{ minWidth: 1480 }}>
+            <table className="w-full border-collapse" style={{ minWidth: 1390 }}>
                 <thead><tr className="bg-slate-50">
                     <th style={th}>Ưu tiên</th>
                     <th style={th}>Mức độ</th>
@@ -1219,7 +1232,6 @@ export default function ViolationManagement() {
                     <th style={th}>Trọng số thời gian</th>
                     <th style={th}>Truyện</th>
                     <th style={th}>Người bình luận</th>
-                    <th style={th}>Vi phạm / điều hành</th>
                     <th style={th}>Người báo</th>
                     <th style={th}>Mã phiếu</th>
                     <th style={th}>Khóa đơn</th>
@@ -1229,7 +1241,7 @@ export default function ViolationManagement() {
                 <tbody>
                     {rows.length === 0 && (
                         <tr>
-                            <td colSpan={12} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                            <td colSpan={11} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                         </tr>
                     )}
                     {rows.map((r) => (
@@ -1246,7 +1258,6 @@ export default function ViolationManagement() {
                                         <td style={td}>{r.timeWeight ?? 0}</td>
                                         <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                         <td style={td}>{r.commentUserDisplayName || '—'}</td>
-                                        <td style={td}>{r.reasonLabelVi || reasonCodeToViLabel(r.reasonCode) || '—'}</td>
                                         <td style={td}>{reporterLabel}</td>
                                         <td style={td}><div style={{ fontWeight: 600 }}>{r.reportId}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.commentId}</div></td>
                                         <td style={td}>{r.isComplianceLocked ? `Đã khóa — ${r.complianceClaimedByDisplayName || '—'}` : 'Chưa khóa'}</td>
@@ -1559,7 +1570,7 @@ export default function ViolationManagement() {
             </div>
 
             {selectedStory && (
-                <Modal title={`Chi tiết phiếu báo cáo — ${selectedStory.storyTitle || selectedStory.storyId}`} onClose={() => setSelectedStory(null)}>
+                <Modal title={`Chi tiết báo cáo vi phạm truyện — ${selectedStory.storyTitle || selectedStory.storyId}`} onClose={() => setSelectedStory(null)}>
                     {storyTicketLoading ? <div>Đang tải phiếu báo cáo...</div> : (
                         <div className="space-y-4">
                             <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white p-4">
@@ -1587,7 +1598,6 @@ export default function ViolationManagement() {
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
                                     <div className="text-sm text-slate-700"><span className="font-semibold">Mã báo cáo:</span> {storyTickets[0]?.reportId || '—'}</div>
                                     <div className="text-sm text-slate-700"><span className="font-semibold">Trạng thái:</span> {statusViLabel(storyTickets[0]?.status)}</div>
-                                    <div className="text-sm text-slate-700"><span className="font-semibold">Thời điểm:</span> {formatDate(storyTickets[0]?.createdAtUtc)}</div>
                                 </div>
                             </div>
 
@@ -1602,14 +1612,24 @@ export default function ViolationManagement() {
                                                 {contributors.map((c, idx) => (
                                                     <div key={`${getContributorLabel(c)}-${idx}`} className="rounded-lg border border-slate-200 p-2.5 bg-white flex items-center justify-between gap-3">
                                                         <div className="min-w-0 flex-1">
-                                                            <div className="text-sm font-semibold text-slate-900 truncate">{idx + 1}. {getContributorLabel(c)}</div>
-                                                            <div className="text-xs text-slate-500 mt-0.5">{formatDate(c?.reportedAtUtc ?? c?.ReportedAtUtc)}</div>
+                                                            <div className="text-sm font-semibold text-slate-900 truncate flex items-center gap-2">
+                                                                <span>{idx + 1}. {getContributorLabel(c)}</span>
+                                                                {reporterRoleVi(extractReporterRole(c)) ? (
+                                                                    <span className="px-2 py-0.5 rounded-full text-xs bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                                                        {reporterRoleVi(extractReporterRole(c))}
+                                                                    </span>
+                                                                ) : null}
+                                                            </div>
+                                                            <div className="text-xs text-slate-500 mt-0.5">
+                                                                <span className="font-semibold">Thời điểm báo cáo:</span> {formatDate(c?.reportedAtUtc ?? c?.ReportedAtUtc)}
+                                                            </div>
                                                             <div className="text-sm text-slate-700 mt-1 whitespace-pre-wrap">
+                                                                <span className="font-semibold">Nội dung báo cáo: </span>
                                                                 {String(c?.description ?? c?.Description ?? '').trim() || 'Không có mô tả.'}
                                                             </div>
                                                         </div>
                                                         <span className="px-2 py-0.5 rounded-full text-xs bg-slate-50 text-slate-700 border border-slate-200">
-                                                            {reasonCodeToViLabel(c?.reasonCode ?? c?.ReasonCode)}
+                                                            Vi phạm: {reasonCodeToViLabel(c?.reasonCode ?? c?.ReasonCode ?? c?.reasonLabelVi ?? c?.ReasonLabelVi)}
                                                         </span>
                                                     </div>
                                                 ))}
@@ -1733,12 +1753,21 @@ export default function ViolationManagement() {
                                     {selectedComment.reporterDetails.map((item, idx) => (
                                         <div key={`${item?.reporterDisplayName || 'nguoi-bao-cao'}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                                             <div className="flex items-center justify-between gap-3 flex-wrap">
-                                                <div className="font-semibold">{idx + 1}. {item?.reporterDisplayName || 'Ẩn danh'}</div>
-                                                <div className="text-xs text-slate-500">{formatDate(item?.reportedAtUtc)}</div>
+                                                <div className="font-semibold flex items-center gap-2">
+                                                    <span>{idx + 1}. {item?.reporterDisplayName || 'Ẩn danh'}</span>
+                                                    {reporterRoleVi(extractReporterRole(item)) ? (
+                                                        <span className="px-2 py-0.5 rounded-full text-xs bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                                            {reporterRoleVi(extractReporterRole(item))}
+                                                        </span>
+                                                    ) : null}
+                                                </div>
+                                                <div className="text-xs text-slate-500"><span className="font-semibold">Thời điểm báo cáo:</span> {formatDate(item?.reportedAtUtc)}</div>
                                             </div>
-                                            <div className="mt-1 whitespace-pre-wrap">{String(item?.description ?? '').trim() || 'Không có mô tả.'}</div>
+                                            <div className="mt-1 whitespace-pre-wrap"><span className="font-semibold">Nội dung báo cáo: </span>{String(item?.description ?? '').trim() || 'Không có mô tả.'}</div>
                                             <div className="mt-2">
-                                                <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border border-slate-200">{item?.reasonLabelVi || 'Khác'}</span>
+                                                <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border border-slate-200">
+                                                    Vi phạm: {reasonCodeToViLabel(item?.reasonCode ?? item?.ReasonCode ?? item?.reasonLabelVi ?? item?.ReasonLabelVi)}
+                                                </span>
                                             </div>
                                         </div>
                                     ))}

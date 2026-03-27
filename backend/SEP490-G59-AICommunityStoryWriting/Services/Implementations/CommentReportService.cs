@@ -175,6 +175,7 @@ public class CommentReportService : ICommentReportService
         });
 
         await context.SaveChangesAsync();
+        _ = NotifyCommentOwnerReportedAsync(comment, reporterId, request.ReasonCode, request.Description);
         return row.id;
     }
 
@@ -301,6 +302,100 @@ public class CommentReportService : ICommentReportService
                 hidden ? "COMMENT_HIDDEN" : "COMMENT_UNHIDDEN",
                 hidden ? "Đã ẩn bình luận (xử lý vi phạm)." : "Đã hiện lại bình luận.",
                 null);
+            _ = NotifyCommentOwnerComplianceActionAsync(comment, actorUserId, hidden);
+        }
+    }
+
+    private async Task NotifyCommentOwnerReportedAsync(comments comment, Guid reporterId, string? reasonCode, string? description)
+    {
+        if (comment.user_id is not Guid ownerId || ownerId == Guid.Empty) return;
+        if (ownerId == reporterId) return;
+
+        try
+        {
+            var reporterName = NotificationDAO.GetUserDisplayName(reporterId);
+            var reasonVi = CommentReportReasonCatalog.TryGet(reasonCode ?? "", out var reason)
+                ? reason.LabelVi
+                : (reasonCode ?? "Khác");
+            var detail = string.IsNullOrWhiteSpace(description)
+                ? string.Empty
+                : $" Chi tiết từ người báo cáo: {description.Trim()}";
+            var targetUrl = comment.story_id.HasValue ? $"/story/{comment.story_id.Value}" : "/notifications";
+
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = ownerId,
+                type = "COMMENT_REPORTED_TO_OWNER",
+                title = $"Người báo cáo: {reporterName}",
+                content =
+                    $"Bình luận của bạn vừa bị báo cáo. Người báo cáo: {reporterName}. Vi phạm: {reasonVi}.{detail}",
+                link_url = targetUrl,
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+            NotificationDAO.Add(n);
+
+            if (_notificationHubNotifier != null)
+            {
+                await _notificationHubNotifier.NotifyUserAsync(ownerId, new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = false,
+                    CreatedAt = n.created_at
+                });
+            }
+        }
+        catch
+        {
+            // best effort push; không làm fail nghiệp vụ chính.
+        }
+    }
+
+    private async Task NotifyCommentOwnerComplianceActionAsync(comments comment, Guid actorUserId, bool hidden)
+    {
+        if (comment.user_id is not Guid ownerId || ownerId == Guid.Empty) return;
+
+        try
+        {
+            var actorName = NotificationDAO.GetUserDisplayName(actorUserId);
+            var targetUrl = comment.story_id.HasValue ? $"/story/{comment.story_id.Value}" : "/notifications";
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = ownerId,
+                type = "COMPLIANCE_COMMENT_MODERATION_ACTION",
+                title = hidden ? "Bình luận của bạn đã bị ẩn" : "Bình luận của bạn đã được hiển thị lại",
+                content = hidden
+                    ? $"Xử lý vi phạm viên {actorName} đã ẩn bình luận của bạn do vi phạm."
+                    : $"Xử lý vi phạm viên {actorName} đã hiển thị lại bình luận của bạn.",
+                link_url = targetUrl,
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+            NotificationDAO.Add(n);
+
+            if (_notificationHubNotifier != null)
+            {
+                await _notificationHubNotifier.NotifyUserAsync(ownerId, new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = false,
+                    CreatedAt = n.created_at
+                });
+            }
+        }
+        catch
+        {
+            // best effort push; không làm fail nghiệp vụ chính.
         }
     }
 

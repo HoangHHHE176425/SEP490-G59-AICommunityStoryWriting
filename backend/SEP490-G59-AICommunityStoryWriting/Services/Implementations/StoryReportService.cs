@@ -56,7 +56,63 @@ public class StoryReportService : IStoryReportService
             reporterId,
             code,
             request.Description);
+        // Mỗi người báo cáo mới (1 lần / truyện / user) = 1 thông báo cho tác giả; trùng trả về Guid.Empty.
+        if (id != Guid.Empty)
+            _ = NotifyStoryAuthorReportedAsync(story, reporterId, request.ReasonCode, request.Description);
         return Task.FromResult(id);
+    }
+
+    private async Task NotifyStoryAuthorReportedAsync(stories story, Guid reporterId, string? reasonCode, string? description)
+    {
+        var authorId = story.author_id;
+        if (!authorId.HasValue || authorId.Value == Guid.Empty) return;
+        // Dù đã chặn self-report, vẫn guard để không tự thông báo cho chính mình.
+        if (authorId.Value == reporterId) return;
+
+        try
+        {
+            var reporterName = NotificationDAO.GetUserDisplayName(reporterId);
+            var reasonVi = StoryReportReasonCatalog.TryGet(reasonCode ?? "", out var reason)
+                ? reason.LabelVi
+                : (reasonCode ?? "Khác");
+            var storyTitle = string.IsNullOrWhiteSpace(story.title) ? "không rõ tiêu đề" : story.title!;
+            var detail = string.IsNullOrWhiteSpace(description)
+                ? string.Empty
+                : $" Chi tiết từ người báo cáo: {description.Trim()}";
+
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = authorId.Value,
+                type = "STORY_REPORTED_TO_AUTHOR",
+                // Tiêu đề luôn ghi rõ người báo cáo (Header chỉ nổi bật dòng title).
+                title = $"Người báo cáo: {reporterName}",
+                content =
+                    $"Truyện «{storyTitle}» vừa nhận báo cáo. Người báo cáo: {reporterName}. Vi phạm: {reasonVi}.{detail}",
+                link_url = $"/story/{story.id}",
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+            NotificationDAO.Add(n);
+
+            if (_notificationHubNotifier != null)
+            {
+                await _notificationHubNotifier.NotifyUserAsync(authorId.Value, new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = false,
+                    CreatedAt = n.created_at
+                });
+            }
+        }
+        catch
+        {
+            // best effort push; không làm fail nghiệp vụ chính.
+        }
     }
 
     private static Func<Guid, bool>? BuildStoryClaimPredicate(string? claimFilter, Guid? actingUserId, bool viewerIsAdmin)
@@ -614,6 +670,13 @@ public class StoryReportService : IStoryReportService
         ViolationLogDAO.Insert(actorId, st.author_id, "STORY", storyId,
             disabled ? "COMMENTS_DISABLED" : "COMMENTS_ENABLED",
             disabled ? "Đã tắt bình luận truyện (xử lý vi phạm)." : "Đã bật lại bình luận truyện.", null);
+        _ = NotifyStoryAuthorComplianceActionAsync(
+            st,
+            actorId,
+            disabled ? "Truyện bị khóa bình luận" : "Truyện được mở lại bình luận",
+            disabled
+                ? "Xử lý vi phạm viên đã tắt bình luận cho truyện của bạn."
+                : "Xử lý vi phạm viên đã bật lại bình luận cho truyện của bạn.");
         return Task.CompletedTask;
     }
 
@@ -625,7 +688,56 @@ public class StoryReportService : IStoryReportService
         ViolationLogDAO.Insert(actorId, st.author_id, "STORY", storyId,
             hidden ? "STORY_HIDDEN_COMPLIANCE" : "STORY_UNHIDDEN_COMPLIANCE",
             hidden ? "Đã ẩn truyện khỏi danh sách công khai (xử lý vi phạm)." : "Đã hiện lại truyện trên danh sách công khai.", null);
+        _ = NotifyStoryAuthorComplianceActionAsync(
+            st,
+            actorId,
+            hidden ? "Truyện bị ẩn khỏi công khai" : "Truyện được hiển thị lại",
+            hidden
+                ? "Xử lý vi phạm viên đã ẩn truyện của bạn khỏi danh sách công khai."
+                : "Xử lý vi phạm viên đã hiển thị lại truyện của bạn trên danh sách công khai.");
         return Task.CompletedTask;
+    }
+
+    private async Task NotifyStoryAuthorComplianceActionAsync(stories story, Guid actorId, string title, string content)
+    {
+        var authorId = story.author_id;
+        if (!authorId.HasValue || authorId.Value == Guid.Empty) return;
+
+        try
+        {
+            var actorName = NotificationDAO.GetUserDisplayName(actorId);
+            var storyTitle = string.IsNullOrWhiteSpace(story.title) ? "không rõ tiêu đề" : story.title!;
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = authorId.Value,
+                type = "COMPLIANCE_STORY_MODERATION_ACTION",
+                title = title,
+                content = $"{content} Truyện: \"{storyTitle}\". Người thực hiện: {actorName}.",
+                link_url = $"/story/{story.id}",
+                is_read = false,
+                created_at = DateTime.UtcNow,
+            };
+            NotificationDAO.Add(n);
+
+            if (_notificationHubNotifier != null)
+            {
+                await _notificationHubNotifier.NotifyUserAsync(authorId.Value, new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = false,
+                    CreatedAt = n.created_at
+                });
+            }
+        }
+        catch
+        {
+            // best effort push; không làm fail nghiệp vụ chính.
+        }
     }
 
     public Task<Guid> RequestComplianceAdminActionAsync(Guid storyId, Guid requesterId, CreateComplianceAdminActionRequestDto dto, bool actorIsAdmin)
