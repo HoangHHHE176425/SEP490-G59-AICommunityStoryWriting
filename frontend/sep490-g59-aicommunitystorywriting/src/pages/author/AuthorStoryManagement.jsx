@@ -7,7 +7,7 @@ import { StoryCommentsViewer } from './StoryCommentsViewer';
 import { ChapterEditorPage } from '../author/ChapterEditorPage';
 import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
-import { createStory, updateStory, getStories, getStoryById, deleteStory } from '../../api/story/storyApi';
+import { createStory, updateStory, getStoriesByAuthor, getStoryById, deleteStory } from '../../api/story/storyApi';
 import { createChapter, updateChapter, getChapterById, getChapters, createChapterVersion, updateChapterVersion, getChapterVersionById, submitChapterVersion } from '../../api/chapter/chapterApi';
 import * as coinApi from '../../api/coins/coinApi';
 import { getAuthorFollowersCount } from '../../api/author/authorApi';
@@ -55,6 +55,14 @@ function mapStoryFromApi(item) {
     const ageRatingMap = { ALL: 'Phù hợp mọi lứa tuổi', '13+': 'Từ 13 tuổi', '16+': 'Từ 16 tuổi', '18+': 'Từ 18 tuổi' };
     const rawAge = item.ageRating ?? item.AgeRating ?? 'ALL';
     const ageRating = ageRatingMap[rawAge] ?? ageRatingMap.ALL;
+    const isComplianceHiddenFlag = Boolean(
+        item.complianceHidden
+        ?? item.ComplianceHidden
+        ?? item.compliance_hidden
+        ?? false
+    );
+    const isHiddenByStatus = String(status || '').toUpperCase() === 'HIDDEN';
+    const isComplianceHidden = isComplianceHiddenFlag || isHiddenByStatus;
     return {
         id: item.id ?? item.Id,
         title: item.title ?? item.Title,
@@ -71,6 +79,7 @@ function mapStoryFromApi(item) {
         publishStatus,
         storyProgressStatus: storyProgressStatus || 'ONGOING',
         progressStatusDisplay,
+        isComplianceHidden,
     };
 }
 
@@ -277,7 +286,7 @@ export function AuthorStoryManagement({ onBack }) {
             setStoriesLoading(true);
             setStoriesError(null);
         }
-        getStories({ authorId, page, pageSize: STORIES_PAGE_SIZE })
+        getStoriesByAuthor(authorId, { page, pageSize: STORIES_PAGE_SIZE })
             .then((res) => {
                 const items = res?.items ?? res?.Items ?? [];
                 const total = res?.totalCount ?? res?.totalItems ?? res?.total ?? items.length;
@@ -294,24 +303,42 @@ export function AuthorStoryManagement({ onBack }) {
                     items.map((s) => {
                         const storyId = s.id ?? s.Id;
                         return Promise.all([
+                            getStoryById(storyId, { recordView: false }).catch(() => null),
                             getChapters({ storyId, status: 'PUBLISHED', pageSize: 1 }),
                             getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 1 })
                         ])
-                            .then(([pubRes, pendRes]) => {
+                            .then(([storyDetail, pubRes, pendRes]) => {
                                 const pubList = Array.isArray(pubRes) ? pubRes : (pubRes?.items ?? pubRes?.Items ?? []);
                                 const pendList = Array.isArray(pendRes) ? pendRes : (pendRes?.items ?? pendRes?.Items ?? []);
+                                const complianceHidden =
+                                    storyDetail?.complianceHidden
+                                    ?? storyDetail?.ComplianceHidden
+                                    ?? storyDetail?.compliance_hidden
+                                    ?? s?.complianceHidden
+                                    ?? s?.ComplianceHidden
+                                    ?? s?.compliance_hidden
+                                    ?? false;
                                 return {
                                     ...s,
                                     _hasPublishedChapter: pubList.length > 0,
-                                    _hasPendingReviewChapter: pendList.length > 0
+                                    _hasPendingReviewChapter: pendList.length > 0,
+                                    _complianceHidden: Boolean(complianceHidden),
                                 };
                             })
-                            .catch(() => ({ ...s, _hasPublishedChapter: false, _hasPendingReviewChapter: false }));
+                            .catch(() => ({ ...s, _hasPublishedChapter: false, _hasPendingReviewChapter: false, _complianceHidden: false }));
                     })
                 ).then((itemsWithFlag) => {
                     setStories(
                         itemsWithFlag.map((item) => {
-                            const mapped = mapStoryFromApi(item);
+                            const mapped = mapStoryFromApi({
+                                ...item,
+                                complianceHidden: item._complianceHidden,
+                            });
+                            if (mapped.isComplianceHidden) {
+                                mapped.status = 'hidden';
+                                mapped.publishStatus = 'Đã ẩn tạm thời';
+                                return mapped;
+                            }
                             const hasPublished = item._hasPublishedChapter === true;
                             const hasPendingReview = item._hasPendingReviewChapter === true;
                             if (hasPublished) {
@@ -1947,6 +1974,22 @@ export function AuthorStoryManagement({ onBack }) {
                                                             <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
                                                                 {story.lastUpdate}
                                                             </div>
+                                                            {story.isComplianceHidden ? (
+                                                                <div
+                                                                    style={{
+                                                                        marginTop: '0.5rem',
+                                                                        padding: '0.375rem 0.625rem',
+                                                                        borderRadius: '6px',
+                                                                        border: '1px solid #fcd34d',
+                                                                        backgroundColor: '#fffbeb',
+                                                                        color: '#92400e',
+                                                                        fontSize: '0.75rem',
+                                                                        fontWeight: 600,
+                                                                    }}
+                                                                >
+                                                                    Truyện này đang bị tạm ẩn để điều tra và xử lý vi phạm.
+                                                                </div>
+                                                            ) : null}
                                                         </div>
                                                         <div style={{
                                                             padding: '0.25rem 0.75rem',
