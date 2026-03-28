@@ -193,6 +193,19 @@ namespace Services.Implementations
                 // The chapter was already created successfully
             }
 
+            if (string.Equals(status, "PUBLISHED", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(content))
+            {
+                ChapterMemoryAnalysisScheduler.TrySchedule(
+                    _scopeFactory,
+                    _logger,
+                    request.StoryId,
+                    chapter.id,
+                    chapter.title,
+                    chapter.order_index,
+                    content);
+            }
+
             // Create: return lightweight DTO without extra DB lookups.
             return MapToResponseDto(chapter, includeStoryLookup: false, storyTitleOverride: story.title);
         }
@@ -386,6 +399,8 @@ namespace Services.Implementations
             var storyForUpdate = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
             EnsureStoryProgressAllowsChapterWrite(storyForUpdate, "chỉnh sửa chương");
 
+            var previousStatus = chapter.status?.ToUpperInvariant() ?? "DRAFT";
+
             if (request.OrderIndex.HasValue && request.OrderIndex.Value != chapter.order_index)
             {
                 var storyId = chapter.story_id ?? Guid.Empty;
@@ -454,7 +469,13 @@ namespace Services.Implementations
             }
 
             chapter.title = request.Title;
-            chapter.content = request.Content;
+            // Chỉ cập nhật content khi client gửi field này; tránh PUT partial làm null → xóa nội dung.
+            if (request.Content != null)
+            {
+                chapter.content = request.Content;
+                chapter.word_count = CalculateWordCount(request.Content);
+            }
+
             chapter.updated_at = DateTime.Now;
 
             if (request.OrderIndex.HasValue)
@@ -501,11 +522,6 @@ namespace Services.Implementations
             if (request.AiSimilarityPercent.HasValue)
                 chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
 
-            if (request.Content != null)
-            {
-                chapter.word_count = CalculateWordCount(request.Content);
-            }
-
             _chapterRepository.Update(chapter);
 
             if (chapter.story_id.HasValue)
@@ -538,6 +554,26 @@ namespace Services.Implementations
                 {
                     // Log error but don't fail the update operation
                     // The chapter was already updated successfully
+                }
+            }
+
+            var finalStatus = chapter.status?.ToUpperInvariant() ?? "DRAFT";
+            if (string.Equals(finalStatus, "PUBLISHED", StringComparison.OrdinalIgnoreCase)
+                && chapter.story_id.HasValue
+                && !string.IsNullOrWhiteSpace(chapter.content))
+            {
+                var contentUpdated = request.Content != null;
+                var becamePublished = !string.Equals(previousStatus, "PUBLISHED", StringComparison.OrdinalIgnoreCase);
+                if (contentUpdated || becamePublished)
+                {
+                    ChapterMemoryAnalysisScheduler.TrySchedule(
+                        _scopeFactory,
+                        _logger,
+                        chapter.story_id.Value,
+                        chapter.id,
+                        chapter.title,
+                        chapter.order_index,
+                        chapter.content);
                 }
             }
 

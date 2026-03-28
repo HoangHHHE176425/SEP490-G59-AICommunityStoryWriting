@@ -267,7 +267,7 @@ export async function getStoriesByAuthor(authorId, params = {}) {
 /**
  * Cập nhật truyện (multipart/form-data).
  * @param {string} id - Guid
- * @param {Object} data - { title?, summary?, categoryIds?, status?, ageRating?, storyProgressStatus?, coverImage? (File) }
+ * @param {Object} data - { title?, summary?, categoryIds?, status?, ageRating?, storyProgressStatus?, coverImage? (File), preserveStoryStatus?: boolean — nếu true không gửi Status (giữ nguyên PUBLISHED khi chỉ đồng bộ meta sau gửi chương tiếp). }
  * @returns {Promise} - NoContent khi thành công
  */
 export async function updateStory(id, data) {
@@ -282,9 +282,11 @@ export async function updateStory(id, data) {
     const formData = new FormData();
     formData.append("Title", title);
     formData.append("Summary", data.summary != null ? String(data.summary).trim() : "");
-    formData.append("Status", (data.status || "DRAFT").toUpperCase());
+    if (!data.preserveStoryStatus) {
+        formData.append("Status", (data.status || "DRAFT").toUpperCase());
+    }
     const ageRating = AGE_RATING_MAP[data.ageRating] || data.ageRating || "ALL";
-    const rawProgress = data.storyProgressStatus || data.publishStatus || data.status || "";
+    const rawProgress = data.storyProgressStatus || data.publishStatus || (data.preserveStoryStatus ? "" : data.status) || "";
     const storyProgress = STORY_PROGRESS_MAP[rawProgress] || (["ONGOING", "COMPLETED", "HIATUS"].includes(String(rawProgress).toUpperCase()) ? String(rawProgress).toUpperCase() : "ONGOING");
     formData.append("AgeRating", ageRating);
     formData.append("StoryProgressStatus", storyProgress);
