@@ -5,13 +5,14 @@ using OpenAI.Chat;
 
 namespace Services.Helpers;
 
-/// <summary>Helper dùng chung cho 2 luồng AI: gợi ý chương tiếp theo và đồng sáng tác. Hỗ trợ model theo agent (Planner, Writer, ConsistencyChecker, PlotManager).</summary>
+/// <summary>Helper dùng chung cho luồng AI: gợi ý chương, đồng sáng tác, phân tích memory. Hỗ trợ model theo agent (Planner, Writer, ConsistencyChecker, MemoryAnalyzer).</summary>
 public static class AIClientHelper
 {
     public const string AgentPlanner = "Planner";
     public const string AgentWriter = "Writer";
     public const string AgentConsistencyChecker = "ConsistencyChecker";
-    public const string AgentPlotManager = "PlotManager";
+    /// <summary>Phân tích chương đã lưu → trích xuất Character / Event / Story State cho bảng memory.</summary>
+    public const string AgentMemoryAnalyzer = "MemoryAnalyzer";
 
     public static string GetDefaultModel(string provider)
     {
@@ -28,7 +29,7 @@ public static class AIClientHelper
             AgentPlanner => "AI:PlannerModel",
             AgentWriter => "AI:WriterModel",
             AgentConsistencyChecker => "AI:ConsistencyCheckerModel",
-            AgentPlotManager => "AI:PlotManagerModel",
+            AgentMemoryAnalyzer => "AI:MemoryAnalyzerModel",
             _ => null
         };
         var model = key != null ? configuration[key] : null;
@@ -75,11 +76,11 @@ public static class AIClientHelper
         return (provider, apiKey, baseUrl);
     }
 
-    /// <summary>Cấu hình cho một agent: dùng model riêng (Planner/Writer/ConsistencyChecker/PlotManager) nếu có.</summary>
+    /// <summary>Cấu hình cho một agent: dùng model riêng (Planner/Writer/ConsistencyChecker) nếu có.</summary>
     public static (string provider, string model, string apiKey, string? baseUrl) GetConfigForAgent(IConfiguration configuration, string agentName)
     {
         // Hỗ trợ 2 provider khác nhau:
-        // - Analysis (Planner/ConsistencyChecker/PlotManager): AI:AnalysisProvider/BaseUrl/ApiKey
+        // - Analysis (Planner/ConsistencyChecker): AI:AnalysisProvider/BaseUrl/ApiKey
         // - Writing (Writer): AI:WritingProvider/BaseUrl/ApiKey
         // Fallback: AI:Provider/BaseUrl/ApiKey
 
@@ -124,7 +125,7 @@ public static class AIClientHelper
     }
 
     /// <summary>Options cho chat completion. Khi dùng OpenAI/Azure/Groq nên set MaxOutputTokenCount (vd. Writer 8192) để không bị cắt output.</summary>
-    /// <param name="agentName">AgentPlanner, AgentWriter, AgentConsistencyChecker, AgentPlotManager hoặc null → dùng AI:MaxOutputTokens.</param>
+    /// <param name="agentName">AgentPlanner, AgentWriter, AgentConsistencyChecker hoặc null → dùng AI:MaxOutputTokens.</param>
     public static ChatCompletionOptions? GetCompletionOptions(IConfiguration configuration, string? agentName)
     {
         int maxTokens;

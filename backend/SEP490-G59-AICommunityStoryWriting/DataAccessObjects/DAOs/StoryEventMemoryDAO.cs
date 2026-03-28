@@ -57,4 +57,12 @@ public static class StoryEventMemoryDAO
         context.story_event_memory.RemoveRange(list);
         context.SaveChanges();
     }
+
+    public static void DeleteByChapterId(Guid chapterId)
+    {
+        using var context = new StoryPlatformDbContext();
+        var list = context.story_event_memory.Where(c => c.chapter_id == chapterId).ToList();
+        context.story_event_memory.RemoveRange(list);
+        context.SaveChanges();
+    }
 }
