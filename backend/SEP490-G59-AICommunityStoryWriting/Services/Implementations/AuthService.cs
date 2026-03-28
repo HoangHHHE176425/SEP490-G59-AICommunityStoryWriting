@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Repositories.Interfaces;
 using Services.DTOs.Auth;
 using Services.Interfaces;
+using System.ComponentModel.DataAnnotations;
 using System.Security.Cryptography;
 
 namespace AIStory.Services.Implementations
@@ -13,18 +14,20 @@ namespace AIStory.Services.Implementations
         private readonly IUserRepository _userRepo;
         private readonly IOtpRepository _otpRepo;      
         private readonly IEmailService _emailService;  
-        private readonly JwtHelper _jwtHelper;
+        private readonly ITokenService _tokenService;
 
-        public AuthService(IUserRepository userRepo, IOtpRepository otpRepo, IEmailService emailService, JwtHelper jwtHelper)
+        public AuthService(IUserRepository userRepo, IOtpRepository otpRepo, IEmailService emailService, ITokenService tokenService)
         {
             _userRepo = userRepo;
             _otpRepo = otpRepo;
             _emailService = emailService;
-            _jwtHelper = jwtHelper;
+            _tokenService = tokenService;
         }
 
         public async Task RegisterAsync(RegisterRequest request)
         {
+            ValidateRegisterRequest(request);
+
             if (await _userRepo.IsEmailExist(request.Email))
                 throw new Exception("Email already exists.");
 
@@ -76,6 +79,28 @@ namespace AIStory.Services.Implementations
                 "Xác thực tài khoản",
                 $"Mã OTP của bạn là: <b>{otpCode}</b>. Mã có hiệu lực trong 15 phút kể từ khi bạn nhận được email này."
             );
+        }
+
+        private static void ValidateRegisterRequest(RegisterRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.Email))
+                throw new Exception("Email is required.");
+
+            var emailChecker = new EmailAddressAttribute();
+            if (!emailChecker.IsValid(request.Email))
+                throw new Exception("Invalid Email format");
+
+            if (string.IsNullOrWhiteSpace(request.Password))
+                throw new Exception("Password is required.");
+
+            if (request.Password.Length < 6)
+                throw new Exception("Password too short");
+
+            if (string.IsNullOrWhiteSpace(request.ConfirmPassword))
+                throw new Exception("Confirm password is required.");
+
+            if (!string.Equals(request.Password, request.ConfirmPassword, StringComparison.Ordinal))
+                throw new Exception("Password not match");
         }
 
         public async Task<ResendOtpResponse> ResendOtpAsync(ResendOtpRequest request)
@@ -190,8 +215,17 @@ namespace AIStory.Services.Implementations
                 throw new Exception("Tài khoản của bạn chưa được xác thực. Vui lòng kiểm tra email để lấy mã OTP và xác thực tài khoản.");
             }
 
-            var accessToken = _jwtHelper.GenerateToken(user);
-            var refreshTokenValue = GenerateRefreshToken();
+            var accessToken = _tokenService.GenerateAccessToken(user);
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                throw new NullReferenceException("Access token generation failed.");
+            }
+
+            var refreshTokenValue = _tokenService.GenerateRefreshToken();
+            if (string.IsNullOrWhiteSpace(refreshTokenValue))
+            {
+                throw new NullReferenceException("Refresh token generation failed.");
+            }
             var refreshToken = new auth_tokens
             {
                 id = Guid.NewGuid(), 
@@ -271,10 +305,18 @@ namespace AIStory.Services.Implementations
             }
 
             // Generate access token
-            var accessToken = _jwtHelper.GenerateToken(user);
+            var accessToken = _tokenService.GenerateAccessToken(user);
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                throw new NullReferenceException("Access token generation failed.");
+            }
 
             // Generate refresh token (stored server-side)
-            var refreshTokenValue = GenerateRefreshToken();
+            var refreshTokenValue = _tokenService.GenerateRefreshToken();
+            if (string.IsNullOrWhiteSpace(refreshTokenValue))
+            {
+                throw new NullReferenceException("Refresh token generation failed.");
+            }
             var refreshToken = new auth_tokens
             {
                 id = Guid.NewGuid(),
@@ -309,8 +351,17 @@ namespace AIStory.Services.Implementations
                 throw new Exception("User not found.");
             }
 
-            var newAccessToken = _jwtHelper.GenerateToken(user);
-            var newRefreshTokenValue = GenerateRefreshToken();
+            var newAccessToken = _tokenService.GenerateAccessToken(user);
+            if (string.IsNullOrWhiteSpace(newAccessToken))
+            {
+                throw new NullReferenceException("Access token generation failed.");
+            }
+
+            var newRefreshTokenValue = _tokenService.GenerateRefreshToken();
+            if (string.IsNullOrWhiteSpace(newRefreshTokenValue))
+            {
+                throw new NullReferenceException("Refresh token generation failed.");
+            }
 
             var newRow = new auth_tokens
             {
@@ -336,17 +387,6 @@ namespace AIStory.Services.Implementations
         {
             await _userRepo.DeleteRefreshToken(refreshToken);
         }
-
-        private static string GenerateRefreshToken()
-        {
-            // 64 bytes -> 86 chars base64url (approx), good entropy
-            var bytes = RandomNumberGenerator.GetBytes(64);
-            return Convert.ToBase64String(bytes)
-                .Replace("+", "-")
-                .Replace("/", "_")
-                .Replace("=", "");
-        }
-
 
         public async Task ResetPasswordAsync(ResetPasswordRequest request)
         {
