@@ -21,16 +21,28 @@ namespace Services.Implementations
         private readonly IChapterRepository _chapterRepository;
         private readonly IChapterVersionRepository _versionRepository;
         private readonly IAiGeneratedContentRepository _aiContentRepository;
+        private readonly IUserLookup _userLookup;
+        private readonly IStoryLookup _storyLookup;
         private readonly IServiceScopeFactory? _scopeFactory;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
         private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly ILogger<ChapterService> _logger;
 
-        public ChapterService(IChapterRepository chapterRepository, IChapterVersionRepository versionRepository, IAiGeneratedContentRepository aiContentRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
+        public ChapterService(
+            IChapterRepository chapterRepository,
+            IChapterVersionRepository versionRepository,
+            IAiGeneratedContentRepository aiContentRepository,
+            IUserLookup userLookup,
+            IStoryLookup storyLookup,
+            ILogger<ChapterService> logger,
+            IModerationHubNotifier? moderationHubNotifier = null,
+            INotificationHubNotifier? notificationHubNotifier = null)
         {
             _chapterRepository = chapterRepository;
             _versionRepository = versionRepository;
             _aiContentRepository = aiContentRepository;
+            _userLookup = userLookup;
+            _storyLookup = storyLookup;
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
             _notificationHubNotifier = notificationHubNotifier;
@@ -42,10 +54,12 @@ namespace Services.Implementations
             IChapterVersionRepository versionRepository,
             IAiGeneratedContentRepository aiContentRepository,
             IServiceScopeFactory scopeFactory,
+            IUserLookup userLookup,
+            IStoryLookup storyLookup,
             ILogger<ChapterService> logger,
             IModerationHubNotifier? moderationHubNotifier = null,
             INotificationHubNotifier? notificationHubNotifier = null)
-            : this(chapterRepository, versionRepository, aiContentRepository, logger, moderationHubNotifier, notificationHubNotifier)
+            : this(chapterRepository, versionRepository, aiContentRepository, userLookup, storyLookup, logger, moderationHubNotifier, notificationHubNotifier)
         {
             _scopeFactory = scopeFactory;
         }
@@ -54,7 +68,7 @@ namespace Services.Implementations
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
-            var story = StoryDAO.GetById(request.StoryId);
+            var story = _storyLookup.GetById(request.StoryId);
             if (story == null)
             {
                 throw new InvalidOperationException($"Story with ID {request.StoryId} not found.");
@@ -63,7 +77,7 @@ namespace Services.Implementations
             if (request.Id == Guid.Empty)
                 throw new ArgumentException("Id must be a non-empty Guid (do not leave empty).");
 
-            if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
+            if (story.author_id is Guid aid && _userLookup.IsAuthorWritingSuspended(aid))
                 throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin).");
             EnsureStoryProgressAllowsChapterWrite(story, "tạo chương");
 
@@ -161,7 +175,7 @@ namespace Services.Implementations
                 if (status == "PUBLISHED" && story != null)
                 {
                     story.last_published_at = DateTime.Now;
-                    StoryDAO.Update(story);
+                    _storyLookup.Update(story);
                     Console.WriteLine($"[CONSOLE] ChapterService.Create PUBLISHED -> NotifyStoryFollowersNewChapter StoryId={request.StoryId} ChapterId={chapter.id}");
                     _logger.LogInformation("ChapterService.Create calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", request.StoryId, chapter.id);
                     var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(request.StoryId, chapter.id, request.Title, story.title, _logger);
@@ -179,8 +193,16 @@ namespace Services.Implementations
                 // The chapter was already created successfully
             }
 
-            var createdChapter = _chapterRepository.GetById(chapter.id);
-            return MapToResponseDto(createdChapter!);
+            // Create: return lightweight DTO without extra DB lookups.
+            return MapToResponseDto(chapter, includeStoryLookup: false, storyTitleOverride: story.title);
+        }
+
+        // New overload (for future ownership/auth validation):
+        // - Intentionally delegates to current behavior for now.
+        // - Unit tests can target this signature; product can later enforce author ownership here.
+        public ChapterResponseDto Create(CreateChapterRequestDto request, Guid authorId)
+        {
+            return Create(request);
         }
 
         public PagedResultDto<ChapterListItemDto> GetAll(ChapterQueryDto query)
@@ -271,7 +293,7 @@ namespace Services.Implementations
             var storyTitles = new Dictionary<Guid, string>();
             foreach (var sid in storyIds)
             {
-                var story = StoryDAO.GetById(sid);
+                var story = _storyLookup.GetById(sid);
                 if (story != null)
                     storyTitles[sid] = story.title ?? "";
             }
@@ -325,7 +347,7 @@ namespace Services.Implementations
                 .OrderBy(c => c.order_index)
                 .ToList();
 
-            var storyTitle = StoryDAO.GetById(storyId)?.title;
+            var storyTitle = _storyLookup.GetById(storyId)?.title;
             var items = chapterList.Select(c =>
             {
                 var dto = MapToListItemDto(c, storyTitle);
@@ -361,7 +383,7 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
-            var storyForUpdate = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
+            var storyForUpdate = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
             EnsureStoryProgressAllowsChapterWrite(storyForUpdate, "chỉnh sửa chương");
 
             if (request.OrderIndex.HasValue && request.OrderIndex.Value != chapter.order_index)
@@ -403,7 +425,7 @@ namespace Services.Implementations
                 }
                 if (accessType == "PAID" && !string.Equals(chapter.access_type, "PAID", StringComparison.OrdinalIgnoreCase))
                 {
-                    var story = targetStoryId == Guid.Empty ? null : StoryDAO.GetById(targetStoryId);
+                    var story = targetStoryId == Guid.Empty ? null : _storyLookup.GetById(targetStoryId);
                     if ((story?.total_views ?? 0) < 500)
                         throw new InvalidOperationException("Truyện cần tối thiểu 500 lượt xem mới được thiết lập chế độ trả phí cho chương.");
                 }
@@ -445,8 +467,8 @@ namespace Services.Implementations
 
                 if (newStatus == "PENDING_REVIEW")
                 {
-                    var updateStory = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
-                    if (updateStory?.author_id is Guid updateAuthorId && UserDAO.IsAuthorWritingSuspended(updateAuthorId))
+                    var updateStory = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+                    if (updateStory?.author_id is Guid updateAuthorId && _userLookup.IsAuthorWritingSuspended(updateAuthorId))
                         throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
                     EnsureCanSubmitForReview(chapter);
                 }
@@ -495,11 +517,11 @@ namespace Services.Implementations
                     // If chapter status was changed to PUBLISHED, update story's last_published_at and notify followers
                     if (!string.IsNullOrWhiteSpace(request.Status) && request.Status.ToUpper() == "PUBLISHED")
                     {
-                        var story = StoryDAO.GetById(chapter.story_id.Value);
+                        var story = _storyLookup.GetById(chapter.story_id.Value);
                         if (story != null)
                         {
                             story.last_published_at = DateTime.Now;
-                            StoryDAO.Update(story);
+                            _storyLookup.Update(story);
                         }
                         Console.WriteLine($"[CONSOLE] ChapterService.Update PUBLISHED -> NotifyStoryFollowersNewChapter StoryId={chapter.story_id} ChapterId={chapter.id}");
                         _logger.LogInformation("ChapterService.Update calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id, chapter.id);
@@ -527,7 +549,7 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
-            var storyForDelete = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
+            var storyForDelete = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
             EnsureStoryProgressAllowsChapterWrite(storyForDelete, "xóa chương");
 
             var statusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
@@ -577,8 +599,8 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
 
-            var story = StoryDAO.GetById(chapter.story_id ?? Guid.Empty);
-            if (story?.author_id is Guid authorId && UserDAO.IsAuthorWritingSuspended(authorId))
+            var story = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            if (story?.author_id is Guid authorId && _userLookup.IsAuthorWritingSuspended(authorId))
                 throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
             EnsureStoryProgressAllowsChapterWrite(story, "gửi xuất bản chương");
 
@@ -770,7 +792,7 @@ namespace Services.Implementations
 
         private void UpdateStoryChapterStats(Guid storyId)
         {
-            var story = StoryDAO.GetById(storyId);
+            var story = _storyLookup.GetById(storyId);
             if (story == null)
                 return;
 
@@ -780,20 +802,20 @@ namespace Services.Implementations
             story.word_count = chapterList.Sum(c => c.word_count ?? 0);
             story.updated_at = DateTime.Now;
 
-            StoryDAO.Update(story);
+            _storyLookup.Update(story);
         }
 
-        private ChapterResponseDto MapToResponseDto(chapters chapter)
+        private ChapterResponseDto MapToResponseDto(chapters chapter, bool includeStoryLookup = true, string? storyTitleOverride = null)
         {
-            stories? story = null;
-            if (chapter.story_id.HasValue)
-                story = StoryDAO.GetById(chapter.story_id.Value);
+            string? storyTitle = storyTitleOverride;
+            if (storyTitle == null && includeStoryLookup && chapter.story_id.HasValue)
+                storyTitle = _storyLookup.GetById(chapter.story_id.Value)?.title;
 
             return new ChapterResponseDto
             {
                 Id = chapter.id,
                 StoryId = chapter.story_id,
-                StoryTitle = story?.title,
+                StoryTitle = storyTitle,
                 Title = chapter.title,
                 OrderIndex = chapter.order_index,
                 Content = chapter.content,

@@ -14,6 +14,7 @@ using Repositories.Implementations;
 using Repositories.Interfaces;
 using AIStory.API.BackgroundServices;
 using Services.Implementations;
+using Services.Implementations.Lookups;
 using Services.Integrations.PayOS;
 using Services.Interfaces;
 using System.Security.Claims;
@@ -76,6 +77,9 @@ namespace AIStory.API
 
             builder.Services.AddScoped<IStoryRepository, StoryRepository>();
             builder.Services.AddScoped<IStoryService, StoryService>();
+            builder.Services.AddScoped<IUserLookup, UserLookup>();
+            builder.Services.AddScoped<ICategoryLookup, CategoryLookup>();
+            builder.Services.AddScoped<IStoryLookup, StoryLookup>();
             builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
             builder.Services.AddScoped<ICategoryService, CategoryService>();
             builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
