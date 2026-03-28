@@ -144,6 +144,11 @@ namespace Services.Implementations
                 IsVerified = user.status == "ACTIVE",
 
                 Role = (user.role ?? "USER").Trim().ToUpperInvariant(),
+                AuthorWritingSuspendedUntilUtc = user.author_writing_suspended_until.HasValue
+                    ? (user.author_writing_suspended_until.Value.Kind == DateTimeKind.Unspecified
+                        ? DateTime.SpecifyKind(user.author_writing_suspended_until.Value, DateTimeKind.Utc)
+                        : user.author_writing_suspended_until.Value.ToUniversalTime())
+                    : null,
 
                 Tags = tags,
 

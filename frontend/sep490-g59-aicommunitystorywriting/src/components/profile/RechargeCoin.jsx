@@ -370,70 +370,7 @@ export default function RechargeCoin() {
                     </div>
                 </div>
 
-                {/* Custom Amount */}
-                <div>
-                    <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                        Hoặc nhập số coin tùy chỉnh
-                    </label>
-                    <div className="relative">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Coins className="w-5 h-5 text-slate-400" />
-                        </div>
-                        <input
-                            type="number"
-                            value={customAmount}
-                            onChange={(e) => {
-                                const v = e.target.value;
-                                setCustomAmount(v);
-                                const amount = Math.floor(Number(v)) || 0;
-                                const pkg = coinPackages.find((p) => p.id && p.coins === amount);
-                                setSelectedPackageId(pkg?.id ?? null);
-                            }}
-                            placeholder="Nhập số coin"
-                            className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
-                            min="1"
-                        />
-                    </div>
-                    {(() => {
-                        const amount = Math.floor(Number(customAmount)) || 0;
-                        const matchedPkg = amount > 0 ? coinPackages.find((p) => p.id && p.coins === amount) : null;
-                        const tierPrice = customAmount ? getPriceForCustomCoins(customAmount) : null;
-                        // Hiển thị khi có nhập số coin: nếu trùng gói thì show giá gói (số tiền thật thanh toán), không trùng thì show tỷ giá tham khảo theo bậc
-                        if (!customAmount || (!matchedPkg && !tierPrice)) return null;
-                        const displayVnd = matchedPkg ? matchedPkg.price : tierPrice.totalVnd;
-                        const displayRate = matchedPkg ? Math.round(matchedPkg.price / matchedPkg.coins) : tierPrice.ratePerCoin;
-                        const isActualPrice = !!matchedPkg;
-                        return (
-                            <div className="mt-3 p-4 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/80 dark:bg-emerald-950/30">
-                                <p className="text-sm font-semibold text-slate-900 dark:text-white mb-1">
-                                    {isActualPrice ? 'Số tiền cần thanh toán' : 'Số tiền tham khảo (theo bậc)'}
-                                </p>
-                                <p className="text-xl font-bold text-primary">
-                                    {displayVnd.toLocaleString('vi-VN')} VNĐ
-                                </p>
-                                <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
-                                    Tỷ giá: <span className="font-semibold">{displayRate.toLocaleString('vi-VN')} VNĐ</span>/coin
-                                    {tierPrice && (
-                                        <span className="ml-1 px-1.5 py-0.5 rounded bg-emerald-200/80 dark:bg-emerald-800/50 text-emerald-800 dark:text-emerald-200 text-[10px] font-medium">
-                                            Bậc {tierPrice.label}
-                                        </span>
-                                    )}
-                                    {isActualPrice && matchedPkg?.bonus > 0 && (
-                                        <span className="ml-1 text-slate-500">(+{matchedPkg.bonus} bonus)</span>
-                                    )}
-                                </p>
-                                <p className="text-xs text-slate-500 dark:text-slate-500 mt-1">
-                                    Nạp càng nhiều coin, tỷ giá càng ưu đãi (từ 1.000 VNĐ/coin xuống 700 VNĐ/coin).
-                                </p>
-                                {!isActualPrice && (
-                                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                                        Để thanh toán, chọn đúng gói có số coin tương ứng bên trên.
-                                    </p>
-                                )}
-                            </div>
-                        );
-                    })()}
-                </div>
+                {/* Custom Amount removed per request */}
 
                 {/* Promotions */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

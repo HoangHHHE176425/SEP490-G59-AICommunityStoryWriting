@@ -233,6 +233,8 @@ namespace AIStory.API.Controllers
             try
             {
                 var reportId = await _storyReportService.CreateStoryReportAsync(id, userId.Value, request);
+                if (reportId == Guid.Empty)
+                    return Conflict(new { message = "Bạn đã báo cáo truyện này trước đó." });
                 return Ok(new { id = reportId, message = "Đã gửi báo cáo." });
             }
             catch (ArgumentException ex)
@@ -560,7 +562,7 @@ namespace AIStory.API.Controllers
                 if (story == null)
                     return NotFound(new { message = $"Story with ID {id} not found" });
                 if (story.comments_disabled)
-                    return BadRequest(new { message = "Truyện này đang tạm khóa bình luận (compliance)." });
+                    return BadRequest(new { message = "Truyện này đang trong quá trình xử lý vi phạm nên hiện không thể bình luận." });
                 if (!string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
                     return BadRequest(new { message = "Chỉ có thể comment truyện đã PUBLISHED." });
 

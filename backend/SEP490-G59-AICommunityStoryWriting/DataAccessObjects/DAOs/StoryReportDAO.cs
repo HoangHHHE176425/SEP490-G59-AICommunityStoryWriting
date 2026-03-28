@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using BusinessObjects.StoryReporting;
 using Microsoft.EntityFrameworkCore;
@@ -89,7 +89,7 @@ public static class StoryReportDAO
             {
                 if (context.story_report_contributors.AsNoTracking()
                         .Any(c => c.story_id == storyId && c.user_id == userId))
-                    throw new InvalidOperationException("Bạn đã báo cáo truyện này trước đó.");
+                    return Guid.Empty;
 
                 context.story_report_contributors.Add(new story_report_contributors
                 {
@@ -106,7 +106,7 @@ public static class StoryReportDAO
                 }
                 catch (DbUpdateException)
                 {
-                    throw new InvalidOperationException("Bạn đã báo cáo truyện này trước đó.");
+                    return Guid.Empty;
                 }
 
                 var open = context.reports.FirstOrDefault(r =>
@@ -266,7 +266,10 @@ public static class StoryReportDAO
                 r.target_type == StoryTargetType
                 && r.target_id == storyId
                 && r.status != null
-                && (r.status == "NEW" || r.status == "IN_REVIEW"))
+                && (
+                    r.status.Trim().ToUpper().StartsWith("NEW")
+                    || r.status.Trim().ToUpper().StartsWith("IN_REVIEW")
+                ))
             .ToList();
         if (rows.Count == 0) return 0;
         var now = DateTime.UtcNow;
@@ -288,7 +291,10 @@ public static class StoryReportDAO
             r.target_type == StoryTargetType
             && r.target_id == storyId
             && r.status != null
-            && (r.status == "NEW" || r.status == "IN_REVIEW"));
+            && (
+                r.status.Trim().ToUpper().StartsWith("NEW")
+                || r.status.Trim().ToUpper().StartsWith("IN_REVIEW")
+            ));
     }
 
     public static int ReopenInReviewReportsForAssignee(Guid storyId, Guid assigneeId)
@@ -298,7 +304,8 @@ public static class StoryReportDAO
             .Where(r =>
                 r.target_type == StoryTargetType
                 && r.target_id == storyId
-                && r.status == "IN_REVIEW"
+                && r.status != null
+                && r.status.Trim().ToUpper().StartsWith("IN_REVIEW")
                 && r.assigned_to == assigneeId)
             .ToList();
         foreach (var r in list)

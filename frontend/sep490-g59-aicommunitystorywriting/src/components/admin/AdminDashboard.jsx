@@ -382,10 +382,12 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
             {/* Page Header */}
             <div>
                 <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-                    Dashboard
+                    {isModeratorPanel ? 'Tổng quan kiểm duyệt' : 'Dashboard'}
                 </h1>
                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                    Chào mừng trở lại! Đây là tổng quan hệ thống của bạn.
+                    {isModeratorPanel
+                        ? 'Theo dõi nhanh khối lượng duyệt truyện/chương và tiến độ xử lý.'
+                        : 'Chào mừng trở lại! Đây là tổng quan hệ thống của bạn.'}
                 </p>
             </div>
 

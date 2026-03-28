@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { approveWithdraw, getAdminTransactions, rejectWithdraw, syncWithdrawStatus } from '../../../api/admin/transactionsApi';
 
+function upper(s) {
+    return String(s ?? '').toUpperCase();
+}
+
 function safeBankAccount(tx) {
     // API returns bankAccount (object) or null. Older mock used snake_case.
     const b = tx?.bankAccount ?? null;
@@ -120,7 +124,25 @@ export function AdminTransactions() {
     const [fraudOnly, setFraudOnly] = useState(false);
     const [riskFlagFilters, setRiskFlagFilters] = useState(() => []);
     const [reviewNote, setReviewNote] = useState('');
-    const [syncingWithdrawId, setSyncingWithdrawId] = useState(null);
+    const [confirm, setConfirm] = useState({ open: false, decision: null });
+    const [pendingWithdrawCount, setPendingWithdrawCount] = useState(0);
+    const [pendingWithdrawPollError, setPendingWithdrawPollError] = useState('');
+
+    // Allow AdminLayout notification to prefill filters once.
+    useEffect(() => {
+        try {
+            const raw = window.sessionStorage.getItem('admin_transactions_prefill');
+            if (!raw) return;
+            window.sessionStorage.removeItem('admin_transactions_prefill');
+            const data = JSON.parse(raw);
+            if (data?.type) setTypeFilter(String(data.type));
+            if (data?.status) setStatusFilter(String(data.status));
+            if (typeof data?.page === 'number') setPage(data.page);
+        } catch {
+            // ignore
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     function toggleRiskFlag(flag) {
         setRiskFlagFilters((prev) => {
@@ -182,50 +204,50 @@ export function AdminTransactions() {
 
     const canReviewWithdraw =
         selectedFresh?.type === 'WITHDRAW' &&
-        ['PENDING', 'PENDING_REVIEW'].includes(String(selectedFresh?.status ?? '').toUpperCase());
+        ['PENDING', 'PENDING_REVIEW'].includes(upper(selectedFresh?.status));
     const requiresReviewNote =
-        canReviewWithdraw && String(selectedFresh?.status ?? '').toUpperCase() === 'PENDING_REVIEW';
-    const canSyncWithdraw =
-        selectedFresh?.type === 'WITHDRAW' &&
-        String(selectedFresh?.status ?? '').toUpperCase() === 'PROCESSING';
+        canReviewWithdraw && upper(selectedFresh?.status) === 'PENDING_REVIEW';
 
-    function isProcessingWithdraw(tx) {
-        return tx?.type === 'WITHDRAW' && String(tx?.status ?? '').toUpperCase() === 'PROCESSING';
-    }
+    // Notification: pending withdraw count (poll).
+    useEffect(() => {
+        let cancelled = false;
+        let prev = -1;
 
-    async function handleSyncWithdrawStatusById(withdrawId) {
-        if (!withdrawId) return;
-        try {
-            setSyncingWithdrawId(withdrawId);
-            const res = await syncWithdrawStatus(withdrawId);
-            const nextStatus = res?.newStatus || res?.currentStatus;
-            setToast(nextStatus ? `Đã đồng bộ trạng thái: ${nextStatus}` : 'Đã đồng bộ trạng thái giao dịch.');
-            window.setTimeout(() => setToast(''), 3000);
-            await loadList(page);
-        } catch (err) {
-            const msg = err?.response?.data?.message || 'Đồng bộ trạng thái thất bại.';
-            setToast(msg);
-            window.setTimeout(() => setToast(''), 3500);
-        } finally {
-            setSyncingWithdrawId(null);
-        }
-    }
+        const fetchPending = async () => {
+            try {
+                // Sum PENDING + PENDING_REVIEW (fraud review) for withdraw.
+                const [a, b] = await Promise.all([
+                    getAdminTransactions({ type: 'WITHDRAW', status: 'PENDING', page: 1, pageSize: 1 }).catch(() => ({ totalCount: 0 })),
+                    getAdminTransactions({ type: 'WITHDRAW', status: 'PENDING_REVIEW', page: 1, pageSize: 1 }).catch(() => ({ totalCount: 0 })),
+                ]);
+                if (cancelled) return;
+                const next = Number(a?.totalCount ?? 0) + Number(b?.totalCount ?? 0);
+                setPendingWithdrawCount(next);
+                setPendingWithdrawPollError('');
 
-    async function handleSyncWithdrawStatus() {
-        if (!selectedFresh?.id || !canSyncWithdraw) return;
-        await handleSyncWithdrawStatusById(selectedFresh.id);
-    }
+                if (prev >= 0 && next > prev) {
+                    setToast(`Có ${next} yêu cầu rút tiền đang chờ duyệt.`);
+                    window.setTimeout(() => setToast(''), 3000);
+                }
+                prev = next;
+            } catch {
+                if (!cancelled) setPendingWithdrawPollError('Không tải được số yêu cầu rút tiền.');
+            }
+        };
+
+        fetchPending();
+        const id = setInterval(fetchPending, 15000);
+        return () => {
+            cancelled = true;
+            clearInterval(id);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     async function handleWithdrawDecision(decision) {
         if (!selectedFresh) return;
         if (!canReviewWithdraw) return;
-        const currentStatus = String(selectedFresh?.status ?? '').toUpperCase();
-        const ok = window.confirm(
-            decision === 'APPROVE'
-                ? `Duyệt giao dịch rút ${formatVnd(selectedFresh.amountVnd)} cho ${selectedFresh.user?.email}?`
-                : `Từ chối giao dịch rút ${formatVnd(selectedFresh.amountVnd)} cho ${selectedFresh.user?.email}?`
-        );
-        if (!ok) return;
+        const currentStatus = upper(selectedFresh?.status);
 
         try {
             setActionLoading(true);
@@ -252,6 +274,7 @@ export function AdminTransactions() {
             window.setTimeout(() => setToast(''), 2500);
             setReviewNote('');
             setSelected(null);
+            setConfirm({ open: false, decision: null });
             await loadList(page);
         } catch (err) {
             const msg = err?.response?.data?.message || 'Xử lý yêu cầu rút tiền thất bại.';
@@ -283,9 +306,28 @@ export function AdminTransactions() {
                         Màn hình FE demo để theo dõi giao dịch ví. Sau này chỉ cần thay nguồn dữ liệu bằng API thật.
                     </p>
                 </div>
-                <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">
-                    {loading ? '...' : `${totalCount} giao dịch`}
-                </span>
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setTypeFilter('WITHDRAW');
+                            setStatusFilter('PENDING');
+                            setPage(1);
+                            setSelected(null);
+                            setReviewNote('');
+                        }}
+                        className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 transition-colors"
+                        title={pendingWithdrawPollError || 'Xem các yêu cầu rút tiền chờ duyệt'}
+                    >
+                        <span>Rút tiền chờ duyệt</span>
+                        <span className="inline-flex min-w-[18px] justify-center rounded-full bg-white px-2 py-0.5 text-[10px] font-extrabold text-emerald-700">
+                            {pendingWithdrawCount}
+                        </span>
+                    </button>
+                    <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-700">
+                        {loading ? '...' : `${totalCount} giao dịch`}
+                    </span>
+                </div>
             </div>
 
             <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
@@ -524,7 +566,7 @@ export function AdminTransactions() {
                                         <button
                                             type="button"
                                             disabled={actionLoading}
-                                            onClick={() => handleWithdrawDecision('REJECT')}
+                                            onClick={() => setConfirm({ open: true, decision: 'REJECT' })}
                                             className={`rounded-lg border px-3 py-2 text-[11px] font-semibold ${
                                                 actionLoading
                                                     ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
@@ -536,7 +578,7 @@ export function AdminTransactions() {
                                         <button
                                             type="button"
                                             disabled={actionLoading}
-                                            onClick={() => handleWithdrawDecision('APPROVE')}
+                                            onClick={() => setConfirm({ open: true, decision: 'APPROVE' })}
                                             className={`rounded-lg border px-3 py-2 text-[11px] font-semibold ${
                                                 actionLoading
                                                     ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
@@ -653,6 +695,80 @@ export function AdminTransactions() {
                                 <p className="text-slate-500">Ghi chú</p>
                                 <p className="mt-1 text-slate-800">{selectedFresh.note || '-'}</p>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {selectedFresh && confirm.open && canReviewWithdraw && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                    <div
+                        className="absolute inset-0 bg-black/40"
+                        onClick={() => setConfirm({ open: false, decision: null })}
+                    />
+                    <div className="relative w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-xl p-5">
+                        <h3 className="text-base font-bold text-slate-900">
+                            {confirm.decision === 'APPROVE' ? 'Xác nhận duyệt rút tiền' : 'Xác nhận từ chối rút tiền'}
+                        </h3>
+                        <p className="mt-2 text-[12px] text-slate-600 leading-relaxed">
+                            {confirm.decision === 'APPROVE'
+                                ? 'Bạn sắp duyệt yêu cầu rút tiền. Hãy kiểm tra thông tin trước khi xác nhận.'
+                                : 'Bạn sắp từ chối yêu cầu rút tiền. Hãy kiểm tra thông tin trước khi xác nhận.'}
+                        </p>
+                        <div className="mt-3 rounded-xl bg-slate-50 p-3 text-[12px]">
+                            <div className="flex items-center justify-between gap-3">
+                                <span className="text-slate-500">Người dùng</span>
+                                <span className="font-semibold text-slate-900">{selectedFresh.user?.email || '-'}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 mt-1">
+                                <span className="text-slate-500">Số tiền</span>
+                                <span className="font-extrabold text-slate-900">{formatVnd(selectedFresh.amountVnd)}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-3 mt-1">
+                                <span className="text-slate-500">Trạng thái</span>
+                                <span className="font-semibold text-slate-900">{String(selectedFresh.status || '-')}</span>
+                            </div>
+                        </div>
+
+                        {requiresReviewNote ? (
+                            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                                <p className="text-[11px] font-semibold text-amber-900">
+                                    Ghi chú xử lý (bắt buộc)
+                                </p>
+                                <p className="mt-1 text-[11px] text-amber-800">
+                                    Yêu cầu đang ở trạng thái chờ xét duyệt gian lận. Cần ghi rõ lý do duyệt/từ chối.
+                                </p>
+                                <textarea
+                                    value={reviewNote}
+                                    onChange={(e) => setReviewNote(e.target.value)}
+                                    rows={3}
+                                    placeholder="Nhập ghi chú..."
+                                    className="mt-2 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-[12px] text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                                />
+                            </div>
+                        ) : null}
+
+                        <div className="mt-4 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                disabled={actionLoading}
+                                onClick={() => setConfirm({ open: false, decision: null })}
+                                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                            >
+                                Quay lại
+                            </button>
+                            <button
+                                type="button"
+                                disabled={actionLoading || (requiresReviewNote && !reviewNote.trim())}
+                                onClick={() => handleWithdrawDecision(confirm.decision)}
+                                className={`rounded-lg border px-3 py-2 text-[11px] font-semibold disabled:opacity-60 disabled:cursor-not-allowed ${
+                                    confirm.decision === 'APPROVE'
+                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                        : 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100'
+                                }`}
+                            >
+                                {actionLoading ? 'Đang xử lý…' : 'Xác nhận'}
+                            </button>
                         </div>
                     </div>
                 </div>

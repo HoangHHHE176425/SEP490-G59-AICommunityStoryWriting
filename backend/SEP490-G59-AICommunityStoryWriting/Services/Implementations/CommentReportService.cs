@@ -1,10 +1,11 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.EntityFrameworkCore;
 using Services;
 using Services.DTOs.CommentReports;
+using Services.DTOs.Notifications;
 using Services.DTOs.StoryReports;
 using Services.Interfaces;
 using Services.StoryReporting;
@@ -17,6 +18,12 @@ public class CommentReportService : ICommentReportService
     private const string CommentTargetType = "COMMENT";
     private static readonly string[] DefaultOpenStatuses = { "NEW", "IN_REVIEW" };
     private static readonly string ComplianceTargetType = ReviewAssignmentDAO.TargetTypeComplianceCommentReports;
+    private readonly INotificationHubNotifier? _notificationHubNotifier;
+
+    public CommentReportService(INotificationHubNotifier? notificationHubNotifier = null)
+    {
+        _notificationHubNotifier = notificationHubNotifier;
+    }
 
     private bool HasPendingAdminActionForCommentThread(Guid commentId)
     {
@@ -168,6 +175,7 @@ public class CommentReportService : ICommentReportService
         });
 
         await context.SaveChangesAsync();
+        _ = NotifyCommentOwnerReportedAsync(comment, reporterId, request.ReasonCode, request.Description);
         return row.id;
     }
 
@@ -292,8 +300,102 @@ public class CommentReportService : ICommentReportService
                 "COMMENT",
                 commentId,
                 hidden ? "COMMENT_HIDDEN" : "COMMENT_UNHIDDEN",
-                hidden ? "Compliance ẩn comment." : "Compliance hiện lại comment.",
+                hidden ? "Đã ẩn bình luận (xử lý vi phạm)." : "Đã hiện lại bình luận.",
                 null);
+            _ = NotifyCommentOwnerComplianceActionAsync(comment, actorUserId, hidden);
+        }
+    }
+
+    private async Task NotifyCommentOwnerReportedAsync(comments comment, Guid reporterId, string? reasonCode, string? description)
+    {
+        if (comment.user_id is not Guid ownerId || ownerId == Guid.Empty) return;
+        if (ownerId == reporterId) return;
+
+        try
+        {
+            var reporterName = NotificationDAO.GetUserDisplayName(reporterId);
+            var reasonVi = CommentReportReasonCatalog.TryGet(reasonCode ?? "", out var reason)
+                ? reason.LabelVi
+                : (reasonCode ?? "Khác");
+            var detail = string.IsNullOrWhiteSpace(description)
+                ? string.Empty
+                : $" Chi tiết từ người báo cáo: {description.Trim()}";
+            var targetUrl = comment.story_id.HasValue ? $"/story/{comment.story_id.Value}" : "/notifications";
+
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = ownerId,
+                type = "COMMENT_REPORTED_TO_OWNER",
+                title = $"Người báo cáo: {reporterName}",
+                content =
+                    $"Bình luận của bạn vừa bị báo cáo. Người báo cáo: {reporterName}. Vi phạm: {reasonVi}.{detail}",
+                link_url = targetUrl,
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+            NotificationDAO.Add(n);
+
+            if (_notificationHubNotifier != null)
+            {
+                await _notificationHubNotifier.NotifyUserAsync(ownerId, new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = false,
+                    CreatedAt = n.created_at
+                });
+            }
+        }
+        catch
+        {
+            // best effort push; không làm fail nghiệp vụ chính.
+        }
+    }
+
+    private async Task NotifyCommentOwnerComplianceActionAsync(comments comment, Guid actorUserId, bool hidden)
+    {
+        if (comment.user_id is not Guid ownerId || ownerId == Guid.Empty) return;
+
+        try
+        {
+            var actorName = NotificationDAO.GetUserDisplayName(actorUserId);
+            var targetUrl = comment.story_id.HasValue ? $"/story/{comment.story_id.Value}" : "/notifications";
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = ownerId,
+                type = "COMPLIANCE_COMMENT_MODERATION_ACTION",
+                title = hidden ? "Bình luận của bạn đã bị ẩn" : "Bình luận của bạn đã được hiển thị lại",
+                content = hidden
+                    ? $"Xử lý vi phạm viên {actorName} đã ẩn bình luận của bạn do vi phạm."
+                    : $"Xử lý vi phạm viên {actorName} đã hiển thị lại bình luận của bạn.",
+                link_url = targetUrl,
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+            NotificationDAO.Add(n);
+
+            if (_notificationHubNotifier != null)
+            {
+                await _notificationHubNotifier.NotifyUserAsync(ownerId, new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = false,
+                    CreatedAt = n.created_at
+                });
+            }
+        }
+        catch
+        {
+            // best effort push; không làm fail nghiệp vụ chính.
         }
     }
 
@@ -316,6 +418,22 @@ public class CommentReportService : ICommentReportService
 
         var targetUserId = dto.TargetUserId ?? comment.user_id.Value;
         var kind = dto.RequestKind.Trim().ToUpperInvariant();
+        if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting)
+        {
+            var reason = dto.Message?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new ArgumentException("Bắt buộc nhập lý do đề xuất khi yêu cầu tạm đình chỉ quyền viết.");
+            if (!dto.ProposedSuspendUntilUtc.HasValue)
+                throw new ArgumentException("Cần ProposedSuspendUntilUtc hợp lệ (UTC).");
+            var until = dto.ProposedSuspendUntilUtc.Value;
+            if (until.Kind == DateTimeKind.Unspecified)
+                until = DateTime.SpecifyKind(until, DateTimeKind.Utc);
+            else if (until.Kind == DateTimeKind.Local)
+                until = until.ToUniversalTime();
+            if (until < DateTime.UtcNow.AddDays(1))
+                throw new ArgumentException("Thời hạn đình chỉ phải tối thiểu 1 ngày kể từ hiện tại.");
+            dto.ProposedSuspendUntilUtc = until;
+        }
         var sourceTag = $"[COMMENT_REPORT:{commentId}]";
         var enrichedMessage = string.IsNullOrWhiteSpace(dto.Message)
             ? sourceTag
@@ -331,9 +449,63 @@ public class CommentReportService : ICommentReportService
             enrichedMessage,
             dto.ProposedSuspendUntilUtc,
             urgencyTier);
+        _ = NotifyAdminsComplianceAdminActionRequestedAsync(storyId, requesterId, kind, dto.Message);
 
         await Task.Yield();
         return id;
+    }
+
+    private async Task NotifyAdminsComplianceAdminActionRequestedAsync(Guid storyId, Guid requesterId, string kind, string? reason)
+    {
+        try
+        {
+            await using var db = new StoryPlatformDbContext();
+            var adminIds = await db.users.AsNoTracking()
+                .Where(u => u.role != null && u.role.ToUpper() == "ADMIN" && u.status != null && u.status.ToUpper() == "ACTIVE")
+                .Select(u => u.id)
+                .Distinct()
+                .ToListAsync();
+            if (adminIds.Count == 0) return;
+
+            var requesterName = NotificationDAO.GetUserDisplayName(requesterId);
+            var requestKindVi = string.Equals(kind, ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting, StringComparison.OrdinalIgnoreCase)
+                ? "tạm đình chỉ quyền viết"
+                : "chặn tài khoản";
+            var note = string.IsNullOrWhiteSpace(reason) ? string.Empty : $" Lý do: {reason.Trim()}";
+
+            foreach (var adminId in adminIds)
+            {
+                var n = new notifications
+                {
+                    id = Guid.NewGuid(),
+                    user_id = adminId,
+                    type = "COMPLIANCE_ADMIN_ACTION_REQUESTED",
+                    title = "Có đơn mới từ xử lý vi phạm viên",
+                    content = $"{requesterName} vừa gửi yêu cầu {requestKindVi} từ báo cáo bình luận.{note}",
+                    link_url = $"/story/{storyId}",
+                    is_read = false,
+                    created_at = DateTime.UtcNow
+                };
+                NotificationDAO.Add(n);
+                if (_notificationHubNotifier != null)
+                {
+                    await _notificationHubNotifier.NotifyUserAsync(adminId, new NotificationDto
+                    {
+                        Id = n.id,
+                        Type = n.type,
+                        Title = n.title,
+                        Content = n.content,
+                        LinkUrl = n.link_url,
+                        IsRead = false,
+                        CreatedAt = n.created_at
+                    });
+                }
+            }
+        }
+        catch
+        {
+            // best effort push; không làm fail nghiệp vụ chính.
+        }
     }
 
     public Task<ComplianceClaimCommentResultDto> ClaimCommentReportsAsync(
@@ -426,7 +598,79 @@ public class CommentReportService : ICommentReportService
         // Close lock khi không còn open report.
         await MaybeCompleteCommentComplianceLockWhenNoOpenReportsAsync(commentId, complianceUserId, actorIsAdmin);
 
+        // Lấy đầy đủ người báo cáo từ các report mở vừa xử lý:
+        // - reporter_id đại diện của từng row
+        // - toàn bộ contributor trong report_evidences (evidence_text chứa reporterId dạng Guid)
+        var reporterIds = new HashSet<Guid>(
+            openReports
+                .Select(r => r.reporter_id ?? Guid.Empty)
+                .Where(id => id != Guid.Empty));
+
+        var openReportIds = openReports.Select(r => r.id).Distinct().ToList();
+        if (openReportIds.Count > 0)
+        {
+            var contributorIdRaw = await context.report_evidences.AsNoTracking()
+                .Where(e => e.report_id.HasValue && openReportIds.Contains(e.report_id.Value))
+                .Select(e => e.evidence_text)
+                .ToListAsync();
+
+            foreach (var raw in contributorIdRaw)
+            {
+                if (Guid.TryParse(raw, out var uid) && uid != Guid.Empty)
+                    reporterIds.Add(uid);
+            }
+        }
+
+        if (openReports.Count > 0 && reporterIds.Count > 0)
+            _ = NotifyCommentReportersBulkResolvedAsync(reporterIds.ToList(), commentId, st);
+
         return openReports.Count;
+    }
+
+    private async Task NotifyCommentReportersBulkResolvedAsync(IReadOnlyCollection<Guid> reporterIds, Guid commentId, string status)
+    {
+        if (reporterIds == null || reporterIds.Count == 0) return;
+        var success = string.Equals(status, "RESOLVED", StringComparison.OrdinalIgnoreCase);
+        var title = success ? "Báo cáo bình luận đã được xử lý" : "Báo cáo bình luận đã được cập nhật";
+        var content = success
+            ? "Đơn báo cáo bình luận bạn đã gửi đã được xử lý bởi xử lý vi phạm viên thành công."
+            : "Đơn báo cáo bình luận bạn đã gửi được đánh dấu không đủ bằng chứng để xử lý.";
+
+        foreach (var userId in reporterIds.Distinct())
+        {
+            try
+            {
+                var n = new notifications
+                {
+                    id = Guid.NewGuid(),
+                    user_id = userId,
+                    type = "COMPLIANCE_COMMENT_REPORT_BULK_RESOLVED",
+                    title = title,
+                    content = content,
+                    link_url = $"/notifications",
+                    is_read = false,
+                    created_at = DateTime.UtcNow
+                };
+                NotificationDAO.Add(n);
+                if (_notificationHubNotifier != null)
+                {
+                    await _notificationHubNotifier.NotifyUserAsync(userId, new NotificationDto
+                    {
+                        Id = n.id,
+                        Type = n.type,
+                        Title = n.title,
+                        Content = n.content,
+                        LinkUrl = n.link_url,
+                        IsRead = false,
+                        CreatedAt = n.created_at
+                    });
+                }
+            }
+            catch
+            {
+                // best effort push; không làm fail nghiệp vụ chính.
+            }
+        }
     }
 
     private async Task MaybeCompleteCommentComplianceLockWhenNoOpenReportsAsync(
@@ -471,7 +715,8 @@ public class CommentReportService : ICommentReportService
         string? statusCsv = null,
         string? search = null,
         Guid? actingUserId = null,
-        bool viewerIsAdmin = false)
+        bool viewerIsAdmin = false,
+        string? claimFilter = null)
     {
         page = page < 1 ? 1 : page;
         pageSize = pageSize is < 1 or > 200 ? 20 : pageSize;
@@ -629,6 +874,42 @@ public class CommentReportService : ICommentReportService
             .ThenBy(x => x.OldestReportAtUtc)
             .ToList();
 
+        // Lọc theo lock (giống report truyện): all | unclaimed | mine
+        var cf = (claimFilter ?? "all").Trim().ToUpperInvariant();
+        var tt = ComplianceTargetType;
+        if (viewerIsAdmin)
+        {
+            if (cf == "UNCLAIMED")
+            {
+                var locked = ReviewAssignmentDAO.GetLockedTargetIds(tt).ToHashSet();
+                groups = groups.Where(g => !locked.Contains(g.CommentId)).ToList();
+            }
+            else if (cf == "MINE" && actingUserId.HasValue)
+            {
+                var mine = ReviewAssignmentDAO.GetClaimedTargetIdsByUser(tt, actingUserId).ToHashSet();
+                groups = groups.Where(g => mine.Contains(g.CommentId)).ToList();
+            }
+        }
+        else if (actingUserId.HasValue)
+        {
+            var uid = actingUserId.Value;
+            if (cf == "UNCLAIMED")
+            {
+                var locked = ReviewAssignmentDAO.GetLockedTargetIds(tt).ToHashSet();
+                groups = groups.Where(g => !locked.Contains(g.CommentId)).ToList();
+            }
+            else if (cf == "MINE")
+            {
+                var mine = ReviewAssignmentDAO.GetClaimedTargetIdsByUser(tt, actingUserId).ToHashSet();
+                groups = groups.Where(g => mine.Contains(g.CommentId)).ToList();
+            }
+            else
+            {
+                var other = ReviewAssignmentDAO.GetLockedTargetIdsByOthers(tt, uid).ToHashSet();
+                groups = groups.Where(g => !other.Contains(g.CommentId)).ToList();
+            }
+        }
+
         var total = groups.Count;
         var slice = groups
             .Skip((page - 1) * pageSize)
@@ -645,7 +926,16 @@ public class CommentReportService : ICommentReportService
                 ((r.target_type ?? "").ToUpper()) == CommentTargetType
                 && commentIds.Contains(r.target_id)
                 && r.status != null)
-            .Select(r => new { ReportId = r.id, CommentId = r.target_id, Status = r.status })
+            .Select(r => new
+            {
+                ReportId = r.id,
+                CommentId = r.target_id,
+                Status = r.status,
+                ReporterId = r.reporter_id,
+                Description = r.description,
+                ReasonCode = r.reason_category,
+                CreatedAtUtc = r.created_at
+            })
             .ToListAsync();
 
         // Nếu comment thread vẫn còn open report (NEW/IN_REVIEW) thì chỉ lấy evidence của open reports.
@@ -725,6 +1015,32 @@ public class CommentReportService : ICommentReportService
 
             reporterNamesByCommentId[cid] = names;
         }
+
+        var reporterDetailsByCommentId = reportRowsForEvidence
+            .GroupBy(x => x.CommentId)
+            .ToDictionary(
+                g => g.Key,
+                g => (IReadOnlyList<ComplianceCommentReporterDetailDto>)g
+                    .OrderBy(x => x.CreatedAtUtc ?? nowUtc)
+                    .Select(x =>
+                    {
+                        var displayName = (x.ReporterId.HasValue && x.ReporterId.Value != Guid.Empty
+                            && reporterNameByUserId.TryGetValue(x.ReporterId.Value, out var nm)
+                            && !string.IsNullOrWhiteSpace(nm))
+                            ? nm
+                            : (x.ReporterId?.ToString() ?? "Ẩn danh");
+
+                        var code = string.IsNullOrWhiteSpace(x.ReasonCode) ? "OTHER" : x.ReasonCode.Trim().ToUpperInvariant();
+                        var label = CommentReportReasonCatalog.GetDominantReasonLabelVi(code);
+                        return new ComplianceCommentReporterDetailDto
+                        {
+                            ReporterDisplayName = displayName,
+                            ReportedAtUtc = x.CreatedAtUtc.HasValue ? ApiDateTime.AsUtcForJson(x.CreatedAtUtc.Value) : null,
+                            Description = x.Description,
+                            ReasonLabelVi = label
+                        };
+                    })
+                    .ToList());
 
         var comments = await context.comments.AsNoTracking()
             .Include(c => c.userNavigation)
@@ -855,6 +1171,8 @@ public class CommentReportService : ICommentReportService
                     CommentId = g.CommentId,
                     StoryId = Guid.Empty,
                     CommentUserId = Guid.Empty,
+                    CommentContent = null,
+                    IsCommentThreadHidden = false,
                     ReasonCode = g.DominantCode,
                     ReasonLabelVi = CommentReportReasonCatalog.GetDominantReasonLabelVi(g.DominantCode),
                     SeverityScore = g.AggregatedSeverity,
@@ -875,6 +1193,7 @@ public class CommentReportService : ICommentReportService
                     ComplianceHandlingSlaMessageVi = null,
                     HoursSinceComplianceClaim = null,
                     ReporterDisplayNames = reporterNamesByCommentId.TryGetValue(g.CommentId, out var rn0) ? rn0 : Array.Empty<string>(),
+                    ReporterDetails = reporterDetailsByCommentId.TryGetValue(g.CommentId, out var rd0) ? rd0 : Array.Empty<ComplianceCommentReporterDetailDto>(),
                     ReasonSummaryVi = g.ReasonCounts
                         .OrderByDescending(kv => kv.Value)
                         .Select(kv => CommentReportReasonCatalog.GetDominantReasonLabelVi(kv.Key) + " (" + kv.Value + ")")
@@ -891,6 +1210,8 @@ public class CommentReportService : ICommentReportService
             var displayName = comment.userNavigation?.user_profiles?.nickname?.Trim();
             if (string.IsNullOrWhiteSpace(displayName))
                 displayName = comment.userNavigation?.email?.Trim();
+            var commentStatus = (comment.status ?? string.Empty).Trim().ToUpperInvariant();
+            var isCommentThreadHidden = commentStatus == "HIDDEN_PARENT" || commentStatus == "HIDDEN";
 
             var isLocked = claimInfos.TryGetValue(comment.id, out var claimInfo);
             var isClaimedByMe = actingUserId.HasValue && isLocked && claimInfo.AssigneeId == actingUserId.Value;
@@ -908,6 +1229,8 @@ public class CommentReportService : ICommentReportService
                 CommentUserId = commentUserId,
                 CommentUserDisplayName = displayName,
                 CommentUserEmail = comment.userNavigation?.email,
+                CommentContent = comment.content,
+                IsCommentThreadHidden = isCommentThreadHidden,
                 ReasonCode = g.DominantCode,
                 ReasonLabelVi = CommentReportReasonCatalog.GetDominantReasonLabelVi(g.DominantCode),
                 SeverityScore = g.AggregatedSeverity,
@@ -928,6 +1251,7 @@ public class CommentReportService : ICommentReportService
                 ComplianceHandlingSlaMessageVi = isLocked ? sla.msgVi : null,
                 HoursSinceComplianceClaim = isLocked ? sla.hoursSince : null,
                 ReporterDisplayNames = reporterNamesByCommentId.TryGetValue(comment.id, out var rn1) ? rn1 : Array.Empty<string>(),
+                ReporterDetails = reporterDetailsByCommentId.TryGetValue(comment.id, out var rd1) ? rd1 : Array.Empty<ComplianceCommentReporterDetailDto>(),
                 ReasonSummaryVi = g.ReasonCounts
                     .OrderByDescending(kv => kv.Value)
                     .Select(kv => CommentReportReasonCatalog.GetDominantReasonLabelVi(kv.Key) + " (" + kv.Value + ")")

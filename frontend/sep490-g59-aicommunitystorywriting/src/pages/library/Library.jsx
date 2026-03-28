@@ -7,6 +7,8 @@ import { Library as LibraryIcon, BookOpen, Clock, ChevronRight, Filter, List, Gr
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { getMyLibrary } from '../../api/library/libraryApi';
+import { getStoryById } from '../../api/story/storyApi';
+import { getProfileByUserId } from '../../api/account/accountApi';
 
 function formatTimeAgo(dateStr) {
     if (!dateStr) return '';
@@ -35,6 +37,8 @@ export default function Library() {
     const [followedStories, setFollowedStories] = useState([]);
     const [followedAuthors, setFollowedAuthors] = useState([]);
     const [readingHistory, setReadingHistory] = useState([]);
+    const [storyVisibilityMap, setStoryVisibilityMap] = useState({});
+    const [authorVisibilityMap, setAuthorVisibilityMap] = useState({});
 
     useEffect(() => {
         if (!user?.id) {
@@ -42,6 +46,8 @@ export default function Library() {
                 setFollowedStories([]);
                 setFollowedAuthors([]);
                 setReadingHistory([]);
+                setStoryVisibilityMap({});
+                setAuthorVisibilityMap({});
                 setLibraryLoading(false);
                 setLibraryError(null);
             });
@@ -75,12 +81,77 @@ export default function Library() {
         return () => { cancelled = true; };
     }, [user?.id]);
 
-    const totalBooks = followedStories.length;
-    const readingCount = readingHistory.length;
-    const followedAuthorsCount = followedAuthors.length;
+    useEffect(() => {
+        if (!user?.id) {
+            setStoryVisibilityMap({});
+            setAuthorVisibilityMap({});
+            return;
+        }
+        let cancelled = false;
+        const loadVisibility = async () => {
+            const storyIds = [...new Set([
+                ...followedStories.map((s) => s?.id),
+                ...readingHistory.map((h) => h?.storyId),
+            ].filter(Boolean))];
+            const authorIds = [...new Set(followedAuthors.map((a) => a?.authorId).filter(Boolean))];
+
+            const storyPairs = await Promise.all(storyIds.map(async (storyId) => {
+                try {
+                    const story = await getStoryById(storyId);
+                    const status = String(story?.status ?? story?.Status ?? '').toUpperCase();
+                    const complianceHidden = Boolean(
+                        story?.complianceHidden
+                        ?? story?.ComplianceHidden
+                        ?? story?.compliance_hidden
+                        ?? false
+                    );
+                    const visible = status === 'PUBLISHED' && !complianceHidden;
+                    return [storyId, visible];
+                } catch {
+                    // Không đọc được truyện => coi như không nên hiển thị trong tủ sách.
+                    return [storyId, false];
+                }
+            }));
+
+            const authorPairs = await Promise.all(authorIds.map(async (authorId) => {
+                try {
+                    const profile = await getProfileByUserId(authorId);
+                    const status = String(profile?.status ?? '').toUpperCase();
+                    const isBanned = Boolean(profile?.isBanned) || status === 'BANNED';
+                    return [authorId, !isBanned];
+                } catch {
+                    // Không tải được profile thì giữ hiển thị để tránh ẩn nhầm.
+                    return [authorId, true];
+                }
+            }));
+
+            if (cancelled) return;
+            setStoryVisibilityMap(Object.fromEntries(storyPairs));
+            setAuthorVisibilityMap(Object.fromEntries(authorPairs));
+        };
+        loadVisibility();
+        return () => { cancelled = true; };
+    }, [user?.id, followedStories, followedAuthors, readingHistory]);
+
+    const visibleFollowedStories = useMemo(
+        () => followedStories.filter((s) => storyVisibilityMap[s.id] !== false),
+        [followedStories, storyVisibilityMap],
+    );
+    const visibleReadingHistory = useMemo(
+        () => readingHistory.filter((h) => storyVisibilityMap[h.storyId] !== false),
+        [readingHistory, storyVisibilityMap],
+    );
+    const visibleFollowedAuthors = useMemo(
+        () => followedAuthors.filter((a) => authorVisibilityMap[a.authorId] !== false),
+        [followedAuthors, authorVisibilityMap],
+    );
+
+    const totalBooks = visibleFollowedStories.length;
+    const readingCount = visibleReadingHistory.length;
+    const followedAuthorsCount = visibleFollowedAuthors.length;
 
     const filteredBooks = useMemo(() => {
-        let items = followedStories.map((s) => ({
+        let items = visibleFollowedStories.map((s) => ({
             id: s.id,
             title: s.title,
             author: s.authorName ?? '',
@@ -112,7 +183,7 @@ export default function Library() {
         });
 
         return items;
-    }, [followedStories, statusFilter, sortBy, search]);
+    }, [visibleFollowedStories, statusFilter, sortBy, search]);
 
     if (!user?.id) {
         return (
@@ -199,7 +270,7 @@ export default function Library() {
                                     <span className="font-semibold">{readingCount}</span> đang đọc
                                 </div>
                                 <div className="px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200">
-                                    <span className="font-semibold">{followedStories.filter((b) => (b.status || '').toLowerCase() === 'completed').length}</span> đã hoàn thành
+                                    <span className="font-semibold">{visibleFollowedStories.filter((b) => (b.status || '').toLowerCase() === 'completed').length}</span> đã hoàn thành
                                 </div>
                                 <div className="px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-200">
                                     <span className="font-semibold">{followedAuthorsCount}</span> tác giả đã theo dõi
@@ -256,7 +327,7 @@ export default function Library() {
                             <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
                                 Các truyện bạn đang đọc dở, nhấn vào để đọc tiếp chương mới nhất.
                             </p>
-                            {readingHistory.length === 0 ? (
+                            {visibleReadingHistory.length === 0 ? (
                                 <div className="text-center py-12 text-slate-500 dark:text-slate-400">
                                     <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
                                     <p>Bạn chưa đọc truyện nào. Khám phá truyện hay và bắt đầu đọc nhé.</p>
@@ -270,7 +341,7 @@ export default function Library() {
                                 </div>
                             ) : (
                                 <div className="space-y-4">
-                                    {readingHistory.map((item) => (
+                                    {visibleReadingHistory.map((item) => (
                                         <Link
                                             key={`${item.storyId}-${item.lastReadChapterId}`}
                                             to={`/chapter?storyId=${encodeURIComponent(item.storyId)}&chapterId=${encodeURIComponent(item.lastReadChapterId)}`}
@@ -522,7 +593,7 @@ export default function Library() {
                                 </div>
                             </div>
 
-                            {followedAuthors.length === 0 ? (
+                            {visibleFollowedAuthors.length === 0 ? (
                                 <div className="text-center py-12 text-slate-500 dark:text-slate-400">
                                     <Star className="w-12 h-12 mx-auto mb-3 opacity-50" />
                                     <p>Bạn chưa theo dõi tác giả nào. Hãy vào trang truyện hoặc trang tác giả để nhấn Theo dõi.</p>
@@ -536,7 +607,7 @@ export default function Library() {
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {followedAuthors.map((author) => (
+                                    {visibleFollowedAuthors.map((author) => (
                                         <div
                                             key={author.authorId}
                                             className="flex gap-4 rounded-xl border border-slate-200 dark:border-slate-700 p-4 hover:border-primary hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-all"

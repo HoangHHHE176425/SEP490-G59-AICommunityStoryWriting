@@ -11,10 +11,12 @@ import ViolationManagement from './violation/ViolationManagement';
 import { AdminTransactions } from './transactions/AdminTransactions';
 import { AdminWalletDashboard } from './wallet/AdminWalletDashboard';
 import { ReviewEscalationsManagement } from './moderation/ReviewEscalationsManagement';
+import { ModeratorLogsManagement } from './moderation/ModeratorLogsManagement';
 
 export function AdminPage() {
     const { role } = useAuth();
     const roleUpper = (role ?? '').toString().toUpperCase();
+    const hidePagesForAdmin = useMemo(() => new Set(['publication', 'stories', 'comments']), []);
     const allowedPages = useMemo(() => {
         if (roleUpper === 'MODERATOR') return new Set(['dashboard', 'publication']);
         if (roleUpper === 'COMPLIANCE') return new Set(['violations']);
@@ -40,6 +42,14 @@ export function AdminPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [roleUpper]);
 
+    // ADMIN: ẩn tab => chặn truy cập nội bộ nếu state còn giữ.
+    useEffect(() => {
+        if (roleUpper !== 'ADMIN') return;
+        if (hidePagesForAdmin.has(activePage)) {
+            setActivePage('dashboard');
+        }
+    }, [roleUpper, activePage, hidePagesForAdmin]);
+
     const renderPage = () => {
         switch (activePage) {
             case 'dashboard':
@@ -57,6 +67,8 @@ export function AdminPage() {
                 return <PublicationManagement initialFilterStatus={publicationInitialStatus} />;
             case 'review-escalations':
                 return <ReviewEscalationsManagement />;
+            case 'moderator-logs':
+                return <ModeratorLogsManagement />;
             case 'stories':
                 return (
                     <div className="text-center py-12">
@@ -97,6 +109,10 @@ export function AdminPage() {
     };
 
     const handleNavigate = (pageId) => {
+        if (roleUpper === 'ADMIN' && hidePagesForAdmin.has(pageId)) {
+            setActivePage('dashboard');
+            return;
+        }
         if (allowedPages && !allowedPages.has(pageId)) {
             setActivePage(getDefaultPageByRole());
             return;

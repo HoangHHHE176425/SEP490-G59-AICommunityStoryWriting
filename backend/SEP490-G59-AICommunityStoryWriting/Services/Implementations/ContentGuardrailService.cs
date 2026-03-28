@@ -3,6 +3,7 @@ using Repositories;
 using Services.DTOs.AI;
 using Services.Interfaces;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using System.Text;
 
 namespace Services.Implementations;
@@ -35,7 +36,8 @@ public class ContentGuardrailService : IContentGuardrailService
         if (draft.Length == 0)
             return Task.FromResult(new GuardrailResult { Passed = true, Violations = violations });
 
-        // Bỏ dấu + chữ thường để khớp keyword Anh/Việt ổn định.
+        // Chuẩn hóa unicode + chữ thường; GIỮ DẤU tiếng Việt để tránh false-positive
+        // (vd: "cặc" không được match "các", "cách").
         var draftNorm = NormalizeForMatch(draft);
 
         foreach (var word in bannedWords)
@@ -44,7 +46,7 @@ public class ContentGuardrailService : IContentGuardrailService
             var w = word.Trim();
             var wNorm = NormalizeForMatch(w);
             if (wNorm.Length == 0) continue;
-            if (draftNorm.Contains(wNorm, StringComparison.Ordinal))
+            if (ContainsWholeWord(draftNorm, wNorm))
                 violations.Add(new GuardrailViolation
                 {
                     Type = "BannedWord",
@@ -105,18 +107,17 @@ public class ContentGuardrailService : IContentGuardrailService
     private static string NormalizeForMatch(string input)
     {
         if (string.IsNullOrEmpty(input)) return string.Empty;
+        return input.Normalize(NormalizationForm.FormC).ToLowerInvariant();
+    }
 
-        // Remove diacritics by decomposing to FormD and stripping non-spacing marks.
-        var formD = input.Normalize(NormalizationForm.FormD);
-        var sb = new StringBuilder(formD.Length);
-        foreach (var ch in formD)
-        {
-            var uc = CharUnicodeInfo.GetUnicodeCategory(ch);
-            if (uc == UnicodeCategory.NonSpacingMark) continue;
-            sb.Append(ch);
-        }
-
-        // Normalize back to FormC rồi chữ thường để so khớp không phân hoa/thường.
-        return sb.ToString().Normalize(NormalizationForm.FormC).ToLowerInvariant();
+    private static bool ContainsWholeWord(string textNormalized, string bannedWordNormalized)
+    {
+        if (string.IsNullOrWhiteSpace(textNormalized) || string.IsNullOrWhiteSpace(bannedWordNormalized))
+            return false;
+        var escaped = Regex.Escape(bannedWordNormalized);
+        // Chỉ match theo biên từ để tránh dính chuỗi con.
+        // \p{L}\p{N}: chữ/số Unicode, hỗ trợ tiếng Việt có dấu.
+        var pattern = $@"(?<![\p{{L}}\p{{N}}_]){escaped}(?![\p{{L}}\p{{N}}_])";
+        return Regex.IsMatch(textNormalized, pattern, RegexOptions.CultureInvariant);
     }
 }
