@@ -104,7 +104,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
 
-            // AI: Story Memory Engine (RAG khi đã index) + 4 Agent
+            // AI: Story Memory Engine (RAG khi đã index) + các agent gợi ý/đồng sáng tác
             builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
             builder.Services.AddScoped<IContentGuardrailService, ContentGuardrailService>();
             builder.Services.AddScoped<IAIUsageLogRepository, AIUsageLogRepository>();
@@ -114,10 +114,9 @@ namespace AIStory.API
             builder.Services.AddSingleton<IVectorStore, FaissVectorStore>();
             builder.Services.AddScoped<IStoryRagService, StoryRagService>();
             builder.Services.AddScoped<IStoryMemoryEngine, StoryMemoryEngine>();
-            builder.Services.AddScoped<IPlotManagerService, PlotManagerService>();
+            builder.Services.AddScoped<IChapterMemoryAnalysisService, ChapterMemoryAnalysisService>();
             builder.Services.AddScoped<IAINextChapterService, AINextChapterService>();
             builder.Services.AddScoped<IAICoCreationService, AICoCreationService>();
-            builder.Services.AddScoped<IAIConsistencyCheckService, AIConsistencyCheckService>();
             builder.Services.AddScoped<IChapterCheckService, ChapterCheckService>();
             builder.Services.AddScoped<IAiGeneratedContentRepository, AiGeneratedContentRepository>();
             builder.Services.AddScoped<IAiSensitiveWordsRepository, AiSensitiveWordsRepository>();
