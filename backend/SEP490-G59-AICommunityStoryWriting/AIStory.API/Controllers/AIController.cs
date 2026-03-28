@@ -46,7 +46,7 @@ namespace AIStory.API.Controllers
         public DateTime? ResetsAtUtc { get; set; }
     }
 
-    /// <summary>API AI: gợi ý chương tiếp theo, đồng sáng tác (3 agent), kiểm tra nhất quán.</summary>
+    /// <summary>API AI: gợi ý chương tiếp theo, đồng sáng tác (dàn ý + viết + guardrail).</summary>
     [ApiController]
     [Route("api/ai")]
     [Authorize(Roles = "AUTHOR,ADMIN")]
@@ -54,7 +54,6 @@ namespace AIStory.API.Controllers
     {
         private readonly IAINextChapterService _aiNextChapterService;
         private readonly IAICoCreationService _aiCoCreationService;
-        private readonly IAIConsistencyCheckService _aiConsistencyCheckService;
         private readonly IChapterCheckService _chapterCheckService;
         private readonly IChapterCompareService _chapterCompareService;
         private readonly IChapterVersionAiCompareService _chapterVersionAiCompareService;
@@ -67,7 +66,6 @@ namespace AIStory.API.Controllers
         public AIController(
             IAINextChapterService aiNextChapterService,
             IAICoCreationService aiCoCreationService,
-            IAIConsistencyCheckService aiConsistencyCheckService,
             IChapterCheckService chapterCheckService,
             IChapterCompareService chapterCompareService,
             IChapterVersionAiCompareService chapterVersionAiCompareService,
@@ -79,7 +77,6 @@ namespace AIStory.API.Controllers
         {
             _aiNextChapterService = aiNextChapterService;
             _aiCoCreationService = aiCoCreationService;
-            _aiConsistencyCheckService = aiConsistencyCheckService;
             _chapterCheckService = chapterCheckService;
             _chapterCompareService = chapterCompareService;
             _chapterVersionAiCompareService = chapterVersionAiCompareService;
@@ -175,7 +172,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Đồng sáng tác (SSE): ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → Agent 3 (kiểm duyệt). Trả về stream event: progress từng bước, cuối cùng event result chứa CoCreationResponse. Client đọc response body theo chuẩn SSE (event: progress / result / error).</summary>
+        /// <summary>Đồng sáng tác (SSE): ý tưởng tác giả → Agent 1 (dàn ý) → Agent 2 (nội dung) → guardrail từ cấm. Trả về stream event: progress từng bước, cuối cùng event result chứa CoCreationResponse. Client đọc response body theo chuẩn SSE (event: progress / result / error).</summary>
         [Produces("text/event-stream")]
         [HttpPost("co-create")]
         public async Task CoCreate([FromBody] CoCreationRequest request, CancellationToken cancellationToken)
@@ -276,47 +273,6 @@ namespace AIStory.API.Controllers
                 _logger.LogError(ex, "AI co-create failed for StoryId={StoryId}", request.StoryId);
                 var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi gọi dịch vụ AI. Vui lòng thử lại sau.";
                 try { await WriteSseEventAsync("error", new { message }, cancellationToken); } catch { }
-            }
-        }
-
-        /// <summary>Kiểm tra nhất quán: so sánh bản nháp chương với cốt truyện (các chương trước). Phát hiện mâu thuẫn như nhân vật đã chết lại xuất hiện, sự kiện sai logic.</summary>
-        [HttpPost("check-consistency")]
-        public async Task<IActionResult> CheckConsistency([FromBody] ConsistencyCheckRequest request, CancellationToken cancellationToken)
-        {
-            if (request.StoryId == Guid.Empty)
-                return BadRequest(new { message = "StoryId là bắt buộc." });
-            if (string.IsNullOrWhiteSpace(request.DraftContent))
-                return BadRequest(new { message = "DraftContent (nội dung bản nháp chương) là bắt buộc." });
-
-            var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
-            if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var authorUserId))
-                return Unauthorized(new { message = "Không xác định được người dùng. Vui lòng đăng nhập lại." });
-
-            try
-            {
-                var response = await _aiConsistencyCheckService.CheckConsistencyAsync(request, authorUserId, cancellationToken);
-                return Ok(response);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                return StatusCode(403, new { message = ex.Message });
-            }
-            catch (InvalidOperationException ex)
-            {
-                if (ex.Message.Contains("không tồn tại"))
-                    return NotFound(new { message = ex.Message });
-                return BadRequest(new { message = ex.Message });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "AI check-consistency failed for StoryId={StoryId}", request.StoryId);
-                var message = "Lỗi khi gọi dịch vụ AI. Vui lòng thử lại sau.";
-                if (_env.IsDevelopment())
-                {
-                    var detail = ex.InnerException?.Message ?? ex.Message;
-                    return StatusCode(500, new { message, detail });
-                }
-                return StatusCode(500, new { message });
             }
         }
 

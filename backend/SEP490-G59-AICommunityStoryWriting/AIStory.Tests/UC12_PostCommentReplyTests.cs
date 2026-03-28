@@ -2,13 +2,14 @@ using System.Security.Claims;
 using AIStory.API.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Services.DTOs.AI;
 using Services.DTOs.Comments;
 using Services.DTOs.Chapters;
 using Services.DTOs.Community;
+using Services.DTOs.Notifications;
 using Services.DTOs.Stories;
+using Services.DTOs.StoryReports;
 using Services.Interfaces;
 using Xunit;
 
@@ -39,7 +40,6 @@ public class UC12_PostCommentReplyTests
         var ctrl = new ChaptersController(
             chapterService: new FakeChapterService(chapter),
             chapterVersionService: new FakeChapterVersionService(),
-            scopeFactory: new FakeServiceScopeFactory(),
             storyService: new FakeStoryService(),
             contentGuardrail: new FakeContentGuardrailService(),
             notificationHubNotifier: new NoOpNotificationHubNotifier(),
@@ -238,20 +238,35 @@ public class UC12_PostCommentReplyTests
         public bool CancelSubmit(Guid versionId, Guid authorId) => false;
     }
 
-    private sealed class FakeServiceScopeFactory : IServiceScopeFactory
+    private sealed class NoOpNotificationHubNotifier : INotificationHubNotifier
     {
-        public IServiceScope CreateScope() => new FakeServiceScope();
+        public Task NotifyUserAsync(Guid userId, NotificationDto notification) => Task.CompletedTask;
+    }
 
-        private sealed class FakeServiceScope : IServiceScope
-        {
-            public IServiceProvider ServiceProvider { get; } = new FakeServiceProvider();
-            public void Dispose() { }
-        }
-
-        private sealed class FakeServiceProvider : IServiceProvider
-        {
-            public object? GetService(Type serviceType) => null;
-        }
+    private sealed class StubStoryReportService : IStoryReportService
+    {
+        public IReadOnlyList<StoryReportReasonOptionDto> GetReasonOptions() => throw new NotImplementedException();
+        public Task<Guid> CreateStoryReportAsync(Guid storyId, Guid reporterId, CreateStoryReportRequestDto request) => throw new NotImplementedException();
+        public Task<PagedComplianceStoryReportsDto> QueryComplianceAsync(ComplianceStoryReportQueryDto query, Guid? actingUserId, bool viewerIsAdmin) => throw new NotImplementedException();
+        public Task<bool> UpdateReportStatusAsync(Guid reportId, Guid actorId, string newStatus, bool actorIsAdmin) => throw new NotImplementedException();
+        public Task<bool> ComplianceResolveReportAsync(Guid reportId, Guid complianceUserId, ComplianceResolveReportRequestDto? dto) => throw new NotImplementedException();
+        public Task<int> ComplianceResolveOpenReportsForStoryAsync(Guid storyId, Guid complianceUserId, ComplianceResolveReportRequestDto? dto) => throw new NotImplementedException();
+        public Task<PagedComplianceStoryReportsDto> QueryMyResolvedComplianceReportsAsync(int page, int pageSize, Guid complianceUserId, string? search) => throw new NotImplementedException();
+        public Task<ComplianceClaimStoryResultDto> ClaimStoryAsync(Guid storyId, Guid complianceUserId) => throw new NotImplementedException();
+        public Task<int> ReleaseComplianceStoryClaimAsync(Guid storyId, Guid adminUserId, bool actorIsAdmin) => throw new NotImplementedException();
+        public Task<Guid> RequestComplianceLockReleaseAsync(Guid storyId, Guid requesterId, RequestComplianceLockReleaseDto? dto) => throw new NotImplementedException();
+        public Task<IReadOnlyList<ComplianceLockRequestListItemDto>> AdminListComplianceLockRequestsAsync(string? status) => throw new NotImplementedException();
+        public Task<IReadOnlyList<ComplianceLockRequestListItemDto>> ListMyComplianceLockRequestsAsync(Guid requesterId) => throw new NotImplementedException();
+        public Task<IReadOnlyList<ComplianceOfficerAssignmentOptionDto>> AdminListComplianceOfficersForAssignmentAsync() => throw new NotImplementedException();
+        public Task AdminResolveComplianceLockRequestAsync(Guid requestId, Guid adminId, AdminResolveComplianceLockRequestDto dto) => throw new NotImplementedException();
+        public Task SetStoryComplianceFlagAsync(Guid storyId, Guid actorId, bool flagged, string? note, bool actorIsAdmin) => throw new NotImplementedException();
+        public Task SetStoryCommentsDisabledAsync(Guid storyId, Guid actorId, bool disabled, bool actorIsAdmin) => throw new NotImplementedException();
+        public Task SetStoryComplianceHiddenAsync(Guid storyId, Guid actorId, bool hidden, bool actorIsAdmin) => throw new NotImplementedException();
+        public Task<Guid> RequestComplianceAdminActionAsync(Guid storyId, Guid requesterId, CreateComplianceAdminActionRequestDto dto, bool actorIsAdmin) => throw new NotImplementedException();
+        public Task<IReadOnlyList<ViolationLogListItemDto>> ListViolationsForUserAsync(Guid violatorUserId, int take, bool viewerIsComplianceOrAdmin) => throw new NotImplementedException();
+        public Task<IReadOnlyList<ComplianceAdminActionRequestListItemDto>> AdminListComplianceAdminActionRequestsAsync(string? status) => throw new NotImplementedException();
+        public Task<IReadOnlyList<ComplianceAdminActionRequestListItemDto>> ListMyComplianceAdminActionRequestsAsync(Guid requesterId) => throw new NotImplementedException();
+        public Task AdminResolveComplianceAdminActionRequestAsync(Guid requestId, Guid adminId, AdminResolveComplianceAdminActionRequestDto dto) => throw new NotImplementedException();
     }
 }
 

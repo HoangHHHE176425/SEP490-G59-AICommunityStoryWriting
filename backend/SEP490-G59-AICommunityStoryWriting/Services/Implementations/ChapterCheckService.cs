@@ -59,11 +59,101 @@ public class ChapterCheckService : IChapterCheckService
         foreach (var v in guardrailResult.Violations)
             policyViolations.Add(new PolicyViolationItem { Type = v.Type, Description = v.Message, Quote = v.Quote });
 
-        // 2) Kiểm tra chính tả bằng AI + cache theo nội dung để ổn định giữa các lần check
+        var (spellingIssues, summary, spellRawError) = await RunSpellingCheckInternalAsync(request.ChapterTitle, content, cancellationToken);
+
+        var (_, model, _, _) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentConsistencyChecker);
+        if (userId.HasValue)
+        {
+            _aiUsageLogRepository.Log(new ai_usage_logs
+            {
+                user_id = userId.Value,
+                story_id = request.StoryId,
+                chapter_id = null,
+                action_type = ActionChapterCheck,
+                model_name = model,
+                prompt_tokens = 0,
+                completion_tokens = 0,
+                total_tokens = 0,
+                status = "SUCCESS",
+                created_at = DateTime.UtcNow
+            });
+        }
+
+        if (spellRawError != null)
+            return new CheckChapterResponse
+            {
+                Passed = policyViolations.Count == 0,
+                PolicyViolations = policyViolations,
+                Summary = spellRawError
+            };
+
+        var passed = spellingIssues.Count == 0 && policyViolations.Count == 0;
+        return new CheckChapterResponse
+        {
+            Passed = passed,
+            SpellingIssues = spellingIssues,
+            PolicyViolations = policyViolations,
+            HasInappropriateContent = false,
+            Summary = summary
+        };
+    }
+
+    public async Task<CheckChapterResponse> CheckSpellingOnlyAsync(CheckChapterRequest request, Guid? userId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Content))
+            return new CheckChapterResponse { Passed = true, Summary = "Nội dung trống, không cần kiểm tra." };
+
+        var content = request.Content.Trim();
+        if (content.Length > 50000)
+            content = content[..50000] + "\n[... nội dung bị cắt bớt ...]";
+
+        var (spellingIssues, summary, spellRawError) = await RunSpellingCheckInternalAsync(request.ChapterTitle, content, cancellationToken);
+
+        if (userId.HasValue)
+        {
+            var (_, model, _, _) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentConsistencyChecker);
+            _aiUsageLogRepository.Log(new ai_usage_logs
+            {
+                user_id = userId.Value,
+                story_id = request.StoryId,
+                chapter_id = null,
+                action_type = ActionChapterCheck,
+                model_name = model,
+                prompt_tokens = 0,
+                completion_tokens = 0,
+                total_tokens = 0,
+                status = "SUCCESS_SPELL_ONLY",
+                created_at = DateTime.UtcNow
+            });
+        }
+
+        if (spellRawError != null)
+            return new CheckChapterResponse
+            {
+                Passed = true,
+                SpellingIssues = new List<SpellingIssue>(),
+                Summary = spellRawError
+            };
+
+        return new CheckChapterResponse
+        {
+            Passed = spellingIssues.Count == 0,
+            SpellingIssues = spellingIssues,
+            PolicyViolations = new List<PolicyViolationItem>(),
+            Summary = summary
+        };
+    }
+
+    /// <summary>Gọi AI chính tả + cache. Trả rawError nếu không đọc được phản hồi.</summary>
+    private async Task<(List<SpellingIssue> Issues, string? Summary, string? RawError)> RunSpellingCheckInternalAsync(
+        string? chapterTitle,
+        string content,
+        CancellationToken cancellationToken)
+    {
         var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentConsistencyChecker);
         var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
 
-        var titlePart = string.IsNullOrWhiteSpace(request.ChapterTitle) ? "" : $"Tiêu đề chương: {request.ChapterTitle}\n\n";
+        var titlePart = string.IsNullOrWhiteSpace(chapterTitle) ? "" : $"Tiêu đề chương: {chapterTitle}\n\n";
         var userPrompt = $@"{titlePart}Nội dung chương cần kiểm tra chính tả:
 
 ---
@@ -83,7 +173,7 @@ Trả về DUY NHẤT một JSON hợp lệ, không markdown hay giải thích:
 
 Nếu không có lỗi chính tả (hoặc không chắc chắn): spellingErrors = [], summary = ""Không phát hiện lỗi chính tả.""";
 
-        var cacheKey = BuildSpellCacheKey(request.ChapterTitle, content);
+        var cacheKey = BuildSpellCacheKey(chapterTitle, content);
         if (!_cache.TryGetValue(cacheKey, out string? text))
         {
             var messages = new List<ChatMessage>
@@ -93,7 +183,6 @@ Nếu không có lỗi chính tả (hoặc không chắc chắn): spellingErrors
             };
 
             var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentConsistencyChecker);
-            // Force deterministic behavior as much as provider allows.
             options ??= new ChatCompletionOptions();
             options.Temperature = 0;
             options.TopP = 1;
@@ -103,41 +192,11 @@ Nếu không có lỗi chính tả (hoặc không chắc chắn): spellingErrors
             _cache.Set(cacheKey, text, SpellCacheTtl);
         }
 
-        if (userId.HasValue)
-        {
-            _aiUsageLogRepository.Log(new ai_usage_logs
-            {
-                user_id = userId.Value,
-                story_id = request.StoryId,
-                chapter_id = null,
-                action_type = ActionChapterCheck,
-                model_name = model,
-                prompt_tokens = 0,
-                completion_tokens = 0,
-                total_tokens = 0,
-                status = "SUCCESS",
-                created_at = DateTime.UtcNow
-            });
-        }
-
         if (string.IsNullOrWhiteSpace(text))
-            return new CheckChapterResponse
-            {
-                Passed = policyViolations.Count == 0,
-                PolicyViolations = policyViolations,
-                Summary = "Không đọc được kết quả kiểm tra chính tả từ AI."
-            };
+            return (new List<SpellingIssue>(), null, "Không đọc được kết quả kiểm tra chính tả từ AI.");
 
         var (spellingIssues, summary) = ParseSpellingResponse(text);
-        var passed = spellingIssues.Count == 0 && policyViolations.Count == 0;
-        return new CheckChapterResponse
-        {
-            Passed = passed,
-            SpellingIssues = spellingIssues,
-            PolicyViolations = policyViolations,
-            HasInappropriateContent = false,
-            Summary = summary
-        };
+        return (spellingIssues, summary, null);
     }
 
     private static string GetSystemPrompt()

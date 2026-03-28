@@ -916,6 +916,17 @@ namespace Services.Implementations
                     _ = PushStoryFollowNotificationsAsync(authorNotifications);
                 }
                 TriggerRagIndexInBackground(chapter.story_id.Value, chapterId);
+                if (!string.IsNullOrWhiteSpace(chapter.content))
+                {
+                    ChapterMemoryAnalysisScheduler.TrySchedule(
+                        _scopeFactory,
+                        _logger,
+                        chapter.story_id.Value,
+                        chapterId,
+                        chapter.title,
+                        chapter.order_index,
+                        chapter.content);
+                }
             }
             else
             {
