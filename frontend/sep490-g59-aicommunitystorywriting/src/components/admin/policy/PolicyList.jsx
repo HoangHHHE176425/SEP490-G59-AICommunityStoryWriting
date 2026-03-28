@@ -1,4 +1,4 @@
-import { FileText, CheckCircle, XCircle, Eye, Pencil, ToggleLeft, ToggleRight } from 'lucide-react';
+import { FileText, CheckCircle, XCircle, Eye, Pencil, ToggleLeft, ToggleRight, Trash2 } from 'lucide-react';
 
 const TYPE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', AI: 'AI', DEFAULT: 'Mặc định' };
 
@@ -7,7 +7,7 @@ function formatDate(value) {
     return new Date(value).toLocaleString('vi-VN');
 }
 
-export function PolicyList({ policies, loading, onView, onEdit, onToggleActive }) {
+export function PolicyList({ policies, loading, onView, onEdit, onToggleActive, onDelete }) {
     if (loading) {
         return (
             <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
@@ -91,6 +91,14 @@ export function PolicyList({ policies, loading, onView, onEdit, onToggleActive }
                                             title={policy.isActive ? 'Tắt' : 'Bật'}
                                         >
                                             {policy.isActive ? <ToggleRight className="w-5 h-5 text-emerald-600" /> : <ToggleLeft className="w-5 h-5 text-slate-400" />}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => onDelete?.(policy)}
+                                            className="p-2 rounded-lg text-slate-600 hover:bg-red-50 hover:text-red-700 transition-colors"
+                                            title="Xóa policy"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
                                         </button>
                                     </div>
                                 </td>

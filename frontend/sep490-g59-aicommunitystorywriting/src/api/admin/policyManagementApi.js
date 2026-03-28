@@ -97,3 +97,11 @@ export async function setPolicyActive(id, isActive) {
     }
     return true;
 }
+
+/**
+ * Xóa policy (DELETE). BE trả 204; 400 nếu vi phạm ràng buộc (vd. policy đang active).
+ */
+export async function deletePolicy(id) {
+    await axiosInstance.delete(`/admin/policies/${id}`);
+    return true;
+}

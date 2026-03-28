@@ -502,14 +502,14 @@ namespace Services.Integrations.PayOS
             var clientId = Require("PayOS:PayoutClientId").Trim();
             var apiKey = Require("PayOS:PayoutApiKey").Trim();
 
-            // PayOS docs: chỉ có GET /v1/payouts-account/balance (không có bản v2). Gọi /v2/... sẽ 404.
+            // PayOS docs: chỉ có GET /v1/payouts-account/balance.
             // https://payos.vn/docs/api#tag/payout-account/operation/get-account-balance
             var candidateUrls = new List<string>
             {
                 $"{rootUrl}/v1/payouts-account/balance",
             };
 
-            // Debug: xác nhận public IP thực tế mà backend đang dùng (có thể khác IP bạn test bằng terminal nếu có VPN/proxy/NAT đổi IP).
+            // Debug: xác nhận public IP thực tế mà backend đang dùng
             string? publicIp = null;
             try
             {
