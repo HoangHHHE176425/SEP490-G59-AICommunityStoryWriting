@@ -428,7 +428,7 @@ export function ChapterListManager({
                 updateChapter(chapterId, { title, content, status: 'PENDING_REVIEW' })
                     .then(() => loadChapters(currentPage))
                     .then(() => {
-                        if (!storyId) return;
+                        if (!storyId) return { storyAlreadyHadPublishedChapter: false };
                         return Promise.all([
                             getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
                             getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 })
@@ -439,16 +439,20 @@ export function ChapterListManager({
                             setHasPendingReviewChapter(pendList.length > 0);
                             setPublishedOrderIndices(new Set(pubList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
                             setPendingOrderIndices(new Set(pendList.map((c) => c.orderIndex ?? c.OrderIndex ?? 0)));
+                            /** Truyện đã PUBLISHED ở DB (vd. đã duyệt chương trước) — không gửi Status PENDING_REVIEW lên PUT /stories (StoryService chặn). */
+                            const storyAlreadyHadPublishedChapter = pubList.length > 0;
+                            return { storyAlreadyHadPublishedChapter };
                         });
                     })
-                    .then(() => {
+                    .then((syncResult) => {
                         if (!storyId || !story) return;
                         const categoryIds = (story.categories || []).map((c) => (typeof c === 'object' && c != null ? c.id : c)).filter((id) => id && /^[0-9a-fA-F-]{36}$/.test(String(id)));
+                        const preserveStoryStatus = syncResult?.storyAlreadyHadPublishedChapter === true;
                         return updateStory(storyId, {
                             title: story.title || 'Untitled',
                             summary: story.summary ?? '',
                             categoryIds,
-                            status: 'PENDING_REVIEW',
+                            ...(preserveStoryStatus ? { preserveStoryStatus: true } : { status: 'PENDING_REVIEW' }),
                             ageRating: story.ageRating ?? 'Phù hợp mọi lứa tuổi',
                             storyProgressStatus: story.progressStatusDisplay ?? story.storyProgressStatus ?? 'Đang ra'
                         });
