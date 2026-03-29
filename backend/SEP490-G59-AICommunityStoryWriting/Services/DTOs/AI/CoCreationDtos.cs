@@ -17,6 +17,12 @@ public class CoCreationRequest
     /// Null = giữ hành vi cũ: gán slot chương tiếp theo (max order_index + 1).
     /// </summary>
     public int? ChapterOrderIndex { get; set; }
+
+    /// <summary>
+    /// ID chương đang soạn do FE cấp trước (draft). Nếu chương đã tồn tại, hệ thống gắn vào <c>chapter_id</c>;
+    /// nếu chưa tồn tại, sẽ lưu vào <c>draft_chapter_id</c> để bind khi tạo chương.
+    /// </summary>
+    public Guid? ChapterId { get; set; }
 }
 
 /// <summary>Response đồng sáng tác: dàn ý + nội dung cuối + trạng thái kiểm duyệt. Có thể kèm feedback khi ý tưởng tác giả mâu thuẫn với truyện.</summary>
@@ -31,16 +37,16 @@ public class CoCreationResponse
     /// <summary>Nội dung cuối (đã qua kiểm duyệt hoặc bản cuối sau khi hết số lần sửa). Rỗng nếu IdeaContradictionFeedback có giá trị.</summary>
     public string FinalContent { get; set; } = null!;
 
-    /// <summary>Nội dung đã được Agent 3 duyệt đạt hay chưa.</summary>
+    /// <summary>True nếu bản nháp qua từ cấm và chính tả (khi bật tự sửa), hoặc chỉ từ cấm khi tắt tự sửa.</summary>
     public bool Approved { get; set; }
 
-    /// <summary>Số lần Agent 2 viết lại theo feedback (0 = không sửa).</summary>
+    /// <summary>Số lần Agent 2 viết lại do từ cấm hoặc chính tả (tự sửa). 0 nếu tắt CoCreateEnableSelfCorrection hoặc không cần sửa.</summary>
     public int RevisionCount { get; set; }
 
-    /// <summary>Feedback từ Agent 3 ở mỗi lần chưa đạt (khiến hệ thống chạy vòng sửa). revisionCount=1 → 1 phần tử (feedback lần 1); revisionCount=2 → 2 phần tử. Null hoặc rỗng khi revisionCount=0.</summary>
+    /// <summary>Không dùng; giữ field để tương thích client cũ.</summary>
     public List<string>? RevisionFeedbacks { get; set; }
 
-    /// <summary>Feedback cuối từ Agent 3 nếu vẫn chưa đạt sau tất cả vòng sửa (để tác giả tham khảo). Khi Approved=true thì thường null.</summary>
+    /// <summary>Khi Approved=false: lý do (từ cấm và/hoặc chính tả còn sót sau các lần sửa tự động).</summary>
     public string? ReviewFeedback { get; set; }
 
     /// <summary>ID chương nếu đã tồn tại <c>chapters</c> trùng <c>story_id</c> + <c>order_index</c> với slot co-create; nếu không có chương tại slot đó thì null.</summary>
@@ -52,20 +58,20 @@ public class CoCreationResponse
     /// <summary>Thứ tự chương dự kiến (khớp <c>chapter_index</c> và sẽ khớp <c>chapters.order_index</c> khi tạo chương).</summary>
     public int? ChapterIndex { get; set; }
 
-    /// <summary>Thời gian chạy từng bước (ms): Outline, Write, Guardrail, Review; khi song song là thời gian wall-clock của mỗi phase. Null nếu không đo.</summary>
+    /// <summary>Thời gian chạy từng bước (ms): Outline, Write, Guardrail, Length_Expand, … Null nếu không đo.</summary>
     public List<AgentDuration>? AgentDurations { get; set; }
 }
 
 /// <summary>Một bước trong pipeline co-create và thời gian chạy (ms).</summary>
 public class AgentDuration
 {
-    /// <summary>Tên bước: Outline, Write, Guardrail, Review; hoặc Write_2, Review_2 khi chạy song song; Revision_Write khi trong vòng sửa.</summary>
+    /// <summary>Tên bước: Outline, Write, Guardrail, Length_Expand, Length_Expand_Guardrail, …</summary>
     public string Step { get; set; } = null!;
     /// <summary>Thời gian chạy (millisecond).</summary>
     public long DurationMs { get; set; }
 }
 
-/// <summary>Event tiến độ gửi qua SSE khi chạy co-create stream: mỗi bước xong (Outline, Write, Guardrail, Review) gửi một event.</summary>
+/// <summary>Event tiến độ gửi qua SSE khi chạy co-create stream: mỗi bước xong (Outline, Write, Guardrail, …) gửi một event.</summary>
 public class CoCreateProgressEvent
 {
     public string Step { get; set; } = null!;

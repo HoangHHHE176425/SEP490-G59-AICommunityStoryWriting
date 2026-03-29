@@ -291,7 +291,12 @@ export function Header() {
                                                 ) : notifications.length === 0 ? (
                                                     <div className="px-4 py-6 text-center text-slate-400 text-sm">Chưa có thông báo</div>
                                                 ) : (
-                                                    notifications.map((n) => (
+                                                    notifications.map((n) => {
+                                                        const typeUpper = (n.type ?? n.Type ?? '').toString().toUpperCase();
+                                                        const isReportToVictim =
+                                                            typeUpper === 'STORY_REPORTED_TO_AUTHOR' ||
+                                                            typeUpper === 'COMMENT_REPORTED_TO_OWNER';
+                                                        return (
                                                         <Link
                                                             key={n.id}
                                                             to={normalizeNotificationTo(n.linkUrl)}
@@ -310,9 +315,14 @@ export function Header() {
                                                             }}
                                                         >
                                                             <p className={`text-sm font-medium ${n.isRead ? 'text-slate-400' : 'text-white'}`}>{n.title}</p>
-                                                            <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">{n.content}</p>
+                                                            <p
+                                                                className={`text-xs text-slate-500 mt-0.5 ${isReportToVictim ? 'line-clamp-4' : 'line-clamp-2'}`}
+                                                            >
+                                                                {n.content}
+                                                            </p>
                                                         </Link>
-                                                    ))
+                                                        );
+                                                    })
                                                 )}
                                             </div>
                                         </div>

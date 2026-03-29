@@ -11,7 +11,8 @@ import axiosInstance from "../axiosInstance";
  *   accessType?: string (FREE, PAID),
  *   coinPrice?: number,
  *   aiContributionRatio?: number,
- *   isAiClean?: boolean
+ *   isAiClean?: boolean,
+ *   id?: string — Guid do FE sinh; nếu không truyền sẽ tự tạo (bắt buộc với API hiện tại)
  * }
  * @returns {Promise} - Created chapter từ server
  */
@@ -31,7 +32,18 @@ export async function createChapter(data) {
         throw new Error("OrderIndex phải là số nguyên không âm");
     }
 
+    const resolvedId =
+        data.id != null && String(data.id).trim() !== ''
+            ? String(data.id).trim()
+            : typeof crypto !== 'undefined' && crypto.randomUUID
+                ? crypto.randomUUID()
+                : null;
+    if (!resolvedId) {
+        throw new Error('Không tạo được Id chương (crypto.randomUUID không khả dụng).');
+    }
+
     const body = {
+        id: resolvedId,
         storyId: data.storyId,
         title: title,
         content: data.content ?? "",

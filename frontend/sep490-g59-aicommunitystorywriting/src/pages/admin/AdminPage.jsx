@@ -11,6 +11,7 @@ import ViolationManagement from './violation/ViolationManagement';
 import { AdminTransactions } from './transactions/AdminTransactions';
 import { AdminWalletDashboard } from './wallet/AdminWalletDashboard';
 import { ReviewEscalationsManagement } from './moderation/ReviewEscalationsManagement';
+import { ModeratorLogsManagement } from './moderation/ModeratorLogsManagement';
 
 export function AdminPage() {
     const { role } = useAuth();
@@ -66,6 +67,8 @@ export function AdminPage() {
                 return <PublicationManagement initialFilterStatus={publicationInitialStatus} />;
             case 'review-escalations':
                 return <ReviewEscalationsManagement />;
+            case 'moderator-logs':
+                return <ModeratorLogsManagement />;
             case 'stories':
                 return (
                     <div className="text-center py-12">

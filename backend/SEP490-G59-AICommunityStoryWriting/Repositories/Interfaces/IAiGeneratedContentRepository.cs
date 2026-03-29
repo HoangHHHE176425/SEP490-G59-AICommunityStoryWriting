@@ -11,6 +11,9 @@ public interface IAiGeneratedContentRepository
     /// <summary>Tất cả bản AI của chương (để so sánh với từng bản, lấy điểm cao nhất).</summary>
     IReadOnlyList<ai_generated_content> GetAllByChapterId(Guid chapterId);
 
+    /// <summary>Tất cả bản AI theo draft chapter id (khi chapter thật chưa được tạo).</summary>
+    IReadOnlyList<ai_generated_content> GetAllByDraftChapterId(Guid draftChapterId);
+
     /// <summary>Các bản AI của truyện tại một thứ tự chương (<c>chapter_index</c> = <c>order_index</c>), mới nhất trước.</summary>
     IReadOnlyList<ai_generated_content> GetAllByStoryIdAndChapterIndex(Guid storyId, int chapterIndex, int maxCount = 50);
 
@@ -21,6 +24,9 @@ public interface IAiGeneratedContentRepository
 
     /// <summary>Gán chapter_id (và đồng bộ chapter_index với thứ tự chương) khi tác giả tạo chương từ bản AI.</summary>
     void UpdateChapterId(Guid id, Guid chapterId, int chapterOrderIndex);
+
+    /// <summary>Map tất cả bản ghi theo draft_chapter_id sang chapter_id thật sau khi tạo chapter.</summary>
+    void BindDraftChapterId(Guid draftChapterId, Guid chapterId, int chapterOrderIndex);
 
     /// <summary>Xóa mọi bản ghi AI gắn chapter (khi xóa chương).</summary>
     void DeleteAllByChapterId(Guid chapterId);

@@ -1,4 +1,4 @@
-﻿using Services.DTOs.CommentReports;
+using Services.DTOs.CommentReports;
 using Services.DTOs.StoryReports;
 
 namespace Services.Interfaces;
@@ -38,7 +38,8 @@ public interface ICommentReportService
         string? statusCsv = null,
         string? search = null,
         Guid? actingUserId = null,
-        bool viewerIsAdmin = false);
+        bool viewerIsAdmin = false,
+        string? claimFilter = null);
 
     Task<ComplianceClaimCommentResultDto> ClaimCommentReportsAsync(
         Guid commentId,
