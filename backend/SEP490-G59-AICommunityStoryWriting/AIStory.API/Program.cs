@@ -67,6 +67,7 @@ namespace AIStory.API
                 });
             });
             builder.Services.AddScoped<JwtHelper>();
+            builder.Services.AddScoped<ITokenService, TokenService>();
             // Dependency Injection
             // dj for auth va user
             builder.Services.AddScoped<IUserRepository, UserRepository>();

@@ -17,11 +17,12 @@ function getErrorMessage(err) {
     return raw;
 }
 
-export async function register({ email, password, fullName }) {
+export async function register({ email, password, confirmPassword, fullName }) {
     try {
         const res = await axiosInstance.post("/Auth/register", {
             email,
             password,
+            confirmPassword,
             fullName,
         });
         return { success: true, data: res.data };
