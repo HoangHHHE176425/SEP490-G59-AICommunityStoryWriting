@@ -347,10 +347,10 @@ namespace AIStory.Tests
         public async Task UTCID10_Login_Fails_WhenAccountIsBanned()
         {
             LogUtcContext("UTCID10",
-                "Abnormal path: account bị banned nhưng service hiện tại chưa có branch riêng.",
+                "Abnormal path: account bị banned phải trả đúng message theo spec.",
                 "Precondition: user tồn tại, password đúng, status = BANNED.",
                 "Input: existing@gmail.com / 12345678aa.",
-                "Kỳ vọng hiện tại của product: mọi status khác ACTIVE đều trả thông báo chưa xác thực; không lưu refresh token.");
+                "Kỳ vọng: throw Exception The account has been banned.; không lưu refresh token.");
 
             var email = "existing@gmail.com";
             var user = CreateUser(email, ValidPassword, "BANNED");
@@ -365,7 +365,7 @@ namespace AIStory.Tests
             }));
 
             LogActualMessage(ex.Message);
-            Assert.Contains("chưa được xác thực", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal("The account has been banned.", ex.Message);
             userRepoMock.Verify(x => x.GetUserByEmail(email), Times.Once);
             userRepoMock.Verify(x => x.AddRefreshToken(It.IsAny<auth_tokens>()), Times.Never);
             otpRepoMock.VerifyNoOtherCalls();

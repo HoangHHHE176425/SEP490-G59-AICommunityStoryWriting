@@ -209,6 +209,11 @@ namespace AIStory.Services.Implementations
                 throw new Exception("Invalid email or password.");
             }
 
+            if (string.Equals(user.status, "BANNED", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Exception("The account has been banned.");
+            }
+
             // CHECK TRẠNG THÁI
             if (user.status != "ACTIVE")
             {
