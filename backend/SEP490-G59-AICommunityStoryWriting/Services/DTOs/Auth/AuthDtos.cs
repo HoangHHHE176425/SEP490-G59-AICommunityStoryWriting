@@ -15,6 +15,9 @@ namespace Services.DTOs.Auth
         [Required, MinLength(6)]
         public string Password { get; set; } = null!;
 
+        [Required]
+        public string ConfirmPassword { get; set; } = null!;
+
         // Optional display name. If empty/null, server will default to email prefix.
         public string? FullName { get; set; }
     }
