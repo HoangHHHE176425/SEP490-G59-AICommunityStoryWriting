@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, Plus, ChevronDown } from 'lucide-react';
 import { getCategoriesWithPagination } from '../../../api/category/categoryApi';
 
-export function StoryInfoForm({ formData, onChange, onImageUpload, readOnlyFields = false, allowProgressOptions = null }) {
+export function StoryInfoForm({ formData, onChange, onImageUpload, readOnlyFields = false, allowProgressOptions = null, disabledProgressOptions = [] }) {
 
     const statusOptions = Array.isArray(allowProgressOptions) && allowProgressOptions.length > 0
         ? allowProgressOptions
@@ -199,8 +199,10 @@ export function StoryInfoForm({ formData, onChange, onImageUpload, readOnlyField
                                     cursor: 'pointer'
                                 }}
                             >
-                                {statusOptions.map(opt => (
-                                    <option key={opt} value={opt}>{opt}</option>
+                                {statusOptions.map((opt) => (
+                                    <option key={opt} value={opt} disabled={Array.isArray(disabledProgressOptions) && disabledProgressOptions.includes(opt)}>
+                                        {opt}
+                                    </option>
                                 ))}
                             </select>
                             <ChevronDown style={{
@@ -306,10 +308,10 @@ export function StoryInfoForm({ formData, onChange, onImageUpload, readOnlyField
                         </div>
                     </div>
 
-                    {/* Mô tả truyện (summary) */}
+                    {/* Mô tả truyện (summary) — bắt buộc ở StoryEditor.validateStep1 */}
                     <div>
                         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                            Mô tả truyện
+                            Mô tả truyện <span style={{ color: '#ef4444' }}>*</span>
                         </label>
                         <textarea
                             value={formData.note}

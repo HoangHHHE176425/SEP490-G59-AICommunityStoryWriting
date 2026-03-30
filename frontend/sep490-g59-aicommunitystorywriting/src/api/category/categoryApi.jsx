@@ -7,13 +7,13 @@ import axiosInstance from "../axiosInstance";
  * @throws {Error} Nếu name không được cung cấp hoặc rỗng
  */
 export async function createCategory(data) {
-    // Validate name (required, max 100 chars theo schema)
+    // Validate name (required, theo nghiệp vụ FE: max 50 chars)
     const name = (data.name || "").trim();
     if (!name) {
         throw new Error("Tên thể loại không được để trống");
     }
-    if (name.length > 100) {
-        throw new Error("Tên thể loại không được vượt quá 100 ký tự");
+    if (name.length > 50) {
+        throw new Error("Tên thể loại không được vượt quá 50 ký tự");
     }
 
     const formData = new FormData();
@@ -165,13 +165,13 @@ export async function getCategoryBySlug(slug) {
  * @throws {Error} Nếu name không được cung cấp hoặc rỗng
  */
 export async function updateCategory(id, data) {
-    // Validate name (required, max 100 chars theo schema)
+    // Validate name (required, theo nghiệp vụ FE: max 50 chars)
     const name = (data.name || "").trim();
     if (!name) {
         throw new Error("Tên thể loại không được để trống");
     }
-    if (name.length > 100) {
-        throw new Error("Tên thể loại không được vượt quá 100 ký tự");
+    if (name.length > 50) {
+        throw new Error("Tên thể loại không được vượt quá 50 ký tự");
     }
 
     const formData = new FormData();

@@ -12,6 +12,7 @@ import {
 
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { Pagination } from '../pagination/Pagination';
 import { getStats } from '../../api/admin/userManagementApi';
 import { getAdminWalletSummary } from '../../api/admin/walletApi';
 import { getStories } from '../../api/story/storyApi';
@@ -22,7 +23,6 @@ import {
     getModeratorReviewedStories,
     getModeratorReviewedChapters,
 } from '../../api/moderator/moderatorApi';
-import { getSlaBadgeStyle, normalizeTimeStatus } from '../../utils/moderatorReviewSla';
 
 function formatCompactNumber(n) {
     const num = Number(n ?? 0);
@@ -58,6 +58,9 @@ function safeTimeAgo(dateLike) {
 }
 
 export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
+    // eslint: prop này được truyền từ nơi gọi (để điều hướng), nhưng dashboard hiện chưa sử dụng trực tiếp.
+    // Dùng `void` để tránh lỗi ESLint "assigned a value but never used".
+    void onNavigatePublicationStatus;
     const { isAdmin, role } = useAuth();
     const roleUpper = (role ?? '').toString().toUpperCase();
     const canFetchWallet = isAdmin || roleUpper === 'ADMIN';
@@ -74,6 +77,7 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
     ]);
 
     const [recentActivities, setRecentActivities] = useState([]);
+    const [activityPage, setActivityPage] = useState(1);
     const [topStories, setTopStories] = useState([]);
     const [chartUsersTotal, setChartUsersTotal] = useState(0);
     const [chartUsersReaders, setChartUsersReaders] = useState(0);
@@ -84,15 +88,9 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
     const [modPendingChaptersCount, setModPendingChaptersCount] = useState(0);
     const [modReviewedStoriesCount, setModReviewedStoriesCount] = useState(0);
     const [modReviewedChaptersCount, setModReviewedChaptersCount] = useState(0);
-
-    // SLA breakdown cho backlog pending
-    const [modSlaCounts, setModSlaCounts] = useState({
-        OnTime: 0,
-        Warning: 0,
-        Critical: 0,
-        Overdue: 0,
-        Unknown: 0,
-    });
+    void modPendingStoriesCount;
+    void modPendingChaptersCount;
+    const ACTIVITY_PAGE_SIZE = 10;
 
     const chartsVip = useMemo(() => {
         const total = Number(chartUsersTotal ?? 0);
@@ -117,8 +115,8 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
 
     const statsToShow = useMemo(() => {
         if (!isModeratorPanel) return stats;
-        // MODERATOR: giảm số card, ưu tiên 3 nhóm chính
-        return [stats?.[0], stats?.[1], stats?.[3]].filter(Boolean);
+        // Kiểm duyệt viên: ưu tiên đơn chờ duyệt + kết quả duyệt truyện/chương.
+        return [stats?.[0], stats?.[2], stats?.[3]].filter(Boolean);
     }, [isModeratorPanel, stats]);
 
     useEffect(() => {
@@ -129,108 +127,112 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
             try {
                 if (isModeratorPanel) {
                     const [
-                        pendingStoriesRes,
-                        pendingChaptersRes,
-                        reviewedStoriesRes,
-                        reviewedChaptersRes,
+                        pendingStoriesUnclaimedRes,
+                        pendingStoriesClaimedRes,
+                        pendingChaptersClaimedRes,
+                        reviewedStoriesPublishedRes,
+                        reviewedStoriesRejectedRes,
+                        reviewedChaptersPublishedRes,
+                        reviewedChaptersRejectedRes,
                     ] = await Promise.all([
-                        getPendingStories({ page: 1, pageSize: 5 }).catch(() => null),
-                        getPendingChapters({ page: 1, pageSize: 5 }).catch(() => null),
-                        getModeratorReviewedStories({ status: 'PUBLISHED', page: 1, pageSize: 4 }).catch(() => null),
-                        getModeratorReviewedChapters({ status: 'PUBLISHED', page: 1, pageSize: 4 }).catch(() => null),
+                        getPendingStories({ claimFilter: 'UNCLAIMED', page: 1, pageSize: 50 }).catch(() => null),
+                        getPendingStories({ claimFilter: 'CLAIMED', page: 1, pageSize: 50 }).catch(() => null),
+                        getPendingChapters({ claimFilter: 'CLAIMED', page: 1, pageSize: 50 }).catch(() => null),
+                        getModeratorReviewedStories({ status: 'PUBLISHED', page: 1, pageSize: 200, sortBy: 'updated_at', sortOrder: 'desc' }).catch(() => null),
+                        getModeratorReviewedStories({ status: 'REJECTED', page: 1, pageSize: 200, sortBy: 'updated_at', sortOrder: 'desc' }).catch(() => null),
+                        getModeratorReviewedChapters({ status: 'PUBLISHED', page: 1, pageSize: 200, sortBy: 'updated_at', sortOrder: 'desc' }).catch(() => null),
+                        getModeratorReviewedChapters({ status: 'REJECTED', page: 1, pageSize: 200, sortBy: 'updated_at', sortOrder: 'desc' }).catch(() => null),
                     ]);
 
-                    const pendingStoriesItems = Array.isArray(pendingStoriesRes?.items)
-                        ? pendingStoriesRes.items
-                        : Array.isArray(pendingStoriesRes?.Items)
-                            ? pendingStoriesRes.Items
-                            : [];
-                    const pendingChaptersItems = Array.isArray(pendingChaptersRes?.items)
-                        ? pendingChaptersRes.items
-                        : Array.isArray(pendingChaptersRes?.Items)
-                            ? pendingChaptersRes.Items
-                            : [];
-                    const reviewedStoriesItems = Array.isArray(reviewedStoriesRes?.items)
-                        ? reviewedStoriesRes.items
-                        : Array.isArray(reviewedStoriesRes?.Items)
-                            ? reviewedStoriesRes.Items
-                            : [];
-                    const reviewedChaptersItems = Array.isArray(reviewedChaptersRes?.items)
-                        ? reviewedChaptersRes.items
-                        : Array.isArray(reviewedChaptersRes?.Items)
-                            ? reviewedChaptersRes.Items
-                            : [];
+                    const toItems = (res) => (Array.isArray(res?.items) ? res.items : (Array.isArray(res?.Items) ? res.Items : []));
+                    const toCount = (res, items) => (
+                        Number(res?.totalCount ?? res?.TotalCount ?? res?.total ?? res?.Total ?? 0) || items.length || 0
+                    );
 
-                    const pendingStoriesCount =
-                        Number(pendingStoriesRes?.totalCount ?? pendingStoriesRes?.TotalCount ?? pendingStoriesRes?.total ?? pendingStoriesRes?.Total ?? 0) ||
-                        pendingStoriesItems.length ||
-                        0;
-                    const pendingChaptersCount =
-                        Number(pendingChaptersRes?.totalCount ?? pendingChaptersRes?.TotalCount ?? pendingChaptersRes?.total ?? pendingChaptersRes?.Total ?? 0) ||
-                        pendingChaptersItems.length ||
-                        0;
-                    const reviewedStoriesCount =
-                        Number(reviewedStoriesRes?.totalCount ?? reviewedStoriesRes?.TotalCount ?? reviewedStoriesRes?.total ?? reviewedStoriesRes?.Total ?? 0) ||
-                        reviewedStoriesItems.length ||
-                        0;
-                    const reviewedChaptersCount =
-                        Number(reviewedChaptersRes?.totalCount ?? reviewedChaptersRes?.TotalCount ?? reviewedChaptersRes?.total ?? reviewedChaptersRes?.Total ?? 0) ||
-                        reviewedChaptersItems.length ||
-                        0;
+                    const pendingStoriesUnclaimedItems = toItems(pendingStoriesUnclaimedRes);
+                    const pendingStoriesClaimedItems = toItems(pendingStoriesClaimedRes);
+                    const pendingChaptersClaimedItems = toItems(pendingChaptersClaimedRes);
+                    const pendingStoriesItems = [...pendingStoriesUnclaimedItems, ...pendingStoriesClaimedItems];
 
-                    // SLA breakdown cho backlog pending (chỉ dựa trên item đang trả về ở page đầu tiên).
-                    // Nếu backend trả ít hơn pageSize thì vẫn hiển thị được thống kê "ước lượng".
-                    const allPending = [
-                        ...(Array.isArray(pendingStoriesItems) ? pendingStoriesItems : []),
-                        ...(Array.isArray(pendingChaptersItems) ? pendingChaptersItems : []),
-                    ];
-                    const slaInit = { OnTime: 0, Warning: 0, Critical: 0, Overdue: 0, Unknown: 0 };
-                    for (const it of allPending) {
-                        const raw =
-                            it?.timeStatus ??
-                            it?.TimeStatus ??
-                            it?.time_status ??
-                            it?.timeStatusRaw ??
-                            null;
-                        const n = normalizeTimeStatus(raw);
-                        if (n && typeof slaInit[n] === 'number') slaInit[n] += 1;
-                        else slaInit.Unknown += 1;
-                    }
-                    setModSlaCounts(slaInit);
+                    const reviewedStoriesPublishedItems = toItems(reviewedStoriesPublishedRes);
+                    const reviewedStoriesRejectedItems = toItems(reviewedStoriesRejectedRes);
+                    const reviewedChaptersPublishedItems = toItems(reviewedChaptersPublishedRes);
+                    const reviewedChaptersRejectedItems = toItems(reviewedChaptersRejectedRes);
+                    // Dashboard kiểm duyệt viên cần khớp tab "Chờ duyệt" (đơn đang xử lý),
+                    // không tính đơn chưa nhận.
+                    const pendingStoriesCount = toCount(pendingStoriesClaimedRes, pendingStoriesClaimedItems);
+                    const pendingChaptersCount = toCount(pendingChaptersClaimedRes, pendingChaptersClaimedItems);
+                    const pendingOrderCount = (() => {
+                        const normalizeId = (v) => (v != null ? String(v).toLowerCase() : '');
+                        const ids = new Set();
+                        pendingStoriesClaimedItems.forEach((s) => {
+                            const sid = normalizeId(s?.id ?? s?.Id ?? s?.storyId ?? s?.StoryId);
+                            if (sid) ids.add(sid);
+                        });
+                        pendingChaptersClaimedItems.forEach((c) => {
+                            const sid = normalizeId(c?.storyId ?? c?.StoryId);
+                            if (sid) ids.add(sid);
+                        });
+                        return ids.size;
+                    })();
+                    const reviewedStoriesCount = toCount(reviewedStoriesPublishedRes, reviewedStoriesPublishedItems)
+                        + toCount(reviewedStoriesRejectedRes, reviewedStoriesRejectedItems);
+                    const reviewedChaptersCount = toCount(reviewedChaptersPublishedRes, reviewedChaptersPublishedItems)
+                        + toCount(reviewedChaptersRejectedRes, reviewedChaptersRejectedItems);
 
-                    setModPendingStoriesCount(pendingStoriesCount);
-                    setModPendingChaptersCount(pendingChaptersCount);
+                    setModPendingStoriesCount(pendingOrderCount);
+                    setModPendingChaptersCount(0);
                     setModReviewedStoriesCount(reviewedStoriesCount);
                     setModReviewedChaptersCount(reviewedChaptersCount);
 
-                    const activities = [];
-                    // 3 pending stories
-                    pendingStoriesItems.slice(0, 3).forEach((s, idx) => {
-                        const author =
-                            s?.authorName ?? s?.AuthorName ?? s?.author ?? s?.Author ?? 'Tác giả';
-                        activities.push({
-                            id: idx + 1,
-                            user: author,
-                            action: 'đang chờ duyệt truyện',
-                            title: s?.title ?? s?.Title ?? s?.storyTitle ?? '',
-                            time: safeTimeAgo(s?.updatedAt ?? s?.UpdatedAt ?? s?.createdAt ?? s?.CreatedAt),
+                    const normalizeTs = (item) => (
+                        item?.updatedAt ?? item?.UpdatedAt ?? item?.createdAt ?? item?.CreatedAt ?? null
+                    );
+                    const chapterActivitiesPublished = reviewedChaptersPublishedItems.map((c, idx) => {
+                        const storyTitle = c?.storyTitle ?? c?.StoryTitle ?? 'Truyện';
+                        const chapterTitle = c?.title ?? c?.Title ?? c?.chapterTitle ?? 'Chương';
+                        const orderIndex = Number(c?.orderIndex ?? c?.OrderIndex ?? 0);
+                        const chapterNo = Number.isFinite(orderIndex) ? Math.max(1, orderIndex + 1) : null;
+                        const user = c?.moderatorName ?? c?.ModeratorName ?? 'Kiểm duyệt viên';
+                        const createdAt = normalizeTs(c);
+                        return {
+                            id: `cp-${idx}-${c?.id ?? c?.Id ?? chapterTitle}`,
+                            user,
+                            action: 'đã duyệt',
+                            title: `${chapterNo ? `chương ${chapterNo}` : 'chương'}: ${chapterTitle} (truyện: ${storyTitle})`,
+                            reason: '',
+                            createdAt,
+                            time: safeTimeAgo(createdAt),
                             avatar: '',
-                        });
+                        };
                     });
-                    // fill remaining with pending chapters
-                    pendingChaptersItems.slice(0, Math.max(0, 5 - activities.length)).forEach((c, idx) => {
-                        const author = c?.storyAuthorName ?? c?.story_author_name ?? c?.authorName ?? c?.AuthorName ?? 'Tác giả';
-                        activities.push({
-                            id: activities.length + idx + 1,
-                            user: author,
-                            action: 'đang chờ duyệt chương',
-                            title: c?.chapterTitle ?? c?.Title ?? c?.title ?? '',
-                            time: safeTimeAgo(c?.updatedAt ?? c?.UpdatedAt ?? c?.createdAt ?? c?.CreatedAt),
+                    const chapterActivitiesRejected = reviewedChaptersRejectedItems.map((c, idx) => {
+                        const storyTitle = c?.storyTitle ?? c?.StoryTitle ?? 'Truyện';
+                        const chapterTitle = c?.title ?? c?.Title ?? c?.chapterTitle ?? 'Chương';
+                        const orderIndex = Number(c?.orderIndex ?? c?.OrderIndex ?? 0);
+                        const chapterNo = Number.isFinite(orderIndex) ? Math.max(1, orderIndex + 1) : null;
+                        const user = c?.moderatorName ?? c?.ModeratorName ?? 'Kiểm duyệt viên';
+                        const reason = c?.rejectionReason ?? c?.RejectionReason ?? '';
+                        const createdAt = normalizeTs(c);
+                        return {
+                            id: `cr-${idx}-${c?.id ?? c?.Id ?? chapterTitle}`,
+                            user,
+                            action: 'đã từ chối duyệt',
+                            title: `${chapterNo ? `chương ${chapterNo}` : 'chương'}: ${chapterTitle} (truyện: ${storyTitle})`,
+                            reason: String(reason || '').trim(),
+                            createdAt,
+                            time: safeTimeAgo(createdAt),
                             avatar: '',
-                        });
+                        };
+                    });
+                    // Nhật ký chỉ hiển thị log DUYỆT/TỪ CHỐI CHƯƠNG theo yêu cầu.
+                    const activities = [...chapterActivitiesPublished, ...chapterActivitiesRejected].sort((a, b) => {
+                        const ta = a?.createdAt ? new Date(a.createdAt).getTime() : 0;
+                        const tb = b?.createdAt ? new Date(b.createdAt).getTime() : 0;
+                        return tb - ta;
                     });
 
-                    const reviewedStoryMapped = reviewedStoriesItems
+                    const reviewedStoryMapped = reviewedStoriesPublishedItems
                         .map(mapStoryListItemToBrowseStory)
                         .filter(Boolean);
                     const topStoriesMapped = reviewedStoryMapped.length
@@ -239,13 +241,13 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
 
                     const nextStats = [
                         {
-                            title: 'Chờ duyệt truyện',
-                            value: pendingStoriesCount ? pendingStoriesCount.toLocaleString('vi-VN') : '0',
+                            title: 'Đơn chờ duyệt',
+                            value: pendingOrderCount ? pendingOrderCount.toLocaleString('vi-VN') : '0',
                             icon: FileText,
                             color: 'blue',
                         },
                         {
-                            title: 'Chờ duyệt chương',
+                            title: 'Chương chờ duyệt',
                             value: pendingChaptersCount ? pendingChaptersCount.toLocaleString('vi-VN') : '0',
                             icon: MessageSquare,
                             color: 'green',
@@ -264,15 +266,16 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
                         },
                     ];
 
-                    const total = pendingStoriesCount + pendingChaptersCount + reviewedStoriesCount;
+                    const total = pendingStoriesCount + pendingChaptersCount + reviewedStoriesCount + reviewedChaptersCount;
                     setStats(nextStats);
-                    setRecentActivities(activities.slice(0, 5));
+                    setRecentActivities(activities);
+                    setActivityPage(1);
                     setTopStories(topStoriesMapped);
 
                     // Pie chart: (pending stories / pending chapters / reviewed)
                     setChartUsersTotal(total);
-                    setChartUsersReaders(pendingStoriesCount);
-                    setChartUsersAuthors(pendingChaptersCount);
+                    setChartUsersReaders(pendingStoriesCount + pendingChaptersCount);
+                    setChartUsersAuthors(reviewedStoriesCount + reviewedChaptersCount);
                 } else {
                     const [
                         userStats,
@@ -344,6 +347,7 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
                     if (!cancelled) {
                         setStats(nextStats);
                         setRecentActivities(mappedRecentActivities);
+                        setActivityPage(1);
                         setTopStories(topMapped.slice(0, 4));
 
                         // Pie chart: active readers / authors (wallet summary)
@@ -376,6 +380,17 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
         }),
         []
     );
+
+    const activityTotalPages = useMemo(
+        () => Math.max(1, Math.ceil(recentActivities.length / ACTIVITY_PAGE_SIZE)),
+        [recentActivities, ACTIVITY_PAGE_SIZE]
+    );
+
+    const visibleActivities = useMemo(() => {
+        if (!isModeratorPanel) return recentActivities;
+        const start = (activityPage - 1) * ACTIVITY_PAGE_SIZE;
+        return recentActivities.slice(start, start + ACTIVITY_PAGE_SIZE);
+    }, [isModeratorPanel, recentActivities, activityPage, ACTIVITY_PAGE_SIZE]);
 
     return (
         <div className="space-y-6">
@@ -434,12 +449,12 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
                 <div className={`lg:${isModeratorPanel ? 'col-span-3' : 'col-span-2'} bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800`}>
                     <div className="p-6 border-b border-slate-200 dark:border-slate-800">
                         <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                            Hoạt động gần đây
+                            Nhật ký hoạt động
                         </h2>
                     </div>
                     <div className="p-6">
                         <div className="space-y-4">
-                            {(loading ? [] : recentActivities).map((activity) => (
+                            {(loading ? [] : visibleActivities).map((activity) => (
                                 <div key={activity.id} className="flex items-start gap-4">
                                     {activity.avatar ? (
                                         <img src={activity.avatar} alt={activity.user} className="w-10 h-10 rounded-full" />
@@ -454,6 +469,11 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
                                             <span className="text-slate-500 dark:text-slate-400">{activity.action}</span>{' '}
                                             <span className="font-semibold">{activity.title}</span>
                                         </p>
+                                        {activity.reason ? (
+                                            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                                                Lý do từ chối: {activity.reason}
+                                            </p>
+                                        ) : null}
                                         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                                             {activity.time}
                                         </p>
@@ -461,6 +481,18 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
                                 </div>
                             ))}
                         </div>
+                        {isModeratorPanel && !loading && recentActivities.length > 0 ? (
+                            <div className="mt-4">
+                                <Pagination
+                                    currentPage={activityPage}
+                                    totalPages={activityTotalPages}
+                                    totalItems={recentActivities.length}
+                                    itemsPerPage={ACTIVITY_PAGE_SIZE}
+                                    onPageChange={setActivityPage}
+                                    itemLabel="hoạt động"
+                                />
+                            </div>
+                        ) : null}
                     </div>
                 </div>
 
@@ -517,92 +549,58 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
                 {isModeratorPanel ? (
                     <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-6">
                         <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-2">
-                            Thống kê MODERATOR
+                            Thống kê kiểm duyệt viên
                         </h2>
 
                         {(() => {
-                            const pendingTotal = Number(modPendingStoriesCount ?? 0) + Number(modPendingChaptersCount ?? 0);
-                            const reviewedTotal = Number(modReviewedStoriesCount ?? 0) + Number(modReviewedChaptersCount ?? 0);
+                            const pendingTotal = Number(modPendingStoriesCount ?? 0);
+                            const reviewedStories = Number(modReviewedStoriesCount ?? 0);
+                            const reviewedChapters = Number(modReviewedChaptersCount ?? 0);
+                            const reviewedTotal = reviewedChapters;
                             const denom = pendingTotal + reviewedTotal;
                             const progress = denom > 0 ? Math.round((reviewedTotal / denom) * 100) : 0;
-
-                            const totalSla =
-                                Number(modSlaCounts.OnTime ?? 0) +
-                                Number(modSlaCounts.Warning ?? 0) +
-                                Number(modSlaCounts.Critical ?? 0) +
-                                Number(modSlaCounts.Overdue ?? 0) +
-                                Number(modSlaCounts.Unknown ?? 0);
-                            const pct = (v) => (totalSla > 0 ? (Number(v) / totalSla) * 100 : 0);
-
-                            const segment = (widthPct, bg) =>
-                                widthPct > 0 ? (
-                                    <div style={{ width: `${widthPct}%`, background: bg }} className="h-full" />
-                                ) : null;
+                            const pendingPct = denom > 0 ? Math.round((pendingTotal / denom) * 100) : 0;
+                            const reviewedDeg = denom > 0 ? Math.round((reviewedTotal / denom) * 360) : 0;
 
                             return (
                                 <>
-                                    <p className="text-sm text-slate-500 dark:text-slate-400">
-                                        Pending: <span className="font-semibold">{loading ? '...' : pendingTotal}</span> • Đã duyệt: <span className="font-semibold">{loading ? '...' : reviewedTotal}</span>
-                                    </p>
-                                    <div className="mt-3">
-                                        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-2">
-                                            <span>Tiến độ</span>
-                                            <span className="font-semibold text-slate-700 dark:text-slate-200">{loading ? '...' : `${progress}%`}</span>
-                                        </div>
-                                        <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                                    <div className="mt-2 flex flex-col items-center">
+                                        <div className="relative w-44 h-44">
                                             <div
-                                                className="h-full rounded-full"
+                                                className="absolute inset-0 rounded-full"
                                                 style={{
-                                                    width: `${progress}%`,
-                                                    background: '#13ec5b',
+                                                    background: `conic-gradient(#13ec5b 0deg ${reviewedDeg}deg, #e2e8f0 ${reviewedDeg}deg 360deg)`,
                                                 }}
                                             />
-                                        </div>
-                                    </div>
-
-                                    <div className="mt-5">
-                                        <div className="flex items-center justify-between text-sm font-semibold text-slate-900 dark:text-white mb-3">
-                                            <span>SLA backlog (ước lượng từ danh sách page đầu)</span>
-                                            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                                                {totalSla ? `${totalSla} item` : ''}
-                                            </span>
+                                            <div className="absolute inset-5 rounded-full bg-white dark:bg-slate-900 flex flex-col items-center justify-center">
+                                                <p className="text-3xl font-bold text-slate-900 dark:text-white">
+                                                    {loading ? '...' : `${progress}%`}
+                                                </p>
+                                                <p className="text-xs text-slate-500 dark:text-slate-400">Tiến độ xử lý đơn</p>
+                                            </div>
                                         </div>
 
-                                        <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
-                                            {segment(pct(modSlaCounts.OnTime), '#d1fae5')}
-                                            {segment(pct(modSlaCounts.Warning), '#fef3c7')}
-                                            {segment(pct(modSlaCounts.Critical), '#ffedd5')}
-                                            {segment(pct(modSlaCounts.Overdue), '#fee2e2')}
-                                            {segment(pct(modSlaCounts.Unknown), '#f1f5f9')}
-                                        </div>
-
-                                        <div className="mt-3 grid grid-cols-2 gap-2">
-                                            {(['OnTime', 'Warning', 'Critical', 'Overdue']).map((key) => {
-                                                const style = getSlaBadgeStyle(key);
-                                                const value = modSlaCounts[key] ?? 0;
-                                                return (
-                                                    <div
-                                                        key={key}
-                                                        className="flex items-center justify-between px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40"
-                                                    >
-                                                        <span className="text-xs font-semibold" style={{ color: style.color }}>
-                                                            {style.label}
-                                                        </span>
-                                                        <span className="text-xs font-bold text-slate-900 dark:text-white">
-                                                            {loading ? '...' : value}
-                                                        </span>
-                                                    </div>
-                                                );
-                                            })}
+                                        <div className="mt-4 w-full grid grid-cols-2 gap-3">
                                             <div
-                                                className="flex items-center justify-between px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40"
+                                                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40"
                                             >
-                                                <span className="text-xs font-semibold" style={{ color: '#475569' }}>
-                                                    Khác
-                                                </span>
+                                                <span className="text-xs text-slate-500 dark:text-slate-400">Đang chờ duyệt đơn</span>
                                                 <span className="text-xs font-bold text-slate-900 dark:text-white">
-                                                    {loading ? '...' : modSlaCounts.Unknown}
+                                                    {loading ? '...' : `${pendingTotal} (${pendingPct}%)`}
                                                 </span>
+                                            </div>
+                                            <div
+                                                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40"
+                                            >
+                                                <span className="text-xs text-slate-500 dark:text-slate-400">Đã duyệt chương</span>
+                                                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                                                    {loading ? '...' : `${reviewedTotal} (${progress}%)`}
+                                                </span>
+                                                {!loading ? (
+                                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 mb-0">
+                                                        Truyện đã duyệt: {reviewedStories}
+                                                    </p>
+                                                ) : null}
                                             </div>
                                         </div>
                                     </div>

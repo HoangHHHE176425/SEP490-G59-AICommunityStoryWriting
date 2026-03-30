@@ -43,11 +43,11 @@ const ALL_MENU_ITEMS = [
     { id: 'users', label: 'Quản lý người dùng', icon: Users },
     { id: 'comments', label: 'Quản lý bình luận', icon: MessageSquare },
     { id: 'policies', label: 'Quản lý Policy', icon: Shield },
-    { id: 'ai-config', label: 'Cấu hình AI', icon: Brain },
+    { id: 'ai-config', label: 'Cấu hình hệ thống', icon: Brain },
 ];
 
 /** Yêu cầu UI: ẩn một số tab ở màn Admin. */
-const HIDE_MENU_IDS_FOR_ADMIN = new Set(['publication', 'stories', 'comments']);
+const HIDE_MENU_IDS_FOR_ADMIN = new Set(['publication', 'stories', 'comments', 'violations']);
 
 /** Menu theo role để tách rõ màn Admin / Moderator / Compliance. */
 const ROLE_MENU_IDS = {

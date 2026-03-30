@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { CategoryModal } from '../../../components/admin/category/CategoryModal';
 import { Pagination } from '../../../components/pagination/Pagination';
-import { createCategory, getCategoriesWithPagination, updateCategory } from '../../../api/category/categoryApi';
+import { createCategory, deleteCategory, getCategoriesWithPagination, toggleCategoryActive, updateCategory } from '../../../api/category/categoryApi';
 import { useToast } from '../../../components/author/story-editor/Toast';
 
 export function CategoryManagement() {
@@ -31,6 +31,19 @@ export function CategoryManagement() {
     const [pageSize] = useState(10);
     const [totalCount, setTotalCount] = useState(0);
     const [totalPages, setTotalPages] = useState(1);
+    const [confirmDialog, setConfirmDialog] = useState({
+        open: false,
+        action: null, // 'delete' | 'toggle'
+        categoryId: null,
+        categoryName: '',
+        nextActive: null,
+    });
+
+    const normalizeCategoryName = (v) =>
+        String(v ?? '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .toLowerCase();
 
     // Load categories for stats (all categories, not filtered by status)
     const loadCategoriesForStats = async () => {
@@ -143,16 +156,68 @@ export function CategoryManagement() {
         setIsModalOpen(true);
     };
 
-    const handleDeleteCategory = (id) => {
-        if (confirm('Bạn có chắc chắn muốn xóa thể loại này?')) {
-            setCategories(categories.filter(cat => cat.id !== id));
+    const executeDeleteCategory = async (id) => {
+        try {
+            await deleteCategory(id);
+            await loadCategories(currentPage);
+            await loadCategoriesForStats();
+            showToast('Xóa thể loại thành công!', 'success');
+        } catch (err) {
+            const rawMsg = err?.response?.data?.message || err?.message || 'Không thể xóa thể loại';
+            const message = String(rawMsg).toLowerCase().includes('associated stories')
+                ? 'Không thể xóa thể loại vì đã được sử dụng trong truyện.'
+                : rawMsg;
+            showToast(message, 'error');
         }
     };
 
+    const executeToggleStatus = async (id, nextActive) => {
+        try {
+            await toggleCategoryActive(id);
+            await loadCategories(currentPage);
+            await loadCategoriesForStats();
+            showToast(nextActive ? 'Đã bật hoạt động thể loại.' : 'Đã tắt hoạt động thể loại.', 'success');
+        } catch (err) {
+            const message = err?.response?.data?.message || err?.message || 'Không thể cập nhật trạng thái thể loại';
+            showToast(message, 'error');
+        }
+    };
+
+    const handleDeleteCategory = (id) => {
+        const target = allCategoriesForStats.find((c) => c.id === id) || categories.find((c) => c.id === id);
+        setConfirmDialog({
+            open: true,
+            action: 'delete',
+            categoryId: id,
+            categoryName: target?.name ?? 'thể loại này',
+            nextActive: null,
+        });
+    };
+
     const handleToggleStatus = (id) => {
-        setCategories(categories.map(cat =>
-            cat.id === id ? { ...cat, isActive: !cat.isActive } : cat
-        ));
+        const target = allCategoriesForStats.find((c) => c.id === id) || categories.find((c) => c.id === id);
+        if (!target) return;
+        const nextActive = !(target.isActive !== false);
+        setConfirmDialog({
+            open: true,
+            action: 'toggle',
+            categoryId: id,
+            categoryName: target.name ?? 'thể loại',
+            nextActive,
+        });
+    };
+
+    const handleConfirmAction = async () => {
+        if (!confirmDialog.categoryId) return;
+        const { action, categoryId, nextActive } = confirmDialog;
+        setConfirmDialog({ open: false, action: null, categoryId: null, categoryName: '', nextActive: null });
+        if (action === 'delete') {
+            await executeDeleteCategory(categoryId);
+            return;
+        }
+        if (action === 'toggle' && typeof nextActive === 'boolean') {
+            await executeToggleStatus(categoryId, nextActive);
+        }
     };
 
     // Get full icon URL (handle relative paths)
@@ -203,6 +268,20 @@ export function CategoryManagement() {
 
     const handleSaveCategory = async (categoryData) => {
         try {
+            const normalizedIncoming = normalizeCategoryName(categoryData.name);
+            const duplicate = allCategoriesForStats.some((c) => {
+                if (editingCategory && c.id === editingCategory.id) return false;
+                return normalizeCategoryName(c.name) === normalizedIncoming;
+            });
+            if (duplicate) {
+                showToast('Tên thể loại đã tồn tại, vui lòng chọn tên khác.', 'error');
+                return;
+            }
+            if (String(categoryData.name || '').trim().length > 50) {
+                showToast('Tên thể loại không được vượt quá 50 ký tự.', 'error');
+                return;
+            }
+
             if (editingCategory) {
                 // Call API to update category
                 await updateCategory(editingCategory.id, {
@@ -245,7 +324,7 @@ export function CategoryManagement() {
                 || error.response?.data?.message
                 || error.response?.data?.title
                 || 'Có lỗi xảy ra khi lưu thể loại';
-            alert(`Lỗi: ${errorMessage}`);
+            showToast(errorMessage, 'error');
             // Log full error for debugging
             if (error.response?.data) {
                 console.error('Full error response:', error.response.data);
@@ -685,6 +764,81 @@ export function CategoryManagement() {
 
             {/* Toast Container */}
             <ToastContainer />
+
+            {/* Confirm Dialog theo format hệ thống */}
+            {confirmDialog.open ? (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 1000,
+                        padding: '1rem',
+                    }}
+                    onClick={() => setConfirmDialog({ open: false, action: null, categoryId: null, categoryName: '', nextActive: null })}
+                >
+                    <div
+                        style={{
+                            width: '100%',
+                            maxWidth: '440px',
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            border: '1px solid #e2e8f0',
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
+                            overflow: 'hidden',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0' }}>
+                            <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#1e293b' }}>
+                                {confirmDialog.action === 'delete' ? 'Xác nhận xóa thể loại' : 'Xác nhận thay đổi trạng thái'}
+                            </h3>
+                        </div>
+                        <div style={{ padding: '1rem 1.25rem' }}>
+                            <p style={{ margin: 0, color: '#334155', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                                {confirmDialog.action === 'delete'
+                                    ? `Bạn có chắc chắn muốn xóa thể loại "${confirmDialog.categoryName}"?`
+                                    : `Bạn có chắc chắn muốn ${confirmDialog.nextActive ? 'bật hoạt động' : 'tắt hoạt động'} cho thể loại "${confirmDialog.categoryName}"?`}
+                            </p>
+                        </div>
+                        <div style={{ padding: '0.75rem 1.25rem 1rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                            <button
+                                type="button"
+                                onClick={() => setConfirmDialog({ open: false, action: null, categoryId: null, categoryName: '', nextActive: null })}
+                                style={{
+                                    padding: '0.5rem 0.875rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid #cbd5e1',
+                                    backgroundColor: '#fff',
+                                    color: '#334155',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleConfirmAction}
+                                style={{
+                                    padding: '0.5rem 0.875rem',
+                                    borderRadius: '8px',
+                                    border: 'none',
+                                    backgroundColor: confirmDialog.action === 'delete' ? '#dc2626' : '#13ec5b',
+                                    color: '#fff',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                }}
+                            >
+                                {confirmDialog.action === 'delete' ? 'Xóa' : 'Xác nhận'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }
