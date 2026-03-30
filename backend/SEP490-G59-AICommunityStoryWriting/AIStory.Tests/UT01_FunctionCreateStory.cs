@@ -24,7 +24,7 @@ namespace AIStory.Tests
         private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
         {
             _output.WriteLine("");
-            _output.WriteLine($"======== {utcId} | UT01 CreateStory ========");
+            _output.WriteLine($"======== {utcId} ========");
             _output.WriteLine(oneLineGoal);
             foreach (var line in details)
                 _output.WriteLine("  · " + line);

@@ -9,6 +9,7 @@ import {
     createPolicy,
     updatePolicy,
     setPolicyActive,
+    deletePolicy,
 } from '../../../api/admin/policyManagementApi';
 import { Plus } from 'lucide-react';
 
@@ -122,6 +123,32 @@ export function PolicyManagement() {
         }
     };
 
+    const handleDelete = async (policy) => {
+        const label = [policy.type, policy.version].filter(Boolean).join(' · ') || policy.id;
+        if (!window.confirm(`Xóa policy "${label}"? Thao tác không thể hoàn tác.`)) {
+            return;
+        }
+        try {
+            await deletePolicy(policy.id);
+            if (viewingPolicy?.id === policy.id) {
+                setViewingPolicy(null);
+            }
+            if (editingPolicy?.id === policy.id) {
+                setShowForm(false);
+                setEditingPolicy(null);
+            }
+            loadPolicies(currentPage);
+            loadStats();
+        } catch (err) {
+            const msg =
+                err?.response?.data?.message ||
+                err?.response?.data?.title ||
+                err?.message ||
+                'Không xóa được policy.';
+            window.alert(msg);
+        }
+    };
+
     return (
         <div className="p-8">
             <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -196,6 +223,7 @@ export function PolicyManagement() {
                         onView={setViewingPolicy}
                         onEdit={handleEdit}
                         onToggleActive={handleToggleActive}
+                        onDelete={handleDelete}
                     />
                     {totalPages > 1 && (
                         <div className="mt-4">
