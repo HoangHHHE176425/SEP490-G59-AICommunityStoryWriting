@@ -129,6 +129,7 @@ namespace AIStory.API
 
             // Coin / PayOS
             builder.Services.AddHttpClient<PayOSClient>();
+            builder.Services.AddScoped<IPayOSClient, PayOSClientAdapter>();
             builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
             builder.Services.AddHostedService<PayOSPendingOrderSyncService>();
 
