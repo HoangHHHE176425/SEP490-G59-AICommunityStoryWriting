@@ -13,6 +13,12 @@ namespace Services.Implementations
     {
         private const string ViewCacheKeyPrefix = "story_view:";
         private static readonly TimeSpan ViewCooldown = TimeSpan.FromHours(24);
+        /// <summary>Giới hạn cột <c>stories.slug</c> trong DB; chừa chỗ cho hậu tố <c>-2</c>, <c>-3</c>, … khi trùng base.</summary>
+        private const int StorySlugMaxLength = 255;
+        /// <summary>Giới hạn tiêu đề khi tạo truyện (ma trận nghiệp vụ / UI; cột DB cho phép 255).</summary>
+        private const int StoryTitleMaxBusinessLength = 50;
+        /// <summary>Giới hạn nội dung mô tả khi tạo/cập nhật (cột summary thường nvarchar(max); giới hạn API để kiểm soát kích thước).</summary>
+        private const int StorySummaryMaxLength = 4000;
 
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
@@ -65,12 +71,21 @@ namespace Services.Implementations
                     throw new InvalidOperationException($"Category '{category.name}' is not active.");
             }
 
-            var slug = GenerateSlug(request.Title);
-            var existingBySlug = _storyRepository.GetBySlug(slug);
-            if (existingBySlug != null)
-            {
-                throw new InvalidOperationException($"Story with slug '{slug}' already exists.");
-            }
+            if (string.IsNullOrWhiteSpace(request.Title))
+                throw new InvalidOperationException("Vui lòng điền đầy đủ thông tin.");
+
+            if (request.Title.Length > StoryTitleMaxBusinessLength)
+                throw new ArgumentException($"Tiêu đề vượt quá giới hạn cho phép (tối đa {StoryTitleMaxBusinessLength} ký tự).");
+
+            if (string.IsNullOrWhiteSpace(coverImageUrl))
+                throw new InvalidOperationException("Vui lòng điền đầy đủ thông tin.");
+
+            if (!string.IsNullOrEmpty(request.Summary) && request.Summary.Length > StorySummaryMaxLength)
+                throw new ArgumentException($"Mô tả truyện vượt quá giới hạn cho phép (tối đa {StorySummaryMaxLength} ký tự).");
+
+            // Nhiều truyện được phép cùng tiêu đề hiển thị: slug suy từ title có thể trùng → thêm hậu tố số cho đến khi unique (UTCID02).
+            var baseSlug = GenerateSlug(request.Title ?? string.Empty);
+            var slug = AllocateUniqueSlug(baseSlug, excludeStoryId: null);
 
             var validAgeRatings = new[] { "ALL", "13+", "16+", "18+" };
             if (!validAgeRatings.Contains(request.AgeRating?.ToUpper()))
@@ -78,12 +93,17 @@ namespace Services.Implementations
                 throw new ArgumentException($"Invalid age rating. Must be one of: {string.Join(", ", validAgeRatings)}");
             }
 
+            if (string.IsNullOrWhiteSpace(request.StoryProgressStatus))
+                throw new InvalidOperationException("Vui lòng điền đầy đủ thông tin.");
+
             var validProgressStatuses = new[] { "ONGOING", "COMPLETED", "HIATUS" };
-            var progressStatus = (request.StoryProgressStatus ?? "ONGOING").ToUpper();
+            var progressStatus = request.StoryProgressStatus.Trim().ToUpperInvariant();
             if (!validProgressStatuses.Contains(progressStatus))
             {
                 throw new ArgumentException($"Invalid story progress status. Must be one of: {string.Join(", ", validProgressStatuses)}");
             }
+
+            // UTCID20: chưa chặn HIATUS khi tạo truyện DRAFT — bug mở; UT01 UTCID20 fail cho đến khi có rule.
 
             var story = new stories
             {
@@ -347,16 +367,8 @@ namespace Services.Implementations
 
             if (request.Title != story.title)
             {
-                var newSlug = GenerateSlug(request.Title);
-                if (newSlug != story.slug)
-                {
-                    var existingStory = _storyRepository.GetBySlug(newSlug);
-                    if (existingStory != null && existingStory.id != id)
-                    {
-                        throw new InvalidOperationException($"Story with slug '{newSlug}' already exists.");
-                    }
-                    story.slug = newSlug;
-                }
+                var newBaseSlug = GenerateSlug(request.Title ?? string.Empty);
+                story.slug = AllocateUniqueSlug(newBaseSlug, id);
             }
 
             if (!string.IsNullOrWhiteSpace(request.Status))
@@ -629,6 +641,45 @@ namespace Services.Implementations
                     .Count(),
                 TotalViews = publishedVisibleStories.Sum(s => (long?)(s.total_views ?? 0)) ?? 0
             };
+        }
+
+        /// <summary>Slug duy nhất trong DB; <paramref name="excludeStoryId"/> dùng khi đổi title (giữ/ghép slug cho đúng bản ghi hiện tại).</summary>
+        private string AllocateUniqueSlug(string baseSlug, Guid? excludeStoryId)
+        {
+            var normalizedBase = string.IsNullOrWhiteSpace(baseSlug) ? "story" : baseSlug.Trim();
+
+            for (var attempt = 0; attempt < 10_000; attempt++)
+            {
+                string candidate;
+                if (attempt == 0)
+                    candidate = TruncateSlugForSuffix(normalizedBase, StorySlugMaxLength, suffixToAppend: string.Empty);
+                else
+                {
+                    var suffix = "-" + (attempt + 1);
+                    var trunc = TruncateSlugForSuffix(normalizedBase, StorySlugMaxLength, suffix);
+                    candidate = trunc + suffix;
+                }
+
+                var existing = _storyRepository.GetBySlug(candidate);
+                if (existing == null)
+                    return candidate;
+                if (excludeStoryId.HasValue && existing.id == excludeStoryId.Value)
+                    return candidate;
+            }
+
+            throw new InvalidOperationException("Không thể tạo slug truyện duy nhất sau nhiều lần thử.");
+        }
+
+        private static string TruncateSlugForSuffix(string slugBase, int maxTotalLength, string suffixToAppend)
+        {
+            if (string.IsNullOrEmpty(slugBase))
+                return "story";
+            var maxBase = maxTotalLength - suffixToAppend.Length;
+            if (maxBase < 1)
+                maxBase = 1;
+            if (slugBase.Length <= maxBase)
+                return slugBase;
+            return slugBase.Substring(0, maxBase).TrimEnd('-');
         }
 
         private string GenerateSlug(string title)
