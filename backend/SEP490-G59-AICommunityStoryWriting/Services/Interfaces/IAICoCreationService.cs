@@ -6,7 +6,7 @@ namespace Services.Interfaces
     public interface IAICoCreationService
     {
         /// <summary>
-        /// Pipeline: Agent 1 (dàn ý JSON) → Agent 2 (nội dung) → Guardrail → Agent 3 (kiểm duyệt JSON). Nếu chưa đạt thì sửa theo feedback, tối đa CoCreateMaxRevisions lần.
+        /// Pipeline: Agent 1 (dàn ý) → Agent 2 (viết) → lặp kiểm tra từ cấm + chính tả và Agent 2 sửa bản nháp (nếu bật) → mở rộng độ dài nếu cần → lặp kiểm tra/sửa tương tự.
         /// </summary>
         /// <param name="request">StoryId và AuthorIdea (ý tưởng, tùy chọn). Nếu AuthorIdea trống/null thì AI tự viết theo mạch truyện hiện có.</param>
         /// <param name="authorUserId">ID user (phải là tác giả truyện).</param>

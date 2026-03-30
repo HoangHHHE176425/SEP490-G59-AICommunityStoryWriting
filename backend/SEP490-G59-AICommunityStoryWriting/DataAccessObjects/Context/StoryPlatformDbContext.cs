@@ -129,7 +129,7 @@ public partial class StoryPlatformDbContext : DbContext
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer(
-                "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                "Server= localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                     maxRetryCount: 5,
                     maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -168,6 +168,7 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.chapter_index);
+            entity.Property(e => e.draft_chapter_id);
 
             entity.HasOne(d => d.chapter).WithMany(p => p.ai_generated_content)
                 .HasForeignKey(d => d.chapter_id)

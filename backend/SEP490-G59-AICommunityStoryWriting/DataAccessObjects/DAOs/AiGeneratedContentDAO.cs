@@ -30,6 +30,18 @@ public static class AiGeneratedContentDAO
             .ToList();
     }
 
+    /// <summary>Tất cả bản AI theo draft chapter id (khi chapter thật chưa được tạo).</summary>
+    public static List<ai_generated_content> GetAllByDraftChapterId(Guid draftChapterId, int maxCount = 50)
+    {
+        using var context = new StoryPlatformDbContext();
+        return context.ai_generated_content
+            .AsNoTracking()
+            .Where(a => a.draft_chapter_id == draftChapterId && a.ai_output != null && a.ai_output.Length > 0)
+            .OrderByDescending(a => a.created_at)
+            .Take(maxCount)
+            .ToList();
+    }
+
     /// <summary>Bản AI theo truyện + thứ tự chương (chapter_index khớp order_index của chương).</summary>
     public static List<ai_generated_content> GetAllByStoryIdAndChapterIndex(Guid storyId, int chapterIndex, int maxCount = 50)
     {
@@ -68,6 +80,20 @@ public static class AiGeneratedContentDAO
             row.chapter_index = chapterOrderIndex;
             context.SaveChanges();
         }
+    }
+
+    /// <summary>Map toàn bộ bản ghi draft sang chapter thật sau khi tạo chương.</summary>
+    public static void BindDraftChapterId(Guid draftChapterId, Guid chapterId, int chapterOrderIndex)
+    {
+        using var context = new StoryPlatformDbContext();
+        var rows = context.ai_generated_content.Where(a => a.draft_chapter_id == draftChapterId).ToList();
+        if (rows.Count == 0) return;
+        foreach (var row in rows)
+        {
+            row.chapter_id = chapterId;
+            row.chapter_index = chapterOrderIndex;
+        }
+        context.SaveChanges();
     }
 
     /// <summary>Xóa mọi bản ghi AI gắn chapter (đồng bộ khi tác giả xóa chương DRAFT).</summary>

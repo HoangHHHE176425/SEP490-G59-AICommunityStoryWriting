@@ -125,6 +125,17 @@ export function ChapterEditor({ chapter, onChange, story }) {
     const [aiUsageLimit, setAiUsageLimit] = useState(null);
 
     const storyId = story?.id ?? story?.Id ?? null;
+    const chapterIdRaw = chapter?.id ?? chapter?.Id ?? null;
+    const isGuid = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v ?? '').trim());
+    const [draftChapterIdForAi] = useState(() => {
+        if (isGuid(chapterIdRaw)) return String(chapterIdRaw);
+        try {
+            return typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : null;
+        } catch {
+            return null;
+        }
+    });
+    const chapterIdForAi = isGuid(chapterIdRaw) ? String(chapterIdRaw) : draftChapterIdForAi;
     /** Bước 2 tạo truyện mới: chưa có storyId → không gọi API AI; hiển thị nút giống màn chương nhưng khóa. */
     const aiLocked = !storyId;
 
@@ -195,8 +206,8 @@ export function ChapterEditor({ chapter, onChange, story }) {
             setShowSuggestPopup(true);
             setSuggestLoading(true);
             try {
-                indexRag(storyId);
-                const data = await suggestNextChapter(storyId, null);
+                await indexRag(storyId);
+                const data = await suggestNextChapter(storyId, null, null, chapterIdForAi);
                 const list = data?.suggestions ?? data?.Suggestions ?? [];
                 setSuggestions(Array.isArray(list) ? list : []);
                 loadAiUsageLimit();
@@ -231,7 +242,7 @@ export function ChapterEditor({ chapter, onChange, story }) {
         setCoCreateLoading(true);
         try {
             const chapterOrderIndex = (Number(chapter?.number) || 1) - 1;
-            const data = await coCreate(storyId, idea, { chapterOrderIndex });
+            const data = await coCreate(storyId, idea, { chapterOrderIndex, chapterId: chapterIdForAi });
             // Trừ ngay trên UI để người dùng thấy số lượt giảm tức thì.
             decrementCoCreateUsageOptimistic();
             setCoCreateResult(data);

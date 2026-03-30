@@ -14,6 +14,7 @@ using Repositories.Implementations;
 using Repositories.Interfaces;
 using AIStory.API.BackgroundServices;
 using Services.Implementations;
+using Services.Implementations.Lookups;
 using Services.Integrations.PayOS;
 using Services.Interfaces;
 using System.Security.Claims;
@@ -76,6 +77,13 @@ namespace AIStory.API
 
             builder.Services.AddScoped<IStoryRepository, StoryRepository>();
             builder.Services.AddScoped<IStoryService, StoryService>();
+            builder.Services.AddScoped<IUserLookup, UserLookup>();
+            builder.Services.AddScoped<ICategoryLookup, CategoryLookup>();
+            builder.Services.AddScoped<IStoryLookup, StoryLookup>();
+            builder.Services.AddScoped<IUserActivityLookup, UserActivityLookup>();
+            builder.Services.AddScoped<IStoryCommentCommand, StoryCommentCommand>();
+            builder.Services.AddScoped<ICommentReactionReader, CommentReactionReader>();
+            builder.Services.AddScoped<IStoryCommentPostService, StoryCommentPostService>();
             builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
             builder.Services.AddScoped<ICategoryService, CategoryService>();
             builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
@@ -100,7 +108,7 @@ namespace AIStory.API
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
 
-            // AI: Story Memory Engine (RAG khi đã index) + 4 Agent
+            // AI: Story Memory Engine (RAG khi đã index) + các agent gợi ý/đồng sáng tác
             builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
             builder.Services.AddScoped<IContentGuardrailService, ContentGuardrailService>();
             builder.Services.AddScoped<IAIUsageLogRepository, AIUsageLogRepository>();
@@ -110,10 +118,9 @@ namespace AIStory.API
             builder.Services.AddSingleton<IVectorStore, FaissVectorStore>();
             builder.Services.AddScoped<IStoryRagService, StoryRagService>();
             builder.Services.AddScoped<IStoryMemoryEngine, StoryMemoryEngine>();
-            builder.Services.AddScoped<IPlotManagerService, PlotManagerService>();
+            builder.Services.AddScoped<IChapterMemoryAnalysisService, ChapterMemoryAnalysisService>();
             builder.Services.AddScoped<IAINextChapterService, AINextChapterService>();
             builder.Services.AddScoped<IAICoCreationService, AICoCreationService>();
-            builder.Services.AddScoped<IAIConsistencyCheckService, AIConsistencyCheckService>();
             builder.Services.AddScoped<IChapterCheckService, ChapterCheckService>();
             builder.Services.AddScoped<IAiGeneratedContentRepository, AiGeneratedContentRepository>();
             builder.Services.AddScoped<IAiSensitiveWordsRepository, AiSensitiveWordsRepository>();

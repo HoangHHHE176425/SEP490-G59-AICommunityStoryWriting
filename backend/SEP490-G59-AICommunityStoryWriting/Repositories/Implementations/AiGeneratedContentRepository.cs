@@ -11,6 +11,9 @@ public class AiGeneratedContentRepository : IAiGeneratedContentRepository
     public IReadOnlyList<ai_generated_content> GetAllByChapterId(Guid chapterId)
         => AiGeneratedContentDAO.GetAllByChapterId(chapterId);
 
+    public IReadOnlyList<ai_generated_content> GetAllByDraftChapterId(Guid draftChapterId)
+        => AiGeneratedContentDAO.GetAllByDraftChapterId(draftChapterId);
+
     public IReadOnlyList<ai_generated_content> GetAllByStoryIdAndChapterIndex(Guid storyId, int chapterIndex, int maxCount = 50)
         => AiGeneratedContentDAO.GetAllByStoryIdAndChapterIndex(storyId, chapterIndex, maxCount);
 
@@ -22,6 +25,9 @@ public class AiGeneratedContentRepository : IAiGeneratedContentRepository
 
     public void UpdateChapterId(Guid id, Guid chapterId, int chapterOrderIndex)
         => AiGeneratedContentDAO.UpdateChapterId(id, chapterId, chapterOrderIndex);
+
+    public void BindDraftChapterId(Guid draftChapterId, Guid chapterId, int chapterOrderIndex)
+        => AiGeneratedContentDAO.BindDraftChapterId(draftChapterId, chapterId, chapterOrderIndex);
 
     public void DeleteAllByChapterId(Guid chapterId)
         => AiGeneratedContentDAO.DeleteAllByChapterId(chapterId);

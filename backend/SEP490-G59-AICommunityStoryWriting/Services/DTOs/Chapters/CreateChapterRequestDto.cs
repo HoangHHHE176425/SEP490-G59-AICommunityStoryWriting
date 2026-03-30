@@ -2,6 +2,8 @@ namespace Services.DTOs.Chapters
 {
     public class CreateChapterRequestDto
     {
+        /// <summary>GUID của chapter do FE sinh. Backend sẽ ghi nhận nguyên giá trị này (không tự tạo Guid).</summary>
+        public Guid Id { get; set; }
         public Guid StoryId { get; set; }
         public string Title { get; set; } = null!;
         public string? Content { get; set; }

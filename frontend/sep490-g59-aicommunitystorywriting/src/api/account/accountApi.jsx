@@ -72,10 +72,14 @@ export async function getProfileByUserId(userId) {
     if (!userId) throw new Error("userId là bắt buộc");
     const res = await axiosInstance.get(`/Account/profile/${userId}`);
     const d = res.data;
+    const statusRaw = d.status ?? d.Status ?? d.accountStatus ?? d.AccountStatus ?? '';
+    const status = String(statusRaw || '').trim().toUpperCase();
     return {
         id: d.id ?? d.Id,
         displayName: d.displayName ?? d.DisplayName ?? d.email?.split?.('@')?.[0] ?? 'Ẩn danh',
         email: d.email ?? d.Email ?? '',
+        status,
+        isBanned: status === 'BANNED',
         phone: d.phone ?? d.Phone ?? '',
         avatarUrl: d.avatarUrl ?? d.AvatarUrl ?? '',
         bio: d.bio ?? d.Bio ?? '',

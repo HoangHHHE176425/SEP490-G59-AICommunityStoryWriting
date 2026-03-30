@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { approveWithdraw, getAdminTransactions, rejectWithdraw } from '../../../api/admin/transactionsApi';
+import { approveWithdraw, getAdminTransactions, rejectWithdraw, syncWithdrawStatus } from '../../../api/admin/transactionsApi';
 
 function upper(s) {
     return String(s ?? '').toUpperCase();
@@ -453,12 +453,13 @@ export function AdminTransactions() {
                                 <th className="px-3 py-2 font-medium">Phương thức</th>
                                 <th className="px-3 py-2 font-medium">Trạng thái</th>
                                 <th className="px-3 py-2 font-medium">Mã tham chiếu</th>
+                                <th className="px-3 py-2 font-medium text-right">Tác vụ</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white">
                             {filtered.length === 0 ? (
                                 <tr>
-                                    <td className="px-3 py-10 text-center text-slate-500" colSpan={7}>
+                                    <td className="px-3 py-10 text-center text-slate-500" colSpan={8}>
                                         {loading ? 'Đang tải...' : 'Không có giao dịch phù hợp bộ lọc.'}
                                     </td>
                                 </tr>
@@ -515,6 +516,27 @@ export function AdminTransactions() {
                                             </span>
                                         </td>
                                         <td className="px-3 py-2 text-slate-600">{tx.gatewayRef || '-'}</td>
+                                        <td className="px-3 py-2 text-right">
+                                            {isProcessingWithdraw(tx) ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={async (e) => {
+                                                        e.stopPropagation();
+                                                        await handleSyncWithdrawStatusById(tx.id);
+                                                    }}
+                                                    disabled={syncingWithdrawId === tx.id}
+                                                    className={`rounded-lg border px-2.5 py-1 text-[10px] font-semibold ${
+                                                        syncingWithdrawId === tx.id
+                                                            ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                                                            : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                                    }`}
+                                                >
+                                                    {syncingWithdrawId === tx.id ? 'Đang sync…' : 'Sync'}
+                                                </button>
+                                            ) : (
+                                                <span className="text-slate-300">—</span>
+                                            )}
+                                        </td>
                                     </tr>
                                 ))
                             )}
@@ -566,6 +588,20 @@ export function AdminTransactions() {
                                             {actionLoading ? 'Đang xử lý…' : 'Duyệt'}
                                         </button>
                                     </>
+                                ) : null}
+                                {canSyncWithdraw ? (
+                                    <button
+                                        type="button"
+                                        disabled={actionLoading}
+                                        onClick={handleSyncWithdrawStatus}
+                                        className={`rounded-lg border px-3 py-2 text-[11px] font-semibold ${
+                                            actionLoading
+                                                ? 'border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed'
+                                                : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                        }`}
+                                    >
+                                        {actionLoading ? 'Đang đồng bộ…' : 'Sync trạng thái'}
+                                    </button>
                                 ) : null}
                                 <button
                                     type="button"

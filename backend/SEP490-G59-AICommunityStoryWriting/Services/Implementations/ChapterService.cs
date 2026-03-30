@@ -21,16 +21,28 @@ namespace Services.Implementations
         private readonly IChapterRepository _chapterRepository;
         private readonly IChapterVersionRepository _versionRepository;
         private readonly IAiGeneratedContentRepository _aiContentRepository;
+        private readonly IUserLookup _userLookup;
+        private readonly IStoryLookup _storyLookup;
         private readonly IServiceScopeFactory? _scopeFactory;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
         private readonly INotificationHubNotifier? _notificationHubNotifier;
         private readonly ILogger<ChapterService> _logger;
 
-        public ChapterService(IChapterRepository chapterRepository, IChapterVersionRepository versionRepository, IAiGeneratedContentRepository aiContentRepository, ILogger<ChapterService> logger, IModerationHubNotifier? moderationHubNotifier = null, INotificationHubNotifier? notificationHubNotifier = null)
+        public ChapterService(
+            IChapterRepository chapterRepository,
+            IChapterVersionRepository versionRepository,
+            IAiGeneratedContentRepository aiContentRepository,
+            IUserLookup userLookup,
+            IStoryLookup storyLookup,
+            ILogger<ChapterService> logger,
+            IModerationHubNotifier? moderationHubNotifier = null,
+            INotificationHubNotifier? notificationHubNotifier = null)
         {
             _chapterRepository = chapterRepository;
             _versionRepository = versionRepository;
             _aiContentRepository = aiContentRepository;
+            _userLookup = userLookup;
+            _storyLookup = storyLookup;
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
             _notificationHubNotifier = notificationHubNotifier;
@@ -42,30 +54,40 @@ namespace Services.Implementations
             IChapterVersionRepository versionRepository,
             IAiGeneratedContentRepository aiContentRepository,
             IServiceScopeFactory scopeFactory,
+            IUserLookup userLookup,
+            IStoryLookup storyLookup,
             ILogger<ChapterService> logger,
             IModerationHubNotifier? moderationHubNotifier = null,
             INotificationHubNotifier? notificationHubNotifier = null)
-            : this(chapterRepository, versionRepository, aiContentRepository, logger, moderationHubNotifier, notificationHubNotifier)
+            : this(chapterRepository, versionRepository, aiContentRepository, userLookup, storyLookup, logger, moderationHubNotifier, notificationHubNotifier)
         {
             _scopeFactory = scopeFactory;
         }
 
         public ChapterResponseDto Create(CreateChapterRequestDto request)
         {
-            var story = StoryDAO.GetById(request.StoryId);
+            if (request == null) throw new ArgumentNullException(nameof(request));
+
+            var story = _storyLookup.GetById(request.StoryId);
             if (story == null)
             {
                 throw new InvalidOperationException($"Story with ID {request.StoryId} not found.");
             }
 
-            if (story.author_id is Guid aid && UserDAO.IsAuthorWritingSuspended(aid))
+            if (request.Id == Guid.Empty)
+                throw new ArgumentException("Id must be a non-empty Guid (do not leave empty).");
+
+            if (story.author_id is Guid aid && _userLookup.IsAuthorWritingSuspended(aid))
                 throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin).");
+            EnsureStoryProgressAllowsChapterWrite(story, "tạo chương");
 
             var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(request.StoryId, request.OrderIndex);
             if (existingChapter != null)
             {
                 throw new InvalidOperationException($"Chapter with order index {request.OrderIndex} already exists for this story.");
             }
+
+            EnsureUniqueChapterTitleForStory(request.StoryId, request.Title, null);
 
             var validAccessTypes = new[] { "FREE", "PAID" };
             var accessType = request.AccessType?.ToUpper() ?? "FREE";
@@ -79,6 +101,10 @@ namespace Services.Implementations
             if (accessType == "PAID" && coinPrice <= 0)
             {
                 throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+            }
+            if (accessType == "PAID" && (story.total_views ?? 0) < 500)
+            {
+                throw new InvalidOperationException("Truyện cần tối thiểu 500 lượt xem mới được thiết lập chế độ trả phí cho chương.");
             }
             if (accessType == "FREE" && coinPrice > 0)
             {
@@ -113,7 +139,7 @@ namespace Services.Implementations
 
             var chapter = new chapters
             {
-                id = Guid.NewGuid(),
+                id = request.Id,
                 story_id = request.StoryId,
                 title = request.Title,
                 content = content,
@@ -134,6 +160,10 @@ namespace Services.Implementations
 
             _chapterRepository.Add(chapter);
 
+            // Nếu trước đó FE đã dùng draft_chapter_id để lưu AI gợi ý,
+            // map toàn bộ record draft sang chapter thật ngay khi tạo xong.
+            _aiContentRepository.BindDraftChapterId(chapter.id, chapter.id, chapter.order_index);
+
             if (request.AiGeneratedContentId.HasValue)
                 _aiContentRepository.UpdateChapterId(request.AiGeneratedContentId.Value, chapter.id, chapter.order_index);
 
@@ -145,7 +175,7 @@ namespace Services.Implementations
                 if (status == "PUBLISHED" && story != null)
                 {
                     story.last_published_at = DateTime.Now;
-                    StoryDAO.Update(story);
+                    _storyLookup.Update(story);
                     Console.WriteLine($"[CONSOLE] ChapterService.Create PUBLISHED -> NotifyStoryFollowersNewChapter StoryId={request.StoryId} ChapterId={chapter.id}");
                     _logger.LogInformation("ChapterService.Create calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", request.StoryId, chapter.id);
                     var createdNotifications = NotificationDAO.NotifyStoryFollowersNewChapter(request.StoryId, chapter.id, request.Title, story.title, _logger);
@@ -163,8 +193,29 @@ namespace Services.Implementations
                 // The chapter was already created successfully
             }
 
-            var createdChapter = _chapterRepository.GetById(chapter.id);
-            return MapToResponseDto(createdChapter!);
+            if (string.Equals(status, "PUBLISHED", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(content))
+            {
+                ChapterMemoryAnalysisScheduler.TrySchedule(
+                    _scopeFactory,
+                    _logger,
+                    request.StoryId,
+                    chapter.id,
+                    chapter.title,
+                    chapter.order_index,
+                    content);
+            }
+
+            // Create: return lightweight DTO without extra DB lookups.
+            return MapToResponseDto(chapter, includeStoryLookup: false, storyTitleOverride: story.title);
+        }
+
+        // New overload (for future ownership/auth validation):
+        // - Intentionally delegates to current behavior for now.
+        // - Unit tests can target this signature; product can later enforce author ownership here.
+        public ChapterResponseDto Create(CreateChapterRequestDto request, Guid authorId)
+        {
+            return Create(request);
         }
 
         public PagedResultDto<ChapterListItemDto> GetAll(ChapterQueryDto query)
@@ -255,7 +306,7 @@ namespace Services.Implementations
             var storyTitles = new Dictionary<Guid, string>();
             foreach (var sid in storyIds)
             {
-                var story = StoryDAO.GetById(sid);
+                var story = _storyLookup.GetById(sid);
                 if (story != null)
                     storyTitles[sid] = story.title ?? "";
             }
@@ -309,7 +360,7 @@ namespace Services.Implementations
                 .OrderBy(c => c.order_index)
                 .ToList();
 
-            var storyTitle = StoryDAO.GetById(storyId)?.title;
+            var storyTitle = _storyLookup.GetById(storyId)?.title;
             var items = chapterList.Select(c =>
             {
                 var dto = MapToListItemDto(c, storyTitle);
@@ -345,6 +396,10 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+            var storyForUpdate = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryProgressAllowsChapterWrite(storyForUpdate, "chỉnh sửa chương");
+
+            var previousStatus = chapter.status?.ToUpperInvariant() ?? "DRAFT";
 
             if (request.OrderIndex.HasValue && request.OrderIndex.Value != chapter.order_index)
             {
@@ -355,6 +410,9 @@ namespace Services.Implementations
                     throw new InvalidOperationException($"Chapter with order index {request.OrderIndex.Value} already exists for this story.");
                 }
             }
+
+            var targetStoryId = chapter.story_id ?? Guid.Empty;
+            EnsureUniqueChapterTitleForStory(targetStoryId, request.Title, id);
 
             if (!string.IsNullOrWhiteSpace(request.Status))
             {
@@ -379,6 +437,12 @@ namespace Services.Implementations
                 if (accessType == "PAID" && coinPrice <= 0)
                 {
                     throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+                }
+                if (accessType == "PAID" && !string.Equals(chapter.access_type, "PAID", StringComparison.OrdinalIgnoreCase))
+                {
+                    var story = targetStoryId == Guid.Empty ? null : _storyLookup.GetById(targetStoryId);
+                    if ((story?.total_views ?? 0) < 500)
+                        throw new InvalidOperationException("Truyện cần tối thiểu 500 lượt xem mới được thiết lập chế độ trả phí cho chương.");
                 }
                 if (accessType == "FREE")
                 {
@@ -405,7 +469,13 @@ namespace Services.Implementations
             }
 
             chapter.title = request.Title;
-            chapter.content = request.Content;
+            // Chỉ cập nhật content khi client gửi field này; tránh PUT partial làm null → xóa nội dung.
+            if (request.Content != null)
+            {
+                chapter.content = request.Content;
+                chapter.word_count = CalculateWordCount(request.Content);
+            }
+
             chapter.updated_at = DateTime.Now;
 
             if (request.OrderIndex.HasValue)
@@ -417,7 +487,12 @@ namespace Services.Implementations
                 var oldStatus = chapter.status?.ToUpper() ?? "DRAFT";
 
                 if (newStatus == "PENDING_REVIEW")
+                {
+                    var updateStory = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+                    if (updateStory?.author_id is Guid updateAuthorId && _userLookup.IsAuthorWritingSuspended(updateAuthorId))
+                        throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
                     EnsureCanSubmitForReview(chapter);
+                }
 
                 chapter.status = newStatus;
 
@@ -447,11 +522,6 @@ namespace Services.Implementations
             if (request.AiSimilarityPercent.HasValue)
                 chapter.ai_similarity_percent = Math.Round(request.AiSimilarityPercent.Value, 2);
 
-            if (request.Content != null)
-            {
-                chapter.word_count = CalculateWordCount(request.Content);
-            }
-
             _chapterRepository.Update(chapter);
 
             if (chapter.story_id.HasValue)
@@ -463,11 +533,11 @@ namespace Services.Implementations
                     // If chapter status was changed to PUBLISHED, update story's last_published_at and notify followers
                     if (!string.IsNullOrWhiteSpace(request.Status) && request.Status.ToUpper() == "PUBLISHED")
                     {
-                        var story = StoryDAO.GetById(chapter.story_id.Value);
+                        var story = _storyLookup.GetById(chapter.story_id.Value);
                         if (story != null)
                         {
                             story.last_published_at = DateTime.Now;
-                            StoryDAO.Update(story);
+                            _storyLookup.Update(story);
                         }
                         Console.WriteLine($"[CONSOLE] ChapterService.Update PUBLISHED -> NotifyStoryFollowersNewChapter StoryId={chapter.story_id} ChapterId={chapter.id}");
                         _logger.LogInformation("ChapterService.Update calling NotifyStoryFollowersNewChapter StoryId={StoryId} ChapterId={ChapterId}", chapter.story_id, chapter.id);
@@ -487,6 +557,26 @@ namespace Services.Implementations
                 }
             }
 
+            var finalStatus = chapter.status?.ToUpperInvariant() ?? "DRAFT";
+            if (string.Equals(finalStatus, "PUBLISHED", StringComparison.OrdinalIgnoreCase)
+                && chapter.story_id.HasValue
+                && !string.IsNullOrWhiteSpace(chapter.content))
+            {
+                var contentUpdated = request.Content != null;
+                var becamePublished = !string.Equals(previousStatus, "PUBLISHED", StringComparison.OrdinalIgnoreCase);
+                if (contentUpdated || becamePublished)
+                {
+                    ChapterMemoryAnalysisScheduler.TrySchedule(
+                        _scopeFactory,
+                        _logger,
+                        chapter.story_id.Value,
+                        chapter.id,
+                        chapter.title,
+                        chapter.order_index,
+                        chapter.content);
+                }
+            }
+
             return true;
         }
 
@@ -495,6 +585,8 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+            var storyForDelete = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryProgressAllowsChapterWrite(storyForDelete, "xóa chương");
 
             var statusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
             if (statusUpper != "DRAFT")
@@ -542,6 +634,11 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+
+            var story = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            if (story?.author_id is Guid authorId && _userLookup.IsAuthorWritingSuspended(authorId))
+                throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể gửi xuất bản.");
+            EnsureStoryProgressAllowsChapterWrite(story, "gửi xuất bản chương");
 
             // Khi đã có phiên bản nào của chương đang chờ duyệt thì không cho gửi duyệt chapter gốc.
             var versionsPending = _versionRepository.GetByChapterId(id)
@@ -642,6 +739,13 @@ namespace Services.Implementations
             }
         }
 
+        private static void EnsureStoryProgressAllowsChapterWrite(stories? story, string actionVi)
+        {
+            var progress = (story?.story_progress_status ?? "ONGOING").Trim().ToUpperInvariant();
+            if (progress == "HIATUS" || progress == "COMPLETED")
+                throw new InvalidOperationException($"Truyện đang ở trạng thái {(progress == "COMPLETED" ? "Hoàn thành" : "Tạm dừng")}, không thể {actionVi}.");
+        }
+
         /// <summary>Hủy xuất bản phải theo thứ tự ngược: chỉ được hủy chương N nếu không còn chương nào có thứ tự > N đang xuất bản hoặc chờ duyệt.</summary>
         private void EnsureCanUnpublish(chapters chapter)
         {
@@ -700,9 +804,31 @@ namespace Services.Implementations
                 .Length;
         }
 
+        private void EnsureUniqueChapterTitleForStory(Guid storyId, string? title, Guid? excludeChapterId)
+        {
+            var normalizedTitle = NormalizeTitle(title);
+            if (string.IsNullOrWhiteSpace(normalizedTitle))
+                return;
+
+            var duplicated = _chapterRepository
+                .GetByStoryId(storyId)
+                .Any(c => (!excludeChapterId.HasValue || c.id != excludeChapterId.Value) &&
+                          NormalizeTitle(c.title) == normalizedTitle);
+            if (duplicated)
+                throw new InvalidOperationException("Tên chương đã tồn tại trong truyện này. Vui lòng đặt tên khác.");
+        }
+
+        private static string NormalizeTitle(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return string.Empty;
+            return string.Join(" ", title.Trim().Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+                .ToLowerInvariant();
+        }
+
         private void UpdateStoryChapterStats(Guid storyId)
         {
-            var story = StoryDAO.GetById(storyId);
+            var story = _storyLookup.GetById(storyId);
             if (story == null)
                 return;
 
@@ -712,20 +838,20 @@ namespace Services.Implementations
             story.word_count = chapterList.Sum(c => c.word_count ?? 0);
             story.updated_at = DateTime.Now;
 
-            StoryDAO.Update(story);
+            _storyLookup.Update(story);
         }
 
-        private ChapterResponseDto MapToResponseDto(chapters chapter)
+        private ChapterResponseDto MapToResponseDto(chapters chapter, bool includeStoryLookup = true, string? storyTitleOverride = null)
         {
-            stories? story = null;
-            if (chapter.story_id.HasValue)
-                story = StoryDAO.GetById(chapter.story_id.Value);
+            string? storyTitle = storyTitleOverride;
+            if (storyTitle == null && includeStoryLookup && chapter.story_id.HasValue)
+                storyTitle = _storyLookup.GetById(chapter.story_id.Value)?.title;
 
             return new ChapterResponseDto
             {
                 Id = chapter.id,
                 StoryId = chapter.story_id,
-                StoryTitle = story?.title,
+                StoryTitle = storyTitle,
                 Title = chapter.title,
                 OrderIndex = chapter.order_index,
                 Content = chapter.content,

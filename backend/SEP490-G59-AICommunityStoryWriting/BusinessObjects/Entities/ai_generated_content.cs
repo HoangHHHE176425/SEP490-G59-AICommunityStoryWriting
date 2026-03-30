@@ -9,6 +9,9 @@ public partial class ai_generated_content
 
     public Guid? chapter_id { get; set; }
 
+    /// <summary>ID chương tạm do FE sinh trước khi chapter thật được tạo.</summary>
+    public Guid? draft_chapter_id { get; set; }
+
     public Guid? user_id { get; set; }
 
     public string? input_prompt { get; set; }

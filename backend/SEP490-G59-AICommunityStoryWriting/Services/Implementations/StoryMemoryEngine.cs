@@ -17,6 +17,7 @@ public class StoryMemoryEngine : IStoryMemoryEngine
     private readonly IStoryStoryStateRepository _stateRepo;
     private readonly IStoryRagService _ragService;
     private readonly IStoryRepository _storyRepository;
+    private readonly IChapterRepository _chapterRepository;
     private readonly IConfiguration _configuration;
 
     public StoryMemoryEngine(
@@ -25,6 +26,7 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         IStoryStoryStateRepository stateRepo,
         IStoryRagService ragService,
         IStoryRepository storyRepository,
+        IChapterRepository chapterRepository,
         IConfiguration configuration)
     {
         _characterRepo = characterRepo;
@@ -32,6 +34,7 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         _stateRepo = stateRepo;
         _ragService = ragService;
         _storyRepository = storyRepository;
+        _chapterRepository = chapterRepository;
         _configuration = configuration;
     }
 
@@ -128,7 +131,17 @@ public class StoryMemoryEngine : IStoryMemoryEngine
     {
         var list = _eventRepo.GetByStoryId(storyId);
         if (list.Count == 0) return string.Empty;
-        var lines = list.Select((e, i) => $"{i + 1}. {e.description}");
+        var chapterOrders = _chapterRepository.GetByStoryId(storyId).ToDictionary(c => c.id, c => c.order_index);
+        var sorted = list
+            .OrderBy(e =>
+            {
+                if (e.chapter_id is Guid cid && chapterOrders.TryGetValue(cid, out var ord)) return ord;
+                return int.MaxValue;
+            })
+            .ThenBy(e => e.order_index)
+            .ThenBy(e => e.created_at ?? DateTime.MinValue)
+            .ToList();
+        var lines = sorted.Select((e, i) => $"{i + 1}. {e.description}");
         return "## Event Memory (Timeline)\n" + string.Join("\n", lines);
     }
 

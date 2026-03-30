@@ -3,7 +3,7 @@ import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'luc
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
-import { indexRag, suggestNextChapter, coCreate, checkChapter, compareChapterPreview, getAiUsageLimit } from '../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, checkBannedWords, checkChapter, compareChapterPreview, getAiUsageLimit } from '../../api/ai/aiApi';
 import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 import { refresh as refreshAuth } from '../../api/auth/authApi';
 import { translateCoCreateOutlineLabels } from '../../utils/coCreateOutlineLabelsVi';
@@ -135,10 +135,10 @@ function contentOnlyForChapter(raw) {
     return s.replace(/\n{3,}/g, '\n\n').trim();
 }
 
-export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, editingVersion, readOnly = false, onSave, onNavigateAfterSave, onCancel }) {
+export function ChapterEditorPage({ story, chapter, isCreateMode = false, sourceChapterForVersion, editingVersion, readOnly = false, onSave, onNavigateAfterSave, onCancel }) {
     const { showToast, ToastContainer } = useToast();
     const storyId = story?.id ?? story?.Id;
-    const [chapterCheckModal, setChapterCheckModal] = useState({ open: false, loading: false, data: null, error: null });
+    const [chapterCheckModal, setChapterCheckModal] = useState({ open: false, loading: false, data: null, error: null, mode: 'banned' });
     /** Preview % AI trước khi lưu; chỉ khi bấm Xác nhận mới gọi onSave + ghi ai_similarity_percent */
     const [aiCompareModal, setAiCompareModal] = useState({
         open: false,
@@ -198,19 +198,25 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     });
     /** Số chương (1-based) đã tồn tại — dùng để gợi ý số tiếp theo và validate không nhập trùng */
     const [existingChapterNumbers, setExistingChapterNumbers] = useState(new Set());
+    const [existingChapterTitles, setExistingChapterTitles] = useState(new Set());
     const [chapterNumberError, setChapterNumberError] = useState('');
     /** Danh sách version của chương (khi ở chế độ version) — dùng validate số version không trùng + trạng thái (pending_review) */
     const [existingVersionsForChapter, setExistingVersionsForChapter] = useState([]);
     const [versionNumberError, setVersionNumberError] = useState('');
-    /** Điều kiện gửi xuất bản version: publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion (chương trước có version chờ duyệt). */
+    /** Điều kiện gửi xuất bản version: chương trước đã duyệt/từ chối + không có version chờ duyệt ở chương trước (đồng bộ ChapterListManager). */
     const [versionPublishEligibility, setVersionPublishEligibility] = useState({
-        publishedOrderIndices: new Set(),
-        pendingOrderIndices: new Set(),
+        prevSequentialOk: false,
         prevHasPendingVersion: false,
     });
     /** Đã load xong dữ liệu để tính canSubmitVersion (tránh nút Xuất bản bật sẵn rồi mới disable). */
     const [versionEligibilityLoaded, setVersionEligibilityLoaded] = useState(false);
     const [versionsForChapterLoaded, setVersionsForChapterLoaded] = useState(false);
+    /** Chương thường (tạo mới / chỉnh sửa): điều kiện gửi xuất bản theo thứ tự + không có phiên bản chờ duyệt ở chương hiện tại. */
+    const [normalPublishEligibility, setNormalPublishEligibility] = useState({
+        loaded: false,
+        prevSequentialOk: true,
+        selfHasPendingVersion: false,
+    });
 
     const [showSettings, setShowSettings] = useState(false);
     const [editorSettings, setEditorSettings] = useState({
@@ -225,6 +231,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     const [showSuggestPopup, setShowSuggestPopup] = useState(false);
     const [suggestLoading, setSuggestLoading] = useState(false);
     const [suggestions, setSuggestions] = useState([]);
+    const [suggestionsCache, setSuggestionsCache] = useState([]);
     const [suggestError, setSuggestError] = useState(null);
     const [aiUsageLimit, setAiUsageLimit] = useState(null);
 
@@ -275,9 +282,14 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     const [coCreateIdea, setCoCreateIdea] = useState('');
     const [coCreateLoading, setCoCreateLoading] = useState(false);
     const [coCreateResult, setCoCreateResult] = useState(null);
+    const [manualSpellingCheckLoading, setManualSpellingCheckLoading] = useState(false);
 
     const isNewChapter = !chapter;
     const isVersionMode = Boolean(sourceChapterForVersion);
+    const isEditingChapterMode = !isVersionMode && !isCreateMode && Boolean(chapter);
+    const storyTotalViews = Number(story?.totalViews ?? story?.TotalViews ?? 0) || 0;
+    const canEnablePaidMode = storyTotalViews >= 500;
+    const normalizeChapterTitle = (value) => (value ?? '').toString().trim().replace(/\s+/g, ' ').toLowerCase();
 
     // Pre-fill khi ở chế độ version: chỉnh sửa version thì lấy dữ liệu version; tạo version mới thì để trống (chỉ giữ number, versionNumber)
     useEffect(() => {
@@ -337,61 +349,111 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             .finally(() => setVersionsForChapterLoaded(true));
     }, [isVersionMode, sourceChapterForVersion?.id, sourceChapterForVersion?.Id, editingVersion]);
 
-    // Load điều kiện gửi xuất bản version (thứ tự 1,2,3... và không trùng phiên bản chờ duyệt) — dùng đúng API có status như ChapterListManager
+    // Load điều kiện gửi xuất bản version — đồng bộ ChapterListManager (chương trước đã published/rejected, không có version pending ở chương trước)
     useEffect(() => {
         if (!isVersionMode || !storyId || !sourceChapterForVersion) {
-            setVersionPublishEligibility({ publishedOrderIndices: new Set(), pendingOrderIndices: new Set(), prevHasPendingVersion: false });
+            setVersionPublishEligibility({ prevSequentialOk: false, prevHasPendingVersion: false });
             setVersionEligibilityLoaded(false);
             return;
         }
         setVersionEligibilityLoaded(false);
         const chapterNumber = Number(sourceChapterForVersion.number ?? 1);
-        const prevOrderIndex = chapterNumber - 2; // 0-based index của chương trước
-        const markLoaded = (publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion) => {
-            setVersionPublishEligibility({ publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion });
-            setVersionEligibilityLoaded(true);
-        };
-        // Gọi riêng PUBLISHED và PENDING_REVIEW giống ChapterListManager để đảm bảo đúng tập chương đã gửi/chờ duyệt
-        Promise.all([
-            getChapters({ storyId, status: 'PUBLISHED', pageSize: 500 }),
-            getChapters({ storyId, status: 'PENDING_REVIEW', pageSize: 500 }),
-            getChapters({ storyId, page: 1, pageSize: 500 }),
-        ])
-            .then(([publishedRes, pendingRes, allRes]) => {
-                const publishedList = Array.isArray(publishedRes) ? publishedRes : (publishedRes?.items ?? publishedRes?.Items ?? []);
-                const pendingList = Array.isArray(pendingRes) ? pendingRes : (pendingRes?.items ?? pendingRes?.Items ?? []);
-                const publishedOrderIndices = new Set(
-                    publishedList.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0))
-                );
-                const pendingOrderIndices = new Set(
-                    pendingList.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0))
-                );
+        const prevOrderIndex = chapterNumber - 2;
+        getChapters({ storyId, page: 1, pageSize: 500 })
+            .then((allRes) => {
                 const allItems = allRes?.items ?? allRes?.Items ?? [];
                 const arr = Array.isArray(allItems) ? allItems : [];
+                if (chapterNumber <= 1) {
+                    setVersionPublishEligibility({ prevSequentialOk: true, prevHasPendingVersion: false });
+                    setVersionEligibilityLoaded(true);
+                    return;
+                }
                 const prevChapter = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === prevOrderIndex);
                 if (!prevChapter) {
-                    markLoaded(publishedOrderIndices, pendingOrderIndices, false);
+                    setVersionPublishEligibility({ prevSequentialOk: false, prevHasPendingVersion: false });
+                    setVersionEligibilityLoaded(true);
                     return;
                 }
                 const prevChapterId = prevChapter.id ?? prevChapter.Id;
+                const prevSt = String(prevChapter.status ?? prevChapter.Status ?? '').toLowerCase();
+                const prevProcessed = prevSt === 'published' || prevSt === 'rejected';
                 getChapterVersions(prevChapterId)
                     .then((verList) => {
                         const vArr = Array.isArray(verList) ? verList : [];
                         const prevHasPendingVersion = vArr.some((v) => ((v.status ?? v.Status ?? '').toString().toLowerCase() === 'pending_review'));
-                        markLoaded(publishedOrderIndices, pendingOrderIndices, prevHasPendingVersion);
+                        const prevSequentialOk = prevProcessed && !prevHasPendingVersion;
+                        setVersionPublishEligibility({ prevSequentialOk, prevHasPendingVersion });
+                        setVersionEligibilityLoaded(true);
                     })
-                    .catch(() => markLoaded(publishedOrderIndices, pendingOrderIndices, false));
+                    .catch(() => {
+                        setVersionPublishEligibility({ prevSequentialOk: false, prevHasPendingVersion: false });
+                        setVersionEligibilityLoaded(true);
+                    });
             })
             .catch(() => {
-                setVersionPublishEligibility({ publishedOrderIndices: new Set(), pendingOrderIndices: new Set(), prevHasPendingVersion: false });
+                setVersionPublishEligibility({ prevSequentialOk: false, prevHasPendingVersion: false });
                 setVersionEligibilityLoaded(true);
             });
     }, [isVersionMode, storyId, sourceChapterForVersion]);
+
+    // Điều kiện Xuất bản chương thường (tạo mới / sửa) — cùng quy tắc tuần tự với ChapterListManager
+    useEffect(() => {
+        if (isVersionMode || !storyId) {
+            setNormalPublishEligibility({ loaded: false, prevSequentialOk: true, selfHasPendingVersion: false });
+            return;
+        }
+        const num = Number(chapterData.number);
+        if (!Number.isInteger(num) || num < 1) {
+            setNormalPublishEligibility({ loaded: true, prevSequentialOk: false, selfHasPendingVersion: false });
+            return;
+        }
+        setNormalPublishEligibility((p) => ({ ...p, loaded: false }));
+        const currentChapterId = chapter?.id ?? chapter?.Id ?? null;
+        getChapters({ storyId, page: 1, pageSize: 500 })
+            .then(async (allRes) => {
+                const allItems = allRes?.items ?? allRes?.Items ?? [];
+                const arr = Array.isArray(allItems) ? allItems : [];
+                let selfHasPendingVersion = false;
+                if (currentChapterId) {
+                    try {
+                        const selfVers = await getChapterVersions(currentChapterId);
+                        const sv = Array.isArray(selfVers) ? selfVers : [];
+                        selfHasPendingVersion = sv.some((v) => String(v.status ?? v.Status ?? '').toLowerCase() === 'pending_review');
+                    } catch {
+                        selfHasPendingVersion = false;
+                    }
+                }
+                if (num === 1) {
+                    setNormalPublishEligibility({ loaded: true, prevSequentialOk: true, selfHasPendingVersion });
+                    return;
+                }
+                const prevOrderIndex = num - 2;
+                const prevChapter = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === prevOrderIndex);
+                if (!prevChapter) {
+                    setNormalPublishEligibility({ loaded: true, prevSequentialOk: false, selfHasPendingVersion });
+                    return;
+                }
+                const prevChapterId = prevChapter.id ?? prevChapter.Id;
+                const prevSt = String(prevChapter.status ?? prevChapter.Status ?? '').toLowerCase();
+                const prevProcessed = prevSt === 'published' || prevSt === 'rejected';
+                try {
+                    const prevVers = await getChapterVersions(prevChapterId);
+                    const pv = Array.isArray(prevVers) ? prevVers : [];
+                    const prevHasPendingVersion = pv.some((v) => String(v.status ?? v.Status ?? '').toLowerCase() === 'pending_review');
+                    const prevSequentialOk = prevProcessed && !prevHasPendingVersion;
+                    setNormalPublishEligibility({ loaded: true, prevSequentialOk, selfHasPendingVersion });
+                } catch {
+                    setNormalPublishEligibility({ loaded: true, prevSequentialOk: false, selfHasPendingVersion });
+                }
+            })
+            .catch(() => setNormalPublishEligibility({ loaded: true, prevSequentialOk: false, selfHasPendingVersion: false }));
+    }, [isVersionMode, storyId, chapterData.number, chapter?.id, chapter?.Id]);
 
     // Load danh sách chương để tính số chương tiếp theo (thêm mới) và validate trùng (số 1-based)
     useEffect(() => {
         if (!storyId) {
             setExistingChapterNumbers(new Set());
+            setExistingChapterTitles(new Set());
             return;
         }
         getChapters({ storyId, page: 1, pageSize: 500 })
@@ -399,7 +461,15 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 const items = res?.items ?? res?.Items ?? [];
                 const arr = Array.isArray(items) ? items : [];
                 const numbers = new Set(arr.map((c) => Number((c.orderIndex ?? c.OrderIndex ?? 0) + 1)));
+                const currentChapterId = chapter?.id ?? chapter?.Id ?? null;
+                const titles = new Set(
+                    arr
+                        .filter((c) => (c?.id ?? c?.Id ?? null) !== currentChapterId)
+                        .map((c) => normalizeChapterTitle(c?.title ?? c?.Title ?? ''))
+                        .filter(Boolean),
+                );
                 setExistingChapterNumbers(numbers);
+                setExistingChapterTitles(titles);
                 if (isNewChapter && !sourceChapterForVersion) {
                     const nextNumber = arr.length > 0
                         ? Math.max(...arr.map((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) + 1)) + 1
@@ -407,8 +477,11 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                     setChapterData((prev) => ({ ...prev, number: nextNumber }));
                 }
             })
-            .catch(() => setExistingChapterNumbers(new Set()));
-    }, [storyId, isNewChapter, sourceChapterForVersion]);
+            .catch(() => {
+                setExistingChapterNumbers(new Set());
+                setExistingChapterTitles(new Set());
+            });
+    }, [storyId, isNewChapter, sourceChapterForVersion, chapter?.id, chapter?.Id]);
 
     // Reload chapter data when chapter prop changes (chỉnh sửa chương). Khi chapter=null mà đang ở chế độ version (sourceChapterForVersion) thì không xóa form.
     useEffect(() => {
@@ -465,10 +538,25 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         try {
             // Gọi index-rag nền (không chờ). Gợi ý chạy ngay; BE dùng RAG nếu đã index, không thì dùng Story Context.
             indexRag(storyId);
-            const afterChapterId = chapter?.id ?? chapter?.Id ?? null;
-            const data = await suggestNextChapter(storyId, afterChapterId);
+            const orderIdx = (Number(chapterData.number) || 1) - 1;
+            let afterChapterId = null;
+            if (orderIdx > 0) {
+                try {
+                    const chRes = await getChapters({ storyId, page: 1, pageSize: 500 });
+                    const items = chRes?.items ?? chRes?.Items ?? [];
+                    const arr = Array.isArray(items) ? items : [];
+                    const prev = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === orderIdx - 1);
+                    afterChapterId = prev?.id ?? prev?.Id ?? null;
+                } catch {
+                    afterChapterId = null;
+                }
+            }
+            const chapterIdForAi = chapter?.id ?? chapter?.Id ?? null;
+            const data = await suggestNextChapter(storyId, afterChapterId, null, chapterIdForAi);
             const list = data?.suggestions ?? data?.Suggestions ?? [];
-            setSuggestions(Array.isArray(list) ? list : []);
+            const normalized = Array.isArray(list) ? list : [];
+            setSuggestions(normalized);
+            setSuggestionsCache(normalized);
             // Cập nhật số lượt còn lại sau khi gọi AI thành công
             loadAiUsageLimit();
         } catch (err) {
@@ -488,6 +576,17 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         } finally {
             setSuggestLoading(false);
         }
+    };
+
+    const openCachedSuggestions = () => {
+        if (!Array.isArray(suggestionsCache) || suggestionsCache.length === 0) {
+            showToast('Chưa có gợi ý nào trong phiên làm việc hiện tại.', 'info');
+            return;
+        }
+        setSuggestError(null);
+        setSuggestLoading(false);
+        setSuggestions(suggestionsCache);
+        setShowSuggestPopup(true);
     };
 
     const handleAISuggestion = async (type) => {
@@ -520,7 +619,8 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         setCoCreateLoading(true);
         try {
             const chapterOrderIndex = (Number(chapterData.number) || 1) - 1;
-            const data = await coCreate(storyId, idea || null, { chapterOrderIndex });
+            const chapterIdForAi = chapter?.id ?? chapter?.Id ?? null;
+            const data = await coCreate(storyId, idea || null, { chapterOrderIndex, chapterId: chapterIdForAi });
             // Trừ ngay trên UI để người dùng thấy số lượt giảm tức thì.
             decrementCoCreateUsageOptimistic();
             // Đồng bộ lại với BE (không chặn UI).
@@ -555,14 +655,9 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
 
     const currentChapterNumber = chapter ? Number(chapter.number ?? chapter.chapterNumber ?? (chapter.orderIndex ?? chapter.OrderIndex ?? 0) + 1) : null;
 
-    /** Điều kiện gửi xuất bản version — giống ChapterListManager: thứ tự 1,2,3...; chương gốc không chờ duyệt; chỉ một phiên bản chờ duyệt. */
+    /** Điều kiện gửi xuất bản version — giống ChapterListManager: thứ tự + chương trước đã duyệt/từ chối; chương gốc không chờ duyệt; chỉ một phiên bản chờ duyệt. */
     const chapterNumberForVersion = isVersionMode ? Number(sourceChapterForVersion?.number ?? 1) : 0;
-    const prevOrderIndexVersion = chapterNumberForVersion - 2;
-    const canSubmitForPublishVersion =
-        chapterNumberForVersion === 1 ||
-        versionPublishEligibility.publishedOrderIndices.has(prevOrderIndexVersion) ||
-        versionPublishEligibility.pendingOrderIndices.has(prevOrderIndexVersion) ||
-        versionPublishEligibility.prevHasPendingVersion;
+    const canSubmitForPublishVersion = versionPublishEligibility.prevSequentialOk;
     const hasOtherPendingVersion =
         existingVersionsForChapter.some(
             (v) => (v.status ?? '').toString().toLowerCase() === 'pending_review' && (v.id ?? '') !== (editingVersion?.id ?? editingVersion?.Id ?? '')
@@ -587,12 +682,32 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 : editingVersionIsPendingReview
                     ? 'Phiên bản này đang chờ duyệt, không thể gửi lại.'
                     : !canSubmitForPublishVersion
-                        ? `Phải gửi chương ${chapterNumberForVersion - 1} trước khi gửi chương ${chapterNumberForVersion}.`
+                        ? `Chỉ được gửi khi chương ${chapterNumberForVersion - 1} đã có kết quả duyệt hoặc từ chối duyệt.`
                         : chapterIsPendingReviewVersion
                             ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.'
                             : hasOtherPendingVersion
                                 ? 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.'
                                 : 'Gửi phiên bản lên để duyệt xuất bản';
+
+    const chapterIsPendingReviewEdit = (chapter?.status ?? '').toString().toLowerCase() === 'pending_review';
+    const chapterIsPublishedEdit = (chapter?.status ?? '').toString().toLowerCase() === 'published';
+    const canSubmitNormalChapterPublish =
+        normalPublishEligibility.loaded &&
+        normalPublishEligibility.prevSequentialOk &&
+        !normalPublishEligibility.selfHasPendingVersion &&
+        !chapterIsPendingReviewEdit &&
+        !chapterIsPublishedEdit;
+    const normalChapterPublishTooltip = !normalPublishEligibility.loaded
+        ? 'Đang kiểm tra điều kiện gửi xuất bản...'
+        : chapterIsPublishedEdit
+            ? 'Chương đã xuất bản.'
+            : chapterIsPendingReviewEdit
+                ? 'Chương đang chờ duyệt.'
+                : normalPublishEligibility.selfHasPendingVersion
+                    ? 'Đã có phiên bản đang chờ duyệt, không thể gửi chương gốc.'
+                    : !normalPublishEligibility.prevSequentialOk
+                        ? `Chỉ được gửi khi chương ${(Number(chapterData.number) || 1) - 1} đã có kết quả duyệt hoặc từ chối duyệt.`
+                        : 'Gửi chương lên để duyệt xuất bản';
 
     const validateChapterNumber = (num) => {
         const n = Number(num);
@@ -610,6 +725,10 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         }
         if (!chapterData.content.trim()) {
             showToast('Vui lòng nhập nội dung chương', 'error');
+            return;
+        }
+        if (!isVersionMode && existingChapterTitles.has(normalizeChapterTitle(chapterData.title))) {
+            showToast('Tên chương đã tồn tại trong truyện này. Vui lòng đặt tên khác.', 'error');
             return;
         }
         if (isVersionMode) {
@@ -646,9 +765,17 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             }
             setChapterNumberError('');
         }
+        if (!isVersionMode && saveStatus === 'published' && (!normalPublishEligibility.loaded || !canSubmitNormalChapterPublish)) {
+            showToast(normalChapterPublishTooltip, 'error');
+            return;
+        }
         const wordCount = countWords(chapterData.content);
         if (wordCount < 500) {
             showToast(`Nội dung chương cần ít nhất 500 từ (Hiện tại: ${wordCount} từ)`, 'error');
+            return;
+        }
+        if (!isVersionMode && chapterData.accessType === 'paid' && !canEnablePaidMode) {
+            showToast('Truyện cần tối thiểu 500 lượt xem mới được bật chế độ trả phí cho chương.', 'error');
             return;
         }
         if (!isVersionMode && chapterData.accessType === 'paid' && (!chapterData.price || chapterData.price <= 0)) {
@@ -656,38 +783,37 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
             return;
         }
 
-        // AI check: chính tả + từ cấm/chính sách (BE: POST /api/ai/check-chapter)
+        // AI check khi lưu: chỉ kiểm tra từ cấm/chính sách.
         try {
-            setChapterCheckModal({ open: false, loading: true, data: null, error: null });
-            const res = await checkChapter({
+            setChapterCheckModal({ open: false, loading: true, data: null, error: null, mode: 'banned' });
+            const res = await checkBannedWords({
                 content: chapterData.content,
                 storyId: storyId ?? null,
                 chapterTitle: chapterData.title ?? null,
             });
-            const spellingIssues = res?.spellingIssues ?? res?.SpellingIssues ?? [];
             const policyViolations = res?.policyViolations ?? res?.PolicyViolations ?? [];
             const passed = Boolean(res?.passed ?? res?.Passed) &&
-                Array.isArray(spellingIssues) && spellingIssues.length === 0 &&
                 Array.isArray(policyViolations) && policyViolations.length === 0 &&
                 !(res?.hasInappropriateContent ?? res?.HasInappropriateContent);
 
             if (!passed) {
+                const hasInappropriateContent = Boolean(res?.hasInappropriateContent ?? res?.HasInappropriateContent);
                 setChapterCheckModal({
                     open: true,
                     loading: false,
                     error: null,
+                    mode: 'banned',
                     data: {
                         passed: Boolean(res?.passed ?? res?.Passed),
-                        summary: res?.summary ?? res?.Summary ?? null,
-                        hasInappropriateContent: Boolean(res?.hasInappropriateContent ?? res?.HasInappropriateContent),
-                        spellingIssues,
+                        summary: buildBannedWordsSummary(res?.summary ?? res?.Summary ?? null, policyViolations, hasInappropriateContent),
+                        hasInappropriateContent,
                         policyViolations,
                     },
                 });
-                showToast('Nội dung có lỗi chính tả / từ cấm. Vui lòng sửa theo gợi ý trước khi lưu/xuất bản.', 'error');
+                showToast('Nội dung có từ cấm/vi phạm chính sách. Vui lòng sửa trước khi lưu/xuất bản.', 'error');
                 return;
             }
-            setChapterCheckModal({ open: false, loading: false, data: null, error: null });
+            setChapterCheckModal({ open: false, loading: false, data: null, error: null, mode: 'banned' });
         } catch (err) {
             const status = err?.response?.status;
             // Nếu 401: token hết hạn → refresh 1 lần rồi kiểm tra lại
@@ -697,36 +823,35 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                 try {
                     const refreshRes = await refreshAuth();
                     if (refreshRes?.success) {
-                        const res2 = await checkChapter({
+                        const res2 = await checkBannedWords({
                             content: chapterData.content,
                             storyId: storyId ?? null,
                             chapterTitle: chapterData.title ?? null,
                         });
-                        const spellingIssues2 = res2?.spellingIssues ?? res2?.SpellingIssues ?? [];
                         const policyViolations2 = res2?.policyViolations ?? res2?.PolicyViolations ?? [];
                         const passed2 = Boolean(res2?.passed ?? res2?.Passed) &&
-                            Array.isArray(spellingIssues2) && spellingIssues2.length === 0 &&
                             Array.isArray(policyViolations2) && policyViolations2.length === 0 &&
                             !(res2?.hasInappropriateContent ?? res2?.HasInappropriateContent);
 
                         if (!passed2) {
+                            const hasInappropriateContent2 = Boolean(res2?.hasInappropriateContent ?? res2?.HasInappropriateContent);
                             setChapterCheckModal({
                                 open: true,
                                 loading: false,
                                 error: null,
+                                mode: 'banned',
                                 data: {
                                     passed: Boolean(res2?.passed ?? res2?.Passed),
-                                    summary: res2?.summary ?? res2?.Summary ?? null,
-                                    hasInappropriateContent: Boolean(res2?.hasInappropriateContent ?? res2?.HasInappropriateContent),
-                                    spellingIssues: spellingIssues2,
+                                    summary: buildBannedWordsSummary(res2?.summary ?? res2?.Summary ?? null, policyViolations2, hasInappropriateContent2),
+                                    hasInappropriateContent: hasInappropriateContent2,
                                     policyViolations: policyViolations2,
                                 },
                             });
-                            showToast('Nội dung có lỗi chính tả / từ cấm. Vui lòng sửa theo gợi ý trước khi lưu/xuất bản.', 'error');
+                            showToast('Nội dung có từ cấm/vi phạm chính sách. Vui lòng sửa trước khi lưu/xuất bản.', 'error');
                             return;
                         }
 
-                        setChapterCheckModal({ open: false, loading: false, data: null, error: null });
+                        setChapterCheckModal({ open: false, loading: false, data: null, error: null, mode: 'banned' });
                         retrySucceeded = true;
                     }
                 } catch {
@@ -741,7 +866,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                     ? (typeof data === 'string' ? data : (() => { try { return JSON.stringify(data); } catch { return String(data); } })())
                     : '';
                 const msg = dataJson && dataJson !== baseMsg ? `${baseMsg}\n${dataJson}` : baseMsg;
-                setChapterCheckModal({ open: true, loading: false, data: null, error: msg });
+                setChapterCheckModal({ open: true, loading: false, data: null, error: msg, mode: 'banned' });
                 showToast(msg, 'error');
                 return;
             }
@@ -780,9 +905,9 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         setIsSaving(true);
         try {
             const orderIndex = (Number(chapterData.number) || 1) - 1;
+            const cid = chapter?.id ?? chapter?.Id ?? null;
             const cmp = await compareChapterPreview({
-                storyId,
-                orderIndex,
+                ...(cid ? { chapterId: cid } : { storyId, orderIndex }),
                 content: chapterData.content,
             });
             const hasBoth = Boolean(cmp?.hasBothContents ?? cmp?.HasBothContents);
@@ -830,6 +955,44 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         }
     };
 
+    const handleManualBannedWordsCheck = async () => {
+        if (!chapterData.content.trim()) {
+            showToast('Vui lòng nhập nội dung chương trước khi kiểm tra.', 'error');
+            return;
+        }
+        setManualSpellingCheckLoading(true);
+        setChapterCheckModal({ open: true, loading: true, data: null, error: null, mode: 'spelling-support' });
+        try {
+            const res = await checkChapter({
+                content: chapterData.content,
+                storyId: storyId ?? null,
+                chapterTitle: chapterData.title ?? null,
+            });
+            const spellingIssues = res?.spellingIssues ?? res?.SpellingIssues ?? [];
+            setChapterCheckModal({
+                open: true,
+                loading: false,
+                error: null,
+                mode: 'spelling-support',
+                data: {
+                    passed: Boolean(res?.passed ?? res?.Passed),
+                    summary: buildSpellingSummary(res?.summary ?? res?.Summary ?? null, spellingIssues),
+                    spellingIssues,
+                },
+            });
+            const normalizedSummary = buildSpellingSummary(res?.summary ?? res?.Summary ?? null, spellingIssues);
+            if (Array.isArray(spellingIssues) && spellingIssues.length === 0 && !summaryImpliesSpellingIssue(normalizedSummary)) {
+                showToast('Hỗ trợ kiểm tra chính tả: không phát hiện lỗi chính tả.', 'success');
+            }
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.response?.data?.detail ?? err?.message ?? 'Không thể kiểm tra chính tả.';
+            setChapterCheckModal({ open: true, loading: false, data: null, error: msg, mode: 'spelling-support' });
+            showToast(`Hỗ trợ kiểm tra chính tả: ${msg}`, 'error');
+        } finally {
+            setManualSpellingCheckLoading(false);
+        }
+    };
+
     const closeAiCompareModalOnly = () => {
         setAiCompareModal({
             open: false,
@@ -843,6 +1006,11 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
     const confirmAiCompareSave = async () => {
         const status = aiCompareModal.pendingSaveStatus;
         if (!status) return;
+        if (!isVersionMode && status === 'published' && (!normalPublishEligibility.loaded || !canSubmitNormalChapterPublish)) {
+            showToast(normalChapterPublishTooltip, 'error');
+            closeAiCompareModalOnly();
+            return;
+        }
         const hasPct =
             aiCompareModal.data?.hasBothContents &&
             Number.isFinite(Number(aiCompareModal.data?.similarityScore));
@@ -891,11 +1059,51 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
         return { lineNo, paraNo, charOffset };
     };
 
+    const policyTypeVi = (typeRaw) => {
+        const t = String(typeRaw ?? '').trim().toUpperCase();
+        if (t === 'BANNEDWORD') return 'Từ cấm';
+        return typeRaw || '—';
+    };
+
+    const buildBannedWordsSummary = (rawSummary, policyViolations, hasInappropriateContent) => {
+        const count = Array.isArray(policyViolations) ? policyViolations.length : 0;
+        if (count > 0) return `Phát hiện ${count} vi phạm từ cấm/chính sách.`;
+        if (hasInappropriateContent) return 'Nội dung có dấu hiệu không phù hợp theo chính sách.';
+        const s = String(rawSummary ?? '').trim();
+        if (!s) return 'Không phát hiện vi phạm từ cấm/chính sách.';
+        if (/ch[ií]nh t[ảa]/i.test(s)) return 'Không phát hiện vi phạm từ cấm/chính sách.';
+        return s;
+    };
+
+    const buildSpellingSummary = (rawSummary, spellingIssues) => {
+        const count = Array.isArray(spellingIssues) ? spellingIssues.length : 0;
+        if (count > 0) return `Phát hiện ${count} lỗi chính tả.`;
+        const s = String(rawSummary ?? '').trim();
+        if (!s) return 'Không phát hiện lỗi chính tả.';
+        if (/t[ừu]\s*c[ấa]m|ch[ií]nh\s*s[áa]ch/i.test(s)) return 'Không phát hiện lỗi chính tả.';
+        return s;
+    };
+
+    const summaryImpliesSpellingIssue = (summaryText) => {
+        const s = String(summaryText ?? '').trim().toLowerCase();
+        if (!s) return false;
+        return /ph[aá]t hi[eệ]n.*l[ỗo]i ch[ií]nh t[ảa]/i.test(s)
+            || /l[ỗo]i ch[ií]nh t[ảa]/i.test(s)
+            || /d[ấa]u c[âa]u/i.test(s);
+    };
+
+    const chapterCheckDialogTitle = chapterCheckModal.mode === 'spelling-support'
+        ? 'Kết quả hỗ trợ kiểm tra chính tả'
+        : 'Kết quả kiểm tra từ cấm/chính sách';
+    const chapterCheckDialogSubtitle = chapterCheckModal.mode === 'spelling-support'
+        ? 'Hiển thị lỗi chính tả và gợi ý chỉnh sửa nội dung.'
+        : 'Vui lòng sửa các vi phạm bên dưới trước khi lưu hoặc xuất bản.';
+
     return (
         <div>
             <Header />
             <ToastContainer />
-            {/* Popup AI check-chapter: lỗi chính tả / từ cấm */}
+            {/* Popup AI check từ cấm/chính sách */}
             {chapterCheckModal.open && (
                 <div
                     style={{
@@ -925,9 +1133,9 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                     >
                         <div style={{ padding: '16px 18px', borderBottom: '1px solid #e5e7eb', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
                             <div style={{ minWidth: 0 }}>
-                                <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>Kết quả kiểm tra nội dung</div>
+                                <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a' }}>{chapterCheckDialogTitle}</div>
                                 <div style={{ fontSize: '0.8125rem', color: '#64748b', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    Vui lòng sửa các lỗi bên dưới trước khi lưu hoặc xuất bản.
+                                    {chapterCheckDialogSubtitle}
                                 </div>
                             </div>
                             <button
@@ -957,97 +1165,107 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                         </div>
                                     )}
 
-                                    {chapterCheckModal.data?.hasInappropriateContent && (
+                                    {chapterCheckModal.mode !== 'spelling-support' && chapterCheckModal.data?.hasInappropriateContent && (
                                         <div style={{ padding: '12px 14px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '10px', color: '#9a3412', fontSize: '0.875rem', marginBottom: '12px' }}>
                                             Nội dung có dấu hiệu không phù hợp theo chính sách nền tảng. Vui lòng chỉnh sửa trước khi lưu/xuất bản.
                                         </div>
                                     )}
 
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
-                                        <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', overflow: 'hidden' }}>
-                                            <div style={{ padding: '10px 12px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: 800, color: '#0f172a' }}>
-                                                Lỗi chính tả ({(chapterCheckModal.data?.spellingIssues?.length ?? 0).toLocaleString()})
-                                            </div>
-                                            <div style={{ padding: '10px 12px' }}>
-                                                {(chapterCheckModal.data?.spellingIssues ?? []).length === 0 ? (
-                                                    <div style={{ color: '#64748b', fontSize: '0.875rem' }}>Không có lỗi chính tả.</div>
-                                                ) : (
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                                                        {(chapterCheckModal.data?.spellingIssues ?? []).map((it, idx) => {
-                                                            const word = it.wordOrPhrase ?? it.WordOrPhrase ?? '';
-                                                            const sug = it.suggestion ?? it.Suggestion ?? '';
-                                                            const pos = findIssuePosition(word);
-                                                            return (
-                                                                <div key={idx} style={{ padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
-                                                                    <div style={{ fontSize: '0.875rem', color: '#0f172a' }}>
-                                                                        <span style={{ fontWeight: 800 }}>Từ/Cụm</span>: <span style={{ fontWeight: 800, color: '#b91c1c' }}>{word || '—'}</span>
-                                                                    </div>
-                                                                    <div style={{ fontSize: '0.875rem', color: '#0f172a', marginTop: '4px' }}>
-                                                                        <span style={{ fontWeight: 800 }}>Gợi ý</span>: <span style={{ color: '#15803d', fontWeight: 800 }}>{sug || '—'}</span>
-                                                                    </div>
-                                                                    {pos ? (
-                                                                        <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#475569' }}>
-                                                                            <span style={{ fontWeight: 800 }}>Vị trí</span>:
-                                                                            {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
-                                                                            {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
-                                                                            {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
+                                    {chapterCheckModal.mode === 'spelling-support' ? (
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
+                                            <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', overflow: 'hidden' }}>
+                                                <div style={{ padding: '10px 12px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: 800, color: '#0f172a' }}>
+                                                    Lỗi chính tả ({(chapterCheckModal.data?.spellingIssues?.length ?? 0).toLocaleString()})
+                                                </div>
+                                                <div style={{ padding: '10px 12px' }}>
+                                                    {(chapterCheckModal.data?.spellingIssues ?? []).length === 0 ? (
+                                                        summaryImpliesSpellingIssue(chapterCheckModal.data?.summary) ? (
+                                                            <div style={{ color: '#9a3412', fontSize: '0.875rem', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '10px', padding: '10px 12px' }}>
+                                                                Hệ thống phát hiện lỗi chính tả nhưng AI chưa trả về vị trí chi tiết. Bạn vui lòng rà lại nội dung theo phần “Tóm tắt”.
+                                                            </div>
+                                                        ) : (
+                                                            <div style={{ color: '#64748b', fontSize: '0.875rem' }}>Không phát hiện lỗi chính tả.</div>
+                                                        )
+                                                    ) : (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                                            {(chapterCheckModal.data?.spellingIssues ?? []).map((it, idx) => {
+                                                                const word = it.wordOrPhrase ?? it.WordOrPhrase ?? '';
+                                                                const sug = it.suggestion ?? it.Suggestion ?? '';
+                                                                const pos = findIssuePosition(word);
+                                                                return (
+                                                                    <div key={idx} style={{ padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
+                                                                        <div style={{ fontSize: '0.875rem', color: '#0f172a' }}>
+                                                                            <span style={{ fontWeight: 800 }}>Từ/Cụm</span>: <span style={{ fontWeight: 800, color: '#b91c1c' }}>{word || '—'}</span>
                                                                         </div>
-                                                                    ) : (
-                                                                        <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#94a3b8' }}>
-                                                                            Không xác định được vị trí trong nội dung hiện tại.
+                                                                        <div style={{ fontSize: '0.875rem', color: '#0f172a', marginTop: '4px' }}>
+                                                                            <span style={{ fontWeight: 800 }}>Gợi ý</span>: <span style={{ color: '#15803d', fontWeight: 800 }}>{sug || '—'}</span>
                                                                         </div>
-                                                                    )}
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', overflow: 'hidden' }}>
-                                            <div style={{ padding: '10px 12px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: 800, color: '#0f172a' }}>
-                                                Từ cấm / vi phạm chính sách ({(chapterCheckModal.data?.policyViolations?.length ?? 0).toLocaleString()})
-                                            </div>
-                                            <div style={{ padding: '10px 12px' }}>
-                                                {(chapterCheckModal.data?.policyViolations ?? []).length === 0 ? (
-                                                    <div style={{ color: '#64748b', fontSize: '0.875rem' }}>Không phát hiện vi phạm.</div>
-                                                ) : (
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                                                        {(chapterCheckModal.data?.policyViolations ?? []).map((it, idx) => {
-                                                            const type = it.type ?? it.Type ?? '';
-                                                            const desc = it.description ?? it.Description ?? '';
-                                                            const quote = it.quote ?? it.Quote ?? '';
-                                                            const pos = findIssuePosition(quote);
-                                                            return (
-                                                                <div key={idx} style={{ padding: '10px 12px', border: '1px solid #fee2e2', borderRadius: '10px', backgroundColor: '#fff7ed' }}>
-                                                                    <div style={{ fontSize: '0.875rem', color: '#9a3412' }}>
-                                                                        <span style={{ fontWeight: 800 }}>Loại</span>: <span style={{ fontWeight: 800 }}>{type || '—'}</span>
+                                                                        {pos ? (
+                                                                            <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#475569' }}>
+                                                                                <span style={{ fontWeight: 800 }}>Vị trí</span>:
+                                                                                {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
+                                                                                {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
+                                                                                {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#94a3b8' }}>
+                                                                                Không xác định được vị trí trong nội dung hiện tại.
+                                                                            </div>
+                                                                        )}
                                                                     </div>
-                                                                    <div style={{ fontSize: '0.875rem', color: '#9a3412', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
-                                                                        {desc || '—'}
-                                                                    </div>
-                                                                    {pos ? (
-                                                                        <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12' }}>
-                                                                            <span style={{ fontWeight: 800 }}>Vị trí</span>:
-                                                                            {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
-                                                                            {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
-                                                                            {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
-                                                                        </div>
-                                                                    ) : null}
-                                                                    {quote ? (
-                                                                        <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12', backgroundColor: '#fffbeb', border: '1px dashed #fdba74', borderRadius: '10px', padding: '8px 10px', whiteSpace: 'pre-wrap' }}>
-                                                                            {quote}
-                                                                        </div>
-                                                                    ) : null}
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                )}
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
+                                    ) : (
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
+                                            <div style={{ border: '1px solid #e5e7eb', borderRadius: '12px', overflow: 'hidden' }}>
+                                                <div style={{ padding: '10px 12px', backgroundColor: '#f9fafb', borderBottom: '1px solid #e5e7eb', fontWeight: 800, color: '#0f172a' }}>
+                                                    Từ cấm / vi phạm chính sách ({(chapterCheckModal.data?.policyViolations?.length ?? 0).toLocaleString()})
+                                                </div>
+                                                <div style={{ padding: '10px 12px' }}>
+                                                    {(chapterCheckModal.data?.policyViolations ?? []).length === 0 ? (
+                                                        <div style={{ color: '#64748b', fontSize: '0.875rem' }}>Không phát hiện vi phạm.</div>
+                                                    ) : (
+                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                                                            {(chapterCheckModal.data?.policyViolations ?? []).map((it, idx) => {
+                                                                const type = it.type ?? it.Type ?? '';
+                                                                const desc = it.description ?? it.Description ?? '';
+                                                                const quote = it.quote ?? it.Quote ?? '';
+                                                                const pos = findIssuePosition(quote);
+                                                                return (
+                                                                    <div key={idx} style={{ padding: '10px 12px', border: '1px solid #fee2e2', borderRadius: '10px', backgroundColor: '#fff7ed' }}>
+                                                                        <div style={{ fontSize: '0.875rem', color: '#9a3412' }}>
+                                                                            <span style={{ fontWeight: 800 }}>Loại</span>: <span style={{ fontWeight: 800 }}>{policyTypeVi(type)}</span>
+                                                                        </div>
+                                                                        <div style={{ fontSize: '0.875rem', color: '#9a3412', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
+                                                                            {desc || '—'}
+                                                                        </div>
+                                                                        {pos ? (
+                                                                            <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12' }}>
+                                                                                <span style={{ fontWeight: 800 }}>Vị trí</span>:
+                                                                                {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
+                                                                                {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
+                                                                                {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {quote ? (
+                                                                            <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12', backgroundColor: '#fffbeb', border: '1px dashed #fdba74', borderRadius: '10px', padding: '8px 10px', whiteSpace: 'pre-wrap' }}>
+                                                                                {quote}
+                                                                            </div>
+                                                                        ) : null}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </>
                             )}
                         </div>
@@ -1533,7 +1751,7 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                 </button>
                                 <div>
                                     <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#333333', margin: 0 }}>
-                                        {readOnly ? 'Xem chi tiết chương' : chapter ? 'Chỉnh sửa chương' : isVersionMode ? (editingVersion ? 'Chỉnh sửa phiên bản' : 'Tạo phiên bản chương') : 'Thêm chương mới'}
+                                        {readOnly ? 'Xem chi tiết chương' : isVersionMode ? (editingVersion ? 'Chỉnh sửa phiên bản' : 'Tạo phiên bản chương') : (isCreateMode ? 'Thêm chương mới' : (isEditingChapterMode ? 'Chỉnh sửa chương' : 'Thêm chương mới'))}
                                     </h2>
                                     <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: '0.25rem 0 0 0' }}>
                                         {story?.title}
@@ -1552,6 +1770,14 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                             {!readOnly && (
                                 <div style={{ display: 'flex', gap: '0.75rem' }}>
                                     <button
+                                        onClick={handleManualBannedWordsCheck}
+                                        disabled={isSaving || manualSpellingCheckLoading}
+                                        className="flex items-center gap-2 px-6 py-2.5 bg-amber-50 text-amber-700 text-sm font-bold rounded-full hover:bg-amber-100 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                                    >
+                                        <Sparkles style={{ width: '16px', height: '16px' }} />
+                                        {manualSpellingCheckLoading ? 'Đang kiểm tra...' : 'Hỗ trợ kiểm tra chính tả'}
+                                    </button>
+                                    <button
                                         onClick={() => handleSave('draft')}
                                         disabled={isSaving || aiCompareModal.open}
                                         className="flex items-center gap-2 px-6 py-2.5 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
@@ -1561,8 +1787,13 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                     </button>
                                     <button
                                         onClick={() => handleSave('published')}
-                                        disabled={isSaving || aiCompareModal.open || (isVersionMode && !canSubmitVersion)}
-                                        title={isVersionMode ? versionPublishTooltip : undefined}
+                                        disabled={
+                                            isSaving ||
+                                            aiCompareModal.open ||
+                                            (isVersionMode && !canSubmitVersion) ||
+                                            (!isVersionMode && (!normalPublishEligibility.loaded || !canSubmitNormalChapterPublish))
+                                        }
+                                        title={isVersionMode ? versionPublishTooltip : normalChapterPublishTooltip}
                                         className="flex items-center gap-2 px-6 py-2.5 bg-primary text-white text-sm font-bold rounded-full hover:bg-primary/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                                     >
                                         <Save style={{ width: '16px', height: '16px' }} />
@@ -1588,29 +1819,18 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                         <input
                                             type="number"
                                             value={chapterData.number}
-                                            readOnly={readOnly}
-                                            disabled={readOnly}
-                                            onChange={(e) => {
-                                                if (readOnly) return;
-                                                const v = e.target.value === '' ? '' : Number(e.target.value);
-                                                setChapterData({ ...chapterData, number: v === '' ? '' : v });
-                                                const err = v === '' ? 'Vui lòng nhập số chương.' : validateChapterNumber(v);
-                                                setChapterNumberError(err);
-                                            }}
-                                            onBlur={() => {
-                                                const err = validateChapterNumber(chapterData.number);
-                                                setChapterNumberError(err);
-                                            }}
+                                            readOnly
+                                            disabled
                                             min="1"
                                             style={{
                                                 width: '100%',
                                                 padding: '0.75rem',
-                                                backgroundColor: readOnly ? '#f1f5f9' : '#f9fafb',
+                                                backgroundColor: '#f1f5f9',
                                                 border: `1px solid ${chapterNumberError ? '#ef4444' : '#e5e7eb'}`,
                                                 borderRadius: '8px',
                                                 fontSize: '0.875rem',
                                                 outline: 'none',
-                                                cursor: readOnly ? 'default' : undefined
+                                                cursor: 'default'
                                             }}
                                         />
                                         {chapterNumberError && (
@@ -1828,8 +2048,16 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                         ) : (
                                             <button
                                                 type="button"
-                                                onClick={() => setChapterData({ ...chapterData, accessType: 'paid' })}
-                                                className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all ${chapterData.accessType === 'paid' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 hover:border-slate-300'}`}
+                                                onClick={() => {
+                                                    if (!canEnablePaidMode) {
+                                                        showToast('Truyện cần tối thiểu 500 lượt xem mới được bật chế độ trả phí cho chương.', 'error');
+                                                        return;
+                                                    }
+                                                    setChapterData({ ...chapterData, accessType: 'paid' });
+                                                }}
+                                                disabled={!canEnablePaidMode && chapterData.accessType !== 'paid'}
+                                                title={!canEnablePaidMode && chapterData.accessType !== 'paid' ? 'Truyện cần tối thiểu 500 lượt xem để bật trả phí.' : undefined}
+                                                className={`flex items-center gap-3 p-4 border-2 rounded-xl transition-all disabled:opacity-60 disabled:cursor-not-allowed ${chapterData.accessType === 'paid' ? 'border-amber-500 bg-amber-50' : 'border-slate-200 hover:border-slate-300'}`}
                                             >
                                                 <div className={`flex items-center justify-center w-10 h-10 rounded-full ${chapterData.accessType === 'paid' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-600'}`}>
                                                     <Lock style={{ width: '20px', height: '20px' }} />
@@ -1919,34 +2147,19 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                             </div>
                                         </div>
                                     )}
-                                </div>
-                            )}
-
-                            {/* Mô tả thay đổi (version) - chỉ hiện khi chỉnh sửa chương, ẩn khi xem chi tiết */}
-                            {chapter && !readOnly && (
-                                <div>
-                                    <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                        Mô tả thay đổi (ghi chú phiên bản)
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={chapterData.changeSummary ?? ''}
-                                        onChange={(e) => setChapterData({ ...chapterData, changeSummary: e.target.value })}
-                                        placeholder="Ví dụ: Sửa lỗi chính tả, bổ sung đoạn mới..."
-                                        maxLength={500}
-                                        style={{
-                                            width: '100%',
-                                            padding: '0.75rem',
-                                            backgroundColor: '#f9fafb',
-                                            border: '1px solid #e5e7eb',
+                                    {!canEnablePaidMode && chapterData.accessType !== 'paid' && (
+                                        <div style={{
+                                            marginTop: '1rem',
+                                            padding: '0.75rem 1rem',
+                                            backgroundColor: '#fff7ed',
+                                            border: '1px solid #fdba74',
                                             borderRadius: '8px',
-                                            fontSize: '0.875rem',
-                                            outline: 'none'
-                                        }}
-                                    />
-                                    <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '0.25rem' }}>
-                                        Tùy chọn. Khi lưu, hệ thống sẽ tạo phiên bản nội dung cho chương này.
-                                    </p>
+                                            fontSize: '0.75rem',
+                                            color: '#9a3412',
+                                        }}>
+                                            Truyện hiện có {storyTotalViews.toLocaleString('vi-VN')} lượt xem. Cần tối thiểu 500 lượt xem để bật chế độ trả phí cho chương.
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
@@ -1982,6 +2195,19 @@ export function ChapterEditorPage({ story, chapter, sourceChapterForVersion, edi
                                             <button type="button" onClick={() => handleAISuggestion('paragraph')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
                                                 AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={openCachedSuggestions}
+                                                disabled={!Array.isArray(suggestionsCache) || suggestionsCache.length === 0}
+                                                className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-full transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
+                                                    Array.isArray(suggestionsCache) && suggestionsCache.length > 0
+                                                        ? 'bg-amber-100 text-amber-800 ring-2 ring-amber-300 hover:bg-amber-200 shadow-sm'
+                                                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                                }`}
+                                            >
+                                                <Sparkles style={{ width: '14px', height: '14px' }} />
+                                                Xem lại gợi ý gần nhất
                                             </button>
                                             <button type="button" onClick={() => handleAISuggestion('chapter')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />

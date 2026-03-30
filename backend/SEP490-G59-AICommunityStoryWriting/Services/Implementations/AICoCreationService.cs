@@ -12,16 +12,13 @@ using Services.Interfaces;
 
 namespace Services.Implementations;
 
-/// <summary>Đồng sáng tác: Dàn ý (JSON) → Viết → Guardrail → Kiểm duyệt (JSON + violations) + vòng sửa. Constitutional rules trong prompt.</summary>
+/// <summary>Đồng sáng tác: Dàn ý → Viết → (tùy chọn) tự sửa từ cấm + chính tả bằng Agent 2 → guardrail/chính tả lần cuối; có thể mở rộng độ dài tối thiểu.</summary>
 public class AICoCreationService : IAICoCreationService
 {
-    private const int DefaultMaxRevisions = 2;
     private const int MinDraftWordCount = 500;
-    /// <summary>Số bản nháp (và review) chạy song song trong một vòng; 1 = tuần tự như cũ.</summary>
-    // Co-create chạy tuần tự (không song song).
     private const string ActionOutline = "CO_CREATE_OUTLINE";
     private const string ActionWrite = "CO_CREATE_WRITE";
-    private const string ActionReview = "CO_CREATE_REVIEW";
+    private const string ActionWriteCorrect = "CO_CREATE_WRITE_CORRECT";
 
     /// <summary>Quy tắc bắt buộc (Constitutional): đưa vào system prompt mọi agent.</summary>
   private const string ConstitutionalRules = """
@@ -86,6 +83,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
     private readonly IAiGeneratedContentRepository _aiContentRepository;
     private readonly IStoryMemoryEngine _memoryEngine;
     private readonly IContentGuardrailService _guardrail;
+    private readonly IChapterCheckService _chapterCheck;
     private readonly IAIUsageLogRepository _aiUsageLogRepository;
     private readonly IConfiguration _configuration;
 
@@ -95,6 +93,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         IAiGeneratedContentRepository aiContentRepository,
         IStoryMemoryEngine memoryEngine,
         IContentGuardrailService guardrail,
+        IChapterCheckService chapterCheck,
         IAIUsageLogRepository aiUsageLogRepository,
         IConfiguration configuration)
     {
@@ -103,6 +102,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         _aiContentRepository = aiContentRepository;
         _memoryEngine = memoryEngine;
         _guardrail = guardrail;
+        _chapterCheck = chapterCheck;
         _aiUsageLogRepository = aiUsageLogRepository;
         _configuration = configuration;
     }
@@ -160,111 +160,31 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
 
         var outlineForPrompt = FormatOutlineForPrompt(outlineJson);
 
-        int maxRevisions = _configuration.GetValue("AI:CoCreateMaxRevisions", DefaultMaxRevisions);
-        if (maxRevisions < 0) maxRevisions = 0;
-
         var (p2, m2, k2, u2) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentWriter);
-        var (p3, m3, k3, u3) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentConsistencyChecker);
+        var clientWriter = AIClientHelper.CreateChatClient(p2, m2, k2, u2);
 
-        string draft;
-        bool approved;
-        string? reviewFeedback;
-        ChatClient clientWriter;
-        ChatClient clientChecker;
-
-        const string LogicCheckAdvisoryNote =
-            "Lưu ý: Kiểm tra nhất quán (logic truyện) hiện chỉ mang tính CẢNH BÁO, không tự động sửa hoặc chặn kết quả.";
-
-        // Luồng tuần tự (ban đầu): một Writer → Guardrail → Review
-        clientWriter = AIClientHelper.CreateChatClient(p2, m2, k2, u2);
-        clientChecker = AIClientHelper.CreateChatClient(p3, m3, k3, u3);
         var swWrite = Stopwatch.StartNew();
-        draft = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, feedback: null, languageInstruction, cancellationToken);
+        var draft = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, languageInstruction, cancellationToken);
         swWrite.Stop();
         draft = StripTrailingFeedbackFromDraft(draft);
         durations.Add(new AgentDuration { Step = "Write", DurationMs = swWrite.ElapsedMilliseconds });
         progress?.Report(new CoCreateProgressEvent { Step = "Write", DurationMs = swWrite.ElapsedMilliseconds, Message = "Đã viết nội dung" });
         LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
 
-        var swGuard = Stopwatch.StartNew();
-        var initialGuardrailResult = await _guardrail.CheckAsync(request.StoryId, draft, cancellationToken);
-        swGuard.Stop();
-        durations.Add(new AgentDuration { Step = "Guardrail", DurationMs = swGuard.ElapsedMilliseconds });
-        progress?.Report(new CoCreateProgressEvent { Step = "Guardrail", DurationMs = swGuard.ElapsedMilliseconds, Message = "Đã kiểm tra từ cấm" });
-        var guardrailFeedback = initialGuardrailResult.Passed ? null : string.Join(" ", initialGuardrailResult.Violations.Select(v => $"[{v.Type}] {v.Message}"));
-
-        // --- Agent 3 (Validator): targeted fix loop ---
-        // Guardrail (từ cấm) vẫn là bước bắt buộc. Validator kiểm tra logic/nhất quán và trả về violations có thể sửa.
-
-        ReviewResult review;
-        if (!initialGuardrailResult.Passed)
-        {
-            approved = false;
-            reviewFeedback = guardrailFeedback;
-            review = new ReviewResult(false, guardrailFeedback, new List<ReviewViolation>());
-        }
-        else
-        {
-            var swReview = Stopwatch.StartNew();
-            review = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, effectiveIdea, languageInstruction, cancellationToken);
-            swReview.Stop();
-            durations.Add(new AgentDuration { Step = "Review", DurationMs = swReview.ElapsedMilliseconds });
-            progress?.Report(new CoCreateProgressEvent { Step = "Review", DurationMs = swReview.ElapsedMilliseconds, Message = "Đã kiểm duyệt nhất quán" });
-            LogUsage(authorUserId, request.StoryId, null, ActionReview, m3, 0, 0);
-            approved = review.Approved;
-            reviewFeedback = review.Feedback;
-        }
-
-        int revisionCount = 0;
-        var revisionFeedbacks = new List<string>();
-
-        while (!approved && revisionCount < maxRevisions)
-        {
-            revisionCount++;
-            if (!string.IsNullOrWhiteSpace(reviewFeedback))
-                revisionFeedbacks.Add(reviewFeedback);
-
-            // Extract violations for targeted fix. If none, fallback to using feedback text only.
-            var violations = review.Violations.Where(v => v.Severity.Equals("critical", StringComparison.OrdinalIgnoreCase)).ToList();
-            var swFix = Stopwatch.StartNew();
-            draft = await RunAgent2FixAsync(
-                clientWriter,
-                contextBlock,
-                outlineForPrompt,
-                draft,
-                violations,
-                reviewFeedback,
-                languageInstruction,
-                cancellationToken);
-            swFix.Stop();
-            draft = StripTrailingFeedbackFromDraft(draft);
-            durations.Add(new AgentDuration { Step = $"Revision_Fix_{revisionCount}", DurationMs = swFix.ElapsedMilliseconds });
-            progress?.Report(new CoCreateProgressEvent { Step = $"Revision_Fix_{revisionCount}", DurationMs = swFix.ElapsedMilliseconds, Message = $"Đã sửa lỗi lần {revisionCount}" });
-            LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
-
-            var swRevGuard = Stopwatch.StartNew();
-            var guardrailResult = await _guardrail.CheckAsync(request.StoryId, draft, cancellationToken);
-            swRevGuard.Stop();
-            durations.Add(new AgentDuration { Step = $"Revision_Guardrail_{revisionCount}", DurationMs = swRevGuard.ElapsedMilliseconds });
-            progress?.Report(new CoCreateProgressEvent { Step = $"Revision_Guardrail_{revisionCount}", DurationMs = swRevGuard.ElapsedMilliseconds, Message = "Đã kiểm tra từ cấm" });
-            if (!guardrailResult.Passed)
-            {
-                approved = false;
-                reviewFeedback = string.Join(" ", guardrailResult.Violations.Select(v => $"[{v.Type}] {v.Message}"));
-                review = new ReviewResult(false, reviewFeedback, new List<ReviewViolation>());
-                continue;
-            }
-
-            var swRevReview = Stopwatch.StartNew();
-            review = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, effectiveIdea, languageInstruction, cancellationToken);
-            swRevReview.Stop();
-            durations.Add(new AgentDuration { Step = $"Revision_Review_{revisionCount}", DurationMs = swRevReview.ElapsedMilliseconds });
-            progress?.Report(new CoCreateProgressEvent { Step = $"Revision_Review_{revisionCount}", DurationMs = swRevReview.ElapsedMilliseconds, Message = "Đã kiểm duyệt nhất quán" });
-            LogUsage(authorUserId, request.StoryId, null, ActionReview, m3, 0, 0);
-
-            approved = review.Approved;
-            reviewFeedback = review.Feedback;
-        }
+        var (draftAfterRefine, approved, reviewFeedback, revisionCount) = await RefineDraftWithSelfCorrectionAsync(
+            clientWriter,
+            request.StoryId,
+            authorUserId,
+            contextBlock,
+            outlineForPrompt,
+            languageInstruction,
+            draft,
+            m2,
+            cancellationToken,
+            progress,
+            durations,
+            phaseLabel: "");
+        draft = draftAfterRefine;
 
         // Enforce minimum length with a single lightweight expansion pass to avoid many rewrites.
         if (CountWords(draft) < MinDraftWordCount)
@@ -283,73 +203,79 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             progress?.Report(new CoCreateProgressEvent { Step = "Length_Expand", DurationMs = swExpand.ElapsedMilliseconds, Message = "Đã mở rộng nội dung để đạt độ dài tối thiểu" });
             LogUsage(authorUserId, request.StoryId, null, ActionWrite, m2, 0, 0);
 
-            var swExpandGuard = Stopwatch.StartNew();
-            var expandGuardrailResult = await _guardrail.CheckAsync(request.StoryId, draft, cancellationToken);
-            swExpandGuard.Stop();
-            durations.Add(new AgentDuration { Step = "Length_Expand_Guardrail", DurationMs = swExpandGuard.ElapsedMilliseconds });
-            progress?.Report(new CoCreateProgressEvent { Step = "Length_Expand_Guardrail", DurationMs = swExpandGuard.ElapsedMilliseconds, Message = "Đã kiểm tra từ cấm sau mở rộng nội dung" });
-            if (!expandGuardrailResult.Passed)
+            var (draftExpanded, expandApproved, expandReviewFeedback, expandRewrites) = await RefineDraftWithSelfCorrectionAsync(
+                clientWriter,
+                request.StoryId,
+                authorUserId,
+                contextBlock,
+                outlineForPrompt,
+                languageInstruction,
+                draft,
+                m2,
+                cancellationToken,
+                progress,
+                durations,
+                phaseLabel: "Length_Expand_");
+            draft = draftExpanded;
+            revisionCount += expandRewrites;
+            if (!expandApproved)
             {
                 approved = false;
-                reviewFeedback = string.Join(" ", expandGuardrailResult.Violations.Select(v => $"[{v.Type}] {v.Message}"));
-                review = new ReviewResult(false, reviewFeedback, new List<ReviewViolation>());
-            }
-            else
-            {
-                var swExpandReview = Stopwatch.StartNew();
-                review = await RunAgent3ReviewAsync(clientChecker, contextBlock, outlineForPrompt, draft, effectiveIdea, languageInstruction, cancellationToken);
-                swExpandReview.Stop();
-                durations.Add(new AgentDuration { Step = "Length_Expand_Review", DurationMs = swExpandReview.ElapsedMilliseconds });
-                progress?.Report(new CoCreateProgressEvent { Step = "Length_Expand_Review", DurationMs = swExpandReview.ElapsedMilliseconds, Message = "Đã kiểm duyệt lại sau mở rộng nội dung" });
-                LogUsage(authorUserId, request.StoryId, null, ActionReview, m3, 0, 0);
-                approved = review.Approved;
-                reviewFeedback = review.Feedback;
+                reviewFeedback = expandReviewFeedback;
             }
         }
 
         var finalWordCount = CountWords(draft);
         if (finalWordCount < MinDraftWordCount)
-            throw new InvalidOperationException($"Nội dung AI tạo ra quá ngắn ({finalWordCount} từ), chưa đạt tối thiểu {MinDraftWordCount} từ. Vui lòng thử lại.");
+            throw new InvalidOperationException($"Nội dung AI tạo ra quá ngắn ({finalWordCount} từ), yêu cầu phải lớn hơn 500 từ. Vui lòng thử lại.");
 
         var saved = SaveAiGeneratedContentOnly(
             request.StoryId,
             authorUserId,
             hasAuthorIdea ? rawIdea! : "[AUTO] Tiếp tục theo mạch truyện (không có gợi ý tác giả)",
             draft,
-            request.ChapterOrderIndex);
+            request.ChapterOrderIndex,
+            request.ChapterId);
         return new CoCreationResponse
         {
             Outline = outlineForPrompt,
             FinalContent = draft,
             Approved = approved,
             RevisionCount = revisionCount,
-            RevisionFeedbacks = revisionFeedbacks.Count > 0 ? revisionFeedbacks : null,
+            RevisionFeedbacks = null,
             ReviewFeedback = approved ? null : reviewFeedback,
-            ChapterId = null,
+            ChapterId = saved.ChapterId,
             AiGeneratedContentId = saved.Id,
             ChapterIndex = saved.ChapterIndex,
             AgentDurations = durations.Count > 0 ? durations : null
         };
     }
 
-    private sealed record ReviewViolation(string Type, string Severity, string? Quote, string? Fix);
-    private sealed record ReviewResult(bool Approved, string? Feedback, List<ReviewViolation> Violations);
-
     /// <summary>Chỉ lưu bản <see cref="ai_generated_content"/> (không tạo/cập nhật <see cref="chapters"/>).
     /// <see cref="ai_generated_content.chapter_index"/> = <paramref name="targetOrderIndex"/> nếu hợp lệ; ngược lại = slot chương tiếp theo.</summary>
-    private (Guid? Id, int? ChapterIndex) SaveAiGeneratedContentOnly(
+    private (Guid? Id, int? ChapterIndex, Guid? ChapterId) SaveAiGeneratedContentOnly(
         Guid storyId,
         Guid authorUserId,
         string authorIdea,
         string finalContent,
-        int? targetOrderIndex = null)
+        int? targetOrderIndex = null,
+        Guid? chapterId = null)
     {
-        if (string.IsNullOrWhiteSpace(finalContent)) return (null, null);
+        if (string.IsNullOrWhiteSpace(finalContent)) return (null, null, null);
         var chaptersList = _chapterRepository.GetByStoryId(storyId).ToList();
-        // Khớp chapters.order_index từ FE (chương 1 → order_index 0). Ưu tiên index chương đang soạn để compare-chapter-preview khớp khi copy–paste.
+        chapters? targetChapter = null;
+        if (chapterId.HasValue && chapterId.Value != Guid.Empty)
+        {
+            targetChapter = _chapterRepository.GetById(chapterId.Value);
+            if (targetChapter != null && targetChapter.story_id != storyId)
+                throw new InvalidOperationException("ChapterId không khớp truyện.");
+        }
+        // Khớp chapters.order_index từ FE (chương 1 → order_index 0). Ưu tiên index chương đang soạn để map đúng slot chương hiện tại.
         int nextChapterIndex;
         if (targetOrderIndex is >= 0)
             nextChapterIndex = targetOrderIndex.Value;
+        else if (targetChapter != null)
+            nextChapterIndex = targetChapter.order_index;
         else
             nextChapterIndex = chaptersList.Count == 0 ? 0 : chaptersList.Max(c => c.order_index) + 1;
         var now = DateTime.UtcNow;
@@ -357,7 +283,8 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         {
             id = Guid.NewGuid(),
             story_id = storyId,
-            chapter_id = null,
+            chapter_id = targetChapter?.id,
+            draft_chapter_id = targetChapter == null ? chapterId : null,
             chapter_index = nextChapterIndex,
             user_id = authorUserId,
             input_prompt = authorIdea.Length > 2000 ? authorIdea[..2000] + "..." : authorIdea,
@@ -365,7 +292,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             created_at = now
         };
         _aiContentRepository.Add(aiRecord);
-        return (aiRecord.id, nextChapterIndex);
+        return (aiRecord.id, nextChapterIndex, targetChapter?.id ?? chapterId);
     }
 
     private static string GetAgent1SystemPrompt() => """
@@ -462,6 +389,179 @@ Expected Outcome:
 
 """ + "\n\n" + ConstitutionalRules;
 
+    private static string GetAgent2CorrectSystemPrompt() => """
+Role:
+Bạn là AI viết truyện (Story Writer) — lần này nhiệm vụ là SỬA bản nháp đã có theo yêu cầu cụ thể.
+
+Quy tắc:
+- Thực hiện đầy đủ các sửa được liệt kê (từ cấm → thay bằng diễn đạt tương đương; chính tả → thay cụm sai bằng gợi ý đúng).
+- Không đổi cốt truyện, timeline, nhân vật so với bản nháp và dàn ý; không thêm plot twist lớn.
+- Giữ ngôn ngữ (Việt/Anh) như bản gốc; độ dài không được ngắn hơn đáng kể so với bản nháp (nếu bản đã ≥500 từ thì bản sau sửa cũng ≥500 từ).
+- Chỉ trả về toàn bộ văn bản sau sửa, không markdown, không giải thích.
+""" + "\n\n" + ConstitutionalRules;
+
+    private static string? BuildCorrectionInstructionBlock(GuardrailResult gr, CheckChapterResponse spell)
+    {
+        var parts = new List<string>();
+        if (!gr.Passed)
+        {
+            if (gr.Violations.Count > 0)
+            {
+                parts.Add("— Từ/cụm không được phép (phải loại bỏ hoặc thay thế, giữ ngữ cảnh):");
+                foreach (var v in gr.Violations)
+                {
+                    var q = string.IsNullOrWhiteSpace(v.Quote) ? "" : $" (tránh dùng: «{v.Quote}»)";
+                    parts.Add($"  • [{v.Type}] {v.Message}{q}");
+                }
+            }
+            else
+                parts.Add("— Nội dung có thể chứa từ cấm: hãy thay các cụm nhạy cảm bằng diễn đạt tương đương, giữ ngữ cảnh.");
+        }
+        if (!spell.Passed && spell.SpellingIssues.Count > 0)
+        {
+            parts.Add("— Lỗi chính tả (thay cụm trái bằng cụm phải, giữ nguyên câu chữ xung quanh):");
+            var take = spell.SpellingIssues.Take(40).ToList();
+            foreach (var s in take)
+                parts.Add($"  • «{s.WordOrPhrase}» → «{s.Suggestion}»");
+            if (spell.SpellingIssues.Count > 40)
+                parts.Add($"  • (và {spell.SpellingIssues.Count - 40} lỗi khác — sửa tương tự)");
+        }
+        return parts.Count == 0 ? null : string.Join("\n", parts);
+    }
+
+    private async Task<string> RunAgent2CorrectAsync(
+        ChatClient client,
+        string contextBlock,
+        string outline,
+        string currentDraft,
+        string languageInstruction,
+        string correctionBlock,
+        CancellationToken ct)
+    {
+        var userPrompt =
+            $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý (không đổi hướng plot):\n{outline}\n\n" +
+            "=== Bản nháp hiện tại ===\n" + currentDraft + "\n\n" +
+            "=== Yêu cầu sửa (bắt buộc) ===\n" + correctionBlock + "\n\n" +
+            $"{languageInstruction}\n\n" +
+            "Viết lại TOÀN BỘ bản nháp sau khi đã áp dụng các sửa trên. Giữ mạch truyện và tone. " +
+            "Chỉ output nội dung truyện (văn bản), không markdown hay giải thích.";
+
+        var messages = new List<ChatMessage>
+        {
+            new SystemChatMessage(GetAgent2CorrectSystemPrompt()),
+            new UserChatMessage(userPrompt)
+        };
+        var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentWriter);
+        var completion = await client.CompleteChatAsync(messages, options, ct);
+        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
+        if (string.IsNullOrWhiteSpace(text))
+            throw new InvalidOperationException("Agent sửa bản nháp không trả về nội dung.");
+        return text.Trim();
+    }
+
+    /// <summary>Lặp tối đa N lần: kiểm tra từ cấm + chính tả → nếu lỗi thì Agent 2 viết lại.</summary>
+    private async Task<(string Draft, bool Approved, string? ReviewFeedback, int RewritesUsed)> RefineDraftWithSelfCorrectionAsync(
+        ChatClient clientWriter,
+        Guid storyId,
+        Guid authorUserId,
+        string contextBlock,
+        string outlineForPrompt,
+        string languageInstruction,
+        string draft,
+        string writerModelName,
+        CancellationToken ct,
+        IProgress<CoCreateProgressEvent>? progress,
+        List<AgentDuration> durations,
+        string phaseLabel)
+    {
+        var enable = _configuration.GetValue("AI:CoCreateEnableSelfCorrection", true);
+        var maxRounds = _configuration.GetValue("AI:CoCreateSelfCorrectionMaxRounds", _configuration.GetValue("AI:CoCreateMaxRevisions", 2));
+        if (maxRounds < 0) maxRounds = 0;
+        if (maxRounds > 5) maxRounds = 5;
+
+        var guardStepName = string.IsNullOrEmpty(phaseLabel) ? "Guardrail" : "Length_Expand_Guardrail";
+
+        if (!enable || maxRounds == 0)
+        {
+            var sw = Stopwatch.StartNew();
+            var gr = await _guardrail.CheckAsync(storyId, draft, ct);
+            sw.Stop();
+            durations.Add(new AgentDuration { Step = guardStepName, DurationMs = sw.ElapsedMilliseconds });
+            progress?.Report(new CoCreateProgressEvent { Step = guardStepName, DurationMs = sw.ElapsedMilliseconds, Message = "Đã kiểm tra từ cấm" });
+            var ok = gr.Passed;
+            var fb = ok ? null : string.Join(" ", gr.Violations.Select(v => $"[{v.Type}] {v.Message}"));
+            return (draft, ok, fb, 0);
+        }
+
+        var rewrites = 0;
+        for (var round = 0; round < maxRounds; round++)
+        {
+            var prefix = $"{phaseLabel}SelfCorrect_R{round + 1}";
+
+            var swG = Stopwatch.StartNew();
+            var gr = await _guardrail.CheckAsync(storyId, draft, ct);
+            swG.Stop();
+            durations.Add(new AgentDuration { Step = $"{prefix}_Banned", DurationMs = swG.ElapsedMilliseconds });
+            progress?.Report(new CoCreateProgressEvent { Step = $"{prefix}_Banned", DurationMs = swG.ElapsedMilliseconds, Message = "Đang kiểm tra từ cấm" });
+
+            var swS = Stopwatch.StartNew();
+            var spell = await _chapterCheck.CheckSpellingOnlyAsync(
+                new CheckChapterRequest { Content = draft, StoryId = storyId },
+                userId: null,
+                ct);
+            swS.Stop();
+            durations.Add(new AgentDuration { Step = $"{prefix}_Spell", DurationMs = swS.ElapsedMilliseconds });
+            progress?.Report(new CoCreateProgressEvent { Step = $"{prefix}_Spell", DurationMs = swS.ElapsedMilliseconds, Message = "Đang kiểm tra chính tả" });
+
+            if (gr.Passed && spell.Passed)
+            {
+                progress?.Report(new CoCreateProgressEvent { Step = guardStepName, DurationMs = 0, Message = "Đã đạt từ cấm và chính tả" });
+                return (draft, true, null, rewrites);
+            }
+
+            var instr = BuildCorrectionInstructionBlock(gr, spell);
+            if (string.IsNullOrWhiteSpace(instr))
+                break;
+
+            var swW = Stopwatch.StartNew();
+            draft = await RunAgent2CorrectAsync(clientWriter, contextBlock, outlineForPrompt, draft, languageInstruction, instr, ct);
+            swW.Stop();
+            draft = StripTrailingFeedbackFromDraft(draft);
+            rewrites++;
+            durations.Add(new AgentDuration { Step = $"{prefix}_Rewrite", DurationMs = swW.ElapsedMilliseconds });
+            progress?.Report(new CoCreateProgressEvent { Step = $"{prefix}_Rewrite", DurationMs = swW.ElapsedMilliseconds, Message = $"Agent 2 đang viết lại bản nháp (lần {rewrites})" });
+            LogUsage(authorUserId, storyId, null, ActionWriteCorrect, writerModelName, 0, 0);
+        }
+
+        var swGf = Stopwatch.StartNew();
+        var grFinal = await _guardrail.CheckAsync(storyId, draft, ct);
+        swGf.Stop();
+        durations.Add(new AgentDuration { Step = $"{phaseLabel}SelfCorrect_Final_Banned", DurationMs = swGf.ElapsedMilliseconds });
+
+        var swSf = Stopwatch.StartNew();
+        var spellFinal = await _chapterCheck.CheckSpellingOnlyAsync(
+            new CheckChapterRequest { Content = draft, StoryId = storyId },
+            userId: null,
+            ct);
+        swSf.Stop();
+        durations.Add(new AgentDuration { Step = $"{phaseLabel}SelfCorrect_Final_Spell", DurationMs = swSf.ElapsedMilliseconds });
+
+        var okFinal = grFinal.Passed && spellFinal.Passed;
+        string? review = null;
+        if (!okFinal)
+        {
+            var bits = new List<string>();
+            if (!grFinal.Passed)
+                bits.Add(string.Join(" ", grFinal.Violations.Select(v => $"[{v.Type}] {v.Message}")));
+            if (!spellFinal.Passed)
+                bits.Add("Chính tả: " + string.Join("; ", spellFinal.SpellingIssues.Take(12).Select(s => $"{s.WordOrPhrase}→{s.Suggestion}")));
+            review = string.Join(" ", bits);
+        }
+
+        progress?.Report(new CoCreateProgressEvent { Step = guardStepName, DurationMs = 0, Message = okFinal ? "Hoàn tất kiểm tra" : "Còn lỗi sau khi hết số lần sửa tự động" });
+        return (draft, okFinal, review, rewrites);
+    }
+
     private async Task<string> RunAgent1OutlineAsync(ChatClient client, stories story, string contextBlock, string authorIdea, string languageInstruction, CancellationToken ct)
     {
         var storyInfo = $"Story Information:\nTitle: {story.title}\nSummary: {story.summary ?? ""}\n\nUser Idea:\n{authorIdea}";
@@ -490,12 +590,12 @@ Expected Outcome:
         var userPrompt =
             $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý:\n{outline}\n\nBản nháp hiện tại:\n{currentDraft}\n\n" +
             $"{languageInstruction}\n\n" +
-            "Yêu cầu: giữ nguyên mạch truyện, sự kiện chính và tính nhất quán của bản nháp hiện tại; chỉ mở rộng thêm chi tiết hợp lý (miêu tả, nội tâm, đối thoại, chuyển cảnh) để bản đầy đủ đạt tối thiểu 500 từ, ưu tiên khoảng 600–700 từ. " +
+            "Yêu cầu: giữ nguyên mạch truyện, sự kiện chính và tính nhất quán của bản nháp hiện tại; chỉ mở rộng thêm chi tiết hợp lý (miêu tả, nội tâm, đối thoại, chuyển cảnh) để bản đầy đủ trên 500 từ, ưu tiên khoảng 600–700 từ. " +
             "Không viết lại theo hướng khác, không thêm plot twist lớn. Trả về toàn bộ bản nháp hoàn chỉnh, chỉ nội dung truyện.";
 
         var messages = new List<ChatMessage>
         {
-            new SystemChatMessage(GetAgent2FixSystemPrompt()),
+            new SystemChatMessage(GetAgent2SystemPrompt()),
             new UserChatMessage(userPrompt)
         };
         var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentWriter);
@@ -629,7 +729,7 @@ Expected Outcome:
         }
     }
 
-    /// <summary>Checklist ràng buộc cho Agent 2: đối chiếu trước khi viết để giảm mâu thuẫn với Agent 3.</summary>
+    /// <summary>Checklist ràng buộc cho Agent 2: đối chiếu ngữ cảnh trước khi viết.</summary>
     private const string Agent2Checklist = """
 Trước khi viết, hãy tự kiểm tra dựa trên “Ngữ cảnh từ database” phía trên:
 (1) Ngữ cảnh mô tả những gì ĐÃ xảy ra; bạn chỉ được viết phần TIẾP THEO (các sự kiện xảy ra SAU điểm kết thúc hiện tại). Tuyệt đối không viết lại quá khứ (ví dụ: ngữ cảnh đã nhắc tang lễ thì không được viết cảnh hấp hối/qua đời như đang diễn ra).
@@ -721,12 +821,12 @@ Checklist (PHẢI tự kiểm tra trước khi trả kết quả):
 4. Nội dung đi theo đúng thứ tự outline
 5. Mọi sự kiện đều xảy ra SAU điểm kết thúc hiện tại
 6. Không lặp lại scene cũ
-7. Độ dài: ít nhất 500 từ; ưu tiên khoảng 600–700 từ (nếu chưa đủ thì mở rộng nội dung hợp lý trước khi gửi)
+7. Độ dài: trên 500 từ; ưu tiên khoảng 600–700 từ (nếu chưa đủ thì mở rộng nội dung hợp lý trước khi gửi)
 
 ---
 
 Độ dài (bắt buộc):
-- Tối thiểu 500 từ (đếm theo từ trong ngôn ngữ đang viết). Không được gửi bản nháp ngắn hơn 500 từ.
+- Phải trên 500 từ (đếm theo từ trong ngôn ngữ đang viết). Không được gửi bản nháp từ 500 từ trở xuống.
 - Mục tiêu: khoảng 600–700 từ (ưu tiên đạt khoảng này).
 - Tối đa khoảng 750 từ — tránh lan man; nếu thiếu độ dài, hãy bổ sung chi tiết, đối thoại hoặc miêu tả hợp lý thay vì kết thúc sớm.
 
@@ -741,103 +841,9 @@ Chỉ trả về nội dung truyện (draft).
 → Chỉ nội dung mà người đọc nhìn thấy
 """ + "\n\n" + ConstitutionalRules;
 
-    private static string GetAgent2FixSystemPrompt() => """
-Role:
-Bạn là AI chỉnh sửa truyện (Story Fixer).
-
----
-
-Task:
-Bạn nhận được:
-- Draft hiện tại
-- Danh sách lỗi (violations) từ Consistency Checker
-- Context gốc
-
-Nhiệm vụ:
-→ CHỈ sửa những phần bị lỗi
-→ KHÔNG viết lại toàn bộ
-
----
-
-Nguyên tắc:
-- Giữ nguyên tối đa nội dung đúng
-- Chỉ chỉnh sửa đoạn liên quan đến lỗi
-- Không thêm nội dung mới không cần thiết
-- Không thay đổi cấu trúc scene nếu không bắt buộc
-
----
-
-Cách sửa:
-Với mỗi violation:
-1. Xác định đoạn bị lỗi
-2. Sửa đúng theo context
-3. Đảm bảo không tạo lỗi mới
-
----
-
-Ưu tiên sửa theo mức độ:
-1. character (cao nhất)
-2. timeline
-3. event
-4. logic
-5. outline
-
----
-
-Độ dài sau khi sửa:
-- Bản đầy đủ vẫn phải đạt ít nhất 500 từ và nên nằm khoảng 600–700 từ (nếu bản gốc đã đủ dài, giữ nguyên độ dài hợp lý khi chỉ sửa từng đoạn).
-
----
-
-Output:
-Trả về bản draft ĐÃ SỬA HOÀN CHỈNH (full text)
-
-Không giải thích
-Không markdown
-""" + "\n\n" + ConstitutionalRules;
-
-    private async Task<string> RunAgent2FixAsync(
-        ChatClient client,
-        string contextBlock,
-        string outline,
-        string currentDraft,
-        List<ReviewViolation> violations,
-        string? feedback,
-        string languageInstruction,
-        CancellationToken ct)
-    {
-        var violationsJson = JsonSerializer.Serialize(violations.Select(v => new
-        {
-            type = v.Type,
-            severity = v.Severity,
-            quote = v.Quote,
-            fix = v.Fix
-        }));
-
-        var userPrompt =
-            $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý:\n{outline}\n\nBản nháp hiện tại:\n{currentDraft}\n\n" +
-            $"Vi phạm cần sửa (JSON):\n{violationsJson}\n\n" +
-            (string.IsNullOrWhiteSpace(feedback) ? "" : $"Góp ý tổng quát:\n{feedback}\n\n") +
-            $"{languageInstruction}\n\nChỉ sửa đúng các lỗi được liệt kê. Trả về toàn bộ bản nháp sau khi sửa. Sau khi sửa, bản văn vẫn phải đạt ít nhất 500 từ và nên khoảng 600–700 từ (nếu bản nháp hiện tại quá ngắn, bổ sung nội dung hợp lý để đạt tối thiểu).";
-
-        var messages = new List<ChatMessage>
-        {
-            new SystemChatMessage(GetAgent2FixSystemPrompt()),
-            new UserChatMessage(userPrompt)
-        };
-        var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentWriter);
-        var completion = await client.CompleteChatAsync(messages, options);
-        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
-        if (string.IsNullOrWhiteSpace(text))
-            throw new InvalidOperationException("Agent sửa lỗi không trả về nội dung.");
-        return text.Trim();
-    }
-
-    private async Task<string> RunAgent2WriteAsync(ChatClient client, string contextBlock, string outline, string? feedback, string languageInstruction, CancellationToken ct)
+    private async Task<string> RunAgent2WriteAsync(ChatClient client, string contextBlock, string outline, string languageInstruction, CancellationToken ct)
     {
         var userPrompt = $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý cần viết:\n{outline}";
-        if (!string.IsNullOrWhiteSpace(feedback))
-            userPrompt += $"\n\n[Bản nháp trước bị đánh giá chưa đạt — sửa đúng các điểm sau rồi viết lại]\nGóp ý bắt buộc tuân thủ:\n{feedback}\n\nViết lại toàn bộ chương, sửa đúng theo góp ý trên và giữ phần logic đã đúng.";
         userPrompt += $"\n\n{languageInstruction}\n\nViết bằng tiếng Việt nếu truyện tiếng Việt. Độ dài: tối thiểu 500 từ, mục tiêu 600–700 từ (tối đa khoảng 750 từ). Chỉ output nội dung chương (văn bản truyện), không markdown hay giải thích.";
 
         var messages = new List<ChatMessage>
@@ -853,7 +859,7 @@ Không markdown
         return text.Trim();
     }
 
-    /// <summary>Cắt bỏ đoạn "Feedback: ..." mà model đôi khi thêm vào cuối bản nháp; chỉ dùng reviewFeedback từ Agent 3.</summary>
+    /// <summary>Cắt bỏ đoạn "Feedback: ..." mà model đôi khi thêm vào cuối bản nháp.</summary>
     private static string StripTrailingFeedbackFromDraft(string draft)
     {
         if (string.IsNullOrWhiteSpace(draft)) return draft;
@@ -862,220 +868,6 @@ Không markdown
         if (idx >= 0)
             return draft[..idx].TrimEnd();
         return draft;
-    }
-
-    private static string GetAgent3SystemPrompt() => """
-Role:
-Bạn là AI kiểm tra tính nhất quán (Consistency Checker), chịu trách nhiệm phát hiện lỗi logic, mâu thuẫn và sai lệch giữa Draft với Context và Outline.
-
----
-
-Input:
-Bạn nhận được:
-- Database Context (Story Information, RAG, Character Memory, Event Memory, Story State)
-- Scene Outline
-- Draft (nội dung truyện)
-
-Ngữ cảnh mô tả những gì ĐÃ xảy ra trong truyện.
-
----
-
-Context Priority (ưu tiên từ cao xuống thấp):
-1. Story State (trạng thái hiện tại)
-2. Event Memory (timeline sự kiện)
-3. Character Memory (trạng thái nhân vật)
-4. RAG / Previous Content
-5. Scene Outline (chỉ để kiểm tra flow, không override context)
-
-Nếu có mâu thuẫn → tuân theo thứ tự này.
-
----
-
-Nhiệm vụ:
-Phát hiện các lỗi giữa Draft với:
-- Context (quan trọng nhất)
-- Outline (để kiểm tra flow)
-
-CHỈ tập trung vào logic và consistency.
-KHÔNG đánh giá văn phong, không đánh giá hay/dở.
-
----
-
-Nguyên tắc đánh giá:
-- CHỈ đánh dấu CRITICAL khi có bằng chứng rõ ràng từ context
-- Nếu không chắc chắn → đánh MINOR
-- Không suy diễn ngoài dữ liệu được cung cấp
-- Ưu tiên tránh false positive (reject nhầm)
-
----
-
-Các loại kiểm tra:
-
-1. Character (Nhân vật)
-- Tên phải KHỚP 100% với context (không dịch, không thay đổi)
-- Không dùng nhân vật đã chết / mất tích
-- Không làm sai trạng thái nhân vật (quan hệ, tính cách nếu có trong memory)
-
----
-
-2. Timeline Position (QUAN TRỌNG NHẤT)
-- Draft phải diễn ra SAU điểm kết thúc hiện tại
-- Không viết lại sự kiện đã xảy ra
-- Không mô tả quá khứ như hiện tại
-
----
-
-3. Event Consistency
-- Không đảo ngược hoặc phủ định Event Memory
-- Không tạo mâu thuẫn với timeline
-
----
-
-4. Story Flow
-- Tiếp nối hợp lý từ đoạn gần nhất
-- Không nhảy cảnh vô lý
-
----
-
-5. Outline Alignment
-- Bám theo Scene Outline
-- Không bỏ sót ý chính
-- Không làm sai ý nghĩa
-
-(Nếu lệch nhẹ → MINOR)
-
----
-
-6. World Rules
-- Không phá vỡ luật thế giới đã thiết lập
-
----
-
-7. Logic tổng thể
-- Không có mâu thuẫn nội tại
-- Không có chi tiết phi lý so với context
-
----
-
-Phân loại mức độ lỗi:
-
-CRITICAL:
-- Sai tên nhân vật (ví dụ: Xuân → Spring)
-- Nhân vật chết vẫn xuất hiện
-- Viết lại / đảo ngược sự kiện đã xảy ra
-- Viết sai timeline (quá khứ thay vì hiện tại)
-- Mâu thuẫn trực tiếp với Story State / Event Memory
-
-MINOR:
-- Diễn đạt mơ hồ
-- Flow chưa mượt
-- Lệch nhẹ outline
-- Chi tiết chưa rõ nhưng không sai
-
----
-
-Xử lý thông minh (QUAN TRỌNG):
-- Nếu lỗi có thể sửa đơn giản → cung cấp fixSuggestion rõ ràng
-- Không yêu cầu viết lại toàn bộ nếu không cần thiết
-- Feedback phải ngắn gọn, actionable
-
-Xử lý plot twist theo ý tác giả:
-- Nếu Ý TƯỞNG TÁC GIẢ yêu cầu một plot twist/retcon có vẻ “mâu thuẫn” với context (ví dụ nhân vật đã hy sinh nhưng tác giả muốn họ trở lại):
-  - Không tự động đánh CRITICAL chỉ vì mâu thuẫn đó.
-  - Chỉ đánh CRITICAL nếu bản nháp KHÔNG đưa ra “cầu nối/giải thích hợp lý” để plot twist trở nên nhất quán với thế giới truyện.
-  - Nếu có thể cứu bằng cách thêm 1–3 câu/đoạn ngắn giải thích: trả về violation với `fix` hướng dẫn thêm giải thích tối thiểu (targeted fix).
-
----
-
-Kết luận:
-- approved = false → nếu có ít nhất 1 lỗi CRITICAL
-- approved = true → nếu chỉ có MINOR hoặc không có lỗi
-
----
-
-Ngôn ngữ:
-- Nếu truyện là tiếng Việt → output tiếng Việt
-- Nếu truyện là tiếng Anh → output tiếng Anh
-- Không trộn ngôn ngữ
-
----
-
-Output (JSON ONLY – bắt buộc):
-
-Trường hợp không có lỗi critical:
-{ "approved": true }
-
-Trường hợp có lỗi:
-{
-  "approved": false,
-  "feedback": "Mô tả ngắn gọn lỗi nghiêm trọng để sửa",
-  "violations": [
-    {
-      "type": "timeline|character|event|world_rules|logic|story_flow|outline|other",
-      "quote": "đoạn trích liên quan (nếu có)",
-      "severity": "critical" | "minor",
-      "fix": "cách sửa cụ thể, ngắn gọn"
-    }
-  ]
-}
-""" + "\n\n" + ConstitutionalRules;
-
-    private async Task<ReviewResult> RunAgent3ReviewAsync(ChatClient client, string contextBlock, string outline, string draft, string authorIdea, string languageInstruction, CancellationToken ct)
-    {
-        var userPrompt =
-            $"{DbContextLabel}\n\n{contextBlock}\n\n---\nÝ tưởng tác giả (có thể trống):\n{authorIdea}\n\n---\nDàn ý:\n{outline}\n\nBản nháp:\n{draft}\n\n{languageInstruction}\n\nTrả lời bằng tiếng Việt nếu truyện tiếng Việt. Chỉ output một JSON duy nhất (approved, feedback, violations), không markdown hay giải thích.";
-        var messages = new List<ChatMessage>
-        {
-            new SystemChatMessage(GetAgent3SystemPrompt()),
-            new UserChatMessage(userPrompt)
-        };
-        var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentConsistencyChecker);
-        var completion = await client.CompleteChatAsync(messages, options);
-        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
-        if (string.IsNullOrWhiteSpace(text))
-            return new ReviewResult(false, "Không đọc được kết quả kiểm duyệt.", new List<ReviewViolation>());
-        return ParseReviewResult(text);
-    }
-
-    private static ReviewResult ParseReviewResult(string text)
-    {
-        text = text.Trim();
-        if (text.StartsWith("```"))
-        {
-            var start = text.IndexOf('\n') + 1;
-            var end = text.IndexOf("```", start, StringComparison.Ordinal);
-            if (end > start) text = text[start..end];
-        }
-        try
-        {
-            var root = JsonDocument.Parse(text).RootElement;
-            var approved = root.TryGetProperty("approved", out var a) && a.GetBoolean();
-            var feedback = root.TryGetProperty("feedback", out var f) ? f.GetString() : null;
-            var violations = new List<ReviewViolation>();
-            if (root.TryGetProperty("violations", out var v) && v.ValueKind == JsonValueKind.Array && v.GetArrayLength() > 0)
-            {
-                var hasCritical = false;
-                foreach (var item in v.EnumerateArray())
-                {
-                    var type = item.TryGetProperty("type", out var t) ? t.GetString() : null;
-                    var quote = item.TryGetProperty("quote", out var q) ? q.GetString() : null;
-                    var severity = item.TryGetProperty("severity", out var sev) ? sev.GetString() : null;
-                    var fix = item.TryGetProperty("fix", out var fx) ? fx.GetString() : null;
-                    if (string.Equals(severity, "critical", StringComparison.OrdinalIgnoreCase))
-                        hasCritical = true;
-                    if (!string.IsNullOrWhiteSpace(type) && !string.IsNullOrWhiteSpace(severity))
-                        violations.Add(new ReviewViolation(type!, severity!, quote, fix));
-                }
-                // Chỉ fail khi có ít nhất một violation critical; nếu toàn minor thì coi là đạt
-                if (!hasCritical)
-                    approved = true;
-            }
-            return new ReviewResult(approved, feedback, violations);
-        }
-        catch
-        {
-            return new ReviewResult(false, "Định dạng phản hồi kiểm duyệt không hợp lệ.", new List<ReviewViolation>());
-        }
     }
 
     private void LogUsage(Guid userId, Guid storyId, Guid? chapterId, string actionType, string modelName, int promptTokens, int completionTokens)
