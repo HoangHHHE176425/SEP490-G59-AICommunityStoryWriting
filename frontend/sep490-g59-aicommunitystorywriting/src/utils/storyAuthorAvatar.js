@@ -1,24 +1,11 @@
 import { resolveBackendUrl } from './resolveBackendUrl';
+import { createInitialAvatarDataUrl } from './avatarFallback';
 
 /**
  * Avatar fallback chữ cái đầu (data URL) khi guest không có ảnh từ API profile.
  */
 export function svgAvatarDataUrlFromName(name) {
-    const initial = (String(name || 'T').trim()[0] || 'T').toUpperCase();
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256">
-        <defs>
-          <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stop-color="#13EC5B"/>
-            <stop offset="1" stop-color="#2B7FFF"/>
-          </linearGradient>
-        </defs>
-        <rect width="256" height="256" rx="40" fill="url(#g)"/>
-        <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
-              font-family="Arial, Helvetica, sans-serif" font-size="120" font-weight="800" fill="white">${initial}</text>
-      </svg>
-    `.trim();
-    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+    return createInitialAvatarDataUrl(name, 256);
 }
 
 /** Tên tác giả ưu tiên profile, sau đó field từ story list/detail. */

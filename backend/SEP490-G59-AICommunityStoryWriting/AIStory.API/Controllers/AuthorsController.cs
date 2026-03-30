@@ -43,6 +43,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Danh sách người theo dõi tác giả (phân trang).</summary>
         [HttpGet("{authorId:guid}/followers")]
+        [AllowAnonymous]
         public IActionResult GetFollowers(
             Guid authorId,
             [FromQuery] int page = 1,

@@ -127,6 +127,7 @@ export function AdminTransactions() {
     const [confirm, setConfirm] = useState({ open: false, decision: null });
     const [pendingWithdrawCount, setPendingWithdrawCount] = useState(0);
     const [pendingWithdrawPollError, setPendingWithdrawPollError] = useState('');
+    const [syncingWithdrawId, setSyncingWithdrawId] = useState(null);
 
     // Allow AdminLayout notification to prefill filters once.
     useEffect(() => {
@@ -207,6 +208,16 @@ export function AdminTransactions() {
         ['PENDING', 'PENDING_REVIEW'].includes(upper(selectedFresh?.status));
     const requiresReviewNote =
         canReviewWithdraw && upper(selectedFresh?.status) === 'PENDING_REVIEW';
+    const canSyncWithdraw =
+        selectedFresh?.type === 'WITHDRAW' &&
+        ['PENDING', 'PENDING_REVIEW', 'PROCESSING'].includes(upper(selectedFresh?.status));
+
+    function isProcessingWithdraw(tx) {
+        return (
+            String(tx?.type || '').toUpperCase() === 'WITHDRAW' &&
+            ['PENDING', 'PENDING_REVIEW', 'PROCESSING'].includes(upper(tx?.status))
+        );
+    }
 
     // Notification: pending withdraw count (poll).
     useEffect(() => {
@@ -283,6 +294,33 @@ export function AdminTransactions() {
         } finally {
             setActionLoading(false);
         }
+    }
+
+    async function handleSyncWithdrawStatusById(withdrawId) {
+        if (!withdrawId) return;
+        try {
+            setSyncingWithdrawId(withdrawId);
+            const res = await syncWithdrawStatus(withdrawId);
+            if (res?.success === false) {
+                setToast(res?.message || 'Không thể đồng bộ trạng thái giao dịch rút.');
+            } else {
+                setToast('Đã đồng bộ trạng thái giao dịch rút.');
+                if (selectedFresh?.id === withdrawId) {
+                    setSelected(null);
+                }
+                await loadList(page);
+            }
+        } catch (err) {
+            setToast(err?.response?.data?.message || 'Đồng bộ trạng thái rút tiền thất bại.');
+        } finally {
+            setSyncingWithdrawId(null);
+            window.setTimeout(() => setToast(''), 3000);
+        }
+    }
+
+    async function handleSyncWithdrawStatus() {
+        if (!selectedFresh?.id) return;
+        await handleSyncWithdrawStatusById(selectedFresh.id);
     }
 
     return (

@@ -4,6 +4,7 @@ import { Footer } from '../../components/homepage/Footer';
 import { User, Edit, Coins, Trash2, BookOpen } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { createInitialAvatarDataUrl } from '../../utils/avatarFallback';
 import ViewProfile from '../../components/profile/ViewProfile';
 import EditProfile from '../../components/profile/EditProfile';
 import DeleteAccount from '../../components/profile/DeleteAccount';
@@ -97,17 +98,15 @@ export default function Profile() {
                     <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-6 mb-6 border border-slate-200 dark:border-slate-700">
                         <div className="flex items-start gap-6">
                             <div className="size-20 rounded-full overflow-hidden bg-primary/10 border border-slate-200 dark:border-slate-700 flex items-center justify-center shadow-lg">
-                                {profileData?.avatarUrl ? (
-                                    <img
-                                        src={resolveBackendUrl(profileData.avatarUrl)}
-                                        alt="Avatar"
-                                        className="w-full h-full object-cover"
-                                    />
-                                ) : (
-                                    <span className="text-primary text-3xl font-bold">
-                                        {(profileData?.displayName || 'U').charAt(0).toUpperCase()}
-                                    </span>
-                                )}
+                                <img
+                                    src={
+                                        profileData?.avatarUrl
+                                            ? resolveBackendUrl(profileData.avatarUrl)
+                                            : createInitialAvatarDataUrl(profileData?.displayName || profileData?.email || 'U', 160)
+                                    }
+                                    alt="Avatar"
+                                    className="w-full h-full object-cover"
+                                />
                             </div>
                             <div className="flex-1">
                                 <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">

@@ -12,6 +12,7 @@ import { createChapter, updateChapter, getChapterById, getChapters, createChapte
 import * as coinApi from '../../api/coins/coinApi';
 import { getAuthorFollowersCount, getAuthorFollowers } from '../../api/author/authorApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { createInitialAvatarDataUrl } from '../../utils/avatarFallback';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
 import { Pagination } from '../../components/pagination/Pagination';
@@ -184,8 +185,7 @@ export function AuthorStoryManagement({ onBack }) {
     const [selectedBankAccountIdx, setSelectedBankAccountIdx] = useState(-1);
 
     // Danh sách ngân hàng (dùng cho form thêm tài khoản ngân hàng)
-    // PayOS payout batch yêu cầu `toBin` (Bank BIN). Ở dự án này ta ánh xạ theo BIN 6 chữ số theo ngân hàng.
-    // Nếu BIN không có trong map thì bạn vẫn có thể nhập thủ công ở ô Bank BIN/toBin.
+    // PayOS payout batch yêu cầu `toBin` (Bank BIN). FE tự ánh xạ từ ngân hàng đã chọn.
     const BANK_BIN_MAP = {
         Vietcombank: '970436',
         VietinBank: '970415',
@@ -239,7 +239,6 @@ export function AuthorStoryManagement({ onBack }) {
 
     // Form "Thêm tài khoản ngân hàng" (tách khỏi phần rút tiền)
     const [bankName, setBankName] = useState('');
-    const [bankBin, setBankBin] = useState(''); // PayOS toBin (BIN ngân hàng đích)
     const [accountNumber, setAccountNumber] = useState('');
     const [accountHolderName, setAccountHolderName] = useState('');
     const [branchName, setBranchName] = useState('');
@@ -255,13 +254,6 @@ export function AuthorStoryManagement({ onBack }) {
     const [followersTotalCount, setFollowersTotalCount] = useState(0);
     const [followersSearchInput, setFollowersSearchInput] = useState('');
     const [followersSearchKeyword, setFollowersSearchKeyword] = useState('');
-
-    // Auto-fill toBin when bank changes (if mapping exists).
-    useEffect(() => {
-        const mapped = BANK_BIN_MAP[bankName];
-        if (mapped) setBankBin(mapped);
-        else setBankBin((prev) => prev || '');
-    }, [bankName]);
 
     // Danh sách tài khoản ngân hàng (load từ backend)
     const [bankAccounts, setBankAccounts] = useState([]);
@@ -285,7 +277,7 @@ export function AuthorStoryManagement({ onBack }) {
     const buildBankInfoStringFromAccount = (acc) => {
         if (!acc) return null;
         const bn = String(acc.bank_name || '').trim();
-        const bb = String(acc.bank_bin || '').trim();
+        const bb = String(acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '').trim();
         // PayOS toAccountNumber should be digits only; remove whitespace safely.
         const an = String(acc.account_number || '').replace(/[^\d]/g, '').trim();
         const ah = String(acc.account_holder_name || '').trim();
@@ -1610,50 +1602,9 @@ export function AuthorStoryManagement({ onBack }) {
                                 </div>
                             </div>
 
-                            <div style={{
-                                backgroundColor: '#fff7ed',
-                                borderRadius: '16px',
-                                padding: '1.25rem 1.25rem',
-                                border: '1px solid #fed7aa',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-                                marginBottom: '1.5rem'
-                            }}>
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-                                    <div style={{
-                                        width: '44px',
-                                        height: '44px',
-                                        borderRadius: '14px',
-                                        backgroundColor: '#fef3c7',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        boxShadow: '0 4px 14px rgba(234,179,8,0.25)',
-                                        flexShrink: 0
-                                    }}>
-                                        <Percent style={{ width: '22px', height: '22px', color: '#ea580c' }} />
-                                    </div>
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#9a3412', marginBottom: '0.25rem' }}>
-                                            Phí nền tảng 0% - Bạn nhận 100%
-                                        </div>
-                                        <div style={{ fontSize: '0.8125rem', color: '#7c2d12', lineHeight: 1.5 }}>
-                                            Khi rút tiền, hệ thống không tính thêm phí. Toàn bộ <b>income balance</b> sẽ được chuyển cho bạn.
-                                        </div>
-                                        <div style={{ marginTop: '0.75rem' }}>
-                                            <div style={{
-                                                height: '10px',
-                                                borderRadius: '9999px',
-                                                background: 'linear-gradient(90deg, #13ec5b 0%, #13ec5b 100%)',
-                                                border: '1px solid #bbf7d0'
-                                            }} />
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#7c2d12', marginTop: '0.4rem' }}>
-                                                <span>100% bạn nhận</span>
-                                                <span>0% nền tảng</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                            <p style={{ margin: '0 0 1rem 0', fontSize: '0.8125rem', color: '#92400e' }}>
+                                Lưu ý: Rút tiền không tính thêm phí nền tảng, bạn nhận 100% từ số dư thu nhập khả dụng.
+                            </p>
 
                             <div style={{
                                 backgroundColor: '#ffffff',
@@ -1782,8 +1733,8 @@ export function AuthorStoryManagement({ onBack }) {
                                             setWithdrawError('Minimum withdrawal amount is 50,000 VND.');
                                             return;
                                         }
-                                        if (!selectedBankAccount?.bank_bin) {
-                                            setWithdrawError('Vui lòng nhập Bank BIN/toBin cho tài khoản rút tiền.');
+                                        if (!selectedBankAccount?.bank_bin && !BANK_BIN_MAP[selectedBankAccount?.bank_name || '']) {
+                                            setWithdrawError('Ngân hàng đã chọn chưa có BIN mapping. Vui lòng chọn ngân hàng khác.');
                                             return;
                                         }
                                         const bankInfo = buildBankInfoStringFromAccount(selectedBankAccount);
@@ -1813,6 +1764,9 @@ export function AuthorStoryManagement({ onBack }) {
                                 >
                                     {withdrawSubmitting ? 'Đang gửi...' : 'Gửi yêu cầu rút tiền'}
                                 </button>
+                                <p style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: '#64748b' }}>
+                                    Lưu ý: Sau khi yêu cầu được duyệt, tiền sẽ được chuyển về tài khoản ngân hàng trong khoảng 3-5 ngày làm việc.
+                                </p>
                             </div>
                         </div>
                     ) : activeView === 'profile' ? (
@@ -2521,16 +2475,6 @@ export function AuthorStoryManagement({ onBack }) {
                                         </select>
                                     </div>
                                     <div>
-                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Bank BIN (toBin)</label>
-                                        <input
-                                            type="text"
-                                            value={bankBin}
-                                            onChange={(e) => setBankBin(e.target.value.replace(/[^\d]/g, ''))}
-                                            placeholder="Ví dụ: 970422"
-                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
-                                        />
-                                    </div>
-                                    <div>
                                         <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Số tài khoản</label>
                                         <input
                                             type="text"
@@ -2566,16 +2510,16 @@ export function AuthorStoryManagement({ onBack }) {
                                         type="button"
                                         onClick={async () => {
                                             const bn = bankName.trim();
-                                            const bb = bankBin.trim();
                                             const an = accountNumber.trim();
                                             const ah = accountHolderName.trim();
-                                            if (!bn || !bb || !an || !ah) {
-                                                showToast('Vui lòng nhập đủ: Ngân hàng, Bank BIN/toBin, Số tài khoản, Chủ tài khoản.', 'error');
+                                            const mappedBin = BANK_BIN_MAP[bn] || '';
+                                            if (!bn || !an || !ah) {
+                                                showToast('Vui lòng nhập đủ: Ngân hàng, Số tài khoản, Chủ tài khoản.', 'error');
                                                 return;
                                             }
                                             const res = await coinApi.upsertAuthorBankAccount({
                                                 bankName: bn,
-                                                bankBin: bb,
+                                                bankBin: mappedBin,
                                                 accountNumber: an,
                                                 accountHolderName: ah,
                                                 branchName: branchName.trim(),
@@ -2586,7 +2530,6 @@ export function AuthorStoryManagement({ onBack }) {
                                                 return;
                                             }
                                             setBankName('');
-                                            setBankBin('');
                                             setAccountNumber('');
                                             setAccountHolderName('');
                                             setBranchName('');
@@ -2848,7 +2791,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                         <td style={{ padding: '0.85rem 1rem' }}>
                                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
                                                                 <img
-                                                                    src={avatar ? resolveBackendUrl(avatar) : 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=64&h=64&fit=crop'}
+                                                                    src={avatar ? resolveBackendUrl(avatar) : createInitialAvatarDataUrl(displayName, 96)}
                                                                     alt={displayName}
                                                                     style={{ width: '36px', height: '36px', borderRadius: '9999px', objectFit: 'cover', border: '1px solid #e2e8f0' }}
                                                                 />

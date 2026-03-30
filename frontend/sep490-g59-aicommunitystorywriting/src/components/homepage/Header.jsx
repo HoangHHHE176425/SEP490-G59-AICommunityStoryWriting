@@ -3,12 +3,12 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { createInitialAvatarDataUrl } from '../../utils/avatarFallback';
 import { getAllCategories } from '../../api/category/categoryApi';
 import { getNotifications, getUnreadCount, markNotificationAsRead, markAllNotificationsAsRead } from '../../api/notification/notificationApi';
 import * as coinApi from '../../api/coins/coinApi';
 import { useToast } from '../author/story-editor/Toast';
 import { isAuthorChapterListActive } from '../../utils/authorUiFlags';
-import { normalizeNotificationTo } from '../../utils/notificationLink';
 
 /** Thông báo mới nhất trên cùng (theo createdAt). */
 function sortNotificationsNewestFirst(list) {
@@ -276,7 +276,7 @@ export function Header() {
                                     </button>
                                     {isNotificationOpen && (
                                         <div
-                                            className="absolute top-full right-0 mt-2 w-80 max-h-[min(24rem,75vh)] bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden z-50 flex flex-col"
+                                            className="absolute top-full right-0 mt-2 w-80 bg-slate-800 border border-slate-700 rounded-lg shadow-xl overflow-hidden z-50 flex flex-col"
                                             onMouseDown={(e) => e.preventDefault()}
                                         >
                                             <div className="shrink-0 px-4 py-3 border-b border-slate-700 flex items-center justify-between">
@@ -285,7 +285,7 @@ export function Header() {
                                                     <span className="text-xs text-slate-400">{unreadCount} chưa đọc</span>
                                                 )}
                                             </div>
-                                            <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain">
+                                            <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain max-h-[320px]">
                                                 {notificationsLoading ? (
                                                     <div className="px-4 py-6 text-center text-slate-400 text-sm">Đang tải...</div>
                                                 ) : notifications.length === 0 ? (
@@ -297,22 +297,9 @@ export function Header() {
                                                             typeUpper === 'STORY_REPORTED_TO_AUTHOR' ||
                                                             typeUpper === 'COMMENT_REPORTED_TO_OWNER';
                                                         return (
-                                                        <Link
+                                                        <div
                                                             key={n.id}
-                                                            to={normalizeNotificationTo(n.linkUrl)}
-                                                            className="block px-4 py-3 border-b border-slate-700/50 hover:bg-slate-700/50 transition-colors"
-                                                            onClick={async () => {
-                                                                if (!n.isRead) {
-                                                                    try {
-                                                                        await markNotificationAsRead(n.id);
-                                                                        setUnreadCount((c) => Math.max(0, c - 1));
-                                                                        setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x)));
-                                                                    } catch {
-                                                                        // ignore
-                                                                    }
-                                                                }
-                                                                setIsNotificationOpen(false);
-                                                            }}
+                                                            className="block px-4 py-3 border-b border-slate-700/50"
                                                         >
                                                             <p className={`text-sm font-medium ${n.isRead ? 'text-slate-400' : 'text-white'}`}>{n.title}</p>
                                                             <p
@@ -320,7 +307,7 @@ export function Header() {
                                                             >
                                                                 {n.content}
                                                             </p>
-                                                        </Link>
+                                                        </div>
                                                         );
                                                     })
                                                 )}
@@ -358,8 +345,8 @@ export function Header() {
                                             alt="User Avatar"
                                             className="w-full h-full object-cover"
                                             src={
-                                                resolveBackendUrl(user?.avatarUrl) ||
-                                                'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'
+                                                (user?.avatarUrl ? resolveBackendUrl(user.avatarUrl) : '') ||
+                                                createInitialAvatarDataUrl(user?.displayName ?? user?.email ?? 'U', 128)
                                             }
                                         />
                                     </Link>
