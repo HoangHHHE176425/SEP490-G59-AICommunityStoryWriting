@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace Services.DTOs.CommentReports;
@@ -13,6 +13,8 @@ public class ComplianceCommentReportRowDto
     public Guid CommentUserId { get; set; }
     public string? CommentUserDisplayName { get; set; }
     public string? CommentUserEmail { get; set; }
+    public string? CommentContent { get; set; }
+    public bool IsCommentThreadHidden { get; set; }
 
     public string? ReasonCode { get; set; }
     public double SeverityScore { get; set; }
@@ -44,10 +46,19 @@ public class ComplianceCommentReportRowDto
 
     // Story-like: liệt kê tất cả người report + tất cả lý do report trong thread.
     public IReadOnlyList<string> ReporterDisplayNames { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<ComplianceCommentReporterDetailDto> ReporterDetails { get; set; } = Array.Empty<ComplianceCommentReporterDetailDto>();
     public IReadOnlyList<string> ReasonSummaryVi { get; set; } = Array.Empty<string>();
 
     // Khi COMPLIANCE đã gửi đơn lên ADMIN (requestKind BAN_USER/SUSPEND_AUTHOR_WRITING) đang PENDING,
     // thì không cho phép COMPLIANCE thao tác tiếp trên các ticket comment report liên quan.
     public bool HasPendingAdminActionRequest { get; set; }
+}
+
+public class ComplianceCommentReporterDetailDto
+{
+    public string? ReporterDisplayName { get; set; }
+    public DateTime? ReportedAtUtc { get; set; }
+    public string? Description { get; set; }
+    public string? ReasonLabelVi { get; set; }
 }
 

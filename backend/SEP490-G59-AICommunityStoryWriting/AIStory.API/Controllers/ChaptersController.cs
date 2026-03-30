@@ -24,7 +24,6 @@ namespace AIStory.API.Controllers
 
         private readonly IChapterService _chapterService;
         private readonly IChapterVersionService _chapterVersionService;
-        private readonly IServiceScopeFactory _scopeFactory;
         private readonly IStoryService _storyService;
         private readonly IContentGuardrailService _contentGuardrail;
         private readonly INotificationHubNotifier _notificationHubNotifier;
@@ -33,7 +32,6 @@ namespace AIStory.API.Controllers
         public ChaptersController(
             IChapterService chapterService,
             IChapterVersionService chapterVersionService,
-            IServiceScopeFactory scopeFactory,
             IStoryService storyService,
             IContentGuardrailService contentGuardrail,
             INotificationHubNotifier notificationHubNotifier,
@@ -41,7 +39,6 @@ namespace AIStory.API.Controllers
         {
             _chapterService = chapterService;
             _chapterVersionService = chapterVersionService;
-            _scopeFactory = scopeFactory;
             _storyService = storyService;
             _contentGuardrail = contentGuardrail;
             _notificationHubNotifier = notificationHubNotifier;
@@ -126,7 +123,7 @@ namespace AIStory.API.Controllers
                     ((p.escrow_status ?? string.Empty).ToUpper() == "RELEASED" || p.released_at != null));
         }
 
-        /// <summary>Tạo chapter mới - Chỉ AUTHOR. Sau khi lưu, Plot Manager (Agent 4) cập nhật memory nếu có nội dung.</summary>
+        /// <summary>Tạo chapter mới - Chỉ AUTHOR.</summary>
         [HttpPost]
         [Authorize(Roles = "AUTHOR")]
         public IActionResult Create([FromBody] CreateChapterRequestDto request)
@@ -134,8 +131,6 @@ namespace AIStory.API.Controllers
             try
             {
                 var chapter = _chapterService.Create(request);
-                if (!string.IsNullOrWhiteSpace(request.Content) && chapter.StoryId.HasValue)
-                    TriggerPlotManagerUpdate(chapter.StoryId.Value, chapter.Id, request.Content);
                 return Created($"api/chapters/{chapter.Id}", chapter);
             }
             catch (InvalidOperationException ex)
@@ -652,12 +647,6 @@ namespace AIStory.API.Controllers
             try
             {
                 var updated = _chapterService.Update(id, request);
-                if (updated && (request.Content != null || (request.Status?.ToUpper() == "PUBLISHED")))
-                {
-                    var chapter = _chapterService.GetById(id);
-                    if (chapter != null && !string.IsNullOrWhiteSpace(chapter.Content) && chapter.StoryId.HasValue)
-                        TriggerPlotManagerUpdate(chapter.StoryId.Value, id, chapter.Content);
-                }
                 return updated ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
             catch (InvalidOperationException ex)
@@ -713,12 +702,6 @@ namespace AIStory.API.Controllers
             try
             {
                 var published = _chapterService.Publish(id);
-                if (published)
-                {
-                    var chapter = _chapterService.GetById(id);
-                    if (chapter != null && !string.IsNullOrWhiteSpace(chapter.Content) && chapter.StoryId.HasValue)
-                        TriggerPlotManagerUpdate(chapter.StoryId.Value, id, chapter.Content);
-                }
                 return published ? NoContent() : NotFound(new { message = $"Chapter with ID {id} not found" });
             }
             catch (InvalidOperationException ex)
@@ -910,22 +893,5 @@ namespace AIStory.API.Controllers
             catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
         }
 
-        /// <summary>Gọi Plot Manager (Agent 4) cập nhật memory trong background; không chặn response.</summary>
-        private void TriggerPlotManagerUpdate(Guid storyId, Guid chapterId, string content)
-        {
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    using var scope = _scopeFactory.CreateScope();
-                    var plotManager = scope.ServiceProvider.GetRequiredService<IPlotManagerService>();
-                    await plotManager.UpdateMemoryFromChapterAsync(storyId, chapterId, content, reIndexRagAfter: true);
-                }
-                catch
-                {
-                    // Best-effort; không làm fail request
-                }
-            });
-        }
     }
 }

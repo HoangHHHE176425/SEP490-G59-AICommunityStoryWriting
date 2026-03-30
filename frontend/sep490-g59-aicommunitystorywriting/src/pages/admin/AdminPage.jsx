@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { AdminDashboard } from '../../components/admin/AdminDashboard';
@@ -11,23 +11,64 @@ import ViolationManagement from './violation/ViolationManagement';
 import { AdminTransactions } from './transactions/AdminTransactions';
 import { AdminWalletDashboard } from './wallet/AdminWalletDashboard';
 import { ReviewEscalationsManagement } from './moderation/ReviewEscalationsManagement';
+import { ModeratorLogsManagement } from './moderation/ModeratorLogsManagement';
 
 export function AdminPage() {
     const { role } = useAuth();
     const roleUpper = (role ?? '').toString().toUpperCase();
-    const hasLimitedAdminMenu = roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE';
-    const [activePage, setActivePage] = useState(hasLimitedAdminMenu ? 'publication' : 'categories');
+    const hidePagesForAdmin = useMemo(() => new Set(['publication', 'stories', 'comments']), []);
+    const allowedPages = useMemo(() => {
+        if (roleUpper === 'MODERATOR') return new Set(['dashboard', 'publication']);
+        if (roleUpper === 'COMPLIANCE') return new Set(['violations']);
+        return null; // ADMIN: full
+    }, [roleUpper]);
+
+    const getDefaultPageByRole = () => {
+        if (roleUpper === 'MODERATOR') return 'dashboard';
+        if (roleUpper === 'COMPLIANCE') return 'violations';
+        return 'dashboard';
+    };
+
+    const [activePage, setActivePage] = useState(getDefaultPageByRole());
+    const [publicationInitialStatus, setPublicationInitialStatus] = useState('pending'); // pending | approved | rejected
+
+    // Khi role thay đổi hoặc reload, luôn kéo về màn mặc định của role đó.
+    useEffect(() => {
+        setActivePage((prev) => {
+            const nextDefault = getDefaultPageByRole();
+            if (!allowedPages) return prev || nextDefault;
+            return allowedPages.has(prev) ? prev : nextDefault;
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [roleUpper]);
+
+    // ADMIN: ẩn tab => chặn truy cập nội bộ nếu state còn giữ.
+    useEffect(() => {
+        if (roleUpper !== 'ADMIN') return;
+        if (hidePagesForAdmin.has(activePage)) {
+            setActivePage('dashboard');
+        }
+    }, [roleUpper, activePage, hidePagesForAdmin]);
 
     const renderPage = () => {
         switch (activePage) {
             case 'dashboard':
-                return <AdminDashboard />;
+                return (
+                    <AdminDashboard
+                        onNavigatePublicationStatus={(status) => {
+                            setPublicationInitialStatus(status);
+                            setActivePage('publication');
+                        }}
+                    />
+                );
             case 'categories':
                 return <CategoryManagement />;
             case 'publication':
-                return <PublicationManagement />;
+                return <PublicationManagement initialFilterStatus={publicationInitialStatus} />;
             case 'review-escalations':
                 return <ReviewEscalationsManagement />;
+            case 'moderator-logs':
+                return <ModeratorLogsManagement />;
             case 'stories':
                 return (
                     <div className="text-center py-12">
@@ -67,8 +108,21 @@ export function AdminPage() {
         }
     };
 
+    const handleNavigate = (pageId) => {
+        if (roleUpper === 'ADMIN' && hidePagesForAdmin.has(pageId)) {
+            setActivePage('dashboard');
+            return;
+        }
+        if (allowedPages && !allowedPages.has(pageId)) {
+            setActivePage(getDefaultPageByRole());
+            return;
+        }
+        setActivePage(pageId);
+        if (pageId === 'publication') setPublicationInitialStatus('pending');
+    };
+
     return (
-        <AdminLayout activePage={activePage} onNavigate={setActivePage}>
+        <AdminLayout activePage={activePage} onNavigate={handleNavigate}>
             {renderPage()}
         </AdminLayout>
     );

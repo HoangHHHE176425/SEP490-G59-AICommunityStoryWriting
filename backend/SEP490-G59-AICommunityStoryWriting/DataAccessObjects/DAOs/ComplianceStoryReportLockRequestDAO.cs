@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -49,6 +49,18 @@ public static class ComplianceStoryReportLockRequestDAO
             .ThenInclude(u => u!.user_profiles)
             .Where(x => x.status == st)
             .OrderBy(x => x.created_at)
+            .ToList();
+    }
+
+    public static List<compliance_story_report_lock_requests> ListByRequesterId(Guid requesterId)
+    {
+        using var context = new StoryPlatformDbContext();
+        return context.compliance_story_report_lock_requests.AsNoTracking()
+            .Include(x => x.story)
+            .Include(x => x.requester)
+            .ThenInclude(u => u!.user_profiles)
+            .Where(x => x.requester_id == requesterId)
+            .OrderByDescending(x => x.created_at)
             .ToList();
     }
 

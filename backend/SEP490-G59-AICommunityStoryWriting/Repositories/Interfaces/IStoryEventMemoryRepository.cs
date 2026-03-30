@@ -9,4 +9,5 @@ public interface IStoryEventMemoryRepository
     void AddRange(IEnumerable<story_event_memory> events);
     int GetNextOrderIndex(Guid storyId);
     void DeleteByStoryId(Guid storyId);
+    void DeleteByChapterId(Guid chapterId);
 }

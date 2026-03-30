@@ -20,4 +20,7 @@ public class StoryEventMemoryRepository : IStoryEventMemoryRepository
 
     public void DeleteByStoryId(Guid storyId)
         => StoryEventMemoryDAO.DeleteByStoryId(storyId);
+
+    public void DeleteByChapterId(Guid chapterId)
+        => StoryEventMemoryDAO.DeleteByChapterId(chapterId);
 }

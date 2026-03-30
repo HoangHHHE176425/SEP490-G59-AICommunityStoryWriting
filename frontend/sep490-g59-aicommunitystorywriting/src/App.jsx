@@ -20,11 +20,13 @@ import AboutUs from './pages/aboutus/AboutUs';
 import PolicyPage from './pages/policy/PolicyPage';
 import Donate from './pages/donate/Donate';
 import GoogleCallback from './pages/auth/GoogleCallback';
+import { ScrollToTop } from './components/routing/ScrollToTop';
 
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <ScrollToTop />
         <Routes>
           <Route path="/" element={<AboutUs />} />
           <Route path="/home" element={<Homepage />} />

@@ -1,4 +1,4 @@
-﻿using Services.DTOs.StoryReports;
+using Services.DTOs.StoryReports;
 
 namespace Services.Interfaces;
 
@@ -32,6 +32,9 @@ public interface IStoryReportService
 
     Task<IReadOnlyList<ComplianceLockRequestListItemDto>> AdminListComplianceLockRequestsAsync(string? status);
 
+    /// <summary>COMPLIANCE/ADMIN: đơn gỡ lock do chính mình gửi (mọi trạng thái).</summary>
+    Task<IReadOnlyList<ComplianceLockRequestListItemDto>> ListMyComplianceLockRequestsAsync(Guid requesterId);
+
     Task<IReadOnlyList<ComplianceOfficerAssignmentOptionDto>> AdminListComplianceOfficersForAssignmentAsync();
 
     Task AdminResolveComplianceLockRequestAsync(Guid requestId, Guid adminId, AdminResolveComplianceLockRequestDto dto);
@@ -48,6 +51,9 @@ public interface IStoryReportService
     Task<IReadOnlyList<ViolationLogListItemDto>> ListViolationsForUserAsync(Guid violatorUserId, int take, bool viewerIsComplianceOrAdmin);
 
     Task<IReadOnlyList<ComplianceAdminActionRequestListItemDto>> AdminListComplianceAdminActionRequestsAsync(string? status);
+
+    /// <summary>COMPLIANCE/ADMIN: đơn BAN/SUSPEND do chính mình gửi (mọi trạng thái).</summary>
+    Task<IReadOnlyList<ComplianceAdminActionRequestListItemDto>> ListMyComplianceAdminActionRequestsAsync(Guid requesterId);
 
     Task AdminResolveComplianceAdminActionRequestAsync(Guid requestId, Guid adminId, AdminResolveComplianceAdminActionRequestDto dto);
 }

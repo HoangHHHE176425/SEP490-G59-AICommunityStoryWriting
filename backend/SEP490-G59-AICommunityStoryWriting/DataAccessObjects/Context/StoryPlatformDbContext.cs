@@ -168,6 +168,7 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
             entity.Property(e => e.created_at).HasDefaultValueSql("(getdate())");
             entity.Property(e => e.chapter_index);
+            entity.Property(e => e.draft_chapter_id);
 
             entity.HasOne(d => d.chapter).WithMany(p => p.ai_generated_content)
                 .HasForeignKey(d => d.chapter_id)

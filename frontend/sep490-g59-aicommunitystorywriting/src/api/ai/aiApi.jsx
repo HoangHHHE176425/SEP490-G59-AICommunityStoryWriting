@@ -19,9 +19,10 @@ export async function indexRag(storyId) {
  * @param {string} storyId - ID truyện (Guid)
  * @param {string|null} afterChapterId - ID chương sau đó muốn gợi ý; null = sau chương mới nhất
  * @param {string|null} prompt - Prompt tùy chọn do tác giả nhập
+ * @param {string|null} chapterId - ID chương đang soạn (FE tạo trước); BE lưu gợi ý vào ai_generated_content
  * @returns {Promise<{ suggestions: Array<{ title, summary, direction }>, contextUsed?: { storyTitle?, chaptersIncluded } }>}
  */
-export async function suggestNextChapter(storyId, afterChapterId = null, prompt = null) {
+export async function suggestNextChapter(storyId, afterChapterId = null, prompt = null, chapterId = null) {
     if (!storyId) {
         throw new Error("StoryId là bắt buộc.");
     }
@@ -29,6 +30,7 @@ export async function suggestNextChapter(storyId, afterChapterId = null, prompt 
     const body = {
         storyId,
         afterChapterId: afterChapterId || null,
+        chapterId: chapterId || null,
         // Hỗ trợ BE theo nhiều naming convention (BE có thể chọn 1 trong các field này)
         prompt: trimmedPrompt || null,
         authorPrompt: trimmedPrompt || null,
@@ -89,7 +91,7 @@ function parseCoCreateSseResponse(rawText) {
  * BE trả về SSE (không phải JSON thuần) — axios phải đọc text rồi parse sự kiện `result`.
  * @param {string} storyId - ID truyện (Guid)
  * @param {string|null|undefined} authorIdea - Ý tưởng của tác giả (có thể null khi BE cho phép auto)
- * @param {{ chapterOrderIndex?: number }} [options] - order_index chương đang soạn (0-based), để lưu ai_generated_content đúng slot và so % khi copy–paste
+ * @param {{ chapterOrderIndex?: number, chapterId?: string }} [options] - order_index/chapterId chương đang soạn
  * @returns {Promise<{ ideaContradictionFeedback?: string, outline: string, finalContent: string, approved: boolean, revisionCount: number, reviewFeedback?: string }>}
  */
 export async function coCreate(storyId, authorIdea, options = {}) {
@@ -103,6 +105,10 @@ export async function coCreate(storyId, authorIdea, options = {}) {
     };
     if (rawIdx !== undefined && rawIdx !== null && Number.isFinite(Number(rawIdx))) {
         payload.chapterOrderIndex = Math.max(0, Math.floor(Number(rawIdx)));
+    }
+    const rawChapterId = options?.chapterId ?? options?.ChapterId;
+    if (rawChapterId != null && String(rawChapterId).trim() !== "") {
+        payload.chapterId = String(rawChapterId).trim();
     }
     const response = await axiosInstance.post(
         "ai/co-create",
@@ -159,9 +165,11 @@ export async function coCreate(storyId, authorIdea, options = {}) {
  */
 export async function compareChapter(payload) {
     const chapterId = payload?.chapterId ?? payload?.ChapterId;
+    const content = (payload?.content ?? "").toString();
     if (!chapterId || String(chapterId).trim() === "") throw new Error("chapterId là bắt buộc.");
     const response = await axiosInstance.post("ai/compare-chapter", {
         chapterId,
+        content,
     });
     return response.data;
 }
@@ -171,9 +179,13 @@ export async function compareChapter(payload) {
  * @param {{ storyId: string, orderIndex: number, content: string }} payload
  */
 export async function compareChapterPreview(payload) {
+    const chapterId = payload?.chapterId ?? payload?.ChapterId;
+    const content = (payload?.content ?? "").toString();
+    if (chapterId != null && String(chapterId).trim() !== "") {
+        return compareChapter({ chapterId, content });
+    }
     const storyId = payload?.storyId ?? payload?.StoryId;
     const orderIndex = payload?.orderIndex ?? payload?.OrderIndex;
-    const content = (payload?.content ?? "").toString();
     if (!storyId || String(storyId).trim() === "") throw new Error("storyId là bắt buộc.");
     if (orderIndex == null || Number.isNaN(Number(orderIndex))) throw new Error("orderIndex là bắt buộc.");
     try {
@@ -216,6 +228,38 @@ export async function checkChapter(payload) {
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     return response.data;
+}
+
+/**
+ * Check từ cấm/chính sách (ưu tiên endpoint tách riêng; fallback check-chapter cũ).
+ * @param {Object} payload - { content: string, storyId?: string|null, chapterTitle?: string|null }
+ */
+export async function checkBannedWords(payload) {
+    const content = (payload?.content ?? "").toString();
+    if (!content.trim()) throw new Error("Content là bắt buộc.");
+    const body = {
+        content,
+        storyId: payload?.storyId ?? null,
+        chapterTitle: payload?.chapterTitle ?? null,
+    };
+    const token = localStorage.getItem("accessToken");
+    try {
+        const response = await axiosInstance.post("ai/check-banned-words", body, {
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        return response.data;
+    } catch (err) {
+        if (err?.response?.status !== 404) throw err;
+        const legacy = await checkChapter(payload);
+        const policyViolations = legacy?.policyViolations ?? legacy?.PolicyViolations ?? [];
+        const hasInappropriateContent = Boolean(legacy?.hasInappropriateContent ?? legacy?.HasInappropriateContent);
+        return {
+            passed: Array.isArray(policyViolations) && policyViolations.length === 0 && !hasInappropriateContent,
+            policyViolations,
+            hasInappropriateContent,
+            summary: legacy?.summary ?? legacy?.Summary ?? null,
+        };
+    }
 }
 
 /**

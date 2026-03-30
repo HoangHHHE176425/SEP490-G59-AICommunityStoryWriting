@@ -23,6 +23,8 @@ namespace Services.DTOs.Account
 
         /// <summary>Role từ DB: USER, AUTHOR, MODERATOR, ADMIN. Dùng cho FE kiểm tra quyền admin.</summary>
         public string? Role { get; set; }
+        /// <summary>UTC; nếu > hiện tại thì tác giả đang bị tạm đình chỉ quyền viết.</summary>
+        public DateTime? AuthorWritingSuspendedUntilUtc { get; set; }
 
         public List<string> Tags { get; set; } = new List<string>();
 

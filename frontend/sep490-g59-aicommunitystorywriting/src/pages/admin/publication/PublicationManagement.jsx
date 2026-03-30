@@ -8,6 +8,8 @@ import { getProfileByUserId } from '../../../api/account/accountApi';
 import { reviewDeadlineAfterDaysUtc, localDateTimeInputToIsoUtc, worstTimeStatus } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
+import { getActivePolicy } from '../../../api/policy/policyApi';
+import { PolicyBody } from '../../../components/policy/PolicyBody';
 
 /** Bổ sung ageRating từ GET /stories/:id cho publication có storyId nhưng chưa có ageRating (tránh lỗi hiển thị "—" khi API danh sách không trả hoặc trả null). */
 async function enrichAgeRatingFromStory(list) {
@@ -341,9 +343,9 @@ function mapPendingChapterToItem(c) {
     };
 }
 
-export function PublicationManagement() {
+export function PublicationManagement({ initialFilterStatus = 'pending' }) {
     const [selectedPublication, setSelectedPublication] = useState(null);
-    const [filterStatus, setFilterStatus] = useState('pending'); // 'pending' | 'approved' | 'rejected'
+    const [filterStatus, setFilterStatus] = useState(initialFilterStatus); // 'pending' | 'approved' | 'rejected'
     const [publications, setPublications] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -380,6 +382,17 @@ export function PublicationManagement() {
     const [claimCustomDeadline, setClaimCustomDeadline] = useState('');
     const [claimCommitted, setClaimCommitted] = useState(false);
     const [modalClaimBusy, setModalClaimBusy] = useState(false);
+    const [policyModalOpen, setPolicyModalOpen] = useState(false);
+    const [policyLoading, setPolicyLoading] = useState(false);
+    const [policyError, setPolicyError] = useState('');
+    const [authorPolicy, setAuthorPolicy] = useState(null);
+    const [processModalOpen, setProcessModalOpen] = useState(false);
+
+    // Khi dashboard MODERATOR bấm nút, thay đổi tab ở màn publication ngay lập tức.
+    useEffect(() => {
+        if (initialFilterStatus) setFilterStatus(initialFilterStatus);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialFilterStatus]);
 
     /** Modal "Nhận duyệt đơn": gộp theo truyện — mỗi truyện 1 dòng; nhận 1 lần = claim truyện (nếu chưa) + tất cả chương chờ duyệt của truyện đó. */
     const loadClaimModalItems = useCallback(() => {
@@ -1156,6 +1169,26 @@ export function PublicationManagement() {
         loadRejectedCache();
     };
 
+    const openAuthorPolicyModal = async () => {
+        setPolicyModalOpen(true);
+        setPolicyLoading(true);
+        setPolicyError('');
+        try {
+            const policy = await getActivePolicy('AUTHOR');
+            setAuthorPolicy(policy);
+        } catch (e) {
+            const msg =
+                e?.response?.data?.message
+                ?? e?.response?.data?.Message
+                ?? e?.message
+                ?? 'Không thể tải chính sách tác giả.';
+            setPolicyError(msg);
+            setAuthorPolicy(null);
+        } finally {
+            setPolicyLoading(false);
+        }
+    };
+
     const stats = statsData;
 
     return (
@@ -1171,6 +1204,40 @@ export function PublicationManagement() {
                 }}>
                     Quản lý xuất bản
                 </h1>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+                    <button
+                        type="button"
+                        onClick={openAuthorPolicyModal}
+                        style={{
+                            padding: '0.5rem 1rem',
+                            fontSize: '0.875rem',
+                            fontWeight: 600,
+                            backgroundColor: '#ffffff',
+                            color: '#1f2937',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        Xem chính sách hệ thống
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setProcessModalOpen(true)}
+                        style={{
+                            padding: '0.5rem 1rem',
+                            fontSize: '0.875rem',
+                            fontWeight: 600,
+                            backgroundColor: '#ffffff',
+                            color: '#1f2937',
+                            border: '1px solid #e2e8f0',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        Xem quy trình duyệt xuất bản
+                    </button>
+                </div>
             </div>
 
             {/* Nút "Nhận duyệt đơn" — số bên cạnh = đơn chưa ai nhận; tab Chờ duyệt = đơn bạn đã nhận, đang chờ bạn duyệt */}
@@ -1731,6 +1798,118 @@ export function PublicationManagement() {
                             >
                                 Đã hiểu
                             </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {policyModalOpen && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10060,
+                        padding: '1rem',
+                    }}
+                    onClick={() => setPolicyModalOpen(false)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            maxWidth: '900px',
+                            width: '100%',
+                            maxHeight: '85vh',
+                            overflow: 'auto',
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
+                            border: '1px solid #e2e8f0',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h2 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, color: '#1e293b' }}>Chính sách hệ thống cho kiểm duyệt viên</h2>
+                            <button
+                                type="button"
+                                onClick={() => setPolicyModalOpen(false)}
+                                style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#64748b', lineHeight: 1 }}
+                                aria-label="Đóng"
+                            >
+                                ×
+                            </button>
+                        </div>
+                        <div style={{ padding: '1rem 1.25rem' }}>
+                            {policyLoading ? (
+                                <p style={{ margin: 0, color: '#64748b', fontSize: '0.875rem' }}>Đang tải chính sách tác giả...</p>
+                            ) : policyError ? (
+                                <div style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid #fecaca', background: '#fef2f2', color: '#991b1b', fontSize: '0.875rem' }}>
+                                    {policyError}
+                                </div>
+                            ) : authorPolicy ? (
+                                <>
+                                    <div style={{ marginBottom: '0.75rem', fontSize: '0.8125rem', color: '#64748b' }}>
+                                        Chính sách tác giả đang áp dụng{authorPolicy.version ? ` · phiên bản v${authorPolicy.version}` : ''}.
+                                    </div>
+                                    <PolicyBody content={authorPolicy.content} />
+                                </>
+                            ) : (
+                                <p style={{ margin: 0, color: '#64748b', fontSize: '0.875rem' }}>Chưa có chính sách tác giả đang áp dụng.</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {processModalOpen && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(0,0,0,0.5)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10060,
+                        padding: '1rem',
+                    }}
+                    onClick={() => setProcessModalOpen(false)}
+                >
+                    <div
+                        style={{
+                            backgroundColor: '#fff',
+                            borderRadius: '12px',
+                            maxWidth: '760px',
+                            width: '100%',
+                            maxHeight: '85vh',
+                            overflow: 'auto',
+                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
+                            border: '1px solid #e2e8f0',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h2 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, color: '#1e293b' }}>Quy trình duyệt xuất bản dành cho kiểm duyệt viên</h2>
+                            <button
+                                type="button"
+                                onClick={() => setProcessModalOpen(false)}
+                                style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#64748b', lineHeight: 1 }}
+                                aria-label="Đóng"
+                            >
+                                ×
+                            </button>
+                        </div>
+                        <div style={{ padding: '1rem 1.25rem', color: '#334155', fontSize: '0.875rem', lineHeight: 1.6 }}>
+                            <p style={{ margin: '0 0 0.5rem', fontWeight: 700, color: '#1e293b' }}>Quy trình đề xuất (ngắn gọn):</p>
+                            <ol style={{ margin: 0, paddingLeft: '1.25rem', display: 'grid', gap: '0.45rem' }}>
+                                <li>Nhận đơn duyệt từ hàng đợi và kiểm tra thông tin truyện/chương cần xử lý.</li>
+                                <li>Đọc nội dung, đối chiếu chính sách tác giả và tiêu chí xuất bản của hệ thống.</li>
+                                <li>Ra quyết định chấp nhận hoặc từ chối, ghi chú rõ ràng và đúng trọng tâm.</li>
+                                <li>Nếu có vướng mắc thẩm quyền, gửi đơn lên quản trị viên để xin hỗ trợ xử lý.</li>
+                                <li>Hoàn tất đơn và kiểm tra trạng thái đã cập nhật đúng trong danh sách/nhật ký.</li>
+                            </ol>
                         </div>
                     </div>
                 </div>

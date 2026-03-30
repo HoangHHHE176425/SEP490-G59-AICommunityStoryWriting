@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.StoryReports;
+namespace Services.DTOs.StoryReports;
 
 public class ComplianceLockRequestListItemDto
 {
@@ -14,4 +14,12 @@ public class ComplianceLockRequestListItemDto
 
     /// <summary>Mức hiệu lực (lưu + tuổi đơn).</summary>
     public string UrgencyTier { get; set; } = "";
+
+    public DateTime? ResolvedAtUtc { get; set; }
+
+    /// <summary>Ghi chú / lý do khi admin xử lý xong (đặc biệt khi từ chối).</summary>
+    public string? ResolutionNote { get; set; }
+
+    /// <summary>UNLOCK | REASSIGN | REJECT.</summary>
+    public string? ResolutionAction { get; set; }
 }
