@@ -31,12 +31,14 @@ namespace AIStory.Tests
         /// <summary>Giống <see cref="UT01_FunctionCreateStory.CreateSut"/> — unit test nghiệp vụ qua service + Moq lookup/command.</summary>
         private static StoryCommentPostService CreatePostServiceSut(
             out Mock<IStoryLookup> storyLookupMock,
+            out Mock<IUserLookup> userLookupMock,
             out Mock<IUserActivityLookup> userActivityMock,
             out Mock<IStoryCommentCommand> commentCommandMock,
             out Mock<ICommentReactionReader> reactionReaderMock,
             out Mock<INotificationHubNotifier> notifierMock)
         {
             storyLookupMock = new Mock<IStoryLookup>(MockBehavior.Strict);
+            userLookupMock = new Mock<IUserLookup>(MockBehavior.Strict);
             userActivityMock = new Mock<IUserActivityLookup>(MockBehavior.Strict);
             commentCommandMock = new Mock<IStoryCommentCommand>(MockBehavior.Strict);
             reactionReaderMock = new Mock<ICommentReactionReader>(MockBehavior.Strict);
@@ -44,6 +46,7 @@ namespace AIStory.Tests
 
             return new StoryCommentPostService(
                 storyLookupMock.Object,
+                userLookupMock.Object,
                 userActivityMock.Object,
                 commentCommandMock.Object,
                 reactionReaderMock.Object,
@@ -127,12 +130,14 @@ namespace AIStory.Tests
 
             var sut = CreatePostServiceSut(
                 out var storyLookup,
+                out var userLookup,
                 out var userActivity,
                 out var commentCmd,
                 out var reactionReader,
                 out _);
 
             storyLookup.Setup(x => x.GetById(storyId)).Returns(story);
+            userLookup.Setup(x => x.Exists(userId)).Returns(true);
             userActivity.Setup(x => x.HasReadAnyChapterOfStory(userId, storyId)).Returns(true);
             commentCmd
                 .Setup(x => x.AddStoryComment(storyId, userId, "abc happy path comment", null))
@@ -233,10 +238,7 @@ namespace AIStory.Tests
         /// log kiểu &quot;User không tồn tại&quot; (không assert đúng từng chữ message).
         /// Mô phỏng &quot;user không tồn tại&quot;: <c>userId</c> là Guid bất kỳ; preconditions nghiệp vụ (đã đọc chapter) vẫn <c>true</c> qua mock —
         /// tương tự <see cref="UT01_FunctionCreateStory.UTCID14_CreateStory_Fails_WhenCallerIsNotRegisteredAuthor"/> (Exists = false).
-        /// Product hiện tại: <see cref="StoryCommentPostService"/> không gọi <see cref="IUserLookup.Exists"/> trước <c>AddStoryComment</c>.
-        /// Test assert theo spec (<see cref="StoryCommentPostStatus.Rejected"/>, <c>Dto</c> null, không persist); <b>hiện FAIL</b> (bug) cho đến khi product
-        /// kiểm tra user tồn tại (ví dụ inject <see cref="IUserLookup"/>, <c>Exists(userId)==false</c> → <see cref="StoryCommentPostOutcome.BadRequest"/>).
-        /// Sau khi fix, cập nhật <see cref="CreatePostServiceSut"/> để truyền mock <c>IUserLookup</c> nếu constructor service thêm dependency.
+        /// Product: <see cref="StoryCommentPostService.AddAsync"/> gọi <see cref="IUserLookup.Exists"/> sau khi story hợp lệ; <c>false</c> → <see cref="StoryCommentPostStatus.Rejected"/>, không <c>AddStoryComment</c>.
         /// </summary>
         [Fact]
         public async Task UTCID04_CreateStoryComment_Fails_WhenUserIdDoesNotExist()
@@ -245,12 +247,10 @@ namespace AIStory.Tests
                 "Spec: UserId không tồn tại → từ chối, không lưu (Fail / Data null).",
                 "Precondition (mock): truyện PUBLISHED; HasReadAnyChapterOfStory(userId, storyId) = true.",
                 "Input: StoryId hợp lệ; content hợp lệ; ParentId null; userId = GUID mô phỏng không có trong users.",
-                "Kỳ vọng spec: Rejected; Dto null; AddStoryComment không được gọi.",
-                "BUG nếu test FAIL: product chưa validate user tồn tại trước khi tạo comment (giống cách UT01 ghi bug UTCID05/09/12…).");
+                "Kỳ vọng spec: Rejected; Dto null; AddStoryComment không được gọi; không gọi HasReadAnyChapter khi user không tồn tại.");
 
             var storyId = Guid.NewGuid();
             var unknownUserId = Guid.NewGuid();
-            var commentId = Guid.NewGuid();
             var slugSuffix = Guid.NewGuid().ToString("N")[..8];
             const string content = "abc spec root comment";
 
@@ -265,41 +265,26 @@ namespace AIStory.Tests
                 comments_disabled = false
             };
 
-            var savedEntity = new comments
-            {
-                id = commentId,
-                user_id = unknownUserId,
-                story_id = storyId,
-                chapter_id = null,
-                parent_id = null,
-                content = content,
-                likes_count = 0,
-                status = "APPROVED",
-                created_at = DateTime.UtcNow,
-                userNavigation = null
-            };
-
             var sut = CreatePostServiceSut(
                 out var storyLookup,
+                out var userLookup,
                 out var userActivity,
                 out var commentCmd,
                 out var reactionReader,
                 out _);
 
             storyLookup.Setup(x => x.GetById(storyId)).Returns(story);
-            userActivity.Setup(x => x.HasReadAnyChapterOfStory(unknownUserId, storyId)).Returns(true);
-            commentCmd
-                .Setup(x => x.AddStoryComment(storyId, unknownUserId, content, null))
-                .Returns(savedEntity);
-            reactionReader
-                .Setup(x => x.GetSummary(commentId, unknownUserId))
-                .Returns((false, (string?)null, new Dictionary<string, int>()));
+            userLookup.Setup(x => x.Exists(unknownUserId)).Returns(false);
 
             var outcome = await sut.AddAsync(storyId, unknownUserId, content, null, default);
 
             Assert.Equal(StoryCommentPostStatus.Rejected, outcome.Status);
             Assert.Null(outcome.Dto);
+            Assert.Equal("User không tồn tại.", outcome.Message);
+            userLookup.Verify(x => x.Exists(unknownUserId), Times.Once);
+            userActivity.Verify(x => x.HasReadAnyChapterOfStory(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
             commentCmd.Verify(x => x.AddStoryComment(storyId, unknownUserId, content, null), Times.Never);
+            reactionReader.Verify(x => x.GetSummary(It.IsAny<Guid>(), It.IsAny<Guid?>()), Times.Never);
         }
 
         /// <summary>
@@ -325,6 +310,7 @@ namespace AIStory.Tests
 
             var sut = CreatePostServiceSut(
                 out var storyLookup,
+                out var userLookup,
                 out var userActivity,
                 out var commentCmd,
                 out var reactionReader,
@@ -339,6 +325,7 @@ namespace AIStory.Tests
             Assert.NotNull(outcome.Message);
 
             storyLookup.Verify(x => x.GetById(missingStoryId), Times.Once);
+            userLookup.Verify(x => x.Exists(It.IsAny<Guid>()), Times.Never);
             userActivity.Verify(x => x.HasReadAnyChapterOfStory(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
             commentCmd.Verify(x => x.AddStoryComment(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid?>()), Times.Never);
             reactionReader.Verify(x => x.GetSummary(It.IsAny<Guid>(), It.IsAny<Guid?>()), Times.Never);
@@ -497,12 +484,14 @@ namespace AIStory.Tests
 
             var sut = CreatePostServiceSut(
                 out var storyLookup,
+                out var userLookup,
                 out var userActivity,
                 out var commentCmd,
                 out var reactionReader,
                 out _);
 
             storyLookup.Setup(x => x.GetById(storyId)).Returns(story);
+            userLookup.Setup(x => x.Exists(userId)).Returns(true);
             userActivity.Setup(x => x.HasReadAnyChapterOfStory(userId, storyId)).Returns(false);
 
             var outcome = await sut.AddAsync(storyId, userId, content, null, default);
@@ -512,6 +501,7 @@ namespace AIStory.Tests
             Assert.NotNull(outcome.Message);
 
             storyLookup.Verify(x => x.GetById(storyId), Times.Once);
+            userLookup.Verify(x => x.Exists(userId), Times.Once);
             userActivity.Verify(x => x.HasReadAnyChapterOfStory(userId, storyId), Times.Once);
             commentCmd.Verify(x => x.AddStoryComment(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid?>()), Times.Never);
             reactionReader.Verify(x => x.GetSummary(It.IsAny<Guid>(), It.IsAny<Guid?>()), Times.Never);
