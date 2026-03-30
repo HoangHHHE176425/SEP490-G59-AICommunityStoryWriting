@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Services.DTOs.Admin.Users;
 using Services.Interfaces;
 
@@ -15,6 +17,13 @@ namespace AIStory.API.Controllers
         public AdminUsersController(IAdminUserService service)
         {
             _service = service;
+        }
+
+        private Guid? GetCurrentUserId()
+        {
+            var sub = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                      ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            return Guid.TryParse(sub, out var id) ? id : null;
         }
 
         [HttpGet]
@@ -98,6 +107,11 @@ namespace AIStory.API.Controllers
         public async Task<IActionResult> SetRole(Guid id, [FromBody] AdminSetUserRoleRequest request)
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
+            var currentUserId = GetCurrentUserId();
+            if (currentUserId.HasValue && currentUserId.Value == id)
+            {
+                return BadRequest(new { message = "ADMIN không thể tự thay đổi role của chính mình." });
+            }
             var ok = await _service.SetRoleAsync(id, request.Role);
             return ok ? NoContent() : NotFound(new { message = "User not found." });
         }

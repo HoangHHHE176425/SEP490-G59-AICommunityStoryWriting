@@ -1,5 +1,7 @@
 import { useAuth } from '../../contexts/AuthContext';
 import { User, Mail, Phone, CreditCard, Calendar, CheckCircle } from 'lucide-react';
+import { createInitialAvatarDataUrl } from '../../utils/avatarFallback';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 export default function ViewProfile() {
     const { user } = useAuth();
@@ -17,8 +19,16 @@ export default function ViewProfile() {
 
                     {/* Mini Profile Summary */}
                     <div className="flex items-start gap-4 mb-8 p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
-                        <div className="size-12 bg-primary rounded-full flex items-center justify-center text-white text-lg font-bold">
-                            {(profileData?.displayName || 'U').charAt(0).toUpperCase()}
+                        <div className="size-12 rounded-full overflow-hidden bg-primary/10 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+                            <img
+                                src={
+                                    profileData?.avatarUrl
+                                        ? resolveBackendUrl(profileData.avatarUrl)
+                                        : createInitialAvatarDataUrl(profileData?.displayName || profileData?.email || 'U', 128)
+                                }
+                                alt="Avatar"
+                                className="w-full h-full object-cover"
+                            />
                         </div>
                         <div className="flex-1">
                             <h4 className="font-bold text-slate-900 dark:text-white mb-1">

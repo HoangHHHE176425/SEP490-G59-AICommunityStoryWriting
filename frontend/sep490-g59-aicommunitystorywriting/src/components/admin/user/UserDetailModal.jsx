@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { X, User, Mail, Shield, Calendar, LogIn, Ban, CheckCircle, Phone, FileText } from 'lucide-react';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 import { getUserDisplayName, updateUserRole } from '../../../api/admin/userManagementApi';
+import { useAuth } from '../../../contexts/AuthContext';
 
 const ROLE_LABELS = { USER: 'Người dùng', AUTHOR: 'Tác giả', MODERATOR: 'Kiểm duyệt', ADMIN: 'Quản trị', COMPLIANCE: 'Compliance' };
 const EDITABLE_ROLES = ['USER', 'AUTHOR', 'MODERATOR', 'ADMIN', 'COMPLIANCE'];
@@ -20,6 +21,7 @@ function formatDate(value) {
 }
 
 export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignModerator }) {
+    const { user: currentUser } = useAuth();
     const [selectedRole, setSelectedRole] = useState('USER');
     const [savingRole, setSavingRole] = useState(false);
     const [roleError, setRoleError] = useState('');
@@ -35,8 +37,14 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
 
     const isBanned = user.status === 'BANNED';
     const roleDirty = user.role !== selectedRole;
+    const isSelf = Boolean(currentUser?.id && user?.id && String(currentUser.id) === String(user.id));
+    const isSelfAdminRole = isSelf && String(user?.role ?? '').toUpperCase() === 'ADMIN';
 
     const handleSaveRole = async () => {
+        if (isSelfAdminRole) {
+            setRoleError('Bạn không thể tự thay đổi role của chính mình.');
+            return;
+        }
         if (!roleDirty) return;
         setSavingRole(true);
         setRoleError('');
@@ -153,6 +161,11 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                         <p className="text-sm text-slate-500 mb-3">
                             Chọn vai trò mới cho tài khoản (ví dụ <strong>Kiểm duyệt</strong> để cấp quyền moderator). Không còn gán theo thể loại truyện.
                         </p>
+                        {isSelfAdminRole ? (
+                            <p className="text-sm text-amber-700 mb-2">
+                                Tài khoản ADMIN hiện tại không được phép tự đổi role.
+                            </p>
+                        ) : null}
                         {roleError ? (
                             <p className="text-sm text-red-600 mb-2">{roleError}</p>
                         ) : null}
@@ -170,7 +183,7 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                             </select>
                             <button
                                 type="button"
-                                disabled={savingRole || !roleDirty}
+                                disabled={savingRole || !roleDirty || isSelfAdminRole}
                                 onClick={handleSaveRole}
                                 className="px-4 py-2 bg-emerald-500 text-white rounded-lg font-semibold text-sm hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                             >
