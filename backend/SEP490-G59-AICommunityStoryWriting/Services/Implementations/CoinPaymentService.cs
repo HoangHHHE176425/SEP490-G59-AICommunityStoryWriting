@@ -17,12 +17,12 @@ namespace Services.Implementations
     public class CoinPaymentService : ICoinPaymentService
     {
         private readonly StoryPlatformDbContext _db;
-        private readonly PayOSClient _payos;
+        private readonly IPayOSClient _payos;
         private readonly IConfiguration _config;
         private readonly ILogger<CoinPaymentService> _logger;
         private readonly INotificationHubNotifier? _notificationHubNotifier;
 
-        public CoinPaymentService(StoryPlatformDbContext db, PayOSClient payos, IConfiguration config, ILogger<CoinPaymentService> logger, INotificationHubNotifier? notificationHubNotifier = null)
+        public CoinPaymentService(StoryPlatformDbContext db, IPayOSClient payos, IConfiguration config, ILogger<CoinPaymentService> logger, INotificationHubNotifier? notificationHubNotifier = null)
         {
             _db = db;
             _payos = payos;
@@ -365,7 +365,9 @@ namespace Services.Implementations
             {
                 await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
 
-                var sender = await _db.users.FirstOrDefaultAsync(u => u.id == senderUserId, cancellationToken);
+                var sender = await _db.users
+                    .Include(u => u.user_profiles)
+                    .FirstOrDefaultAsync(u => u.id == senderUserId, cancellationToken);
                 var receiver = await _db.users.FirstOrDefaultAsync(u => u.id == receiverUserId, cancellationToken);
 
                 if (sender == null) throw new InvalidOperationException("Tài khoản người ủng hộ không tồn tại.");
@@ -477,8 +479,8 @@ namespace Services.Implementations
                 // Tuy nhiên KHÔNG để lỗi notification làm hỏng giao dịch donate (trừ/cộng coin + lưu donations).
                 try
                 {
-                    var senderDisplayName = NotificationDAO.GetUserDisplayName(senderUserId);
-                    var notification = NotificationDAO.NotifyDonationReceived(receiverUserId, senderDisplayName, amount, message);
+                    var senderDisplayName = GetDisplayName(sender);
+                    var notification = await SaveDonationNotificationAsync(receiverUserId, senderDisplayName, amount, message, cancellationToken);
                     _ = PushDonationNotificationAsync(receiverUserId, notification);
                 }
                 catch (Exception ex)
@@ -784,6 +786,51 @@ namespace Services.Implementations
             {
                 _logger.LogWarning(ex, "Push donation notification to author failed. UserId={UserId} NotificationId={NotificationId}", userId, n.id);
             }
+        }
+
+        private async Task<notifications> SaveDonationNotificationAsync(
+            Guid recipientUserId,
+            string senderDisplayName,
+            int amount,
+            string? message,
+            CancellationToken cancellationToken)
+        {
+            var notification = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = recipientUserId,
+                type = "DONATION",
+                title = "Ủng hộ từ độc giả",
+                content = BuildDonationNotificationContent(senderDisplayName, amount, message),
+                link_url = "/wallet",
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+
+            _db.notifications.Add(notification);
+            await _db.SaveChangesAsync(cancellationToken);
+            return notification;
+        }
+
+        private static string BuildDonationNotificationContent(string? senderDisplayName, int amount, string? message)
+        {
+            var safeDisplayName = string.IsNullOrWhiteSpace(senderDisplayName) ? "Người dùng" : senderDisplayName.Trim();
+            var content = $"{safeDisplayName} đã ủng hộ {amount} coin cho bạn.";
+            if (!string.IsNullOrWhiteSpace(message))
+                content += " Lời nhắn: " + message.Trim();
+
+            return content;
+        }
+
+        private static string GetDisplayName(users? user)
+        {
+            if (user == null) return "Người dùng";
+
+            var nickname = user.user_profiles?.nickname?.Trim();
+            if (!string.IsNullOrWhiteSpace(nickname)) return nickname;
+
+            var email = user.email?.Trim();
+            return !string.IsNullOrWhiteSpace(email) ? email : "Người dùng";
         }
 
         private static CoinOrderDto MapOrderDto(coin_orders o)
