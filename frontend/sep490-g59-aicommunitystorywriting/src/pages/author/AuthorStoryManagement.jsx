@@ -352,6 +352,8 @@ export function AuthorStoryManagement({ onBack }) {
                                 ...item,
                                 complianceHidden: item._complianceHidden,
                             });
+                            // Giữ lại flag FE để chặn cập nhật trạng thái tiến độ khi có chương đang chờ duyệt.
+                            mapped._hasPendingReviewChapter = item._hasPendingReviewChapter === true;
                             if (mapped.isComplianceHidden) {
                                 mapped.status = 'hidden';
                                 mapped.publishStatus = 'Đã ẩn tạm thời';
@@ -642,6 +644,15 @@ export function AuthorStoryManagement({ onBack }) {
         try {
             const fullStory = await getStoryById(story.id);
             const mapped = mapStoryFromApi(fullStory);
+            // Tính flag chapter đang chờ duyệt để StoryInfoEditor chặn cập nhật Tạm dừng/Hoàn thành.
+            // Chỉ cần biết có tồn tại >= 1 chapter pending_review.
+            try {
+                const pendRes = await getChapters({ storyId: story.id, status: 'PENDING_REVIEW', pageSize: 1 });
+                const pendList = Array.isArray(pendRes) ? pendRes : (pendRes?.items ?? pendRes?.Items ?? []);
+                mapped._hasPendingReviewChapter = pendList.length > 0;
+            } catch {
+                mapped._hasPendingReviewChapter = false;
+            }
             setCurrentStory(mapped);
             setActiveView('editInfo');
         } catch (err) {
@@ -1052,6 +1063,23 @@ export function AuthorStoryManagement({ onBack }) {
     const handleSaveInfo = async (infoData) => {
         if (!currentStory?.id) return;
         try {
+            const hasPendingReviewChapter = Boolean(currentStory?._hasPendingReviewChapter);
+            const selectedProgressStatus = String(infoData?.status ?? infoData?.publishStatus ?? '').trim();
+            if (hasPendingReviewChapter && (selectedProgressStatus === 'Tạm dừng' || selectedProgressStatus === 'Hoàn thành')) {
+                showToast('Truyện đang có chương chờ duyệt, vui lòng thử lại sau.', 'error');
+                return;
+            }
+
+            const storyTitle = String(infoData?.title ?? '').trim();
+            if (!storyTitle) {
+                showToast('Vui lòng nhập tên truyện', 'error');
+                return;
+            }
+            if (storyTitle.length > 50) {
+                showToast('Tên truyện không được vượt quá 50 ký tự', 'error');
+                return;
+            }
+
             const rawIds = (infoData.categories || []).map(getCategoryId).filter(Boolean);
             const categoryIds = rawIds.filter((id) =>
                 /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/i.test(String(id))
@@ -1062,7 +1090,7 @@ export function AuthorStoryManagement({ onBack }) {
             }
             const storyPublishStatus = (currentStory.status || 'draft').toUpperCase();
             await updateStory(currentStory.id, {
-                title: infoData.title,
+                title: storyTitle,
                 summary: infoData.note ?? '',
                 categoryIds,
                 status: storyPublishStatus,
@@ -1070,8 +1098,40 @@ export function AuthorStoryManagement({ onBack }) {
                 ageRating: infoData.ageRating,
                 coverImage: infoData.cover,
             });
-            setStories(stories.map(s => s.id === currentStory.id ? { ...s, ...infoData, summary: infoData.note } : s));
-            setCurrentStory((prev) => prev ? { ...prev, ...infoData, summary: infoData.note } : null);
+
+            // Update FE state đúng field (không ghi đè `status` publication bằng progress status UI).
+            const uiProgress = infoData.status || infoData.publishStatus || currentStory?.progressStatusDisplay || 'Đang ra';
+            const nextProgressApi =
+                uiProgress === 'Tạm dừng' ? 'HIATUS' :
+                    uiProgress === 'Hoàn thành' ? 'COMPLETED' :
+                        'ONGOING';
+
+            setStories(stories.map((s) => {
+                if (s.id !== currentStory.id) return s;
+                return {
+                    ...s,
+                    title: infoData.title,
+                    summary: infoData.note ?? s.summary,
+                    ageRating: infoData.ageRating ?? s.ageRating,
+                    cover: infoData.cover ?? s.cover,
+                    storyProgressStatus: nextProgressApi,
+                    progressStatusDisplay: uiProgress,
+                };
+            }));
+
+            setCurrentStory((prev) => {
+                if (!prev) return null;
+                return {
+                    ...prev,
+                    title: infoData.title,
+                    summary: infoData.note ?? prev.summary,
+                    ageRating: infoData.ageRating ?? prev.ageRating,
+                    cover: infoData.cover ?? prev.cover,
+                    storyProgressStatus: nextProgressApi,
+                    progressStatusDisplay: uiProgress,
+                };
+            });
+
             showToast('Đã lưu thay đổi thông tin truyện', 'success');
         } catch (err) {
             const msg = err?.response?.data?.message ?? err?.response?.data?.error ?? err?.message ?? 'Không thể lưu thay đổi';

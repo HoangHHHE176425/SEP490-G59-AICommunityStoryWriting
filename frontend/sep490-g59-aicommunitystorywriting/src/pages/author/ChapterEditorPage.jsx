@@ -723,6 +723,11 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             showToast(isVersionMode ? 'Vui lòng nhập tiêu đề phiên bản' : 'Vui lòng nhập tên chương', 'error');
             return;
         }
+        // FE validation: tên chương không vượt quá 50 ký tự.
+        if (!isVersionMode && chapterData.title.trim().length > 50) {
+            showToast('Tên chương không được vượt quá 50 ký tự', 'error');
+            return;
+        }
         if (!chapterData.content.trim()) {
             showToast('Vui lòng nhập nội dung chương', 'error');
             return;
@@ -926,6 +931,29 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 onNavigateAfterSave?.();
                 return;
             }
+            const scoreNum = typeof score === 'number' ? score : Number(score);
+            const pct = hasBoth && Number.isFinite(scoreNum) ? scoreNum : undefined;
+            // Rule: similarity < 40% => không cần popup xác nhận & không ghi ai_similarity_percent.
+            if (pct != null && pct < 40) {
+                if (!isVersionMode && saveStatus === 'published' && (!normalPublishEligibility.loaded || !canSubmitNormalChapterPublish)) {
+                    showToast(normalChapterPublishTooltip, 'error');
+                    return;
+                }
+                const payload = {
+                    ...chapterData,
+                    status: saveStatus,
+                    updatedAt: new Date().toLocaleString('vi-VN'),
+                    // Bỏ cập nhật ai_similarity_percent khi pct < 40.
+                    aiSimilarityPercent: undefined,
+                };
+                try {
+                    await onSave(payload);
+                    onNavigateAfterSave?.();
+                } catch (error) {
+                    showToast(error?.message || 'Không thể lưu chương', 'error');
+                }
+                return;
+            }
             setAiCompareModal({
                 open: true,
                 loading: false,
@@ -1018,11 +1046,13 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         closeAiCompareModalOnly();
         setIsSaving(true);
         try {
+            const shouldSendAiSimilarity = pct != null && pct >= 40;
             const payload = {
                 ...chapterData,
                 status,
                 updatedAt: new Date().toLocaleString('vi-VN'),
-                ...(pct != null ? { aiSimilarityPercent: pct } : {}),
+                // Bỏ cập nhật ai_similarity_percent khi pct < 40.
+                aiSimilarityPercent: shouldSendAiSimilarity ? pct : undefined,
             };
             await onSave(payload);
             onNavigateAfterSave?.();
