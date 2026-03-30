@@ -146,6 +146,8 @@ export function CategoryModal({ isOpen, onClose, onSave, category, isViewOnly = 
 
         if (!formData.name.trim()) {
             newErrors.name = 'Tên thể loại không được để trống';
+        } else if (formData.name.trim().length > 50) {
+            newErrors.name = 'Tên thể loại không được vượt quá 50 ký tự';
         }
 
         if (!formData.slug.trim()) {
@@ -171,7 +173,6 @@ export function CategoryModal({ isOpen, onClose, onSave, category, isViewOnly = 
 
         if (validateForm()) {
             onSave(formData);
-            onClose();
         }
     };
 
@@ -253,6 +254,7 @@ export function CategoryModal({ isOpen, onClose, onSave, category, isViewOnly = 
                             type="text"
                             value={formData.name}
                             onChange={handleNameChange}
+                            maxLength={50}
                             readOnly={isViewOnly}
                             placeholder="Ví dụ: Tiên hiệp"
                             style={{

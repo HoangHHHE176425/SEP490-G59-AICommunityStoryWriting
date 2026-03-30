@@ -17,17 +17,21 @@ export function PolicyFormModal({ policy, onClose, onSave, saving }) {
 
     useEffect(() => {
         if (policy) {
-            setType(policy.type || 'USER');
-            setVersion(policy.version || '');
-            setContent(policy.content || '');
-            setIsActive(!!policy.isActive);
-            setRequireResign(!!policy.requireResign);
+            queueMicrotask(() => {
+                setType(policy.type || 'USER');
+                setVersion(policy.version || '');
+                setContent(policy.content || '');
+                setIsActive(!!policy.isActive);
+                setRequireResign(!!policy.requireResign);
+            });
         } else {
-            setType('USER');
-            setVersion('1.0');
-            setContent('');
-            setIsActive(false);
-            setRequireResign(false);
+            queueMicrotask(() => {
+                setType('USER');
+                setVersion('1.0');
+                setContent('');
+                setIsActive(false);
+                setRequireResign(false);
+            });
         }
     }, [policy]);
 
@@ -45,7 +49,7 @@ export function PolicyFormModal({ policy, onClose, onSave, saving }) {
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between p-4 border-b border-slate-200">
-                    <h2 className="text-xl font-bold text-slate-900">{isEdit ? 'Chỉnh sửa Policy' : 'Thêm Policy mới'}</h2>
+                    <h2 className="text-xl font-bold text-slate-900">{isEdit ? 'Chỉnh sửa chính sách' : 'Thêm chính sách mới'}</h2>
                     <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
                         <X className="w-5 h-5" />
                     </button>
@@ -53,7 +57,7 @@ export function PolicyFormModal({ policy, onClose, onSave, saving }) {
                 <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
                     <div className="p-6 overflow-y-auto space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">Loại policy</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Loại chính sách</label>
                             <select
                                 value={type}
                                 onChange={(e) => setType(e.target.value)}

@@ -835,6 +835,44 @@ export function AuthorStoryManagement({ onBack }) {
         }
     };
 
+    /** Mở xem chi tiết phiên bản (read-only). */
+    const handleViewVersion = async (chapter, versionFromList) => {
+        const chapterId = chapter?.id ?? chapter?.Id;
+        const versionId = versionFromList?.id ?? versionFromList?.Id;
+        if (!chapterId || !versionId) {
+            showToast('Không tìm thấy chương hoặc phiên bản', 'error');
+            return;
+        }
+        try {
+            const detail = await getChapterVersionById(chapterId, versionId);
+            const id = detail.id ?? detail.Id;
+            const titleSnapshot = detail.titleSnapshot ?? detail.TitleSnapshot ?? detail.title_snapshot ?? '';
+            const contentSnapshot = detail.contentSnapshot ?? detail.ContentSnapshot ?? detail.content_snapshot ?? '';
+            const versionNumber = detail.versionNumber ?? detail.VersionNumber ?? detail.version_number ?? 1;
+            const chapterNumber = chapter.number ?? (chapter.orderIndex ?? chapter.order_index ?? 0) + 1;
+            const sourceMapped = {
+                id: chapterId,
+                number: Number(chapterNumber) || 1,
+                title: chapter.title ?? chapter.name ?? `Chương ${chapterNumber}`,
+                status: (chapter.status ?? chapter.Status ?? 'draft').toString().toLowerCase(),
+            };
+            setViewChapterOnly(true);
+            setSourceChapterForVersion(sourceMapped);
+            setEditingVersion({
+                id,
+                chapterId,
+                titleSnapshot,
+                contentSnapshot,
+                versionNumber: Number(versionNumber) || 1,
+                status: detail.status ?? detail.Status,
+            });
+            setActiveView('addChapterVersion');
+        } catch (error) {
+            const msg = error?.response?.data?.message || error?.message || 'Không thể tải phiên bản';
+            showToast(msg, 'error');
+        }
+    };
+
     /** Sau khi lưu chương + (tuỳ chọn) popup so sánh AI — ChapterEditorPage gọi khi hoàn tất. */
     const navigateAwayFromChapterEditor = () => {
         setActiveView('chapterList');
@@ -1187,6 +1225,7 @@ export function AuthorStoryManagement({ onBack }) {
                     onViewChapter={(chapter) => handleViewChapter(chapter)}
                     onAddVersion={(chapter) => handleAddVersion(currentStory, chapter)}
                     onEditVersion={(chapter, version) => handleEditVersion(chapter, version)}
+                    onViewVersion={(chapter, version) => handleViewVersion(chapter, version)}
                 />
                 <ToastContainer />
             </>
