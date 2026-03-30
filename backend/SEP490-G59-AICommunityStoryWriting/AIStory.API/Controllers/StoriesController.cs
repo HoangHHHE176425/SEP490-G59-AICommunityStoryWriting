@@ -24,6 +24,7 @@ namespace AIStory.API.Controllers
         private readonly IContentGuardrailService _contentGuardrail;
         private readonly IStoryReportService _storyReportService;
         private readonly INotificationHubNotifier _notificationHubNotifier;
+        private readonly IStoryCommentPostService _storyCommentPostService;
         private readonly ILogger<StoriesController> _logger;
 
         public StoriesController(
@@ -31,12 +32,14 @@ namespace AIStory.API.Controllers
             IContentGuardrailService contentGuardrail,
             IStoryReportService storyReportService,
             INotificationHubNotifier notificationHubNotifier,
+            IStoryCommentPostService storyCommentPostService,
             ILogger<StoriesController> logger)
         {
             _storyService = storyService;
             _contentGuardrail = contentGuardrail;
             _storyReportService = storyReportService;
             _notificationHubNotifier = notificationHubNotifier;
+            _storyCommentPostService = storyCommentPostService;
             _logger = logger;
         }
 
@@ -558,43 +561,20 @@ namespace AIStory.API.Controllers
                         violations = guardrailResult.Violations.Select(v => new { v.Type, v.Quote })
                     });
 
-                var story = StoryDAO.GetById(id);
-                if (story == null)
-                    return NotFound(new { message = $"Story with ID {id} not found" });
-                if (story.comments_disabled)
-                    return BadRequest(new { message = "Truyện này đang trong quá trình xử lý vi phạm nên hiện không thể bình luận." });
-                if (!string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
-                    return BadRequest(new { message = "Chỉ có thể comment truyện đã PUBLISHED." });
+                var outcome = await _storyCommentPostService.AddAsync(
+                    id,
+                    userId.Value,
+                    content,
+                    request.ParentId,
+                    HttpContext.RequestAborted);
 
-                if (!UserActivityLogDAO.HasReadAnyChapterOfStory(userId.Value, id))
-                    return BadRequest(new { message = "Bạn cần đọc ít nhất một chapter trước khi comment." });
-
-                comments? parent = null;
-                if (request.ParentId.HasValue)
+                return outcome.Status switch
                 {
-                    parent = CommentDAO.GetById(request.ParentId.Value);
-                    if (parent == null || parent.story_id != id || parent.chapter_id != null)
-                        return BadRequest(new { message = "ParentId không hợp lệ (phải là comment cấp truyện)." });
-                }
-
-                var entity = CommentDAO.AddStoryComment(id, userId.Value, content, request.ParentId);
-                if (parent != null && parent.user_id.HasValue && parent.user_id != userId.Value)
-                {
-                    var replierName = entity.userNavigation?.user_profiles?.nickname?.Trim()
-                        ?? entity.userNavigation?.email?.Trim()
-                        ?? "Ai đó";
-                    try
-                    {
-                        var notif = NotificationDAO.NotifyCommentReply(parent.user_id.Value, replierName, id, story.title, entity.id);
-                        await PushCommentReplyNotificationAsync(notif);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "NotifyCommentReply failed for parent {ParentId}", parent.id);
-                    }
-                }
-                var dto = MapToStoryCommentDto(entity, userId, story.author_id);
-                return Created($"/api/stories/{id}/comments/{dto.Id}", dto);
+                    StoryCommentPostStatus.StoryNotFound => NotFound(new { message = outcome.Message }),
+                    StoryCommentPostStatus.Rejected => BadRequest(new { message = outcome.Message }),
+                    StoryCommentPostStatus.Success => Created($"/api/stories/{id}/comments/{outcome.Dto!.Id}", outcome.Dto),
+                    _ => StatusCode(500, new { message = "Unexpected story comment outcome." })
+                };
             }
             catch (InvalidOperationException ex)
             {

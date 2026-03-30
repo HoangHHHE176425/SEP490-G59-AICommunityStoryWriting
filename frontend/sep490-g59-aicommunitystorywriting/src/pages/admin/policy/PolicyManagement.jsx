@@ -5,10 +5,12 @@ import { PolicyViewModal } from '../../../components/admin/policy/PolicyViewModa
 import { Pagination } from '../../../components/pagination/Pagination';
 import {
     getPolicies,
+    getPolicyById,
     getPolicyStats,
     createPolicy,
     updatePolicy,
     setPolicyActive,
+    deletePolicy,
 } from '../../../api/admin/policyManagementApi';
 import { Plus } from 'lucide-react';
 
@@ -35,6 +37,7 @@ export function PolicyManagement() {
     const [editingPolicy, setEditingPolicy] = useState(null);
     const [showForm, setShowForm] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [loadingDetailId, setLoadingDetailId] = useState(null);
 
     const loadPolicies = useCallback((page = 1) => {
         setLoading(true);
@@ -84,9 +87,33 @@ export function PolicyManagement() {
         setShowForm(true);
     };
 
-    const handleEdit = (policy) => {
-        setEditingPolicy(policy);
-        setShowForm(true);
+    const handleView = async (policy) => {
+        if (!policy?.id) return;
+        setLoadingDetailId(policy.id);
+        try {
+            const detail = await getPolicyById(policy.id);
+            setViewingPolicy(detail ?? policy);
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không tải được chi tiết policy.';
+            window.alert(msg);
+        } finally {
+            setLoadingDetailId(null);
+        }
+    };
+
+    const handleEdit = async (policy) => {
+        if (!policy?.id) return;
+        setLoadingDetailId(policy.id);
+        try {
+            const detail = await getPolicyById(policy.id);
+            setEditingPolicy(detail ?? policy);
+            setShowForm(true);
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Không tải được chi tiết policy để chỉnh sửa.';
+            window.alert(msg);
+        } finally {
+            setLoadingDetailId(null);
+        }
     };
 
     const handleCloseForm = () => {
@@ -119,6 +146,32 @@ export function PolicyManagement() {
             loadStats();
         } catch (err) {
             console.error(err);
+        }
+    };
+
+    const handleDelete = async (policy) => {
+        const label = [policy.type, policy.version].filter(Boolean).join(' · ') || policy.id;
+        if (!window.confirm(`Xóa policy "${label}"? Thao tác không thể hoàn tác.`)) {
+            return;
+        }
+        try {
+            await deletePolicy(policy.id);
+            if (viewingPolicy?.id === policy.id) {
+                setViewingPolicy(null);
+            }
+            if (editingPolicy?.id === policy.id) {
+                setShowForm(false);
+                setEditingPolicy(null);
+            }
+            loadPolicies(currentPage);
+            loadStats();
+        } catch (err) {
+            const msg =
+                err?.response?.data?.message ||
+                err?.response?.data?.title ||
+                err?.message ||
+                'Không xóa được policy.';
+            window.alert(msg);
         }
     };
 
@@ -193,9 +246,10 @@ export function PolicyManagement() {
                     <PolicyList
                         policies={policies}
                         loading={loading}
-                        onView={setViewingPolicy}
+                        onView={handleView}
                         onEdit={handleEdit}
                         onToggleActive={handleToggleActive}
+                        onDelete={handleDelete}
                     />
                     {totalPages > 1 && (
                         <div className="mt-4">
@@ -212,6 +266,13 @@ export function PolicyManagement() {
                 </>
             )}
 
+            {loadingDetailId ? (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
+                    <div className="rounded-xl bg-white px-4 py-3 text-sm font-medium text-slate-700 shadow-lg border border-slate-200">
+                        Đang tải chi tiết policy...
+                    </div>
+                </div>
+            ) : null}
             {viewingPolicy && <PolicyViewModal policy={viewingPolicy} onClose={() => setViewingPolicy(null)} />}
             {showForm && (
                 <PolicyFormModal

@@ -67,6 +67,7 @@ namespace AIStory.API
                 });
             });
             builder.Services.AddScoped<JwtHelper>();
+            builder.Services.AddScoped<ITokenService, TokenService>();
             // Dependency Injection
             // dj for auth va user
             builder.Services.AddScoped<IUserRepository, UserRepository>();
@@ -80,6 +81,10 @@ namespace AIStory.API
             builder.Services.AddScoped<IUserLookup, UserLookup>();
             builder.Services.AddScoped<ICategoryLookup, CategoryLookup>();
             builder.Services.AddScoped<IStoryLookup, StoryLookup>();
+            builder.Services.AddScoped<IUserActivityLookup, UserActivityLookup>();
+            builder.Services.AddScoped<IStoryCommentCommand, StoryCommentCommand>();
+            builder.Services.AddScoped<ICommentReactionReader, CommentReactionReader>();
+            builder.Services.AddScoped<IStoryCommentPostService, StoryCommentPostService>();
             builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
             builder.Services.AddScoped<ICategoryService, CategoryService>();
             builder.Services.AddScoped<IChapterRepository, ChapterRepository>();
@@ -128,6 +133,7 @@ namespace AIStory.API
 
             // Coin / PayOS
             builder.Services.AddHttpClient<PayOSClient>();
+            builder.Services.AddScoped<IPayOSClient, PayOSClientAdapter>();
             builder.Services.AddScoped<ICoinPaymentService, CoinPaymentService>();
             builder.Services.AddHostedService<PayOSPendingOrderSyncService>();
 

@@ -58,7 +58,12 @@ export default function Register() {
         if (!validateForm()) return;
         setLoading(true);
         try {
-            const result = await register(formData.email, formData.password, formData.name);
+            const result = await register(
+                formData.email,
+                formData.password,
+                formData.confirmPassword,
+                formData.name
+            );
             if (result.success) {
                 setSuccess(true);
                 setTimeout(() => {

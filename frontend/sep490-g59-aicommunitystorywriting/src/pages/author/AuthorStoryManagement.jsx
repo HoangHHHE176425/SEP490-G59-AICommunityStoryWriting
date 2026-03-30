@@ -10,7 +10,7 @@ import { Header } from '../../components/homepage/Header';
 import { createStory, updateStory, getStoriesByAuthor, getStoryById, deleteStory } from '../../api/story/storyApi';
 import { createChapter, updateChapter, getChapterById, getChapters, createChapterVersion, updateChapterVersion, getChapterVersionById, submitChapterVersion } from '../../api/chapter/chapterApi';
 import * as coinApi from '../../api/coins/coinApi';
-import { getAuthorFollowersCount } from '../../api/author/authorApi';
+import { getAuthorFollowersCount, getAuthorFollowers } from '../../api/author/authorApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -246,6 +246,15 @@ export function AuthorStoryManagement({ onBack }) {
     const [profileFollowersCount, setProfileFollowersCount] = useState(0);
     const [showBankModal, setShowBankModal] = useState(false);
     const [showHistoryModal, setShowHistoryModal] = useState(false);
+    const [showFollowersModal, setShowFollowersModal] = useState(false);
+    const [followersItems, setFollowersItems] = useState([]);
+    const [followersLoading, setFollowersLoading] = useState(false);
+    const [followersError, setFollowersError] = useState(null);
+    const [followersPage, setFollowersPage] = useState(1);
+    const [followersPageSize] = useState(10);
+    const [followersTotalCount, setFollowersTotalCount] = useState(0);
+    const [followersSearchInput, setFollowersSearchInput] = useState('');
+    const [followersSearchKeyword, setFollowersSearchKeyword] = useState('');
 
     // Auto-fill toBin when bank changes (if mapping exists).
     useEffect(() => {
@@ -430,6 +439,38 @@ export function AuthorStoryManagement({ onBack }) {
             });
         return () => { cancelled = true; };
     }, [authorId]);
+
+    const loadFollowers = useCallback(async (page = 1, keyword = '') => {
+        if (!authorId) {
+            setFollowersItems([]);
+            setFollowersTotalCount(0);
+            setFollowersError(null);
+            setFollowersLoading(false);
+            return;
+        }
+        setFollowersLoading(true);
+        setFollowersError(null);
+        try {
+            const res = await getAuthorFollowers(authorId, { page, pageSize: followersPageSize, search: keyword });
+            const items = res?.items ?? res?.Items ?? [];
+            const total = Number(res?.totalCount ?? res?.TotalCount ?? items.length);
+            const currentPage = Number(res?.page ?? res?.Page ?? page) || 1;
+            setFollowersItems(Array.isArray(items) ? items : []);
+            setFollowersTotalCount(Number.isFinite(total) ? total : 0);
+            setFollowersPage(currentPage > 0 ? currentPage : 1);
+        } catch (err) {
+            setFollowersItems([]);
+            setFollowersTotalCount(0);
+            setFollowersError(err?.response?.data?.message ?? err?.message ?? 'Không tải được danh sách người theo dõi.');
+        } finally {
+            setFollowersLoading(false);
+        }
+    }, [authorId, followersPageSize]);
+
+    useEffect(() => {
+        if (!showFollowersModal) return;
+        loadFollowers(followersPage, followersSearchKeyword);
+    }, [showFollowersModal, followersPage, followersSearchKeyword, loadFollowers]);
 
     useEffect(() => {
         if (activeView !== 'bank-accounts' && activeView !== 'history') return;
@@ -1868,6 +1909,31 @@ export function AuthorStoryManagement({ onBack }) {
                                     </button>
                                     <button
                                         type="button"
+                                        onClick={() => {
+                                            setFollowersPage(1);
+                                            setFollowersSearchInput('');
+                                            setFollowersSearchKeyword('');
+                                            setShowFollowersModal(true);
+                                        }}
+                                        style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.5rem',
+                                            padding: '0.65rem 1.1rem',
+                                            borderRadius: '9999px',
+                                            border: '1px solid #fecdd3',
+                                            backgroundColor: '#fff1f2',
+                                            color: '#be123c',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        <Heart style={{ width: '18px', height: '18px' }} />
+                                        Người theo dõi
+                                    </button>
+                                    <button
+                                        type="button"
                                         onClick={() => setShowHistoryModal(true)}
                                         style={{
                                             display: 'inline-flex',
@@ -2631,6 +2697,184 @@ export function AuthorStoryManagement({ onBack }) {
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Popup: danh sách người theo dõi */}
+            {showFollowersModal && (
+                <div
+                    role="presentation"
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(15, 23, 42, 0.45)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10000,
+                        padding: '1rem',
+                    }}
+                    onClick={() => setShowFollowersModal(false)}
+                >
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="followers-modal-title"
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '16px',
+                            maxWidth: '900px',
+                            width: '100%',
+                            maxHeight: 'min(90vh, 900px)',
+                            overflow: 'auto',
+                            boxShadow: '0 25px 50px rgba(0,0,0,0.18)',
+                            border: '1px solid #e5e7eb',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', padding: '1.25rem 1.5rem', borderBottom: '1px solid #f1f5f9' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                                <div style={{
+                                    width: '44px', height: '44px', borderRadius: '12px',
+                                    background: 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    flexShrink: 0,
+                                }}
+                                >
+                                    <Heart style={{ width: '22px', height: '22px', color: '#ffffff' }} />
+                                </div>
+                                <div style={{ minWidth: 0 }}>
+                                    <h2 id="followers-modal-title" style={{ fontSize: '1.125rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>
+                                        Danh sách người theo dõi
+                                    </h2>
+                                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.35rem 0 0 0' }}>
+                                        Tổng số người theo dõi: <b>{Number(followersTotalCount || 0).toLocaleString('vi-VN')}</b>
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                aria-label="Đóng"
+                                onClick={() => setShowFollowersModal(false)}
+                                style={{
+                                    border: 'none',
+                                    background: '#f1f5f9',
+                                    borderRadius: '10px',
+                                    width: '36px',
+                                    height: '36px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    flexShrink: 0,
+                                }}
+                            >
+                                <X style={{ width: '18px', height: '18px', color: '#475569' }} />
+                            </button>
+                        </div>
+
+                        <div style={{ padding: '1.25rem 1.5rem 1.5rem' }}>
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+                                <input
+                                    type="text"
+                                    value={followersSearchInput}
+                                    onChange={(e) => setFollowersSearchInput(e.target.value)}
+                                    placeholder="Tìm theo tên hiển thị hoặc email..."
+                                    style={{
+                                        flex: 1,
+                                        padding: '0.7rem 0.95rem',
+                                        border: '1px solid #e2e8f0',
+                                        borderRadius: '10px',
+                                        outline: 'none',
+                                        fontSize: '0.875rem',
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setFollowersPage(1);
+                                        setFollowersSearchKeyword(followersSearchInput.trim());
+                                    }}
+                                    style={{
+                                        padding: '0.7rem 1rem',
+                                        borderRadius: '10px',
+                                        border: '1px solid #e2e8f0',
+                                        backgroundColor: '#f8fafc',
+                                        color: '#334155',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    Tìm kiếm
+                                </button>
+                            </div>
+
+                            <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                    <thead>
+                                        <tr style={{ backgroundColor: '#f8fafc' }}>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>NGƯỜI DÙNG</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>EMAIL</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THEO DÕI TỪ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {followersLoading ? (
+                                            <tr>
+                                                <td colSpan={3} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải danh sách follower...</td>
+                                            </tr>
+                                        ) : followersError ? (
+                                            <tr>
+                                                <td colSpan={3} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{followersError}</td>
+                                            </tr>
+                                        ) : followersItems.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={3} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Chưa có người theo dõi nào.</td>
+                                            </tr>
+                                        ) : (
+                                            followersItems.map((follower) => {
+                                                const id = follower.userId ?? follower.UserId;
+                                                const displayName = follower.displayName ?? follower.DisplayName ?? 'Người dùng';
+                                                const email = follower.email ?? follower.Email ?? '—';
+                                                const avatar = follower.avatarUrl ?? follower.AvatarUrl;
+                                                const followedAt = follower.followedAt ?? follower.FollowedAt;
+                                                const timeLabel = followedAt
+                                                    ? new Date(followedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                                                    : '—';
+                                                return (
+                                                    <tr key={id ?? email} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                        <td style={{ padding: '0.85rem 1rem' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+                                                                <img
+                                                                    src={avatar ? resolveBackendUrl(avatar) : 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=64&h=64&fit=crop'}
+                                                                    alt={displayName}
+                                                                    style={{ width: '36px', height: '36px', borderRadius: '9999px', objectFit: 'cover', border: '1px solid #e2e8f0' }}
+                                                                />
+                                                                <span style={{ color: '#1e293b', fontWeight: 600 }}>{displayName}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td style={{ padding: '0.85rem 1rem', color: '#334155' }}>{email}</td>
+                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', color: '#64748b' }}>{timeLabel}</td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {!followersLoading && !followersError && followersTotalCount > followersPageSize && (
+                                <Pagination
+                                    currentPage={followersPage}
+                                    totalPages={Math.max(1, Math.ceil(followersTotalCount / followersPageSize))}
+                                    totalItems={followersTotalCount}
+                                    itemsPerPage={followersPageSize}
+                                    onPageChange={setFollowersPage}
+                                    itemLabel="người theo dõi"
+                                />
+                            )}
                         </div>
                     </div>
                 </div>

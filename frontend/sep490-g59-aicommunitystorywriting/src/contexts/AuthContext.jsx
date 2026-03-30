@@ -105,8 +105,8 @@ export function AuthProvider({ children }) {
         }
     };
 
-    const register = async (email, password, name) => {
-        return await authApi.register({ email, password, fullName: name });
+    const register = async (email, password, confirmPassword, name) => {
+        return await authApi.register({ email, password, confirmPassword, fullName: name });
     };
 
     const verifyOtp = async (email, otpCode) => {

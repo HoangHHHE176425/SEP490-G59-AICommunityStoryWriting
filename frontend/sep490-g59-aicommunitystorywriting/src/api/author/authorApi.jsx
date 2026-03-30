@@ -65,3 +65,26 @@ export async function unfollowAuthor(authorId) {
     const response = await axiosInstance.delete(`/authors/${authorId}/follow`);
     return response.data;
 }
+
+/**
+ * Danh sách followers của tác giả (phân trang).
+ * GET api/authors/{authorId}/followers
+ * @param {string} authorId - Guid
+ * @param {{ page?: number, pageSize?: number, search?: string }} options
+ */
+export async function getAuthorFollowers(authorId, options = {}) {
+    if (!isAuthorGuid(authorId)) {
+        return { items: [], totalCount: 0, page: 1, pageSize: 20 };
+    }
+    const page = Number(options?.page) > 0 ? Number(options.page) : 1;
+    const pageSize = Number(options?.pageSize) > 0 ? Number(options.pageSize) : 20;
+    const search = typeof options?.search === 'string' ? options.search.trim() : '';
+    const response = await axiosInstance.get(`/authors/${authorId}/followers`, {
+        params: {
+            page,
+            pageSize,
+            ...(search ? { search } : {}),
+        },
+    });
+    return response.data ?? { items: [], totalCount: 0, page, pageSize };
+}
