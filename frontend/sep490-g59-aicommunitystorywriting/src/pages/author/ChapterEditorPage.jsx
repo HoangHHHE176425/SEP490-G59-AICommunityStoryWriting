@@ -723,6 +723,11 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             showToast(isVersionMode ? 'Vui lòng nhập tiêu đề phiên bản' : 'Vui lòng nhập tên chương', 'error');
             return;
         }
+        // FE validation: tên chương không vượt quá 50 ký tự.
+        if (!isVersionMode && chapterData.title.trim().length > 50) {
+            showToast('Tên chương không được vượt quá 50 ký tự', 'error');
+            return;
+        }
         if (!chapterData.content.trim()) {
             showToast('Vui lòng nhập nội dung chương', 'error');
             return;
@@ -926,6 +931,36 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 onNavigateAfterSave?.();
                 return;
             }
+            const scoreNum = typeof score === 'number' ? score : Number(score);
+            const pct = hasBoth && Number.isFinite(scoreNum) ? scoreNum : undefined;
+            const shouldSkipAiComparePopup =
+                // Không tính ra được AI similarity (hoặc không có đủ dữ liệu so sánh)
+                !hasBoth ||
+                pct == null ||
+                // Hoặc similarity < 40%
+                (pct != null && pct < 40);
+
+            // Rule: nếu không có / không tính được AI similarity hoặc pct < 40%
+            // => không hiển thị popup xác nhận, mà lưu nháp/xuất bản luôn (không cập nhật ai_similarity_percent).
+            if (shouldSkipAiComparePopup) {
+                if (!isVersionMode && saveStatus === 'published' && (!normalPublishEligibility.loaded || !canSubmitNormalChapterPublish)) {
+                    showToast(normalChapterPublishTooltip, 'error');
+                    return;
+                }
+                const payload = {
+                    ...chapterData,
+                    status: saveStatus,
+                    updatedAt: new Date().toLocaleString('vi-VN'),
+                    aiSimilarityPercent: undefined,
+                };
+                try {
+                    await onSave(payload);
+                    onNavigateAfterSave?.();
+                } catch (error) {
+                    showToast(error?.message || 'Không thể lưu chương', 'error');
+                }
+                return;
+            }
             setAiCompareModal({
                 open: true,
                 loading: false,
@@ -938,18 +973,28 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 pendingSaveStatus: saveStatus,
             });
         } catch (cmpErr) {
+            // Nếu BE fail / không tính được AI similarity => không mở popup nữa, vẫn cho lưu/xuất bản.
             const msg =
                 cmpErr?.response?.data?.message ??
                 cmpErr?.response?.data?.Message ??
                 cmpErr?.message ??
                 'Không thể tính độ tương đồng với bản AI.';
-            setAiCompareModal({
-                open: true,
-                loading: false,
-                data: null,
-                error: String(msg),
-                pendingSaveStatus: saveStatus,
-            });
+            if (!isVersionMode && saveStatus === 'published' && (!normalPublishEligibility.loaded || !canSubmitNormalChapterPublish)) {
+                showToast(normalChapterPublishTooltip, 'error');
+                return;
+            }
+            try {
+                const payload = {
+                    ...chapterData,
+                    status: saveStatus,
+                    updatedAt: new Date().toLocaleString('vi-VN'),
+                    aiSimilarityPercent: undefined,
+                };
+                await onSave(payload);
+                onNavigateAfterSave?.();
+            } catch {
+                showToast(String(msg), 'error');
+            }
         } finally {
             setIsSaving(false);
         }
@@ -1018,11 +1063,13 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         closeAiCompareModalOnly();
         setIsSaving(true);
         try {
+            const shouldSendAiSimilarity = pct != null && pct >= 40;
             const payload = {
                 ...chapterData,
                 status,
                 updatedAt: new Date().toLocaleString('vi-VN'),
-                ...(pct != null ? { aiSimilarityPercent: pct } : {}),
+                // Bỏ cập nhật ai_similarity_percent khi pct < 40.
+                aiSimilarityPercent: shouldSendAiSimilarity ? pct : undefined,
             };
             await onSave(payload);
             onNavigateAfterSave?.();
@@ -1754,7 +1801,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         {readOnly ? 'Xem chi tiết chương' : isVersionMode ? (editingVersion ? 'Chỉnh sửa phiên bản' : 'Tạo phiên bản chương') : (isCreateMode ? 'Thêm chương mới' : (isEditingChapterMode ? 'Chỉnh sửa chương' : 'Thêm chương mới'))}
                                     </h2>
                                     <p style={{ fontSize: '0.875rem', color: '#6b7280', margin: '0.25rem 0 0 0' }}>
-                                        {story?.title}
+                                        {`Truyện: ${story?.title ?? ''}`}
                                     </p>
                                     {isVersionMode && sourceChapterForVersion && (
                                         <p style={{ fontSize: '0.8125rem', color: '#6366f1', margin: '0.375rem 0 0 0', fontWeight: 600 }}>
@@ -2200,11 +2247,10 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                 type="button"
                                                 onClick={openCachedSuggestions}
                                                 disabled={!Array.isArray(suggestionsCache) || suggestionsCache.length === 0}
-                                                className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-full transition-all disabled:opacity-60 disabled:cursor-not-allowed ${
-                                                    Array.isArray(suggestionsCache) && suggestionsCache.length > 0
-                                                        ? 'bg-amber-100 text-amber-800 ring-2 ring-amber-300 hover:bg-amber-200 shadow-sm'
-                                                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                                                }`}
+                                                className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-full transition-all disabled:opacity-60 disabled:cursor-not-allowed ${Array.isArray(suggestionsCache) && suggestionsCache.length > 0
+                                                    ? 'bg-amber-100 text-amber-800 ring-2 ring-amber-300 hover:bg-amber-200 shadow-sm'
+                                                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                                    }`}
                                             >
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
                                                 Xem lại gợi ý gần nhất

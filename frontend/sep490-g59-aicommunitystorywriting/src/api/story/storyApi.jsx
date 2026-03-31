@@ -36,7 +36,7 @@ const STORY_PROGRESS_MAP = {
  * Tạo truyện mới (multipart/form-data).
  * @param {Object} data - {
  *   title (required),
- *   summary?,
+ *   summary (required — khớp validate bước 1 StoryEditor),
  *   categoryIds?: string[] (Guid),
  *   ageRating?: string (ALL, 13+, 16+, 18+),
  *   storyProgressStatus?: string (ONGOING, COMPLETED, HIATUS),
@@ -54,12 +54,14 @@ export async function createStory(data) {
         throw new Error("Tiêu đề truyện không được vượt quá 255 ký tự");
     }
 
+    const summaryTrim = data.summary != null ? String(data.summary).trim() : "";
+    if (!summaryTrim) {
+        throw new Error("Mô tả truyện không được để trống");
+    }
+
     const formData = new FormData();
     formData.append("Title", title);
-
-    if (data.summary != null && data.summary !== "") {
-        formData.append("Summary", String(data.summary).trim());
-    }
+    formData.append("Summary", summaryTrim);
 
     if (Array.isArray(data.categoryIds) && data.categoryIds.length > 0) {
         data.categoryIds.forEach((id) => {

@@ -18,7 +18,7 @@ export function PolicyViewModal({ policy, onClose }) {
                 <div className="flex items-center justify-between p-4 border-b border-slate-200">
                     <div className="flex items-center gap-2">
                         <FileText className="w-5 h-5 text-emerald-600" />
-                        <h2 className="text-xl font-bold text-slate-900">Policy: {policy.type} — v{policy.version}</h2>
+                        <h2 className="text-xl font-bold text-slate-900">Chính sách: {policy.type} — v{policy.version}</h2>
                     </div>
                     <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-slate-100 text-slate-500">
                         <X className="w-5 h-5" />

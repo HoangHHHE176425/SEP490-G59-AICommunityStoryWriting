@@ -1,0 +1,6 @@
+# Use this workspace to collaborate
+workspace:
+  id: 9c9f2e48-a47c-4316-81d2-5fa6505aaf26
+localResources:
+  specs:
+    - ..\backend\SEP490-G59-AICommunityStoryWriting\AIStory.API\obj\Debug\net8.0\EndpointInfo\AIStory.API.json

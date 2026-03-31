@@ -81,6 +81,10 @@ namespace AIStory.API
             builder.Services.AddScoped<IUserLookup, UserLookup>();
             builder.Services.AddScoped<ICategoryLookup, CategoryLookup>();
             builder.Services.AddScoped<IStoryLookup, StoryLookup>();
+            builder.Services.AddScoped<IUserActivityLookup, UserActivityLookup>();
+            builder.Services.AddScoped<IStoryCommentCommand, StoryCommentCommand>();
+            builder.Services.AddScoped<ICommentReactionReader, CommentReactionReader>();
+            builder.Services.AddScoped<IStoryCommentPostService, StoryCommentPostService>();
             builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
             builder.Services.AddScoped<ICategoryService, CategoryService>();
             builder.Services.AddScoped<IChapterRepository, ChapterRepository>();

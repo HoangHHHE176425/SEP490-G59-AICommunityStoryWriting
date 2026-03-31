@@ -83,6 +83,38 @@ function mapStoryToPublication(item) {
     };
 }
 
+function extractAuthorName(raw) {
+    return (
+        raw?.authorName ??
+        raw?.AuthorName ??
+        raw?.author ??
+        raw?.Author ??
+        raw?.displayName ??
+        raw?.DisplayName ??
+        raw?.userName ??
+        raw?.UserName ??
+        raw?.createdByName ??
+        raw?.CreatedByName ??
+        raw?.writerName ??
+        raw?.WriterName ??
+        'N/A'
+    );
+}
+
+function extractAuthorId(raw) {
+    return (
+        raw?.authorId ??
+        raw?.AuthorId ??
+        raw?.author_id ??
+        raw?.Author_id ??
+        raw?.userId ??
+        raw?.UserId ??
+        raw?.createdBy ??
+        raw?.CreatedBy ??
+        null
+    );
+}
+
 /** Lấy cover, author, authorId, ageRating, categories, description từ GET /stories/:id. */
 function storyResponseToMeta(story) {
     if (!story) return { storyCover: '', author: 'N/A', authorId: null, ageRating: null, categories: [], description: '' };
@@ -91,8 +123,8 @@ function storyResponseToMeta(story) {
     const coverPath = story.coverImage ?? story.CoverImage;
     return {
         storyCover: coverPath ? resolveBackendUrl(coverPath) : '',
-        author: story.authorName ?? story.AuthorName ?? 'N/A',
-        authorId: story.authorId ?? story.AuthorId ?? null,
+        author: extractAuthorName(story),
+        authorId: extractAuthorId(story),
         ageRating: story.ageRating ?? story.AgeRating ?? 'ALL',
         categories: categoryNamesArr,
         description: story.summary ?? story.Summary ?? '',
@@ -115,6 +147,13 @@ const MAX_CLAIM_DEADLINE_DAYS = 366;
 function toDatetimeLocalValue(d) {
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function formatDateTimeVi(value) {
+    if (!value) return '—';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('vi-VN');
 }
 
 function getDefaultDatetimeLocalForClaim() {
@@ -148,6 +187,12 @@ function validateClaimDeadlineLocal(datetimeLocalValue) {
     if (picked > max) return `Hạn duyệt không được vượt quá ${MAX_CLAIM_DEADLINE_DAYS} ngày.`;
     return null;
 }
+
+// Các hàm này hiện chưa được dùng trực tiếp, nhưng giữ lại để phục vụ các lần mở rộng sau.
+// Để tránh lỗi ESLint no-unused-vars, đánh dấu đã tham chiếu.
+void getMinDatetimeLocalForClaim;
+void getMaxDatetimeLocalForClaim;
+void validateClaimDeadlineLocal;
 
 /** Backend khuyến nghị: load lại danh sách duyệt/từ chối mỗi 30 giây để cập nhật khi có thay đổi từ nơi khác */
 const REFRESH_INTERVAL_MS = 30 * 1000;
@@ -233,8 +278,8 @@ function mapPendingStoryToItem(s) {
         type: 'story',
         storyTitle: s.title ?? s.Title ?? '',
         storyCover: coverPath ? resolveBackendUrl(coverPath) : '',
-        author: s.authorName ?? s.AuthorName ?? 'N/A',
-        authorId: s.authorId ?? s.AuthorId ?? null,
+        author: extractAuthorName(s),
+        authorId: extractAuthorId(s),
         status,
         submittedAt: s.createdAt ?? s.CreatedAt ?? s.updatedAt ?? s.UpdatedAt ?? null,
         totalChapters: s.totalChapters ?? s.TotalChapters ?? 0,
@@ -367,9 +412,15 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
     const [claimConfirmTarget, setClaimConfirmTarget] = useState(null); // { type: 'story', id, title } khi cần popup xác nhận
     /** Hạn hoàn thành duyệt (datetime-local) khi xác nhận trong popup — gửi API reviewDeadlineAt (ISO UTC). */
     const [claimReviewDeadlineLocal, setClaimReviewDeadlineLocal] = useState('');
+    // Giữ state này (vì có thể còn được tham chiếu trong luồng UI khác); tránh ESLint báo unused-vars.
+    void claimReviewDeadlineLocal;
     /** Modal "Nhận duyệt đơn": danh sách truyện + chương chưa nhận (type 'story' | 'chapter') */
     const [claimModalItems, setClaimModalItems] = useState([]);
     const [claimModalLoading, setClaimModalLoading] = useState(false);
+    const [claimModalSearch, setClaimModalSearch] = useState('');
+    const [claimModalSort, setClaimModalSort] = useState('newest'); // newest | oldest
+    const [claimModalPage, setClaimModalPage] = useState(1);
+    const CLAIM_MODAL_PAGE_SIZE = 8;
     /** Số đơn chưa nhận (unclaimed) — hiển thị bên cạnh "Nhận duyệt đơn" để moderator biết. */
     const [unclaimedCount, setUnclaimedCount] = useState(0);
     /** Cache Đã duyệt / Từ chối để vừa vào màn đã load sẵn, chuyển tab thấy ngay. */
@@ -434,32 +485,60 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                     const storyTitle = storyMeta?.storyTitle ?? storyChapters[0]?.storyTitle ?? 'Truyện';
                     const storyCover = storyMeta?.storyCover ?? storyChapters[0]?.storyCover ?? '';
                     const chapterIds = storyChapters.map((c) => c.chapterId ?? c.id);
+
+                    // Ưu tiên hiển thị "thời gian gửi xuất bản" để moderator biết đơn nào nên nhận trước.
+                    // Dùng mốc sớm nhất trong cả truyện và các chương đang chờ duyệt.
+                    const submittedAtMs = [
+                        storyMeta?.submittedAt ?? null,
+                        ...(storyChapters ?? []).map((c) => c?.submittedAt ?? null),
+                    ]
+                        .map((v) => (v ? new Date(v).getTime() : NaN))
+                        .filter((t) => Number.isFinite(t));
+                    const submittedAtIso = submittedAtMs.length ? new Date(Math.min(...submittedAtMs)).toISOString() : null;
+
                     grouped.push({
                         _claimType: 'story_group',
                         _claimId: storyId,
                         storyId,
                         storyTitle,
                         storyCover: storyCover || '',
-                        author: storyMeta?.author ?? 'N/A',
+                        author: extractAuthorName(storyMeta),
+                        authorId: extractAuthorId(storyMeta),
                         totalChapters: storyMeta?.totalChapters ?? storyChapters.length,
                         categories: storyMeta?.categories ?? [],
                         _chapterIds: chapterIds,
                         _isStoryUnclaimed: isStoryUnclaimed,
                         _chapterCount: chapterIds.length,
+                        _submittedAt: submittedAtIso,
                     });
                 }
                 setClaimModalItems(grouped);
-                // Lấy ảnh bìa từ GET /stories/:id để luôn đúng (tránh lỗi ảnh khi mở modal lần 2)
-                Promise.all(grouped.map((g) => getStoryById(g.storyId).then((s) => s).catch(() => null)))
-                    .then((storyDetails) => {
-                        const enriched = grouped.map((g, i) => {
-                            const story = storyDetails[i];
+                // Lấy ảnh + thông tin author (nếu đang N/A) để dialog hiển thị đúng.
+                Promise.all(
+                    grouped.map(async (g) => {
+                        const story = await getStoryById(g.storyId).catch(() => null);
+                        let storyCover = g.storyCover;
+                        let author = g.author;
+                        let authorId = g.authorId ?? null;
+
+                        if (story) {
                             const coverPath = story?.coverImage ?? story?.CoverImage;
                             const cover = coverPath ? resolveBackendUrl(coverPath) : (g.storyCover || '');
-                            return { ...g, storyCover: cover || g.storyCover };
-                        });
-                        setClaimModalItems(enriched);
+                            storyCover = cover || g.storyCover;
+
+                            author = extractAuthorName(story) ?? author;
+                            authorId = extractAuthorId(story) ?? authorId;
+                        }
+
+                        if ((!author || String(author).trim() === '' || String(author).trim().toUpperCase() === 'N/A') && authorId) {
+                            const profile = await getProfileByUserId(authorId).catch(() => null);
+                            author = profile?.displayName ?? author;
+                        }
+
+                        return { ...g, storyCover, author, authorId };
                     })
+                )
+                    .then((enriched) => setClaimModalItems(enriched))
                     .catch(() => { });
             })
             .catch(() => setClaimModalItems([]))
@@ -1003,6 +1082,14 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
         if (showClaimModal) loadClaimModalItems();
     }, [showClaimModal, loadClaimModalItems]);
 
+    // Reset bộ lọc/phân trang khi mở modal nhận duyệt.
+    useEffect(() => {
+        if (!showClaimModal) return;
+        setClaimModalSearch('');
+        setClaimModalSort('newest');
+        setClaimModalPage(1);
+    }, [showClaimModal]);
+
     useEffect(() => {
         if (claimConfirmTarget) {
             setClaimDeadlineChoice('7');
@@ -1417,7 +1504,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                     >
                         <div style={{ padding: '1rem 1.25rem', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <h2 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#1e293b' }}>
-                                Chọn truyện hoặc chương để nhận duyệt
+                                Chọn đơn để nhận duyệt
                             </h2>
                             <button
                                 type="button"
@@ -1431,89 +1518,210 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                         <div style={{ padding: '1rem', overflow: 'auto', flex: 1 }}>
                             {claimModalLoading ? (
                                 <p style={{ textAlign: 'center', color: '#64748b', margin: 0 }}>Đang tải danh sách...</p>
-                            ) : claimModalItems.length === 0 ? (
-                                <p style={{ textAlign: 'center', color: '#64748b', margin: 0 }}>
-                                    Không có truyện hoặc chương nào chưa nhận (trùng thể loại với bạn).
-                                </p>
                             ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                    {claimModalItems.map((item) => {
-                                        const isGroup = item._claimType === 'story_group';
-                                        const subtitle = isGroup
-                                            ? (item._chapterCount ? `${item._chapterCount} chương chờ duyệt` : 'Truyện chờ duyệt')
-                                            : item._claimType === 'story'
-                                                ? `${item.author ?? ''}${item.totalChapters != null ? ` • ${item.totalChapters} chương` : ''}`
-                                                : `Chương ${(item.orderIndex ?? 0) + 1} • ${item.wordCount ?? 0} từ`;
-                                        const confirmTitle = isGroup ? `${item.storyTitle} (${item._chapterCount || 0} chương)` : (item._claimType === 'story' ? item.storyTitle : `${item.storyTitle} — ${item.chapterTitle || 'Chương'}`);
-                                        const confirmPayload = isGroup
-                                            ? { type: 'story_group', id: item._claimId, title: confirmTitle, storyId: item.storyId, chapterIds: item._chapterIds, isStoryUnclaimed: item._isStoryUnclaimed }
-                                            : { type: item._claimType, id: item._claimId, title: confirmTitle };
-                                        return (
-                                            <div
-                                                key={item._claimType + '-' + item._claimId}
-                                                style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '1rem',
-                                                    padding: '0.75rem',
-                                                    border: '1px solid #e2e8f0',
-                                                    borderRadius: '8px',
-                                                    backgroundColor: '#fafafa'
-                                                }}
-                                            >
-                                                <div style={{ position: 'relative', width: '48px', height: '64px', borderRadius: '6px', flexShrink: 0, overflow: 'hidden' }}>
-                                                    <div style={{ position: 'absolute', inset: 0, backgroundColor: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}>📄</div>
-                                                    {item.storyCover ? (
-                                                        <img
-                                                            src={item.storyCover}
-                                                            alt=""
-                                                            style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%', objectFit: 'cover', borderRadius: '6px' }}
-                                                            onError={(e) => { e.target.style.opacity = '0'; e.target.style.position = 'absolute'; }}
-                                                            referrerPolicy="no-referrer"
-                                                        />
-                                                    ) : null}
-                                                </div>
-                                                <div style={{ flex: 1, minWidth: 0 }}>
-                                                    <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: '0.25rem' }}>
-                                                        {item.storyTitle}
-                                                        {!isGroup && item._claimType === 'chapter' && item.chapterTitle && (
-                                                            <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.875rem' }}> — {item.chapterTitle}</span>
-                                                        )}
-                                                    </div>
-                                                    <div style={{ fontSize: '0.8125rem', color: '#64748b' }}>{subtitle}</div>
-                                                    {isGroup && Array.isArray(item.categories) && item.categories.length > 0 && (
-                                                        <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
-                                                            {item.categories.slice(0, 3).map((c) => (
-                                                                <span key={c} style={{ fontSize: '0.7rem', padding: '0.125rem 0.375rem', backgroundColor: '#e2e8f0', borderRadius: '4px', color: '#475569' }}>{c}</span>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setClaimReviewDeadlineLocal(getDefaultDatetimeLocalForClaim());
-                                                        setClaimConfirmTarget(confirmPayload);
+                                (() => {
+                                    const base = Array.isArray(claimModalItems) ? claimModalItems : [];
+
+                                    const toMs = (v) => {
+                                        if (!v) return -1;
+                                        const t = new Date(v).getTime();
+                                        return Number.isFinite(t) ? t : -1;
+                                    };
+
+                                    const sorted = [...base].sort((a, b) => {
+                                        const ta = toMs(a._submittedAt ?? a.submittedAt ?? a.createdAt ?? a.CreatedAt ?? null);
+                                        const tb = toMs(b._submittedAt ?? b.submittedAt ?? b.createdAt ?? b.CreatedAt ?? null);
+                                        if (claimModalSort === 'oldest') return ta - tb;
+                                        return tb - ta;
+                                    });
+
+                                    const keyword = String(claimModalSearch ?? '').trim().toLowerCase();
+                                    const filtered = keyword
+                                        ? sorted.filter((item) => {
+                                            const storyTitle = String(item?.storyTitle ?? '').toLowerCase();
+                                            const author = String(item?.author ?? '').toLowerCase();
+                                            return storyTitle.includes(keyword) || author.includes(keyword);
+                                        })
+                                        : sorted;
+
+                                    const totalItems = filtered.length;
+                                    const totalPages = Math.max(1, Math.ceil(totalItems / CLAIM_MODAL_PAGE_SIZE));
+                                    const safePage = Math.min(Math.max(1, claimModalPage), totalPages);
+                                    const start = (safePage - 1) * CLAIM_MODAL_PAGE_SIZE;
+                                    const end = start + CLAIM_MODAL_PAGE_SIZE;
+                                    const pagedItems = filtered.slice(start, end);
+
+                                    return (
+                                        <>
+                                            <div style={{ marginBottom: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                                                <input
+                                                    value={claimModalSearch}
+                                                    onChange={(e) => {
+                                                        setClaimModalSearch(e.target.value);
+                                                        setClaimModalPage(1);
                                                     }}
-                                                    disabled={claimingId === (item._claimId ?? item.storyId)}
+                                                    placeholder="Tìm theo tên truyện hoặc tên tác giả"
                                                     style={{
-                                                        padding: '0.5rem 0.875rem',
-                                                        fontSize: '0.8125rem',
-                                                        fontWeight: 600,
-                                                        backgroundColor: '#0ea5e9',
-                                                        color: '#fff',
-                                                        border: 'none',
+                                                        padding: '0.5rem 0.75rem',
                                                         borderRadius: '8px',
-                                                        cursor: claimingId === (item._claimId ?? item.storyId) ? 'wait' : 'pointer',
-                                                        opacity: claimingId === (item._claimId ?? item.storyId) ? 0.7 : 1
+                                                        border: '1px solid #e2e8f0',
+                                                        backgroundColor: '#fff',
+                                                        color: '#0f172a',
+                                                        fontSize: '0.875rem',
+                                                        minWidth: '220px',
+                                                        flex: 1,
+                                                    }}
+                                                />
+                                                <select
+                                                    value={claimModalSort}
+                                                    onChange={(e) => {
+                                                        setClaimModalSort(e.target.value);
+                                                        setClaimModalPage(1);
+                                                    }}
+                                                    style={{
+                                                        padding: '0.5rem 0.75rem',
+                                                        borderRadius: '8px',
+                                                        border: '1px solid #e2e8f0',
+                                                        backgroundColor: '#fff',
+                                                        color: '#0f172a',
+                                                        fontSize: '0.875rem',
                                                     }}
                                                 >
-                                                    {claimingId === (item._claimId ?? item.storyId) ? '...' : 'Nhận duyệt đơn'}
-                                                </button>
+                                                    <option value="newest">Gửi xuất bản mới nhất</option>
+                                                    <option value="oldest">Gửi xuất bản cũ nhất</option>
+                                                </select>
                                             </div>
-                                        );
-                                    })}
-                                </div>
+
+                                            {claimModalItems.length === 0 ? (
+                                                <p style={{ textAlign: 'center', color: '#64748b', margin: 0 }}>
+                                                    Không có truyện hoặc chương nào chưa nhận (trùng thể loại với bạn).
+                                                </p>
+                                            ) : pagedItems.length === 0 ? (
+                                                <p style={{ textAlign: 'center', color: '#64748b', margin: 0 }}>Không có đơn phù hợp với bộ lọc.</p>
+                                            ) : (
+                                                <>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                                        {pagedItems.map((item) => {
+                                                            const isGroup = item._claimType === 'story_group';
+                                                            const subtitle = isGroup
+                                                                ? item._chapterCount
+                                                                    ? `${item._chapterCount} chương chờ duyệt`
+                                                                    : 'Truyện chờ duyệt'
+                                                                : item._claimType === 'story'
+                                                                    ? `${item.author ?? ''}${item.totalChapters != null ? ` • ${item.totalChapters} chương` : ''}`
+                                                                    : `Chương ${(item.orderIndex ?? 0) + 1} • ${item.wordCount ?? 0} từ`;
+
+                                                            const confirmTitle = isGroup
+                                                                ? `${item.storyTitle} (${item._chapterCount || 0} chương)`
+                                                                : item._claimType === 'story'
+                                                                    ? item.storyTitle
+                                                                    : `${item.storyTitle} — ${item.chapterTitle || 'Chương'}`;
+
+                                                            const confirmPayload = isGroup
+                                                                ? {
+                                                                    type: 'story_group',
+                                                                    id: item._claimId,
+                                                                    title: confirmTitle,
+                                                                    storyId: item.storyId,
+                                                                    chapterIds: item._chapterIds,
+                                                                    isStoryUnclaimed: item._isStoryUnclaimed,
+                                                                }
+                                                                : { type: item._claimType, id: item._claimId, title: confirmTitle };
+
+                                                            return (
+                                                                <div
+                                                                    key={item._claimType + '-' + item._claimId}
+                                                                    style={{
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        gap: '1rem',
+                                                                        padding: '0.75rem',
+                                                                        border: '1px solid #e2e8f0',
+                                                                        borderRadius: '8px',
+                                                                        backgroundColor: '#fafafa',
+                                                                    }}
+                                                                >
+                                                                    <div style={{ position: 'relative', width: '48px', height: '64px', borderRadius: '6px', flexShrink: 0, overflow: 'hidden' }}>
+                                                                        <div style={{ position: 'absolute', inset: 0, backgroundColor: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}>📄</div>
+                                                                        {item.storyCover ? (
+                                                                            <img
+                                                                                src={item.storyCover}
+                                                                                alt=""
+                                                                                style={{ position: 'relative', zIndex: 1, width: '100%', height: '100%', objectFit: 'cover', borderRadius: '6px' }}
+                                                                                onError={(e) => { e.target.style.opacity = '0'; e.target.style.position = 'absolute'; }}
+                                                                                referrerPolicy="no-referrer"
+                                                                            />
+                                                                        ) : null}
+                                                                    </div>
+                                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                                        <div style={{ fontWeight: 600, color: '#1e293b', marginBottom: '0.25rem' }}>
+                                                                            {item.storyTitle}
+                                                                            {!isGroup && item._claimType === 'chapter' && item.chapterTitle && (
+                                                                                <span style={{ fontWeight: 500, color: '#64748b', fontSize: '0.875rem' }}> — {item.chapterTitle}</span>
+                                                                            )}
+                                                                        </div>
+                                                                        <div style={{ fontSize: '0.8125rem', color: '#64748b' }}>{subtitle}</div>
+                                                                        {isGroup ? (
+                                                                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+                                                                                Tác giả: {item.author ?? '—'}
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {item._submittedAt ? (
+                                                                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.25rem' }}>
+                                                                                Thời gian gửi xuất bản: {formatDateTimeVi(item._submittedAt)}
+                                                                            </div>
+                                                                        ) : null}
+                                                                        {isGroup && Array.isArray(item.categories) && item.categories.length > 0 && (
+                                                                            <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                                                                                {item.categories.slice(0, 3).map((c) => (
+                                                                                    <span key={c} style={{ fontSize: '0.7rem', padding: '0.125rem 0.375rem', backgroundColor: '#e2e8f0', borderRadius: '4px', color: '#475569' }}>{c}</span>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setClaimReviewDeadlineLocal(getDefaultDatetimeLocalForClaim());
+                                                                            setClaimConfirmTarget(confirmPayload);
+                                                                        }}
+                                                                        disabled={claimingId === (item._claimId ?? item.storyId)}
+                                                                        style={{
+                                                                            padding: '0.5rem 0.875rem',
+                                                                            fontSize: '0.8125rem',
+                                                                            fontWeight: 600,
+                                                                            backgroundColor: '#0ea5e9',
+                                                                            color: '#fff',
+                                                                            border: 'none',
+                                                                            borderRadius: '8px',
+                                                                            cursor: claimingId === (item._claimId ?? item.storyId) ? 'wait' : 'pointer',
+                                                                            opacity: claimingId === (item._claimId ?? item.storyId) ? 0.7 : 1,
+                                                                        }}
+                                                                    >
+                                                                        {claimingId === (item._claimId ?? item.storyId) ? '...' : 'Nhận duyệt đơn'}
+                                                                    </button>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+
+                                                    {totalPages > 1 ? (
+                                                        <div style={{ marginTop: '0.75rem' }}>
+                                                            <Pagination
+                                                                currentPage={safePage}
+                                                                totalPages={totalPages}
+                                                                totalItems={totalItems}
+                                                                itemsPerPage={CLAIM_MODAL_PAGE_SIZE}
+                                                                onPageChange={(p) => setClaimModalPage(p)}
+                                                                itemLabel="đơn"
+                                                            />
+                                                        </div>
+                                                    ) : null}
+                                                </>
+                                            )}
+                                        </>
+                                    );
+                                })()
                             )}
                         </div>
                     </div>
