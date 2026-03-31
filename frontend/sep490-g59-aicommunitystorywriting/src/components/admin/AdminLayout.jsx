@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { createInitialAvatarDataUrl } from '../../utils/avatarFallback';
 import { getSystemWalletBalance } from '../../api/admin/walletApi';
 import { getAdminTransactions } from '../../api/admin/transactionsApi';
 import {
@@ -43,11 +44,11 @@ const ALL_MENU_ITEMS = [
     { id: 'users', label: 'Quản lý người dùng', icon: Users },
     { id: 'comments', label: 'Quản lý bình luận', icon: MessageSquare },
     { id: 'policies', label: 'Quản lý Policy', icon: Shield },
-    { id: 'ai-config', label: 'Cấu hình AI', icon: Brain },
+    { id: 'ai-config', label: 'Cấu hình hệ thống', icon: Brain },
 ];
 
 /** Yêu cầu UI: ẩn một số tab ở màn Admin. */
-const HIDE_MENU_IDS_FOR_ADMIN = new Set(['publication', 'stories', 'comments']);
+const HIDE_MENU_IDS_FOR_ADMIN = new Set(['publication', 'stories', 'comments', 'violations']);
 
 /** Menu theo role để tách rõ màn Admin / Moderator / Compliance. */
 const ROLE_MENU_IDS = {
@@ -387,10 +388,14 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                             }}
                         >
                             <img
-                                src={user?.avatarUrl ? resolveBackendUrl(user.avatarUrl) : 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop'}
+                                src={
+                                    user?.avatarUrl
+                                        ? resolveBackendUrl(user.avatarUrl)
+                                        : createInitialAvatarDataUrl(displayName, 96)
+                                }
                                 alt="Admin"
                                 style={{ width: '32px', height: '32px', borderRadius: '50%' }}
-                                onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=40&h=40&fit=crop'; }}
+                                onError={(e) => { e.target.src = createInitialAvatarDataUrl(displayName, 96); }}
                             />
                             <div style={{ display: window.innerWidth >= 640 ? 'block' : 'none' }} className="hidden sm:block">
                                 <p style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b', margin: 0 }}>{displayName}</p>

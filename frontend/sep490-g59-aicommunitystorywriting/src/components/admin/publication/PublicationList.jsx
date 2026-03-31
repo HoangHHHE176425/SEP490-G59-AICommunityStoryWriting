@@ -205,7 +205,7 @@ export function PublicationList({
                                                     backgroundColor: sla.bg,
                                                     color: sla.color,
                                                 }}>
-                                                    SLA: {sla.label}
+                                                    Thời hạn SLA: {sla.label}
                                                 </span>
                                             );
                                         })()}

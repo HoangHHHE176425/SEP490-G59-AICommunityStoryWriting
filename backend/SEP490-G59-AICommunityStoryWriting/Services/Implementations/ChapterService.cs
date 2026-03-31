@@ -64,9 +64,12 @@ namespace Services.Implementations
             _scopeFactory = scopeFactory;
         }
 
-        public ChapterResponseDto Create(CreateChapterRequestDto request)
+        /// <inheritdoc cref="IChapterService.Create"/>
+        public ChapterResponseDto Create(CreateChapterRequestDto request, Guid authorId)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
+            if (authorId == Guid.Empty)
+                throw new ArgumentException("Author ID is required.", nameof(authorId));
 
             var story = _storyLookup.GetById(request.StoryId);
             if (story == null)
@@ -74,6 +77,15 @@ namespace Services.Implementations
                 throw new InvalidOperationException($"Story with ID {request.StoryId} not found.");
             }
 
+            // UTCID13/14: chỉ story.author_id được tạo chương; tác giả khác (dù có truyện khác) không được.
+            if (!story.author_id.HasValue || story.author_id.Value != authorId)
+                throw new UnauthorizedAccessException("Bạn không phải tác giả của truyện này.");
+
+            return CreateChapterCore(request, story);
+        }
+
+        private ChapterResponseDto CreateChapterCore(CreateChapterRequestDto request, stories story)
+        {
             if (request.Id == Guid.Empty)
                 throw new ArgumentException("Id must be a non-empty Guid (do not leave empty).");
 
@@ -86,6 +98,9 @@ namespace Services.Implementations
             {
                 throw new InvalidOperationException($"Chapter with order index {request.OrderIndex} already exists for this story.");
             }
+
+            if (string.IsNullOrWhiteSpace(request.Title))
+                throw new ArgumentException("Tiêu đề chương là bắt buộc và không được chỉ gồm khoảng trắng.");
 
             EnsureUniqueChapterTitleForStory(request.StoryId, request.Title, null);
 
@@ -107,9 +122,7 @@ namespace Services.Implementations
                 throw new InvalidOperationException("Truyện cần tối thiểu 500 lượt xem mới được thiết lập chế độ trả phí cho chương.");
             }
             if (accessType == "FREE" && coinPrice > 0)
-            {
-                coinPrice = 0; // Force coin price to 0 for FREE chapters
-            }
+                throw new ArgumentException("Chương miễn phí (FREE) không được khai báo giá coin lớn hơn 0.");
 
             var content = request.Content;
             if (request.AiGeneratedContentId.HasValue)
@@ -121,6 +134,13 @@ namespace Services.Implementations
                         content = aiDraft.ai_output;
                 }
             }
+
+            if (string.IsNullOrWhiteSpace(content))
+                throw new InvalidOperationException("Vui lòng điền đầy đủ thông tin.");
+
+            const int minChapterContentChars = 500;
+            if (content.Length < minChapterContentChars)
+                throw new InvalidOperationException("Nội dung chương quá ngắn: yêu cầu tối thiểu 500 ký tự.");
 
             var wordCount = CalculateWordCount(content);
 
@@ -208,14 +228,6 @@ namespace Services.Implementations
 
             // Create: return lightweight DTO without extra DB lookups.
             return MapToResponseDto(chapter, includeStoryLookup: false, storyTitleOverride: story.title);
-        }
-
-        // New overload (for future ownership/auth validation):
-        // - Intentionally delegates to current behavior for now.
-        // - Unit tests can target this signature; product can later enforce author ownership here.
-        public ChapterResponseDto Create(CreateChapterRequestDto request, Guid authorId)
-        {
-            return Create(request);
         }
 
         public PagedResultDto<ChapterListItemDto> GetAll(ChapterQueryDto query)
