@@ -3,12 +3,14 @@ import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useAuth } from '../../contexts/AuthContext';
 import { StoryInfoForm } from '../../components/author/story-editor/StoryInfoForm';
+import { useToast } from '../../components/author/story-editor/Toast';
 
 export function StoryInfoEditor({ story, onSave, onCancel }) {
     const { user } = useAuth();
     const authorName = user?.displayName ?? user?.DisplayName ?? user?.fullName ?? user?.FullName ?? user?.nickname ?? user?.Nickname ?? '';
 
     const [saving, setSaving] = useState(false);
+    const { showToast, ToastContainer } = useToast();
     const [formData, setFormData] = useState({
         title: '',
         author: authorName,
@@ -56,6 +58,12 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
     };
 
     const handleSubmit = async () => {
+        const hasPendingReviewChapter = Boolean(story?._hasPendingReviewChapter);
+        const selectedProgressStatus = String(formData.status ?? '').trim();
+        if (hasPendingReviewChapter && (selectedProgressStatus === 'Tạm dừng' || selectedProgressStatus === 'Hoàn thành')) {
+            showToast('Truyện đang có chương chờ duyệt, vui lòng thử lại sau.', 'error');
+            return;
+        }
         const payload = {
             ...formData,
             author: formData.author || authorName,
@@ -72,13 +80,16 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
     const publishStatusUpper = String(story?.status ?? '').trim().toUpperCase();
     const isPublishedStory = publishStatusUpper === 'PUBLISHED';
     const progressStatusUpper = String(story?.storyProgressStatus ?? '').trim().toUpperCase();
+    const hasPendingReviewChapter = Boolean(story?._hasPendingReviewChapter);
+    const disabledProgressOptions = hasPendingReviewChapter ? ['Tạm dừng', 'Hoàn thành'] : [];
     const allowProgressOptions = progressStatusUpper === 'COMPLETED'
-        ? ['Hoàn thành']
-        : ['Đang ra', 'Hoàn thành', 'Tạm dừng'];
+        ? (hasPendingReviewChapter ? ['Đang ra', 'Hoàn thành', 'Tạm dừng'] : ['Hoàn thành'])
+        : (hasPendingReviewChapter ? ['Đang ra', 'Hoàn thành', 'Tạm dừng'] : ['Đang ra', 'Hoàn thành', 'Tạm dừng']);
 
     return (
         <div>
             <Header />
+            <ToastContainer />
             <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5', padding: '2rem' }}>
                 <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
                     {/* Header */}
@@ -125,7 +136,22 @@ export function StoryInfoEditor({ story, onSave, onCancel }) {
                         onImageUpload={handleImageUpload}
                         readOnlyFields={isPublishedStory}
                         allowProgressOptions={allowProgressOptions}
+                        disabledProgressOptions={disabledProgressOptions}
                     />
+                    {hasPendingReviewChapter && (
+                        <div style={{
+                            marginTop: '1rem',
+                            padding: '0.75rem 0.9rem',
+                            borderRadius: '8px',
+                            border: '1px solid #fcd34d',
+                            backgroundColor: '#fffbeb',
+                            color: '#92400e',
+                            fontSize: '0.8125rem',
+                            fontWeight: 600
+                        }}>
+                            Truyện hiện có ít nhất 1 chương đang chờ duyệt. Vì vậy bạn không thể cập nhật trạng thái tiến độ sang <b>Tạm dừng</b> hoặc <b>Hoàn thành</b>. Vui lòng thử lại sau khi chương được duyệt xong.
+                        </div>
+                    )}
                     {isPublishedStory && (
                         <div style={{
                             marginTop: '1rem',

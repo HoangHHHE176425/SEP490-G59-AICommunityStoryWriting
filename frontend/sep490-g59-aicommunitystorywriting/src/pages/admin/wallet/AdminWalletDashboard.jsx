@@ -837,14 +837,14 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                                     !tx.adminId &&
                                                     !tx.buyerUserId &&
                                                     !tx.authorUserId ? (
-                                                        <span className="text-xs text-slate-400">—</span>
+                                                        <span className="text-xs text-slate-400">Chưa có thông tin</span>
                                                     ) : null}
                                                 </div>
                                             </td>
                                             {hasAnyNote ? (
                                                 <td className="px-4 py-3.5 text-sm text-slate-600">
                                                     <span className="line-clamp-2" title={tx.note || ''}>
-                                                        {tx.note && String(tx.note).trim() ? tx.note : '—'}
+                                                        {tx.note && String(tx.note).trim() ? tx.note : 'Chưa có thông tin'}
                                                     </span>
                                                 </td>
                                             ) : null}

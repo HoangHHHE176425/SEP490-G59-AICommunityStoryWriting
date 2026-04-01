@@ -8,7 +8,8 @@ public class CreateCommentReportRequestDto
     [MaxLength(50)]
     public string ReasonCode { get; set; } = null!;
 
-    [MaxLength(4000)]
+    /// <summary>Ma trận nghiệp vụ: tối đa 200 ký tự.</summary>
+    [MaxLength(200)]
     public string? Description { get; set; }
 }
 

@@ -121,6 +121,7 @@ export function ChapterListManager({
     onViewChapter,
     onAddVersion,
     onEditVersion,
+    onViewVersion,
     isAuthorWritingSuspended = false,
     authorWritingSuspendedUntilLabel = '',
 }) {
@@ -1356,8 +1357,31 @@ export function ChapterListManager({
                                                                                 width: 'fit-content',
                                                                                 margin: '0 auto'
                                                                             }}>
-                                                                                {/* Hàng 1: Lý do từ chối (nếu rejected), Chỉnh sửa, Xóa — giống chapter */}
+                                                                                {/* Hàng 1: Xem chi tiết, Lý do từ chối (nếu rejected), Chỉnh sửa, Xóa — giống chapter */}
                                                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={(e) => { e.stopPropagation(); onViewVersion?.(chapter, v); }}
+                                                                                        title="Xem chi tiết phiên bản"
+                                                                                        style={{
+                                                                                            display: 'inline-flex',
+                                                                                            alignItems: 'center',
+                                                                                            gap: '0.25rem',
+                                                                                            padding: '0.4rem 0.75rem',
+                                                                                            backgroundColor: '#eef2ff',
+                                                                                            border: '1px solid #c7d2fe',
+                                                                                            borderRadius: '9999px',
+                                                                                            fontSize: '0.75rem',
+                                                                                            fontWeight: 600,
+                                                                                            color: '#4338ca',
+                                                                                            cursor: 'pointer',
+                                                                                            whiteSpace: 'nowrap',
+                                                                                            transition: 'all 0.2s'
+                                                                                        }}
+                                                                                    >
+                                                                                        <Eye size={12} />
+                                                                                        Xem chi tiết
+                                                                                    </button>
                                                                                     {vStatusLower === 'rejected' && (
                                                                                         <button
                                                                                             type="button"

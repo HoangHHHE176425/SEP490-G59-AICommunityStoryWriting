@@ -1,8 +1,10 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using DataAccessObjects.DAOs;
+using Services.DTOs.Authors;
+using Services.DTOs.Stories;
 
 namespace AIStory.API.Controllers
 {
@@ -37,6 +39,34 @@ namespace AIStory.API.Controllers
         {
             var count = FollowDAO.GetAuthorFollowerCount(authorId);
             return Ok(new { followersCount = count });
+        }
+
+        /// <summary>Danh sách người theo dõi tác giả (phân trang).</summary>
+        [HttpGet("{authorId:guid}/followers")]
+        [AllowAnonymous]
+        public IActionResult GetFollowers(
+            Guid authorId,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] string? search = null)
+        {
+            var (items, totalCount) = FollowDAO.GetAuthorFollowers(authorId, page, pageSize, search);
+            var mapped = items.Select(x => new AuthorFollowerListItemDto
+            {
+                UserId = x.UserId,
+                DisplayName = x.DisplayName,
+                Email = x.Email,
+                AvatarUrl = x.AvatarUrl,
+                FollowedAt = x.FollowedAt
+            }).ToList();
+
+            return Ok(new PagedResultDto<AuthorFollowerListItemDto>
+            {
+                Items = mapped,
+                TotalCount = totalCount,
+                Page = page < 1 ? 1 : page,
+                PageSize = pageSize < 1 ? 20 : Math.Min(pageSize, 100)
+            });
         }
 
         /// <summary>Theo dõi tác giả. Khi tác giả có truyện/chương mới sẽ nhận thông báo.</summary>

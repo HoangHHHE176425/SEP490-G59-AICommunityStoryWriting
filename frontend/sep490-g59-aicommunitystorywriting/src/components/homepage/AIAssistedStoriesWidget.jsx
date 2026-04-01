@@ -1,54 +1,154 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { Sparkles, Brain, PenTool, ChevronRight, Eye, Star, BookOpen } from 'lucide-react';
-import linhVuThienHa from '../../assets/image/linh-vu-thien-ha.jpg';
-import cyber from '../../assets/image/cyber.jpg';
-import maphapsutoicao from '../../assets/image/maphapsutoicao.jpg';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { formatStoryViews } from '../../utils/storyBrowseMap';
+import { getStories } from '../../api/story/storyApi';
+import { getChaptersByStoryId } from '../../api/chapter/chapterApi';
 
 export function AIAssistedStoriesWidget() {
-  const aiStories = [
-    {
-      id: 1,
-      story: 'Thế Giới Song Song',
-      author: {
-        name: 'Vũ Phong',
-        avatar: 'https://images.unsplash.com/photo-1754954865833-c6ee8cb8726d?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxhc2lhbiUyMHlvdW5nJTIwbWFuJTIwY3JlYXRpdmV8ZW58MXx8fHwxNzcwMjg1MTU2fDA&ixlib=rb-4.1.0&q=80&w=1080',
-      },
-      genre: 'Huyền Huyễn',
-      chapters: 156,
-      views: '1.8M',
-      rating: 4.8,
-      aiFeatures: ['Gợi ý cốt truyện', 'Phát triển nhân vật'],
-      image: linhVuThienHa
-    },
-    {
-      id: 2,
-      story: 'Cyber Thế Giới',
-      author: {
-        name: 'Thanh Lương',
-        avatar: 'https://images.unsplash.com/photo-1754954865833-c6ee8cb8726d?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxhc2lhbiUyMHlvdW5nJTIwbWFuJTIwY3JlYXRpdmV8ZW58MXx8fHwxNzcwMjg1MTU2fDA&ixlib=rb-4.1.0&q=80&w=1080',
-      },
-      genre: 'Khoa Huyễn',
-      chapters: 98,
-      views: '2.6M',
-      rating: 4.6,
-      aiFeatures: ['Xây dựng thế giới', 'Kiểm tra logic'],
-      image: cyber
-    },
-    {
-      id: 3,
-      story: 'Ma Pháp Sư Tối Cao',
-      author: {
-        name: 'Minh Trinh',
-        avatar: 'https://images.unsplash.com/photo-1581065178026-390bc4e78dad?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxhc2lhbiUyMHdvbWFuJTIwcHJvZmVzc2lvbmFsJTIwcG9ydHJhaXR8ZW58MXx8fHwxNzcwMjc3OTQ1fDA&ixlib=rb-4.1.0&q=80&w=1080',
-      },
-      genre: 'Huyền Huyễn',
-      chapters: 156,
-      views: '2.9M',
-      rating: 4.7,
-      aiFeatures: ['Tạo đối thoại', 'Cảnh hành động'],
-      image: maphapsutoicao
-    },
-  ];
+  const TAKE = 3;
+  const CANDIDATE_PAGE_SIZE = 12;
+
+  const [aiStories, setAiStories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const skeletonCards = useMemo(() => Array.from({ length: TAKE }), []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      setLoading(true);
+      setError('');
+
+      try {
+        // Lấy danh sách truyện PUBLISHED và sắp theo views.
+        const res = await getStories({
+          status: 'PUBLISHED',
+          page: 1,
+          pageSize: CANDIDATE_PAGE_SIZE,
+          sortBy: 'total_views',
+          sortOrder: 'desc',
+        });
+
+        const items = Array.isArray(res?.items) ? res.items : Array.isArray(res?.Items) ? res.Items : [];
+
+        // Lọc: truyện có ít nhất 1 chapter có AI contribution/similarity > 0.
+        const checked = await Promise.all(
+          items.map(async (s) => {
+            const storyId = s?.id ?? s?.Id;
+            if (!storyId) return null;
+
+            let chapters = [];
+            try {
+              const chaptersRes = await getChaptersByStoryId(storyId);
+              chapters = Array.isArray(chaptersRes)
+                ? chaptersRes
+                : Array.isArray(chaptersRes?.items)
+                  ? chaptersRes.items
+                  : Array.isArray(chaptersRes?.Items)
+                    ? chaptersRes.Items
+                    : [];
+            } catch {
+              chapters = [];
+            }
+
+            let maxAiContribution = 0;
+            let maxAiSimilarity = 0;
+            for (const c of chapters) {
+              const contribRaw = c?.AiContributionRatio ?? c?.aiContributionRatio ?? 0;
+              const simRaw = c?.AiSimilarityPercent ?? c?.aiSimilarityPercent ?? 0;
+              const contrib = Number(contribRaw);
+              const sim = Number(simRaw);
+              if (Number.isFinite(contrib)) maxAiContribution = Math.max(maxAiContribution, contrib);
+              if (Number.isFinite(sim)) maxAiSimilarity = Math.max(maxAiSimilarity, sim);
+            }
+
+            const hasAi = maxAiContribution > 0 || maxAiSimilarity > 0;
+            if (!hasAi) return null;
+
+            return {
+              story: s,
+              maxAiContribution,
+              maxAiSimilarity,
+            };
+          })
+        );
+
+        const qualifiedRecords = checked
+          .filter(Boolean)
+          .sort((a, b) => {
+            const av = Number(a?.story?.totalViews ?? a?.story?.TotalViews ?? 0) || 0;
+            const bv = Number(b?.story?.totalViews ?? b?.story?.TotalViews ?? 0) || 0;
+            return bv - av;
+          });
+
+        const top = qualifiedRecords.slice(0, TAKE);
+
+        const mapped = top.map((rec) => {
+          const raw = rec?.story ?? {};
+          const id = raw?.id ?? raw?.Id;
+          const story = raw?.title ?? raw?.Title ?? '';
+          const authorName = raw?.authorName ?? raw?.AuthorName ?? 'Tác giả';
+          const authorAvatarUrl = raw?.authorAvatarUrl ?? raw?.AuthorAvatarUrl ?? raw?.author_avatar_url ?? null;
+          const coverPath = raw?.coverImage ?? raw?.CoverImage ?? raw?.cover_image ?? null;
+
+          const categoriesStr = raw?.categoryNames ?? raw?.CategoryNames ?? '';
+          const categories = categoriesStr
+            ? String(categoriesStr)
+                .split(',')
+                .map((x) => x.trim())
+                .filter(Boolean)
+            : [];
+          const genre = categories[0] ?? 'Truyện';
+
+          const views = formatStoryViews(raw?.totalViews ?? raw?.TotalViews ?? 0);
+
+          const ratingNum = raw?.avgRating ?? raw?.AvgRating;
+          const rating =
+            ratingNum != null && Number.isFinite(Number(ratingNum)) ? Number(ratingNum).toFixed(1) : '—';
+
+          const chaptersNum =
+            Number(raw?.publishedChaptersCount ?? raw?.PublishedChaptersCount ?? raw?.totalChapters ?? raw?.TotalChapters ?? 0) || 0;
+
+          const cover = coverPath ? resolveBackendUrl(String(coverPath)) : '';
+          const avatar = authorAvatarUrl ? resolveBackendUrl(String(authorAvatarUrl)) : '';
+
+          const aiFeatures = [
+            rec?.maxAiContribution > 0 ? 'Đồng sáng tác' : 'Hỗ trợ AI',
+            rec?.maxAiSimilarity > 0 ? 'Kiểm tra logic & độ tương đồng' : 'Gợi ý nội dung',
+          ];
+
+          return {
+            id: String(id),
+            story,
+            author: { name: authorName, avatar },
+            genre,
+            chapters: chaptersNum,
+            views,
+            rating,
+            aiFeatures,
+            image: cover,
+          };
+        });
+
+        if (!cancelled) setAiStories(mapped);
+      } catch (e) {
+        if (!cancelled) setError(e?.message ?? 'Không tải được danh sách truyện AI.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return (
     <section
@@ -86,9 +186,33 @@ export function AIAssistedStoriesWidget() {
           </button>
         </div>
 
+        {error ? (
+          <div className="text-sm text-red-700 font-semibold mb-4">{error}</div>
+        ) : null}
+
         <div className="grid grid-cols-3 gap-5">
-          {aiStories.map((item) => (
-            <div key={item.id} className="group cursor-pointer bg-white rounded-2xl border border-gray-200 hover:border-[#13EC5B] hover:shadow-2xl transition-all duration-300 overflow-hidden">
+          {loading
+            ? skeletonCards.map((_, i) => (
+                <div
+                  key={`ai-sk-${i}`}
+                  className="bg-white rounded-2xl border border-gray-200 overflow-hidden animate-pulse"
+                >
+                  <div className="w-full h-56 bg-gray-100" />
+                  <div className="p-4 space-y-3">
+                    <div className="h-5 bg-gray-100 rounded w-3/4" />
+                    <div className="h-4 bg-gray-100 rounded w-1/2" />
+                    <div className="h-4 bg-gray-100 rounded w-full" />
+                    <div className="h-4 bg-gray-100 rounded w-full" />
+                  </div>
+                </div>
+              ))
+            : aiStories.map((item) => (
+                <Link
+                  key={item.id}
+                  to={`/story/${item.id}`}
+                  style={{ textDecoration: 'none', color: 'inherit' }}
+                >
+                  <div className="group cursor-pointer bg-white rounded-2xl border border-gray-200 hover:border-[#13EC5B] hover:shadow-2xl transition-all duration-300 overflow-hidden">
               <div className="relative">
                 <ImageWithFallback 
                   src={item.image} 
@@ -159,8 +283,9 @@ export function AIAssistedStoriesWidget() {
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
+                  </div>
+                </Link>
+              ))}
         </div>
 
         {/* Bottom CTA */}

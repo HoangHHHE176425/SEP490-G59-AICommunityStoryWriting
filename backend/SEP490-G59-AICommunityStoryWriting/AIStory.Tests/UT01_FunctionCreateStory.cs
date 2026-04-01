@@ -24,7 +24,7 @@ namespace AIStory.Tests
         private void LogUtcContext(string utcId, string oneLineGoal, params string[] details)
         {
             _output.WriteLine("");
-            _output.WriteLine($"======== {utcId} | UT01 CreateStory ========");
+            _output.WriteLine($"======== {utcId} ========");
             _output.WriteLine(oneLineGoal);
             foreach (var line in details)
                 _output.WriteLine("  · " + line);
@@ -71,7 +71,7 @@ namespace AIStory.Tests
             LogUtcContext("UTCID01",
                 "Happy path: tất cả input hợp lệ → Create thành công, có DTO trả về và story được Add.",
                 "Precondition: user Exists; không IsAuthorWritingSuspended; category tồn tại và is_active.",
-                "Input: Title/Summary >= 50 ký tự; StoryProgressStatus ONGOING (Đang sáng tác); AgeRating 13+; CategoryIds có 1 id; coverImageUrl hợp lệ.",
+                "Input: Title/Summary đủ dài trong giới hạn nghiệp vụ (title ≤ 50); StoryProgressStatus ONGOING; AgeRating 13+; CategoryIds có 1 id; coverImageUrl hợp lệ.",
                 "Kỳ vọng spec: success; response có title, summary, authorId, category ids, status/progress; không assert đúng từng chữ log.");
 
             var authorId = Guid.NewGuid();
@@ -93,7 +93,7 @@ namespace AIStory.Tests
 
             categoryLookupMock.Setup(x => x.GetById(categoryId)).Returns(category);
 
-            var title = new string('a', 52);
+            var title = new string('a', 50);
             var summary = new string('b', 50);
             var coverImageUrl = "https://example.com/covers/valid-story-cover.jpg";
 
@@ -129,8 +129,7 @@ namespace AIStory.Tests
 
         /// <summary>
         /// UTCID02 – cùng Title với truyện đã có (ví dụ Author A rồi Author B): spec cho phép trùng tên hiển thị, không coi là lỗi duplicate title.
-        /// Product hiện tại: slug = GenerateSlug(Title) và GetBySlug phải unique → hai lần cùng Title thường cùng slug → lần Create thứ 2 có thể throw InvalidOperationException.
-        /// Test assert theo spec (hai lần đều success, 2 story, cùng Title); nếu FAIL thì product chưa khớp rule “cho phép trùng tên” ở tầng slug/DB.
+        /// Product: slug = base từ Title + hậu tố số khi trùng DB → hai story cùng Title vẫn tạo được (UTCID02).
         /// Không assert đúng từng chữ log.
         /// </summary>
         [Fact]
@@ -153,7 +152,7 @@ namespace AIStory.Tests
                 is_active = true
             };
 
-            var sharedTitle = new string('h', 52);
+            var sharedTitle = new string('h', 50);
             var summaryA = new string('a', 50);
             var summaryB = new string('b', 50);
             var coverUrl = "https://example.com/covers/cover-utc02.jpg";
@@ -315,10 +314,7 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID05 – StoryProgressStatus = null: spec yêu cầu fail (bắt buộc có trạng thái), không tạo story.
-        /// Product hiện tại: <c>request.StoryProgressStatus ?? "ONGOING"</c> → null được mặc định thành ONGOING → vẫn tạo được.
-        /// Test assert theo spec (phải có exception + không Add); hiện FAIL cho đến khi product reject null/empty status.
-        /// Không assert đúng từng chữ message ("Vui lòng điền đầy đủ thông tin").
+        /// UTCID05 – StoryProgressStatus null/whitespace: bắt buộc; <see cref="StoryService.Create"/> ném <c>InvalidOperationException</c> (vd. đầy đủ thông tin).
         /// </summary>
         [Fact]
         public void UTCID05_CreateStory_Fails_WhenStoryProgressStatusIsNull()
@@ -326,8 +322,7 @@ namespace AIStory.Tests
             LogUtcContext("UTCID05",
                 "Spec: Status/tiến độ truyện null → fail, không tạo story.",
                 "Input: StoryProgressStatus = null; các field khác hợp lệ.",
-                "Kỳ vọng spec: exception + không Add.",
-                "Ghi chú: product có thể mặc định null → ONGOING (test sẽ FAIL).");
+                "Kỳ vọng: exception + không Add.");
 
             var authorId = Guid.NewGuid();
             var categoryId = Guid.NewGuid();
@@ -354,7 +349,7 @@ namespace AIStory.Tests
                 Summary = new string('h', 52),
                 CategoryIds = new List<Guid> { categoryId },
                 AgeRating = "13+",
-                StoryProgressStatus = null!
+                StoryProgressStatus = null
             };
 
             var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc05.jpg"));
@@ -505,10 +500,7 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID09 – dữ liệu vượt giới hạn (ví dụ Title quá dài): spec yêu cầu fail, không tạo story.
-        /// Ma trận có thể ghi log "Dữ liệu đã quá giới hạn" — không assert đúng từng chữ.
-        /// Product hiện tại: Create không validate max length Title/Summary → thường vẫn tạo được.
-        /// Test assert theo spec (phải có exception + không Add); hiện FAIL cho đến khi product có giới hạn + validate.
+        /// UTCID09 – Title vượt giới hạn nghiệp vụ (max 50 ký tự khi tạo): fail, không Add.
         /// </summary>
         [Fact]
         public void UTCID09_CreateStory_Fails_WhenInputExceedsMaxLength()
@@ -516,8 +508,7 @@ namespace AIStory.Tests
             LogUtcContext("UTCID09",
                 "Spec: ít nhất một field vượt độ dài/giới hạn cho phép → fail.",
                 "Input: Title rất dài (mô phỏng vượt max); Summary hợp lệ; category/age/status/cover hợp lệ; slug chưa trùng (store rỗng).",
-                "Kỳ vọng spec: exception + không Add.",
-                "Ghi chú: product có thể chưa có max-length validation — test có thể FAIL.");
+                "Kỳ vọng: ArgumentException + không Add.");
 
             const int titleOverLimitChars = 20_000;
             var authorId = Guid.NewGuid();
@@ -678,19 +669,15 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID12 – Title vượt giới hạn độ dài: spec yêu cầu fail, không tạo story.
-        /// Ma trận: Title &gt; 50 ký tự ❌; có thể ghi log "Dữ liệu đã quá giới hạn" — không assert đúng từng chữ.
-        /// Product hiện tại: <see cref="StoryService.Create"/> không validate max length Title → thường vẫn Add.
-        /// Test assert theo spec (exception + không Add); FAIL cho đến khi product có giới hạn + validate Title.
+        /// UTCID12 – Title vượt giới hạn nghiệp vụ (ma trận: &gt; 50 ký tự).
         /// </summary>
         [Fact]
         public void UTCID12_CreateStory_Fails_WhenTitleExceedsMaxLength()
         {
             LogUtcContext("UTCID12",
                 "Spec: Title vượt giới hạn ký tự → fail, không tạo story.",
-                "Input: Title dài hơn ngưỡng ma trận (&gt; 50); Summary/category/age/status/cover hợp lệ; slug chưa trùng.",
-                "Kỳ vọng spec: exception + không Add. Không assert đúng từng chữ message.",
-                "Ghi chú: nếu product đặt max khác 50, cần đồng bộ hằng số trong test.");
+                "Input: Title dài hơn 50 (ma trận); Summary/category/age/status/cover hợp lệ; slug chưa trùng.",
+                "Kỳ vọng: ArgumentException + không Add.");
 
             const int specMaxTitleLength = 50;
             var authorId = Guid.NewGuid();
@@ -722,6 +709,7 @@ namespace AIStory.Tests
             };
 
             var ex = Record.Exception(() => sut.Create(request, authorId, "https://example.com/covers/utc12.jpg"));
+            Assert.IsType<ArgumentException>(ex);
             Assert.NotNull(ex);
 
             Assert.Empty(storyStore);
@@ -1097,8 +1085,7 @@ namespace AIStory.Tests
         /// <summary>
         /// UTCID20 – truyện mới (chưa xuất bản, <c>DRAFT</c>) không được chọn tiến độ <c>HIATUS</c> (tạm ngưng): spec yêu cầu fail.
         /// Ma trận có thể ghi "Truyện chưa được xuất bản không thể chọn trạng thái là tạm ngưng" — không assert đúng từng chữ.
-        /// Product hiện tại: <see cref="StoryService.Create"/> chấp nhận ONGOING/COMPLETED/HIATUS cho mọi lần tạo; không so <c>HIATUS</c> với đã xuất bản hay chưa → thường vẫn Add.
-        /// Test assert theo spec (exception + không Add); FAIL cho đến khi product thêm business rule.
+        /// <b>Bug mở:</b> test assert theo spec → <b>FAIL</b> (đỏ) cho đến khi dev implement chặn HIATUS trong <see cref="StoryService.Create"/>; không dùng <c>Skip</c>.
         /// </summary>
         [Fact]
         public void UTCID20_CreateStory_Fails_WhenHiatusOnUnpublishedNewStory()

@@ -10,8 +10,9 @@ import { Header } from '../../components/homepage/Header';
 import { createStory, updateStory, getStoriesByAuthor, getStoryById, deleteStory } from '../../api/story/storyApi';
 import { createChapter, updateChapter, getChapterById, getChapters, createChapterVersion, updateChapterVersion, getChapterVersionById, submitChapterVersion } from '../../api/chapter/chapterApi';
 import * as coinApi from '../../api/coins/coinApi';
-import { getAuthorFollowersCount } from '../../api/author/authorApi';
+import { getAuthorFollowersCount, getAuthorFollowers } from '../../api/author/authorApi';
 import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
+import { createInitialAvatarDataUrl } from '../../utils/avatarFallback';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../components/author/story-editor/Toast';
 import { Pagination } from '../../components/pagination/Pagination';
@@ -184,8 +185,7 @@ export function AuthorStoryManagement({ onBack }) {
     const [selectedBankAccountIdx, setSelectedBankAccountIdx] = useState(-1);
 
     // Danh sách ngân hàng (dùng cho form thêm tài khoản ngân hàng)
-    // PayOS payout batch yêu cầu `toBin` (Bank BIN). Ở dự án này ta ánh xạ theo BIN 6 chữ số theo ngân hàng.
-    // Nếu BIN không có trong map thì bạn vẫn có thể nhập thủ công ở ô Bank BIN/toBin.
+    // PayOS payout batch yêu cầu `toBin` (Bank BIN). FE tự ánh xạ từ ngân hàng đã chọn.
     const BANK_BIN_MAP = {
         Vietcombank: '970436',
         VietinBank: '970415',
@@ -239,20 +239,21 @@ export function AuthorStoryManagement({ onBack }) {
 
     // Form "Thêm tài khoản ngân hàng" (tách khỏi phần rút tiền)
     const [bankName, setBankName] = useState('');
-    const [bankBin, setBankBin] = useState(''); // PayOS toBin (BIN ngân hàng đích)
     const [accountNumber, setAccountNumber] = useState('');
     const [accountHolderName, setAccountHolderName] = useState('');
     const [branchName, setBranchName] = useState('');
     const [profileFollowersCount, setProfileFollowersCount] = useState(0);
     const [showBankModal, setShowBankModal] = useState(false);
     const [showHistoryModal, setShowHistoryModal] = useState(false);
-
-    // Auto-fill toBin when bank changes (if mapping exists).
-    useEffect(() => {
-        const mapped = BANK_BIN_MAP[bankName];
-        if (mapped) setBankBin(mapped);
-        else setBankBin((prev) => prev || '');
-    }, [bankName]);
+    const [showFollowersModal, setShowFollowersModal] = useState(false);
+    const [followersItems, setFollowersItems] = useState([]);
+    const [followersLoading, setFollowersLoading] = useState(false);
+    const [followersError, setFollowersError] = useState(null);
+    const [followersPage, setFollowersPage] = useState(1);
+    const [followersPageSize] = useState(10);
+    const [followersTotalCount, setFollowersTotalCount] = useState(0);
+    const [followersSearchInput, setFollowersSearchInput] = useState('');
+    const [followersSearchKeyword, setFollowersSearchKeyword] = useState('');
 
     // Danh sách tài khoản ngân hàng (load từ backend)
     const [bankAccounts, setBankAccounts] = useState([]);
@@ -276,7 +277,7 @@ export function AuthorStoryManagement({ onBack }) {
     const buildBankInfoStringFromAccount = (acc) => {
         if (!acc) return null;
         const bn = String(acc.bank_name || '').trim();
-        const bb = String(acc.bank_bin || '').trim();
+        const bb = String(acc.bank_bin || BANK_BIN_MAP[acc.bank_name] || '').trim();
         // PayOS toAccountNumber should be digits only; remove whitespace safely.
         const an = String(acc.account_number || '').replace(/[^\d]/g, '').trim();
         const ah = String(acc.account_holder_name || '').trim();
@@ -352,6 +353,8 @@ export function AuthorStoryManagement({ onBack }) {
                                 ...item,
                                 complianceHidden: item._complianceHidden,
                             });
+                            // Giữ lại flag FE để chặn cập nhật trạng thái tiến độ khi có chương đang chờ duyệt.
+                            mapped._hasPendingReviewChapter = item._hasPendingReviewChapter === true;
                             if (mapped.isComplianceHidden) {
                                 mapped.status = 'hidden';
                                 mapped.publishStatus = 'Đã ẩn tạm thời';
@@ -428,6 +431,38 @@ export function AuthorStoryManagement({ onBack }) {
             });
         return () => { cancelled = true; };
     }, [authorId]);
+
+    const loadFollowers = useCallback(async (page = 1, keyword = '') => {
+        if (!authorId) {
+            setFollowersItems([]);
+            setFollowersTotalCount(0);
+            setFollowersError(null);
+            setFollowersLoading(false);
+            return;
+        }
+        setFollowersLoading(true);
+        setFollowersError(null);
+        try {
+            const res = await getAuthorFollowers(authorId, { page, pageSize: followersPageSize, search: keyword });
+            const items = res?.items ?? res?.Items ?? [];
+            const total = Number(res?.totalCount ?? res?.TotalCount ?? items.length);
+            const currentPage = Number(res?.page ?? res?.Page ?? page) || 1;
+            setFollowersItems(Array.isArray(items) ? items : []);
+            setFollowersTotalCount(Number.isFinite(total) ? total : 0);
+            setFollowersPage(currentPage > 0 ? currentPage : 1);
+        } catch (err) {
+            setFollowersItems([]);
+            setFollowersTotalCount(0);
+            setFollowersError(err?.response?.data?.message ?? err?.message ?? 'Không tải được danh sách người theo dõi.');
+        } finally {
+            setFollowersLoading(false);
+        }
+    }, [authorId, followersPageSize]);
+
+    useEffect(() => {
+        if (!showFollowersModal) return;
+        loadFollowers(followersPage, followersSearchKeyword);
+    }, [showFollowersModal, followersPage, followersSearchKeyword, loadFollowers]);
 
     useEffect(() => {
         if (activeView !== 'bank-accounts' && activeView !== 'history') return;
@@ -642,6 +677,15 @@ export function AuthorStoryManagement({ onBack }) {
         try {
             const fullStory = await getStoryById(story.id);
             const mapped = mapStoryFromApi(fullStory);
+            // Tính flag chapter đang chờ duyệt để StoryInfoEditor chặn cập nhật Tạm dừng/Hoàn thành.
+            // Chỉ cần biết có tồn tại >= 1 chapter pending_review.
+            try {
+                const pendRes = await getChapters({ storyId: story.id, status: 'PENDING_REVIEW', pageSize: 1 });
+                const pendList = Array.isArray(pendRes) ? pendRes : (pendRes?.items ?? pendRes?.Items ?? []);
+                mapped._hasPendingReviewChapter = pendList.length > 0;
+            } catch {
+                mapped._hasPendingReviewChapter = false;
+            }
             setCurrentStory(mapped);
             setActiveView('editInfo');
         } catch (err) {
@@ -808,6 +852,44 @@ export function AuthorStoryManagement({ onBack }) {
                 title: chapter.title ?? chapter.name ?? `Chương ${chapterNumber}`,
                 status: (chapter.status ?? chapter.Status ?? 'draft').toString().toLowerCase(),
             };
+            setSourceChapterForVersion(sourceMapped);
+            setEditingVersion({
+                id,
+                chapterId,
+                titleSnapshot,
+                contentSnapshot,
+                versionNumber: Number(versionNumber) || 1,
+                status: detail.status ?? detail.Status,
+            });
+            setActiveView('addChapterVersion');
+        } catch (error) {
+            const msg = error?.response?.data?.message || error?.message || 'Không thể tải phiên bản';
+            showToast(msg, 'error');
+        }
+    };
+
+    /** Mở xem chi tiết phiên bản (read-only). */
+    const handleViewVersion = async (chapter, versionFromList) => {
+        const chapterId = chapter?.id ?? chapter?.Id;
+        const versionId = versionFromList?.id ?? versionFromList?.Id;
+        if (!chapterId || !versionId) {
+            showToast('Không tìm thấy chương hoặc phiên bản', 'error');
+            return;
+        }
+        try {
+            const detail = await getChapterVersionById(chapterId, versionId);
+            const id = detail.id ?? detail.Id;
+            const titleSnapshot = detail.titleSnapshot ?? detail.TitleSnapshot ?? detail.title_snapshot ?? '';
+            const contentSnapshot = detail.contentSnapshot ?? detail.ContentSnapshot ?? detail.content_snapshot ?? '';
+            const versionNumber = detail.versionNumber ?? detail.VersionNumber ?? detail.version_number ?? 1;
+            const chapterNumber = chapter.number ?? (chapter.orderIndex ?? chapter.order_index ?? 0) + 1;
+            const sourceMapped = {
+                id: chapterId,
+                number: Number(chapterNumber) || 1,
+                title: chapter.title ?? chapter.name ?? `Chương ${chapterNumber}`,
+                status: (chapter.status ?? chapter.Status ?? 'draft').toString().toLowerCase(),
+            };
+            setViewChapterOnly(true);
             setSourceChapterForVersion(sourceMapped);
             setEditingVersion({
                 id,
@@ -1052,6 +1134,23 @@ export function AuthorStoryManagement({ onBack }) {
     const handleSaveInfo = async (infoData) => {
         if (!currentStory?.id) return;
         try {
+            const hasPendingReviewChapter = Boolean(currentStory?._hasPendingReviewChapter);
+            const selectedProgressStatus = String(infoData?.status ?? infoData?.publishStatus ?? '').trim();
+            if (hasPendingReviewChapter && (selectedProgressStatus === 'Tạm dừng' || selectedProgressStatus === 'Hoàn thành')) {
+                showToast('Truyện đang có chương chờ duyệt, vui lòng thử lại sau.', 'error');
+                return;
+            }
+
+            const storyTitle = String(infoData?.title ?? '').trim();
+            if (!storyTitle) {
+                showToast('Vui lòng nhập tên truyện', 'error');
+                return;
+            }
+            if (storyTitle.length > 50) {
+                showToast('Tên truyện không được vượt quá 50 ký tự', 'error');
+                return;
+            }
+
             const rawIds = (infoData.categories || []).map(getCategoryId).filter(Boolean);
             const categoryIds = rawIds.filter((id) =>
                 /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/i.test(String(id))
@@ -1062,7 +1161,7 @@ export function AuthorStoryManagement({ onBack }) {
             }
             const storyPublishStatus = (currentStory.status || 'draft').toUpperCase();
             await updateStory(currentStory.id, {
-                title: infoData.title,
+                title: storyTitle,
                 summary: infoData.note ?? '',
                 categoryIds,
                 status: storyPublishStatus,
@@ -1070,8 +1169,40 @@ export function AuthorStoryManagement({ onBack }) {
                 ageRating: infoData.ageRating,
                 coverImage: infoData.cover,
             });
-            setStories(stories.map(s => s.id === currentStory.id ? { ...s, ...infoData, summary: infoData.note } : s));
-            setCurrentStory((prev) => prev ? { ...prev, ...infoData, summary: infoData.note } : null);
+
+            // Update FE state đúng field (không ghi đè `status` publication bằng progress status UI).
+            const uiProgress = infoData.status || infoData.publishStatus || currentStory?.progressStatusDisplay || 'Đang ra';
+            const nextProgressApi =
+                uiProgress === 'Tạm dừng' ? 'HIATUS' :
+                    uiProgress === 'Hoàn thành' ? 'COMPLETED' :
+                        'ONGOING';
+
+            setStories(stories.map((s) => {
+                if (s.id !== currentStory.id) return s;
+                return {
+                    ...s,
+                    title: infoData.title,
+                    summary: infoData.note ?? s.summary,
+                    ageRating: infoData.ageRating ?? s.ageRating,
+                    cover: infoData.cover ?? s.cover,
+                    storyProgressStatus: nextProgressApi,
+                    progressStatusDisplay: uiProgress,
+                };
+            }));
+
+            setCurrentStory((prev) => {
+                if (!prev) return null;
+                return {
+                    ...prev,
+                    title: infoData.title,
+                    summary: infoData.note ?? prev.summary,
+                    ageRating: infoData.ageRating ?? prev.ageRating,
+                    cover: infoData.cover ?? prev.cover,
+                    storyProgressStatus: nextProgressApi,
+                    progressStatusDisplay: uiProgress,
+                };
+            });
+
             showToast('Đã lưu thay đổi thông tin truyện', 'success');
         } catch (err) {
             const msg = err?.response?.data?.message ?? err?.response?.data?.error ?? err?.message ?? 'Không thể lưu thay đổi';
@@ -1127,6 +1258,7 @@ export function AuthorStoryManagement({ onBack }) {
                     onViewChapter={(chapter) => handleViewChapter(chapter)}
                     onAddVersion={(chapter) => handleAddVersion(currentStory, chapter)}
                     onEditVersion={(chapter, version) => handleEditVersion(chapter, version)}
+                    onViewVersion={(chapter, version) => handleViewVersion(chapter, version)}
                 />
                 <ToastContainer />
             </>
@@ -1470,50 +1602,9 @@ export function AuthorStoryManagement({ onBack }) {
                                 </div>
                             </div>
 
-                            <div style={{
-                                backgroundColor: '#fff7ed',
-                                borderRadius: '16px',
-                                padding: '1.25rem 1.25rem',
-                                border: '1px solid #fed7aa',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-                                marginBottom: '1.5rem'
-                            }}>
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
-                                    <div style={{
-                                        width: '44px',
-                                        height: '44px',
-                                        borderRadius: '14px',
-                                        backgroundColor: '#fef3c7',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        boxShadow: '0 4px 14px rgba(234,179,8,0.25)',
-                                        flexShrink: 0
-                                    }}>
-                                        <Percent style={{ width: '22px', height: '22px', color: '#ea580c' }} />
-                                    </div>
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#9a3412', marginBottom: '0.25rem' }}>
-                                            Phí nền tảng 0% - Bạn nhận 100%
-                                        </div>
-                                        <div style={{ fontSize: '0.8125rem', color: '#7c2d12', lineHeight: 1.5 }}>
-                                            Khi rút tiền, hệ thống không tính thêm phí. Toàn bộ <b>income balance</b> sẽ được chuyển cho bạn.
-                                        </div>
-                                        <div style={{ marginTop: '0.75rem' }}>
-                                            <div style={{
-                                                height: '10px',
-                                                borderRadius: '9999px',
-                                                background: 'linear-gradient(90deg, #13ec5b 0%, #13ec5b 100%)',
-                                                border: '1px solid #bbf7d0'
-                                            }} />
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#7c2d12', marginTop: '0.4rem' }}>
-                                                <span>100% bạn nhận</span>
-                                                <span>0% nền tảng</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                            <p style={{ margin: '0 0 1rem 0', fontSize: '0.8125rem', color: '#92400e' }}>
+                                Lưu ý: Rút tiền không tính thêm phí nền tảng, bạn nhận 100% từ số dư thu nhập khả dụng.
+                            </p>
 
                             <div style={{
                                 backgroundColor: '#ffffff',
@@ -1642,8 +1733,8 @@ export function AuthorStoryManagement({ onBack }) {
                                             setWithdrawError('Minimum withdrawal amount is 50,000 VND.');
                                             return;
                                         }
-                                        if (!selectedBankAccount?.bank_bin) {
-                                            setWithdrawError('Vui lòng nhập Bank BIN/toBin cho tài khoản rút tiền.');
+                                        if (!selectedBankAccount?.bank_bin && !BANK_BIN_MAP[selectedBankAccount?.bank_name || '']) {
+                                            setWithdrawError('Ngân hàng đã chọn chưa có BIN mapping. Vui lòng chọn ngân hàng khác.');
                                             return;
                                         }
                                         const bankInfo = buildBankInfoStringFromAccount(selectedBankAccount);
@@ -1673,6 +1764,9 @@ export function AuthorStoryManagement({ onBack }) {
                                 >
                                     {withdrawSubmitting ? 'Đang gửi...' : 'Gửi yêu cầu rút tiền'}
                                 </button>
+                                <p style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: '#64748b' }}>
+                                    Lưu ý: Sau khi yêu cầu được duyệt, tiền sẽ được chuyển về tài khoản ngân hàng trong khoảng 3-5 ngày làm việc.
+                                </p>
                             </div>
                         </div>
                     ) : activeView === 'profile' ? (
@@ -1766,6 +1860,31 @@ export function AuthorStoryManagement({ onBack }) {
                                     >
                                         <Landmark style={{ width: '18px', height: '18px' }} />
                                         Tài khoản ngân hàng
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setFollowersPage(1);
+                                            setFollowersSearchInput('');
+                                            setFollowersSearchKeyword('');
+                                            setShowFollowersModal(true);
+                                        }}
+                                        style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.5rem',
+                                            padding: '0.65rem 1.1rem',
+                                            borderRadius: '9999px',
+                                            border: '1px solid #fecdd3',
+                                            backgroundColor: '#fff1f2',
+                                            color: '#be123c',
+                                            fontSize: '0.875rem',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        <Heart style={{ width: '18px', height: '18px' }} />
+                                        Người theo dõi
                                     </button>
                                     <button
                                         type="button"
@@ -2356,16 +2475,6 @@ export function AuthorStoryManagement({ onBack }) {
                                         </select>
                                     </div>
                                     <div>
-                                        <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Bank BIN (toBin)</label>
-                                        <input
-                                            type="text"
-                                            value={bankBin}
-                                            onChange={(e) => setBankBin(e.target.value.replace(/[^\d]/g, ''))}
-                                            placeholder="Ví dụ: 970422"
-                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
-                                        />
-                                    </div>
-                                    <div>
                                         <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Số tài khoản</label>
                                         <input
                                             type="text"
@@ -2401,16 +2510,16 @@ export function AuthorStoryManagement({ onBack }) {
                                         type="button"
                                         onClick={async () => {
                                             const bn = bankName.trim();
-                                            const bb = bankBin.trim();
                                             const an = accountNumber.trim();
                                             const ah = accountHolderName.trim();
-                                            if (!bn || !bb || !an || !ah) {
-                                                showToast('Vui lòng nhập đủ: Ngân hàng, Bank BIN/toBin, Số tài khoản, Chủ tài khoản.', 'error');
+                                            const mappedBin = BANK_BIN_MAP[bn] || '';
+                                            if (!bn || !an || !ah) {
+                                                showToast('Vui lòng nhập đủ: Ngân hàng, Số tài khoản, Chủ tài khoản.', 'error');
                                                 return;
                                             }
                                             const res = await coinApi.upsertAuthorBankAccount({
                                                 bankName: bn,
-                                                bankBin: bb,
+                                                bankBin: mappedBin,
                                                 accountNumber: an,
                                                 accountHolderName: ah,
                                                 branchName: branchName.trim(),
@@ -2421,7 +2530,6 @@ export function AuthorStoryManagement({ onBack }) {
                                                 return;
                                             }
                                             setBankName('');
-                                            setBankBin('');
                                             setAccountNumber('');
                                             setAccountHolderName('');
                                             setBranchName('');
@@ -2532,6 +2640,184 @@ export function AuthorStoryManagement({ onBack }) {
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Popup: danh sách người theo dõi */}
+            {showFollowersModal && (
+                <div
+                    role="presentation"
+                    style={{
+                        position: 'fixed',
+                        inset: 0,
+                        backgroundColor: 'rgba(15, 23, 42, 0.45)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 10000,
+                        padding: '1rem',
+                    }}
+                    onClick={() => setShowFollowersModal(false)}
+                >
+                    <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="followers-modal-title"
+                        style={{
+                            backgroundColor: '#ffffff',
+                            borderRadius: '16px',
+                            maxWidth: '900px',
+                            width: '100%',
+                            maxHeight: 'min(90vh, 900px)',
+                            overflow: 'auto',
+                            boxShadow: '0 25px 50px rgba(0,0,0,0.18)',
+                            border: '1px solid #e5e7eb',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', padding: '1.25rem 1.5rem', borderBottom: '1px solid #f1f5f9' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
+                                <div style={{
+                                    width: '44px', height: '44px', borderRadius: '12px',
+                                    background: 'linear-gradient(135deg, #f43f5e 0%, #e11d48 100%)',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    flexShrink: 0,
+                                }}
+                                >
+                                    <Heart style={{ width: '22px', height: '22px', color: '#ffffff' }} />
+                                </div>
+                                <div style={{ minWidth: 0 }}>
+                                    <h2 id="followers-modal-title" style={{ fontSize: '1.125rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>
+                                        Danh sách người theo dõi
+                                    </h2>
+                                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.35rem 0 0 0' }}>
+                                        Tổng số người theo dõi: <b>{Number(followersTotalCount || 0).toLocaleString('vi-VN')}</b>
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                aria-label="Đóng"
+                                onClick={() => setShowFollowersModal(false)}
+                                style={{
+                                    border: 'none',
+                                    background: '#f1f5f9',
+                                    borderRadius: '10px',
+                                    width: '36px',
+                                    height: '36px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    flexShrink: 0,
+                                }}
+                            >
+                                <X style={{ width: '18px', height: '18px', color: '#475569' }} />
+                            </button>
+                        </div>
+
+                        <div style={{ padding: '1.25rem 1.5rem 1.5rem' }}>
+                            <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+                                <input
+                                    type="text"
+                                    value={followersSearchInput}
+                                    onChange={(e) => setFollowersSearchInput(e.target.value)}
+                                    placeholder="Tìm theo tên hiển thị hoặc email..."
+                                    style={{
+                                        flex: 1,
+                                        padding: '0.7rem 0.95rem',
+                                        border: '1px solid #e2e8f0',
+                                        borderRadius: '10px',
+                                        outline: 'none',
+                                        fontSize: '0.875rem',
+                                    }}
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setFollowersPage(1);
+                                        setFollowersSearchKeyword(followersSearchInput.trim());
+                                    }}
+                                    style={{
+                                        padding: '0.7rem 1rem',
+                                        borderRadius: '10px',
+                                        border: '1px solid #e2e8f0',
+                                        backgroundColor: '#f8fafc',
+                                        color: '#334155',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    Tìm kiếm
+                                </button>
+                            </div>
+
+                            <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                    <thead>
+                                        <tr style={{ backgroundColor: '#f8fafc' }}>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>NGƯỜI DÙNG</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>EMAIL</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THEO DÕI TỪ</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {followersLoading ? (
+                                            <tr>
+                                                <td colSpan={3} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải danh sách follower...</td>
+                                            </tr>
+                                        ) : followersError ? (
+                                            <tr>
+                                                <td colSpan={3} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{followersError}</td>
+                                            </tr>
+                                        ) : followersItems.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={3} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Chưa có người theo dõi nào.</td>
+                                            </tr>
+                                        ) : (
+                                            followersItems.map((follower) => {
+                                                const id = follower.userId ?? follower.UserId;
+                                                const displayName = follower.displayName ?? follower.DisplayName ?? 'Người dùng';
+                                                const email = follower.email ?? follower.Email ?? '—';
+                                                const avatar = follower.avatarUrl ?? follower.AvatarUrl;
+                                                const followedAt = follower.followedAt ?? follower.FollowedAt;
+                                                const timeLabel = followedAt
+                                                    ? new Date(followedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                                                    : '—';
+                                                return (
+                                                    <tr key={id ?? email} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                        <td style={{ padding: '0.85rem 1rem' }}>
+                                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+                                                                <img
+                                                                    src={avatar ? resolveBackendUrl(avatar) : createInitialAvatarDataUrl(displayName, 96)}
+                                                                    alt={displayName}
+                                                                    style={{ width: '36px', height: '36px', borderRadius: '9999px', objectFit: 'cover', border: '1px solid #e2e8f0' }}
+                                                                />
+                                                                <span style={{ color: '#1e293b', fontWeight: 600 }}>{displayName}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td style={{ padding: '0.85rem 1rem', color: '#334155' }}>{email}</td>
+                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', color: '#64748b' }}>{timeLabel}</td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {!followersLoading && !followersError && followersTotalCount > followersPageSize && (
+                                <Pagination
+                                    currentPage={followersPage}
+                                    totalPages={Math.max(1, Math.ceil(followersTotalCount / followersPageSize))}
+                                    totalItems={followersTotalCount}
+                                    itemsPerPage={followersPageSize}
+                                    onPageChange={setFollowersPage}
+                                    itemLabel="người theo dõi"
+                                />
+                            )}
                         </div>
                     </div>
                 </div>
