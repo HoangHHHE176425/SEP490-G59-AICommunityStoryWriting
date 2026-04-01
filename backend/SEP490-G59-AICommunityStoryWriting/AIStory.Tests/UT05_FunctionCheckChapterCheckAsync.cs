@@ -95,7 +95,7 @@ public class UT05_FunctionCheckChapterCheckAsync
         LogMatrixCase("UTCID01",
             "Nội dung null/rỗng/chỉ whitespace — ma trận yêu cầu coi là không hợp lệ: passed=false và thông báo thiếu thông tin (điền đầy đủ).",
             "ChapterCheckService; mock Strict guardrail + usage (không được gọi khi fail sớm theo spec).",
-            "CheckAsync(CheckChapterRequest với Content = \"\", \"   \", \"\\t\\r\\n\"; userId có giá trị).",
+            "CheckAsync(CheckChapterSpellingRequest với Content = \"\", \"   \", \"\\t\\r\\n\"; userId có giá trị).",
             "passed=false; Summary chứa \"đầy đủ\"; không gọi guardrail; không Log usage.",
             "Product hiện trả passed=true, Summary \"Nội dung trống, không cần kiểm tra.\" — lệch ma trận → test FAIL tới khi chỉnh CheckAsync.");
 
@@ -107,7 +107,7 @@ public class UT05_FunctionCheckChapterCheckAsync
 
         foreach (var content in new[] { "", "   ", "\t\r\n" })
         {
-            var r = await sut.CheckAsync(new CheckChapterRequest { Content = content }, Guid.NewGuid());
+            var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = content }, Guid.NewGuid());
             Assert.False(r.Passed);
             Assert.Contains("đầy đủ", r.Summary ?? "", StringComparison.OrdinalIgnoreCase);
         }
@@ -147,7 +147,7 @@ public class UT05_FunctionCheckChapterCheckAsync
         usage.Setup(x => x.Log(It.IsAny<ai_usage_logs>()));
 
         var sut = CreateSut(config, cache, guardrail, usage);
-        var r = await sut.CheckAsync(new CheckChapterRequest { Content = raw, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = raw, StoryId = Guid.NewGuid() }, Guid.NewGuid());
 
         Assert.False(r.Passed);
         Assert.Contains("lớn", r.Summary ?? "", StringComparison.OrdinalIgnoreCase);
@@ -198,7 +198,7 @@ public class UT05_FunctionCheckChapterCheckAsync
         usage.Setup(x => x.Log(It.IsAny<ai_usage_logs>()));
 
         var sut = CreateSut(config, cache, guardrail, usage);
-        var r = await sut.CheckAsync(new CheckChapterRequest
+        var r = await sut.CheckAsync(new CheckChapterSpellingRequest
         {
             Content = body,
             StoryId = Guid.NewGuid()
@@ -241,7 +241,7 @@ public class UT05_FunctionCheckChapterCheckAsync
         usage.Setup(x => x.Log(It.IsAny<ai_usage_logs>()));
 
         var sut = CreateSut(config, cache, guardrail, usage);
-        var r = await sut.CheckAsync(new CheckChapterRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
 
         Assert.True(r.Passed);
         Assert.Empty(r.SpellingIssues);
@@ -277,7 +277,7 @@ public class UT05_FunctionCheckChapterCheckAsync
         usage.Setup(x => x.Log(It.IsAny<ai_usage_logs>()));
 
         var sut = CreateSut(config, cache, guardrail, usage);
-        var r = await sut.CheckAsync(new CheckChapterRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
 
         Assert.False(r.Passed);
         Assert.NotEmpty(r.SpellingIssues);
@@ -310,7 +310,7 @@ public class UT05_FunctionCheckChapterCheckAsync
         var usage = new Mock<IAIUsageLogRepository>(MockBehavior.Strict);
         var sut = CreateSut(config, cache, guardrail, usage);
 
-        var r = await sut.CheckAsync(new CheckChapterRequest { Content = body, StoryId = Guid.NewGuid() }, userId: null);
+        var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, userId: null);
 
         Assert.True(r.Passed);
         usage.Verify(x => x.Log(It.IsAny<ai_usage_logs>()), Times.Never);
@@ -345,7 +345,7 @@ public class UT05_FunctionCheckChapterCheckAsync
         usage.Setup(x => x.Log(It.IsAny<ai_usage_logs>()));
 
         var sut = CreateSut(config, cache, guardrail, usage);
-        var r = await sut.CheckAsync(new CheckChapterRequest { Content = body, StoryId = null }, Guid.NewGuid());
+        var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = null }, Guid.NewGuid());
 
         Assert.False(r.Passed);
         Assert.Contains("story", r.Summary ?? "", StringComparison.OrdinalIgnoreCase);
@@ -391,7 +391,7 @@ public class UT05_FunctionCheckChapterCheckAsync
         CheckChapterResponse? r = null;
         try
         {
-            r = await sut.CheckAsync(new CheckChapterRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid(), cts.Token);
+            r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid(), cts.Token);
         }
         catch (OperationCanceledException)
         {
@@ -430,7 +430,7 @@ public class UT05_FunctionCheckChapterCheckAsync
         usage.Setup(x => x.Log(It.IsAny<ai_usage_logs>()));
 
         var sut = CreateSut(config, cache, guardrail, usage);
-        var r = await sut.CheckAsync(new CheckChapterRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
 
         Assert.False(r.Passed);
         Assert.Contains("đọc", r.Summary ?? "", StringComparison.OrdinalIgnoreCase);
@@ -468,7 +468,7 @@ public class UT05_FunctionCheckChapterCheckAsync
 
         var sut = CreateSut(config, cache, guardrail, usage);
         var userId = Guid.NewGuid();
-        var req = new CheckChapterRequest { Content = body, StoryId = Guid.NewGuid() };
+        var req = new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() };
 
         _ = await sut.CheckAsync(req, userId);
         _ = await sut.CheckAsync(req, userId);
@@ -508,7 +508,7 @@ public class UT05_FunctionCheckChapterCheckAsync
         usage.Setup(x => x.Log(It.IsAny<ai_usage_logs>()));
 
         var sut = CreateSut(config, cache, guardrail, usage);
-        var r = await sut.CheckAsync(new CheckChapterRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
 
         Assert.False(r.Passed);
         Assert.Single(r.PolicyViolations);
@@ -542,7 +542,7 @@ public class UT05_FunctionCheckChapterCheckAsync
         usage.Setup(x => x.Log(It.IsAny<ai_usage_logs>()));
 
         var sut = CreateSut(config, cache, guardrail, usage);
-        var r = await sut.CheckAsync(new CheckChapterRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
+        var r = await sut.CheckAsync(new CheckChapterSpellingRequest { Content = body, StoryId = Guid.NewGuid() }, Guid.NewGuid());
 
         Assert.False(r.Passed);
     }
