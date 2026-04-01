@@ -3,7 +3,7 @@ import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'luc
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
-import { indexRag, suggestNextChapter, coCreate, checkBannedWords, checkChapter, compareChapterPreview, getAiUsageLimit } from '../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, checkBannedWords, checkChapter, compareChapterPreview, getAiUsageLimit, pickAiContextWarning } from '../../api/ai/aiApi';
 import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 import { refresh as refreshAuth } from '../../api/auth/authApi';
 import { translateCoCreateOutlineLabels } from '../../utils/coCreateOutlineLabelsVi';
@@ -557,6 +557,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             const normalized = Array.isArray(list) ? list : [];
             setSuggestions(normalized);
             setSuggestionsCache(normalized);
+            const ctxWarn = pickAiContextWarning(data);
+            if (ctxWarn) showToast(ctxWarn, 'warning', 12000);
             // Cập nhật số lượt còn lại sau khi gọi AI thành công
             loadAiUsageLimit();
         } catch (err) {
@@ -625,6 +627,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             decrementCoCreateUsageOptimistic();
             // Đồng bộ lại với BE (không chặn UI).
             loadAiUsageLimit();
+            const ctxWarnCo = pickAiContextWarning(data);
+            if (ctxWarnCo) showToast(ctxWarnCo, 'warning', 12000);
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);

@@ -334,9 +334,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Kiểm tra chương: lỗi chính tả, vi phạm chính sách, nội dung không phù hợp. Trả về danh sách lỗi và gợi ý sửa.</summary>
-        [HttpPost("check-chapter")]
-        public async Task<IActionResult> CheckChapter([FromBody] CheckChapterRequest request, CancellationToken cancellationToken)
+        /// <summary>Chỉ kiểm tra từ cấm / guardrail (không gọi AI chính tả). Body: <see cref="CheckChapterRequest"/>.</summary>
+        [HttpPost("check-chapter-banned-words")]
+        public async Task<IActionResult> CheckChapterBannedWords([FromBody] CheckChapterRequest request, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(request.Content))
                 return BadRequest(new { message = "Content (nội dung chương) là bắt buộc." });
@@ -348,7 +348,7 @@ namespace AIStory.API.Controllers
 
             try
             {
-                var response = await _chapterCheckService.CheckAsync(request, userId, cancellationToken);
+                var response = await _chapterCheckService.CheckBannedWordsOnlyAsync(request, userId, cancellationToken);
                 return Ok(response);
             }
             catch (InvalidOperationException ex)
@@ -357,8 +357,37 @@ namespace AIStory.API.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "AI check-chapter failed");
-                var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi kiểm tra chương. Vui lòng thử lại sau.";
+                _logger.LogError(ex, "AI check-chapter-banned-words failed");
+                var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi kiểm tra từ cấm. Vui lòng thử lại sau.";
+                return StatusCode(500, new { message });
+            }
+        }
+
+        /// <summary>Chỉ kiểm tra chính tả (AI). Body: <see cref="CheckChapterRequest"/>; không chạy guardrail từ cấm.</summary>
+        [HttpPost("check-chapter-spelling")]
+        public async Task<IActionResult> CheckChapterSpelling([FromBody] CheckChapterRequest request, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(request.Content))
+                return BadRequest(new { message = "Content (nội dung chương) là bắt buộc." });
+
+            Guid? userId = null;
+            var userIdClaim = User.FindFirst(JwtRegisteredClaimNames.Sub) ?? User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim != null && Guid.TryParse(userIdClaim.Value, out var uid))
+                userId = uid;
+
+            try
+            {
+                var response = await _chapterCheckService.CheckSpellingOnlyAsync(request, userId, cancellationToken);
+                return Ok(response);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "AI check-chapter-spelling failed");
+                var message = _env.IsDevelopment() ? (ex.InnerException?.Message ?? ex.Message) : "Lỗi khi kiểm tra chính tả. Vui lòng thử lại sau.";
                 return StatusCode(500, new { message });
             }
         }

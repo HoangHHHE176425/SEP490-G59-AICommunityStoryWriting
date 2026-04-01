@@ -33,6 +33,9 @@ public class SuggestNextChapterResponse
 {
     public List<NextChapterSuggestionItemDto> Suggestions { get; set; } = new();
     public SuggestNextChapterContextDto? ContextUsed { get; set; }
+
+    /// <summary>Khi có giá trị: có chương trước slot gợi ý chưa PUBLISHED nhưng đã có nội dung.</summary>
+    public string? ContextWarning { get; set; }
 }
 
 public class SuggestNextChapterContextDto

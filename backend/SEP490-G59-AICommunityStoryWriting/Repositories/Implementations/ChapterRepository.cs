@@ -5,6 +5,9 @@ namespace Repositories
 {
     public class ChapterRepository : IChapterRepository
     {
+        private static bool IsPublishedChapter(chapters c) =>
+            string.Equals(c.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase);
+
         public IQueryable<chapters> GetAll()
             => ChapterDAO.GetAll();
 
@@ -14,6 +17,12 @@ namespace Repositories
         public IEnumerable<chapters> GetByStoryId(Guid storyId)
             => ChapterDAO.GetAll()
                 .Where(c => c.story_id == storyId)
+                .ToList();
+
+        public IReadOnlyList<chapters> GetPublishedByStoryId(Guid storyId)
+            => ChapterDAO.GetAll()
+                .Where(c => c.story_id == storyId && IsPublishedChapter(c))
+                .OrderBy(c => c.order_index)
                 .ToList();
 
         public chapters? GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex)

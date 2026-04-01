@@ -119,6 +119,10 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         if (story.author_id != authorUserId)
             throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được sử dụng tính năng đồng sáng tác.");
 
+        var allChaptersOrdered = _chapterRepository.GetByStoryId(request.StoryId).OrderBy(c => c.order_index).ToList();
+        var targetOrderForWarning = ResolveCoCreateTargetOrderIndex(request, allChaptersOrdered);
+        var contextWarning = ChapterAiContextWarningHelper.GetWarningIfApplicable(allChaptersOrdered, targetOrderForWarning);
+
         var rawIdea = request.AuthorIdea?.Trim();
         var hasAuthorIdea = !string.IsNullOrWhiteSpace(rawIdea);
         var effectiveIdea = hasAuthorIdea
@@ -154,7 +158,8 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
                 Approved = false,
                 RevisionCount = 0,
                 ReviewFeedback = null,
-                AgentDurations = durations.Count > 0 ? durations : null
+                AgentDurations = durations.Count > 0 ? durations : null,
+                ContextWarning = contextWarning
             };
         }
 
@@ -247,8 +252,23 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             ChapterId = saved.ChapterId,
             AiGeneratedContentId = saved.Id,
             ChapterIndex = saved.ChapterIndex,
-            AgentDurations = durations.Count > 0 ? durations : null
+            AgentDurations = durations.Count > 0 ? durations : null,
+            ContextWarning = contextWarning
         };
+    }
+
+    private static int ResolveCoCreateTargetOrderIndex(CoCreationRequest request, List<chapters> allOrdered)
+    {
+        if (request.ChapterOrderIndex is int coIdx && coIdx >= 0)
+            return coIdx;
+        if (request.ChapterId.HasValue && request.ChapterId.Value != Guid.Empty)
+        {
+            var ch = allOrdered.FirstOrDefault(c => c.id == request.ChapterId.Value);
+            if (ch != null)
+                return ch.order_index;
+        }
+
+        return allOrdered.Count == 0 ? 0 : allOrdered.Max(c => c.order_index) + 1;
     }
 
     /// <summary>Chỉ lưu bản <see cref="ai_generated_content"/> (không tạo/cập nhật <see cref="chapters"/>).

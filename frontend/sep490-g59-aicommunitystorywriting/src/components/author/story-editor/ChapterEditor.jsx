@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Sparkles, Settings, X, Lock, Unlock, Coins } from 'lucide-react';
 import { useToast } from './Toast';
-import { indexRag, suggestNextChapter, coCreate, getAiUsageLimit } from '../../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, getAiUsageLimit, pickAiContextWarning } from '../../../api/ai/aiApi';
 import { translateCoCreateOutlineLabels } from '../../../utils/coCreateOutlineLabelsVi';
 
 const countWords = (text) => {
@@ -210,6 +210,8 @@ export function ChapterEditor({ chapter, onChange, story }) {
                 const data = await suggestNextChapter(storyId, null, null, chapterIdForAi);
                 const list = data?.suggestions ?? data?.Suggestions ?? [];
                 setSuggestions(Array.isArray(list) ? list : []);
+                const ctxWarn = pickAiContextWarning(data);
+                if (ctxWarn) showToast(ctxWarn, 'warning', 12000);
                 loadAiUsageLimit();
             } catch (err) {
                 const status = err?.response?.status;
@@ -245,6 +247,8 @@ export function ChapterEditor({ chapter, onChange, story }) {
             const data = await coCreate(storyId, idea, { chapterOrderIndex, chapterId: chapterIdForAi });
             // Trừ ngay trên UI để người dùng thấy số lượt giảm tức thì.
             decrementCoCreateUsageOptimistic();
+            const ctxWarnCo = pickAiContextWarning(data);
+            if (ctxWarnCo) showToast(ctxWarnCo, 'warning', 12000);
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);
