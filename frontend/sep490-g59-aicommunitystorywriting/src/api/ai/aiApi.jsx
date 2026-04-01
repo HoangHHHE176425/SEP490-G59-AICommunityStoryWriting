@@ -1,5 +1,14 @@
 import axiosInstance from "../axiosInstance";
 
+/** Chuỗi cảnh báo ngữ cảnh (chương trước nháp có nội dung) từ BE suggest-next-chapter / co-create. */
+export function pickAiContextWarning(payload) {
+    if (payload == null || typeof payload !== "object") return "";
+    const w = payload.contextWarning ?? payload.ContextWarning;
+    if (typeof w !== "string") return "";
+    const t = w.trim();
+    return t || "";
+}
+
 /**
  * Index RAG cho truyện (embedding các chương) để gợi ý chương chính xác hơn. Chỉ tác giả.
  * Gọi trước suggest-next-chapter nếu muốn dùng ngữ cảnh RAG; không bắt buộc (BE có fallback Story Context).

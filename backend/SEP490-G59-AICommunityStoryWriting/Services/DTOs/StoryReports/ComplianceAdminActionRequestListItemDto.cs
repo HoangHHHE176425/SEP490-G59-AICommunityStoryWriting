@@ -1,4 +1,6 @@
-﻿namespace Services.DTOs.StoryReports;
+﻿using System.ComponentModel.DataAnnotations;
+
+namespace Services.DTOs.StoryReports;
 
 public class ComplianceAdminActionRequestListItemDto
 {
@@ -38,6 +40,10 @@ public class AdminResolveComplianceAdminActionRequestDto
 {
     /// <summary>APPROVE | REJECT</summary>
     public string Decision { get; set; } = "";
+    /// <summary>Mã lý do báo cáo (catalog truyện); bắt buộc khi resolve (UTC: null/blank → từ chối).</summary>
+    public string? ReasonCode { get; set; }
+    /// <summary>Ma trận: mô tả / ghi chú admin tối đa 200 ký tự.</summary>
+    [MaxLength(200)]
     public string? AdminNote { get; set; }
     /// <summary>Admin có thể chỉnh ngày kết thúc tạm khóa viết (UTC); nếu null với SUSPEND thì dùng đề xuất của compliance.</summary>
     public DateTime? SuspendUntilUtc { get; set; }

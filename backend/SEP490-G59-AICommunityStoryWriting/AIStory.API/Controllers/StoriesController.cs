@@ -75,6 +75,9 @@ namespace AIStory.API.Controllers
         {
             try
             {
+                if (string.IsNullOrWhiteSpace(request.Title))
+                    return BadRequest(new { message = "Vui lòng điền đầy đủ thông tin." });
+
                 string? coverUrl = null;
 
                 if (request.CoverImage != null && request.CoverImage.Length > 0)
@@ -109,6 +112,9 @@ namespace AIStory.API.Controllers
 
                     coverUrl = $"/uploads/covers/{fileName}";
                 }
+
+                if (string.IsNullOrWhiteSpace(coverUrl))
+                    return BadRequest(new { message = "Vui lòng điền đầy đủ thông tin." });
 
                 Guid authorId;
                 // Tìm user ID từ JWT token (tương tự AccountController)

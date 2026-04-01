@@ -130,8 +130,16 @@ namespace AIStory.API.Controllers
         {
             try
             {
-                var chapter = _chapterService.Create(request);
-                return Created($"api/chapters/{chapter.Id}", chapter);
+                var authorId = GetCurrentUserId();
+                if (!authorId.HasValue || authorId.Value == Guid.Empty)
+                    return Unauthorized(new { message = "Không xác định được tài khoản tác giả. Vui lòng đăng nhập lại." });
+
+                var chapter = _chapterService.Create(request, authorId.Value);
+                return Created($"api/chapters/{chapter.Id}", new { message = "tạo truyện thành công", chapter });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
             }
             catch (InvalidOperationException ex)
             {

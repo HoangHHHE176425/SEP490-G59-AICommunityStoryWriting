@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Services.DTOs.StoryReports;
+using Services.Implementations;
 using Services.Interfaces;
 using System.ComponentModel.DataAnnotations;
 using System.Reflection;
@@ -16,8 +17,8 @@ namespace AIStory.Tests
     /// Đối chiếu ma trận / product (CreateStoryReport):
     /// <list type="bullet">
     /// <item><description>UTCID01, 02, 04, 05, 07, 08, 09, 10 — product có logic tương ứng (hoặc test mock mapping HTTP/exception).</description></item>
-    /// <item><description>UTCID03 — ma trận: reporter null / user không tồn tại. Product chỉ bắt JWT không parse được → 401; <b>chưa</b> validate user tồn tại trong DB khi JWT có GUID → <see cref="UT05_FunctionCreateStoryReport.UTCID03_CreateStoryReport_Bug_ReporterValidationIncomplete_PerSpec"/> <b>fail</b> cho đến khi bổ sung + mở rộng test.</description></item>
-    /// <item><description>UTCID06 — ma trận Description &gt; 200 ký tự phải từ chối; product chỉ <c>MaxLength(4000)</c> → <see cref="UT05_FunctionCreateStoryReport.UTCID06_CreateStoryReport_Bug_DescriptionMustRejectWhenOver200Chars_PerSpec"/> (fail cho đến khi thêm giới hạn 200).</description></item>
+    /// <item><description>UTCID03 — reporter không xác định (JWT) → 401; <c>Guid.Empty</c> hoặc user không trong DB → <see cref="StoryReportService.CreateStoryReportAsync"/> ném <see cref="InvalidOperationException"/> (<c>USER không tồn tại.</c>), không lưu — xem <see cref="UT05_FunctionCreateStoryReport.UTCID03_CreateStoryReport_Rejects_WhenReporterInvalidOrUserNotInDatabase"/>.</description></item>
+    /// <item><description>UTCID06 — Description &gt; 200 ký tự → không hợp lệ: <see cref="CreateStoryReportRequestDto"/> + <see cref="StoryReportService.CreateStoryReportAsync"/>; test <see cref="UT05_FunctionCreateStoryReport.UTCID06_CreateStoryReport_Rejects_WhenDescriptionExceeds200Characters"/>.</description></item>
     /// </list>
     /// </summary>
     public class UT05_FunctionCreateStoryReport
@@ -56,7 +57,7 @@ namespace AIStory.Tests
         /// <summary>
         /// UTCID01 — happy path: story tồn tại, user/reporter hợp lệ, chưa từng báo cáo (service trả id khác Empty), ReasonCode hợp lệ, mô tả &lt; 200 ký tự.
         /// Ma trận: Return True, log &quot;Tạo báo cáo thành công&quot; — product API trả <c>200 OK</c> với <c>id</c> và message &quot;Đã gửi báo cáo.&quot;; không assert đúng từng chữ log/message.
-        /// Product nghiệp vụ: <see cref="Services.Implementations.StoryReportService.CreateStoryReportAsync"/> — <c>StoryReportReasonCatalog.TryGet</c>, <c>StoryDAO.GetById</c>, trạng thái PUBLISHED, không tự báo cáo chính mình, <c>StoryReportDAO.AppendStoryReportAggregated</c> (trùng user+story → <c>Guid.Empty</c> → controller <c>409</c>).
+        /// Product nghiệp vụ: <see cref="Services.Implementations.StoryReportService.CreateStoryReportAsync"/> — <c>StoryReportReasonCatalog.TryGet</c>, <c>IUserLookup.Exists(reporterId)</c>, <c>StoryDAO.GetById</c>, trạng thái PUBLISHED, không tự báo cáo chính mình, <c>StoryReportDAO.AppendStoryReportAggregated</c> (trùng user+story → <c>Guid.Empty</c> → controller <c>409</c>).
         /// Unit test tầng API: <see cref="StoriesController.ReportStory"/> + mock service trả <c>Guid</c> khác Empty → <c>Ok</c>; không DB.
         /// </summary>
         [Fact]
@@ -147,18 +148,17 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID03 — ma trận: <c>reporterId</c> null <b>hoặc</b> user không tồn tại → không tạo báo cáo; Return <c>false</c>, log &quot;USER không tồn tại&quot; (không assert đúng từng chữ).
-        /// <b>[BUG — chờ product]</b> Product mới bắt một phần: không parse được user từ JWT → <c>401</c> (phần dưới vẫn assert để giữ hồi quy). Chưa có bước kiểm tra user tồn tại trong DB khi JWT có GUID hợp lệ (<see cref="Services.Implementations.StoryReportService.CreateStoryReportAsync"/> không gọi UserDAO / <c>IUserLookup</c>).
-        /// Sau khi bổ sung validate + assert cho nhánh &quot;JWT có id nhưng user không có trong DB&quot;: xóa <c>Assert.Fail</c> cuối method (hoặc thay bằng assert thật); giữ assert 401 nếu vẫn cần.
+        /// UTCID03 — ma trận: không xác định được người báo cáo <b>hoặc</b> user không tồn tại → không tạo / không lưu báo cáo; message kiểu &quot;USER không tồn tại&quot;.
+        /// (A) API: không parse được user từ JWT → <c>401</c>, không gọi <see cref="IStoryReportService.CreateStoryReportAsync"/>.
+        /// (B) Service: <see cref="StoryReportService.CreateStoryReportAsync"/> với <c>IUserLookup.Exists(reporterId)==false</c> → <see cref="InvalidOperationException"/> trước <c>StoryDAO.GetById</c> (không persist).
+        /// (C) Service: <c>reporterId == Guid.Empty</c> → cùng exception; không gọi <c>Exists</c>.
         /// </summary>
         [Fact]
-        public async Task UTCID03_CreateStoryReport_Bug_ReporterValidationIncomplete_PerSpec()
+        public async Task UTCID03_CreateStoryReport_Rejects_WhenReporterInvalidOrUserNotInDatabase()
         {
-            LogUtcContext("UTCID03 [BUG — ma trận reporter / user]",
-                "Spec: reporterId null hoặc user không tồn tại → không tạo báo cáo (ma trận: false).",
-                "Product hiện: chỉ 401 khi không parse được id từ JWT; chưa reject khi JWT có GUID nhưng user không có trong DB.",
-                "Phần assert: vẫn kiểm tra nhánh 401 (hồi quy). Cuối test: Assert.Fail cho đến khi đủ ma trận.",
-                "Không assert message từng chữ so với ma trận.");
+            LogUtcContext("UTCID03 — reporter không hợp lệ / user không tồn tại",
+                "Spec: không tạo báo cáo; API 401 khi thiếu identity; service từ chối khi Empty hoặc !Exists.",
+                "Không assert log từng chữ so với ma trận.");
 
             var storyId = Guid.NewGuid();
             var controller = CreateStoriesControllerSut(out var reportMock);
@@ -185,14 +185,22 @@ namespace AIStory.Tests
                 s => s.CreateStoryReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CreateStoryReportRequestDto>()),
                 Times.Never);
 
-            _output.WriteLine(
-                "[BUG UT05/UTCID03] Cần thêm Exists(reporterId) (hoặc tương đương) và assert: JWT hợp lệ + user không trong DB → từ chối. " +
-                "Sau đó xóa Assert.Fail phía dưới.");
+            var reporterId = Guid.NewGuid();
+            var userLookup = new Mock<IUserLookup>(MockBehavior.Strict);
+            userLookup.Setup(x => x.Exists(reporterId)).Returns(false);
+            var sut = new StoryReportService(userLookup.Object, notificationHubNotifier: null);
 
-            Assert.Fail(
-                "BUG UT05/UTCID03: Ma trận yêu cầu đủ cả 'reporter không xác định' và 'user không tồn tại trong hệ thống'. " +
-                "Product chỉ đáp ứng nhánh JWT không parse được id (401). " +
-                "Implement kiểm tra user tồn tại trong CreateStoryReport + bổ sung assert trong test này, rồi gỡ Fail.");
+            var ex = await Record.ExceptionAsync(() => sut.CreateStoryReportAsync(storyId, reporterId, request));
+            var ioe = Assert.IsType<InvalidOperationException>(ex);
+            Assert.Equal("USER không tồn tại.", ioe.Message);
+            userLookup.Verify(x => x.Exists(reporterId), Times.Once);
+
+            var userLookupEmpty = new Mock<IUserLookup>(MockBehavior.Strict);
+            var sutEmpty = new StoryReportService(userLookupEmpty.Object, notificationHubNotifier: null);
+            var exEmpty = await Record.ExceptionAsync(() => sutEmpty.CreateStoryReportAsync(storyId, Guid.Empty, request));
+            var ioeEmpty = Assert.IsType<InvalidOperationException>(exEmpty);
+            Assert.Equal("USER không tồn tại.", ioeEmpty.Message);
+            userLookupEmpty.Verify(x => x.Exists(It.IsAny<Guid>()), Times.Never);
         }
 
         /// <summary>
@@ -283,19 +291,15 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID06 — ma trận: <c>Description</c> &gt; <b>200</b> ký tự → không hợp lệ (Return false / không lưu), log kiểu &quot;Kí tự quá dài&quot;.
-        /// <b>[BUG — chờ product]</b> Hiện chỉ <c>[MaxLength(4000)]</c> trên <see cref="CreateStoryReportRequestDto.Description"/>; 201 ký tự vẫn pass validation.
-        /// Dùng <see cref="Validator.TryValidateObject"/> (cùng rule với DataAnnotations khi API validate model).
-        /// Sau khi đặt <c>MaxLength(200)</c> hoặc validate trong <c>StoryReportService</c>: chuỗi 201 ký tự phải invalid → test <b>pass</b>.
-        /// Vẫn assert &gt;4000 invalid để giữ sanity với giới hạn hiện có của product.
+        /// UTCID06 — ma trận: <c>Description</c> &gt; <b>200</b> ký tự → không hợp lệ, không lưu; message kiểu &quot;ký tự quá dài&quot;.
+        /// Product: <see cref="CreateStoryReportRequestDto.Description"/> <c>[MaxLength(200)]</c> + <see cref="StoryReportService.CreateStoryReportAsync"/> ném <see cref="ArgumentException"/> nếu vượt quá.
         /// </summary>
         [Fact]
-        public void UTCID06_CreateStoryReport_Bug_DescriptionMustRejectWhenOver200Chars_PerSpec()
+        public async Task UTCID06_CreateStoryReport_Rejects_WhenDescriptionExceeds200Characters()
         {
-            LogUtcContext("UTCID06 [BUG — ma trận >200 ký tự]",
-                "Kỳ vọng spec: Description length > 200 → reject (không cần khớp từng chữ message).",
-                "Product hiện: MaxLength(4000); cần thêm giới hạn 200 ở DTO hoặc service.",
-                "Khi sửa xong, TryValidate(201 chars) phải trả false.");
+            LogUtcContext("UTCID06 — Description > 200 ký tự",
+                "Kỳ vọng: DataAnnotations + service đều từ chối > 200 ký tự.",
+                "Không assert đúng từng chữ message so với ma trận.");
 
             static bool TryValidate(CreateStoryReportRequestDto dto, out List<ValidationResult> results)
             {
@@ -304,30 +308,28 @@ namespace AIStory.Tests
                 return Validator.TryValidateObject(dto, ctx, results, validateAllProperties: true);
             }
 
-            var overProductLimit = new CreateStoryReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = new string('f', 4001)
-            };
-            Assert.False(TryValidate(overProductLimit, out var errorsOver));
-            Assert.Contains(errorsOver, e => e.MemberNames.Contains(nameof(CreateStoryReportRequestDto.Description)));
-
-            var over200PerMatrix = new CreateStoryReportRequestDto
+            var over201 = new CreateStoryReportRequestDto
             {
                 ReasonCode = "OTHER",
                 Description = new string('g', 201)
             };
-            var descriptionStillValidOnCurrentProduct = TryValidate(over200PerMatrix, out var errors201);
-            if (descriptionStillValidOnCurrentProduct)
-            {
-                _output.WriteLine(
-                    "[BUG UT05/UTCID06] 201 ký tự vẫn hợp lệ: thêm MaxLength(200) hoặc if (Description?.Length > 200) throw/return trong StoryReportService.");
-            }
+            Assert.False(TryValidate(over201, out var errors201));
+            Assert.Contains(errors201, e => e.MemberNames.Contains(nameof(CreateStoryReportRequestDto.Description)));
 
-            Assert.False(descriptionStillValidOnCurrentProduct,
-                "BUG UT05/UTCID06: Theo ma trận, Description > 200 ký tự phải không hợp lệ. " +
-                "Sửa CreateStoryReportRequestDto / StoryReportService rồi chạy lại test.");
-            Assert.NotEmpty(errors201);
+            var wayOver = new CreateStoryReportRequestDto
+            {
+                ReasonCode = "OTHER",
+                Description = new string('f', 4001)
+            };
+            Assert.False(TryValidate(wayOver, out var errorsLong));
+            Assert.Contains(errorsLong, e => e.MemberNames.Contains(nameof(CreateStoryReportRequestDto.Description)));
+
+            var userLookup = new Mock<IUserLookup>(MockBehavior.Strict);
+            var sut = new StoryReportService(userLookup.Object, notificationHubNotifier: null);
+            var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+                sut.CreateStoryReportAsync(Guid.NewGuid(), Guid.NewGuid(), over201));
+            Assert.Contains("quá dài", ex.Message, StringComparison.OrdinalIgnoreCase);
+            userLookup.Verify(x => x.Exists(It.IsAny<Guid>()), Times.Never);
         }
 
         /// <summary>

@@ -118,12 +118,20 @@ export function StoryEditor({ story, onSave, onCancel }) {
             showToast('Vui lòng nhập tên truyện', 'error');
             return false;
         }
+        if (formData.title.trim().length > 50) {
+            showToast('Tên truyện không được vượt quá 50 ký tự', 'error');
+            return false;
+        }
         if (formData.categories.length === 0) {
             showToast('Vui lòng chọn ít nhất 1 thể loại', 'error');
             return false;
         }
         if (!formData.cover) {
             showToast('Vui lòng tải ảnh bìa lên', 'error');
+            return false;
+        }
+        if (!formData.note || !String(formData.note).trim()) {
+            showToast('Vui lòng nhập mô tả truyện', 'error');
             return false;
         }
         return true;
@@ -137,6 +145,11 @@ export function StoryEditor({ story, onSave, onCancel }) {
         const invalidChapters = chapters.filter(ch => !ch.title.trim() || !ch.content.trim());
         if (invalidChapters.length > 0) {
             showToast(`Có ${invalidChapters.length} chương chưa hoàn thành`, 'error');
+            return false;
+        }
+        const chaptersWithLongTitle = chapters.filter((ch) => (ch.title ?? '').trim().length > 50);
+        if (chaptersWithLongTitle.length > 0) {
+            showToast(`Tên chương không được vượt quá 50 ký tự (có ${chaptersWithLongTitle.length} chương vi phạm).`, 'error');
             return false;
         }
         // Validate minimum 500 words per chapter
@@ -169,6 +182,12 @@ export function StoryEditor({ story, onSave, onCancel }) {
     const handleSubmit = async (isDraft) => {
         if (!validateStep1() || !validateStep2()) {
             showToast('Vui lòng hoàn thành tất cả thông tin bắt buộc', 'error');
+            return;
+        }
+        // Khi bấm "Xuất bản" thì các chương sẽ được tạo ở trạng thái PENDING_REVIEW (đang chờ duyệt),
+        // do đó không được phép đặt trạng thái tiến độ là "Tạm dừng" hoặc "Hoàn thành".
+        if (!isDraft && (formData.status === 'Tạm dừng' || formData.status === 'Hoàn thành')) {
+            showToast('Truyện đang có chương chờ duyệt, vui lòng thử lại sau.', 'error');
             return;
         }
 

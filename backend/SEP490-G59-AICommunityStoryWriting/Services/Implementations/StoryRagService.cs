@@ -62,9 +62,9 @@ public class StoryRagService : IStoryRagService
             return;
 
         var (baseUrl, apiKey, model) = config.Value;
-        var chapters = _chapterRepository.GetByStoryId(storyId)
-            .OrderBy(c => c.order_index)
-            .ToList();
+        // Mốc thứ tự có thể là chương DRAFT (FE gửi "chương liền trước"); chỉ embed nội dung chương PUBLISHED.
+        var allChapters = _chapterRepository.GetByStoryId(storyId).OrderBy(c => c.order_index).ToList();
+        var publishedChapters = _chapterRepository.GetPublishedByStoryId(storyId).ToList();
 
         var indexedChapterIds = _vectorStore.GetIndexedChapterIds(storyId).ToHashSet();
         bool hasExistingIndex = indexedChapterIds.Count > 0;
@@ -73,7 +73,7 @@ public class StoryRagService : IStoryRagService
         List<chapters> toIndex;
         if (doIncremental)
         {
-            toIndex = chapters.Where(c => !indexedChapterIds.Contains(c.id)).OrderBy(c => c.order_index).ToList();
+            toIndex = publishedChapters.Where(c => !indexedChapterIds.Contains(c.id)).ToList();
             if (toIndex.Count == 0)
                 return;
         }
@@ -81,11 +81,13 @@ public class StoryRagService : IStoryRagService
         {
             if (afterChapterId.HasValue)
             {
-                var idx = chapters.FirstOrDefault(c => c.id == afterChapterId.Value)?.order_index;
-                toIndex = idx.HasValue ? chapters.Where(c => c.order_index <= idx.Value).OrderBy(c => c.order_index).ToList() : chapters;
+                var idx = allChapters.FirstOrDefault(c => c.id == afterChapterId.Value)?.order_index;
+                toIndex = idx.HasValue
+                    ? publishedChapters.Where(c => c.order_index <= idx.Value).ToList()
+                    : publishedChapters;
             }
             else
-                toIndex = chapters;
+                toIndex = publishedChapters.ToList();
 
             _vectorStore.DeleteStory(storyId);
         }
@@ -164,8 +166,9 @@ public class StoryRagService : IStoryRagService
 
         var (baseUrl, apiKey, model) = config.Value;
         var queryEmbedding = await EmbeddingHelper.GetEmbeddingAsync(query, baseUrl, apiKey, model, cancellationToken);
-        var chapters = _chapterRepository.GetByStoryId(storyId).OrderBy(c => c.order_index).ToList();
-        var chapterMap = chapters.ToDictionary(c => c.id, c => (c.order_index, c.title ?? $"Chương {c.order_index}"));
+        var publishedChapters = _chapterRepository.GetPublishedByStoryId(storyId).ToList();
+        var chapterMap = publishedChapters.ToDictionary(c => c.id, c => (c.order_index, c.title ?? $"Chương {c.order_index}"));
+        var publishedChapterIds = chapterMap.Keys.ToHashSet();
 
         if (!_vectorStore.HasIndex(storyId))
             return null;
@@ -178,6 +181,8 @@ public class StoryRagService : IStoryRagService
         int totalChars = 0;
         foreach (var (_, chapterId, content) in infos.OrderBy(x => chunkIds.IndexOf(x.ChunkId)))
         {
+            if (!publishedChapterIds.Contains(chapterId))
+                continue;
             if (totalChars >= maxChars)
                 break;
             var (order, title) = chapterMap.GetValueOrDefault(chapterId, (0, ""));

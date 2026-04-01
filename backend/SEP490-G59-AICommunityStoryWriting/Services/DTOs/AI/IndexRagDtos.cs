@@ -1,10 +1,10 @@
 namespace Services.DTOs.AI;
 
-/// <summary>Request index RAG cho một truyện (chunk + embedding).</summary>
+/// <summary>Request index RAG cho một truyện (chunk + embedding). Chỉ nội dung chương <c>PUBLISHED</c> được đưa vào index.</summary>
 public class IndexRagRequest
 {
     public Guid StoryId { get; set; }
-    /// <summary>Chỉ index các chương có order_index &lt;= chương này. Null = index tất cả.</summary>
+    /// <summary>Chỉ index các chương <c>PUBLISHED</c> có order_index &lt;= chương mốc này. Null = mọi chương đã xuất bản.</summary>
     public Guid? AfterChapterId { get; set; }
 }
 

@@ -3,7 +3,10 @@ using Services.DTOs.Stories;
 
 public interface IChapterService
 {
-    ChapterResponseDto Create(CreateChapterRequestDto request);
+    /// <summary>Tạo chương; chỉ chủ truyện (<c>stories.author_id</c>) được phép.</summary>
+    /// <param name="authorId">User đang thao tác — phải trùng <c>story.author_id</c> của <c>request.StoryId</c>.</param>
+    /// <exception cref="UnauthorizedAccessException">Khi <paramref name="authorId"/> không phải chủ truyện (vd. tác giả khác có story riêng).</exception>
+    ChapterResponseDto Create(CreateChapterRequestDto request, Guid authorId);
     PagedResultDto<ChapterListItemDto> GetAll(ChapterQueryDto query);
     ChapterResponseDto? GetById(Guid id);
     IEnumerable<ChapterListItemDto> GetByStoryId(Guid storyId);
