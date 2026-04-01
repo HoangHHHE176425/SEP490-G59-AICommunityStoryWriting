@@ -829,14 +829,18 @@ public class StoryReportService : IStoryReportService
         if (dto.AdminNote != null && dto.AdminNote.Length > 200)
             throw new ArgumentException("Ký tự quá dài: mô tả tối đa 200 ký tự.");
 
-        if (string.IsNullOrWhiteSpace(dto.ReasonCode))
-            throw new InvalidOperationException("Không tìm thấy lý do phù hợp.");
-        if (!StoryReportReasonCatalog.TryGet(dto.ReasonCode, out _))
-            throw new InvalidOperationException("Không tìm thấy lý do phù hợp.");
-
         var decision = (dto.Decision ?? "").Trim().ToUpperInvariant();
         if (decision is not ("APPROVE" or "REJECT"))
             throw new ArgumentException("Decision phải là APPROVE hoặc REJECT.");
+
+        // Khi REJECT: không cần ReasonCode. Khi APPROVE: bắt buộc ReasonCode hợp lệ để log lý do vi phạm.
+        if (decision == "APPROVE")
+        {
+            if (string.IsNullOrWhiteSpace(dto.ReasonCode))
+                throw new InvalidOperationException("Không tìm thấy lý do phù hợp.");
+            if (!StoryReportReasonCatalog.TryGet(dto.ReasonCode, out _))
+                throw new InvalidOperationException("Không tìm thấy lý do phù hợp.");
+        }
 
         var row = ComplianceAdminActionRequestDAO.GetTrackedById(requestId)
                   ?? throw new InvalidOperationException("Yêu cầu không tồn tại.");

@@ -168,17 +168,22 @@ public class AdminComplianceStoryReportsController : ControllerBase
         if (!uid.HasValue) return Unauthorized();
         if (body == null || string.IsNullOrWhiteSpace(body.Decision))
             return BadRequest(new { message = "Decision is required." });
+        var decision = (body.Decision ?? "").Trim().ToUpperInvariant();
         if (body.AdminNote != null && body.AdminNote.Length > 200)
             return BadRequest(new { message = "Ký tự quá dài: mô tả tối đa 200 ký tự." });
-        if (string.IsNullOrWhiteSpace(body.ReasonCode))
+        // ReasonCode chỉ bắt buộc khi APPROVE (khi REJECT không cần chọn lý do vi phạm).
+        if (decision == "APPROVE")
         {
-            _logger.LogWarning("Không tìm thấy lý do phù hợp.");
-            return BadRequest(new { message = "Không tìm thấy lý do phù hợp." });
-        }
-        if (!StoryReportReasonCatalog.TryGet(body.ReasonCode, out _))
-        {
-            _logger.LogWarning("Không tìm thấy lý do phù hợp.");
-            return BadRequest(new { message = "Không tìm thấy lý do phù hợp." });
+            if (string.IsNullOrWhiteSpace(body.ReasonCode))
+            {
+                _logger.LogWarning("Không tìm thấy lý do phù hợp.");
+                return BadRequest(new { message = "Không tìm thấy lý do phù hợp." });
+            }
+            if (!StoryReportReasonCatalog.TryGet(body.ReasonCode, out _))
+            {
+                _logger.LogWarning("Không tìm thấy lý do phù hợp.");
+                return BadRequest(new { message = "Không tìm thấy lý do phù hợp." });
+            }
         }
         if (requestId == Guid.Empty)
         {
