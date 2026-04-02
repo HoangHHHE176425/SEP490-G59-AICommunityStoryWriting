@@ -201,6 +201,26 @@ namespace Services.Implementations
                 storiesQuery = storiesQuery.Where(s => (s.total_chapters ?? 0) <= max);
             }
 
+            if (query.UsesAi.HasValue)
+            {
+                if (query.UsesAi.Value)
+                {
+                    storiesQuery = storiesQuery.Where(s => s.chapters.Any(c =>
+                        c.status != null &&
+                        c.status.Trim().ToUpper() == "PUBLISHED" &&
+                        c.ai_contribution_ratio.HasValue &&
+                        c.ai_contribution_ratio.Value > 0));
+                }
+                else
+                {
+                    storiesQuery = storiesQuery.Where(s => !s.chapters.Any(c =>
+                        c.status != null &&
+                        c.status.Trim().ToUpper() == "PUBLISHED" &&
+                        c.ai_contribution_ratio.HasValue &&
+                        c.ai_contribution_ratio.Value > 0));
+                }
+            }
+
             if (query.StatusIn != null && query.StatusIn.Count > 0)
             {
                 var statusList = query.StatusIn.Select(s => s?.Trim().ToUpperInvariant()).Where(s => !string.IsNullOrEmpty(s)).ToList();
@@ -331,6 +351,7 @@ namespace Services.Implementations
                 AgeRating = query.AgeRating,
                 MinTotalChapters = query.MinTotalChapters,
                 MaxTotalChapters = query.MaxTotalChapters,
+                UsesAi = query.UsesAi,
                 IncludeComplianceHiddenInLists = query.IncludeComplianceHiddenInLists,
             };
 

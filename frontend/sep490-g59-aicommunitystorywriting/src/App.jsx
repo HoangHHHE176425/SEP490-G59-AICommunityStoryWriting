@@ -18,6 +18,7 @@ import { AuthorDetail } from './pages/author/AuthorDetail';
 import { StoryBrowse } from './pages/story-list/StoryBrowse';
 import AboutUs from './pages/aboutus/AboutUs';
 import PolicyPage from './pages/policy/PolicyPage';
+import FaqPage from './pages/faq/FaqPage';
 import Donate from './pages/donate/Donate';
 import GoogleCallback from './pages/auth/GoogleCallback';
 import { ScrollToTop } from './components/routing/ScrollToTop';
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/story-list" element={<StoryBrowse />} />
           <Route path="/about-us" element={<AboutUs />} />
           <Route path="/policy" element={<PolicyPage />} />
+          <Route path="/faq" element={<FaqPage />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

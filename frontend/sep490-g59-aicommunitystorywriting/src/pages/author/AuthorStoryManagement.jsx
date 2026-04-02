@@ -120,6 +120,62 @@ function formatSuspensionUntilVi(dateValue) {
     });
 }
 
+const BANK_ACCOUNT_NUMBER_MIN = 6;
+const BANK_ACCOUNT_NUMBER_MAX = 19;
+const BANK_ACCOUNT_HOLDER_MIN = 3;
+const BANK_ACCOUNT_HOLDER_MAX = 100;
+const BANK_BRANCH_MAX = 120;
+
+/**
+ * Kiểm tra form thêm TK ngân hàng (đồng bộ quy tắc hiển thị với BE: đủ trường + BIN + độ dài STK).
+ * @returns {{ errors: Record<string, string>, normalized: { bankTrim: string, digits: string, holderForApi: string, branchTrim: string, bin: string } | null }}
+ */
+function validateAuthorBankAccountInput({ bankName, accountNumber, accountHolderName, branchName, bankOptions, bankBinMap }) {
+    const errors = {};
+    const bankTrim = String(bankName || '').trim();
+    if (!bankTrim) {
+        errors.bankName = 'Vui lòng chọn ngân hàng.';
+    } else if (!bankOptions.includes(bankTrim)) {
+        errors.bankName = 'Ngân hàng không hợp lệ.';
+    } else if (!(String(bankBinMap[bankTrim] || '').trim())) {
+        errors.bankName = 'Ngân hàng này chưa được cấu hình mã BIN. Vui lòng chọn ngân hàng khác.';
+    }
+
+    const digits = String(accountNumber || '').replace(/\D/g, '');
+    if (!digits) {
+        errors.accountNumber = 'Vui lòng nhập số tài khoản (chỉ chữ số).';
+    } else if (digits.length < BANK_ACCOUNT_NUMBER_MIN || digits.length > BANK_ACCOUNT_NUMBER_MAX) {
+        errors.accountNumber = `Số tài khoản cần từ ${BANK_ACCOUNT_NUMBER_MIN} đến ${BANK_ACCOUNT_NUMBER_MAX} chữ số.`;
+    }
+
+    const holderNorm = String(accountHolderName || '').trim().replace(/\s+/g, ' ');
+    if (!holderNorm) {
+        errors.accountHolderName = 'Vui lòng nhập tên chủ tài khoản.';
+    } else if (holderNorm.length < BANK_ACCOUNT_HOLDER_MIN) {
+        errors.accountHolderName = `Tên chủ tài khoản tối thiểu ${BANK_ACCOUNT_HOLDER_MIN} ký tự.`;
+    } else if (holderNorm.length > BANK_ACCOUNT_HOLDER_MAX) {
+        errors.accountHolderName = `Tên chủ tài khoản tối đa ${BANK_ACCOUNT_HOLDER_MAX} ký tự.`;
+    } else if (!/^[\p{L}\s'.-]+$/u.test(holderNorm)) {
+        errors.accountHolderName = 'Chỉ dùng chữ cái (có dấu), khoảng trắng và các ký tự . \' -';
+    }
+
+    const branchTrim = String(branchName || '').trim();
+    if (branchTrim.length > BANK_BRANCH_MAX) {
+        errors.branchName = `Chi nhánh tối đa ${BANK_BRANCH_MAX} ký tự.`;
+    }
+
+    if (Object.keys(errors).length > 0) {
+        return { errors, normalized: null };
+    }
+
+    const holderForApi = holderNorm.toLocaleUpperCase('vi-VN');
+    const bin = String(bankBinMap[bankTrim] || '').trim();
+    return {
+        errors,
+        normalized: { bankTrim, digits, holderForApi, branchTrim, bin },
+    };
+}
+
 export function AuthorStoryManagement({ onBack }) {
     const { user, logout } = useAuth();
 
@@ -242,6 +298,7 @@ export function AuthorStoryManagement({ onBack }) {
     const [accountNumber, setAccountNumber] = useState('');
     const [accountHolderName, setAccountHolderName] = useState('');
     const [branchName, setBranchName] = useState('');
+    const [bankFieldErrors, setBankFieldErrors] = useState({});
     const [profileFollowersCount, setProfileFollowersCount] = useState(0);
     const [showBankModal, setShowBankModal] = useState(false);
     const [showHistoryModal, setShowHistoryModal] = useState(false);
@@ -1843,7 +1900,10 @@ export function AuthorStoryManagement({ onBack }) {
                                 >
                                     <button
                                         type="button"
-                                        onClick={() => setShowBankModal(true)}
+                                        onClick={() => {
+                                            setBankFieldErrors({});
+                                            setShowBankModal(true);
+                                        }}
                                         style={{
                                             display: 'inline-flex',
                                             alignItems: 'center',
@@ -2465,64 +2525,158 @@ export function AuthorStoryManagement({ onBack }) {
                                         <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Ngân hàng</label>
                                         <select
                                             value={bankName}
-                                            onChange={(e) => setBankName(e.target.value)}
-                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none', backgroundColor: '#ffffff' }}
+                                            aria-invalid={!!bankFieldErrors.bankName}
+                                            onChange={(e) => {
+                                                setBankName(e.target.value);
+                                                setBankFieldErrors((p) => {
+                                                    if (!p.bankName) return p;
+                                                    const n = { ...p };
+                                                    delete n.bankName;
+                                                    return n;
+                                                });
+                                            }}
+                                            style={{
+                                                width: '100%',
+                                                padding: '0.75rem 1rem',
+                                                border: `1px solid ${bankFieldErrors.bankName ? '#f87171' : '#e5e7eb'}`,
+                                                borderRadius: '10px',
+                                                fontSize: '0.9375rem',
+                                                outline: 'none',
+                                                backgroundColor: '#ffffff',
+                                            }}
                                         >
                                             <option value="">Chọn ngân hàng</option>
                                             {BANK_OPTIONS.map((b) => (
                                                 <option key={b} value={b}>{b}</option>
                                             ))}
                                         </select>
+                                        {bankFieldErrors.bankName ? (
+                                            <p style={{ fontSize: '0.75rem', color: '#dc2626', margin: '0.35rem 0 0 0', lineHeight: 1.35 }}>{bankFieldErrors.bankName}</p>
+                                        ) : null}
                                     </div>
                                     <div>
                                         <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Số tài khoản</label>
                                         <input
                                             type="text"
+                                            inputMode="numeric"
+                                            autoComplete="off"
                                             value={accountNumber}
-                                            onChange={(e) => setAccountNumber(e.target.value.replace(/[^\d]/g, ''))}
+                                            aria-invalid={!!bankFieldErrors.accountNumber}
+                                            onChange={(e) => {
+                                                setAccountNumber(e.target.value.replace(/[^\d]/g, ''));
+                                                setBankFieldErrors((p) => {
+                                                    if (!p.accountNumber) return p;
+                                                    const n = { ...p };
+                                                    delete n.accountNumber;
+                                                    return n;
+                                                });
+                                            }}
                                             placeholder="Nhập số tài khoản"
-                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                            style={{
+                                                width: '100%',
+                                                padding: '0.75rem 1rem',
+                                                border: `1px solid ${bankFieldErrors.accountNumber ? '#f87171' : '#e5e7eb'}`,
+                                                borderRadius: '10px',
+                                                fontSize: '0.9375rem',
+                                                outline: 'none',
+                                            }}
                                         />
+                                        {bankFieldErrors.accountNumber ? (
+                                            <p style={{ fontSize: '0.75rem', color: '#dc2626', margin: '0.35rem 0 0 0', lineHeight: 1.35 }}>{bankFieldErrors.accountNumber}</p>
+                                        ) : (
+                                            <p style={{ fontSize: '0.7rem', color: '#94a3b8', margin: '0.35rem 0 0 0' }}>
+                                                {BANK_ACCOUNT_NUMBER_MIN}–{BANK_ACCOUNT_NUMBER_MAX} chữ số, không khoảng trắng.
+                                            </p>
+                                        )}
                                     </div>
                                     <div>
                                         <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Chủ tài khoản</label>
                                         <input
                                             type="text"
                                             value={accountHolderName}
-                                            onChange={(e) => setAccountHolderName(e.target.value)}
+                                            aria-invalid={!!bankFieldErrors.accountHolderName}
+                                            onChange={(e) => {
+                                                setAccountHolderName(e.target.value);
+                                                setBankFieldErrors((p) => {
+                                                    if (!p.accountHolderName) return p;
+                                                    const n = { ...p };
+                                                    delete n.accountHolderName;
+                                                    return n;
+                                                });
+                                            }}
                                             placeholder="Ví dụ: NGUYỄN VĂN A"
-                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                            style={{
+                                                width: '100%',
+                                                padding: '0.75rem 1rem',
+                                                border: `1px solid ${bankFieldErrors.accountHolderName ? '#f87171' : '#e5e7eb'}`,
+                                                borderRadius: '10px',
+                                                fontSize: '0.9375rem',
+                                                outline: 'none',
+                                            }}
                                         />
+                                        {bankFieldErrors.accountHolderName ? (
+                                            <p style={{ fontSize: '0.75rem', color: '#dc2626', margin: '0.35rem 0 0 0', lineHeight: 1.35 }}>{bankFieldErrors.accountHolderName}</p>
+                                        ) : (
+                                            <p style={{ fontSize: '0.7rem', color: '#94a3b8', margin: '0.35rem 0 0 0' }}>
+                                                Ghi đúng họ tên trên thẻ; khi lưu sẽ chuẩn hoá IN HOA (tiếng Việt).
+                                            </p>
+                                        )}
                                     </div>
                                     <div style={{ gridColumn: 'span 2' }}>
                                         <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: '#4b5563', marginBottom: '0.5rem' }}>Chi nhánh (tuỳ chọn)</label>
                                         <input
                                             type="text"
                                             value={branchName}
-                                            onChange={(e) => setBranchName(e.target.value)}
+                                            aria-invalid={!!bankFieldErrors.branchName}
+                                            onChange={(e) => {
+                                                setBranchName(e.target.value);
+                                                setBankFieldErrors((p) => {
+                                                    if (!p.branchName) return p;
+                                                    const n = { ...p };
+                                                    delete n.branchName;
+                                                    return n;
+                                                });
+                                            }}
                                             placeholder="Ví dụ: CN TP.HCM"
-                                            style={{ width: '100%', padding: '0.75rem 1rem', border: '1px solid #e5e7eb', borderRadius: '10px', fontSize: '0.9375rem', outline: 'none' }}
+                                            style={{
+                                                width: '100%',
+                                                padding: '0.75rem 1rem',
+                                                border: `1px solid ${bankFieldErrors.branchName ? '#f87171' : '#e5e7eb'}`,
+                                                borderRadius: '10px',
+                                                fontSize: '0.9375rem',
+                                                outline: 'none',
+                                            }}
                                         />
+                                        {bankFieldErrors.branchName ? (
+                                            <p style={{ fontSize: '0.75rem', color: '#dc2626', margin: '0.35rem 0 0 0', lineHeight: 1.35 }}>{bankFieldErrors.branchName}</p>
+                                        ) : null}
                                     </div>
                                 </div>
                                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
                                     <button
                                         type="button"
                                         onClick={async () => {
-                                            const bn = bankName.trim();
-                                            const an = accountNumber.trim();
-                                            const ah = accountHolderName.trim();
-                                            const mappedBin = BANK_BIN_MAP[bn] || '';
-                                            if (!bn || !an || !ah) {
-                                                showToast('Vui lòng nhập đủ: Ngân hàng, Số tài khoản, Chủ tài khoản.', 'error');
+                                            const { errors, normalized } = validateAuthorBankAccountInput({
+                                                bankName,
+                                                accountNumber,
+                                                accountHolderName,
+                                                branchName,
+                                                bankOptions: BANK_OPTIONS,
+                                                bankBinMap: BANK_BIN_MAP,
+                                            });
+                                            if (!normalized) {
+                                                setBankFieldErrors(errors);
+                                                const firstMsg = Object.values(errors)[0];
+                                                if (firstMsg) showToast(firstMsg, 'error');
                                                 return;
                                             }
+                                            setBankFieldErrors({});
                                             const res = await coinApi.upsertAuthorBankAccount({
-                                                bankName: bn,
-                                                bankBin: mappedBin,
-                                                accountNumber: an,
-                                                accountHolderName: ah,
-                                                branchName: branchName.trim(),
+                                                bankName: normalized.bankTrim,
+                                                bankBin: normalized.bin,
+                                                accountNumber: normalized.digits,
+                                                accountHolderName: normalized.holderForApi,
+                                                branchName: normalized.branchTrim || undefined,
                                                 isVerified: true,
                                             });
                                             if (!res?.success) {
