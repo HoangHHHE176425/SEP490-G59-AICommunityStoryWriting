@@ -172,6 +172,18 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         if (urlChapterId) loadComments();
     }, [urlChapterId, loadComments]);
 
+    // Cuộn tới bình luận khi URL có #comment-{guid} (vd. từ màn xử lý vi phạm).
+    useEffect(() => {
+        const h = location.hash || '';
+        if (!h || !/^#comment-/i.test(h)) return;
+        if (commentsLoading) return;
+        const elId = h.slice(1);
+        const fid = requestAnimationFrame(() => {
+            document.getElementById(elId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        return () => cancelAnimationFrame(fid);
+    }, [location.hash, commentsLoading, comments.length]);
+
     const handleSubmitComment = useCallback(async (content, parentId) => {
         if (!urlChapterId) return;
         if (chapter?.isPaidLocked) {

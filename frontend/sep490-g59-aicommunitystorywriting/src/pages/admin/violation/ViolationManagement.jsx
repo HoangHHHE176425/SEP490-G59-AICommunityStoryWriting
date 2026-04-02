@@ -15,6 +15,7 @@ import {
     LockOpen,
     History,
     ClipboardList,
+    ExternalLink,
 } from 'lucide-react';
 import { Pagination } from '../../../components/pagination/Pagination';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -95,6 +96,44 @@ function requestFieldDisplay(value) {
     if (value == null) return '—';
     const s = String(value).trim();
     return s || '—';
+}
+
+/** Đường dẫn trang truyện công khai (cùng site với /admin). */
+function publicStoryDetailPath(storyId) {
+    const id = storyId != null ? String(storyId).trim() : '';
+    if (!id) return '';
+    return `/story/${id}`;
+}
+
+/**
+ * Trang truyện + hash cuộn tới bình luận (khớp StoryDetail: #comment-{guid}).
+ */
+function publicStoryCommentLocationPath(storyId, commentId) {
+    const base = publicStoryDetailPath(storyId);
+    if (!base) return '';
+    const cid = commentId != null ? String(commentId).trim() : '';
+    if (!cid) return base;
+    return `${base}#comment-${cid}`;
+}
+
+/** Đọc chương + hash bình luận (khớp ChapterReader + CommentSection id). */
+function publicChapterCommentLocationPath(storyId, chapterId, commentId) {
+    const sid = storyId != null ? String(storyId).trim() : '';
+    const chid = chapterId != null ? String(chapterId).trim() : '';
+    const cid = commentId != null ? String(commentId).trim() : '';
+    if (!sid || !chid) return '';
+    const q = `storyId=${encodeURIComponent(sid)}&chapterId=${encodeURIComponent(chid)}`;
+    const hash = cid ? `#comment-${cid}` : '';
+    return `/chapter?${q}${hash}`;
+}
+
+/** Link công khai tới bình luận bị báo cáo (truyện hoặc chương). */
+function publicComplianceReportCommentPath(storyId, chapterId, commentId) {
+    const cid = commentId != null ? String(commentId).trim() : '';
+    const ch = chapterId != null ? String(chapterId).trim() : '';
+    if (ch && cid) return publicChapterCommentLocationPath(storyId, ch, cid);
+    if (cid) return publicStoryCommentLocationPath(storyId, cid);
+    return publicStoryDetailPath(storyId);
 }
 
 function formatDate(value) {
@@ -239,6 +278,7 @@ function normalizeCommentQueueItem(x) {
         reportId: pick(x, 'reportId', 'ReportId'),
         commentId: pick(x, 'commentId', 'CommentId'),
         storyId: pick(x, 'storyId', 'StoryId'),
+        chapterId: pick(x, 'chapterId', 'ChapterId') ?? null,
         storyTitle: pick(x, 'storyTitle', 'StoryTitle'),
         commentUserId: pick(x, 'commentUserId', 'CommentUserId') ?? null,
         commentUserDisplayName: pick(x, 'commentUserDisplayName', 'CommentUserDisplayName'),
@@ -1748,6 +1788,19 @@ export default function ViolationManagement() {
                                     <div className="text-sm text-slate-700"><span className="font-semibold">Mã báo cáo:</span> {storyTickets[0]?.reportId || '—'}</div>
                                     <div className="text-sm text-slate-700"><span className="font-semibold">Trạng thái:</span> {statusViLabel(storyTickets[0]?.status)}</div>
                                 </div>
+                                {publicStoryDetailPath(selectedStory.storyId) ? (
+                                    <div className="mt-3 pt-3 border-t border-slate-200/80">
+                                        <a
+                                            href={publicStoryDetailPath(selectedStory.storyId)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1.5 text-sm font-semibold text-sky-700 hover:text-sky-900 underline-offset-2 hover:underline"
+                                        >
+                                            <ExternalLink className="shrink-0" size={16} aria-hidden />
+                                            Mở trang truyện (giao diện người đọc)
+                                        </a>
+                                    </div>
+                                ) : null}
                             </div>
 
                             <div className="rounded-lg border border-slate-200">
@@ -1969,6 +2022,27 @@ export default function ViolationManagement() {
                                 <div><span className="font-semibold">Lý do vi phạm:</span> {reasonCodeToViLabel(selectedComment.reasonCode) || selectedComment.reasonCode || '—'}</div>
                                 <div><span className="font-semibold">Số báo cáo:</span> {selectedComment.reportCount ?? 0}</div>
                             </div>
+                            {publicStoryDetailPath(selectedComment.storyId) ? (
+                                <div className="mt-3 pt-3 border-t border-slate-200/80">
+                                    <a
+                                        href={publicComplianceReportCommentPath(
+                                            selectedComment.storyId,
+                                            selectedComment.chapterId,
+                                            selectedComment.commentId,
+                                        )}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1.5 text-sm font-semibold text-sky-700 hover:text-sky-900 underline-offset-2 hover:underline"
+                                    >
+                                        <ExternalLink className="shrink-0" size={16} aria-hidden />
+                                        {selectedComment.commentId
+                                            ? (selectedComment.chapterId
+                                                ? 'Mở vị trí bình luận trên trang đọc chương'
+                                                : 'Mở vị trí bình luận trên trang truyện')
+                                            : 'Mở trang truyện (giao diện người đọc)'}
+                                    </a>
+                                </div>
+                            ) : null}
                         </div>
                         <div className="rounded-xl border border-slate-200 bg-white p-4">
                             <div className="text-sm font-semibold text-slate-900 mb-2">Nội dung bình luận</div>
