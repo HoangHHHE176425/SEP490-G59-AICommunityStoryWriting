@@ -46,13 +46,18 @@ import {
     setComplianceStoryCommentsDisabled,
     setComplianceStoryFlag,
     setComplianceStoryHidden,
+    setComplianceCommentReportEvidenceVerification,
+    setComplianceStoryContributorVerification,
 } from '../../../api/admin/adminComplianceApi';
+import { Pagination } from '../../../components/pagination/Pagination';
 import { getModerationLogs } from '../../../api/admin/adminModerationApi';
 import { useToast } from '../../../components/author/story-editor/Toast';
 
 /** BE giới hạn pageSize (thường ≤100; comment reports ≤200). Dùng khi gom nhiều trang một lần. */
 const COMPLIANCE_FETCH_CHUNK_STORY = 100;
 const COMPLIANCE_FETCH_CHUNK_COMMENT = 200;
+/** Page size hiển thị theo phân trang (để UI có Next/Prev). */
+const REPORT_PAGE_SIZE = 20;
 
 /** Gọi API phân trang lặp cho đến khi lấy hết bản ghi (hoặc hết maxPages). */
 async function fetchAllPagedItems(fetchPage, { chunkSize = 100, maxPages = 250 } = {}) {
@@ -77,7 +82,6 @@ async function fetchAllPagedItems(fetchPage, { chunkSize = 100, maxPages = 250 }
     };
 }
 const REPORT_STATUS_FILTER_OPTIONS = [
-    { value: 'OPEN', label: 'Đang mở (mới + đang xử lý)' },
     { value: 'NEW', label: 'Mới nhận' },
     { value: 'IN_REVIEW', label: 'Đang xử lý' },
     { value: 'RESOLVED', label: 'Đã xử lý thành công' },
@@ -110,8 +114,10 @@ const COMPLIANCE_HISTORY_ACTION_OPTIONS = [
 
 function mapStatusFilterToApiValue(filterValue) {
     const key = String(filterValue ?? '').trim().toUpperCase();
-    if (!key || key === 'OPEN') return 'NEW,IN_REVIEW';
+    if (!key) return 'NEW';
     if (key === 'ALL') return undefined;
+    // API cho phép nhận 1 trong các giá trị trạng thái hoặc cặp "NEW,IN_REVIEW".
+    // Ở UI hiện tại ta tách riêng NEW / IN_REVIEW nên trả key nguyên.
     return key;
 }
 
@@ -341,6 +347,7 @@ function reasonCodeToViLabel(code) {
     const map = {
         HATE_SPEECH: 'Phát ngôn thù ghét / phân biệt',
         SEXUAL_CONTENT: 'Nội dung tình dục / 18+',
+        SEXUAL_EXPLICIT: 'Nội dung tình dục / 18+',
         VIOLENCE: 'Nội dung bạo lực',
         ILLEGAL_CONTENT: 'Nội dung vi phạm pháp luật',
         COPYRIGHT: 'Vi phạm bản quyền',
@@ -351,6 +358,18 @@ function reasonCodeToViLabel(code) {
         OTHER: 'Khác',
     };
     return map[key] || key || 'Khác';
+}
+
+/** Ưu tiên `reasonLabelVi` (đúng tiếng Việt), fallback sang mapping theo `reasonCode`. */
+function violationCategoryReasonDisplayVi(item) {
+    if (!item) return '—';
+    const label = item?.reasonLabelVi ?? item?.ReasonLabelVi;
+    if (label != null) {
+        const s = String(label).trim();
+        if (s) return s;
+    }
+    const code = item?.reasonCode ?? item?.ReasonCode;
+    return reasonCodeToViLabel(code);
 }
 
 function reporterRoleVi(value) {
@@ -387,7 +406,14 @@ function collectContributors(selectedStory, storyTickets) {
             const prev = map.get(key);
             const prevDesc = prev?.description ?? prev?.Description;
             const nextDesc = c?.description ?? c?.Description;
-            if (!prevDesc && nextDesc) map.set(key, { ...prev, description: nextDesc });
+            const nextVerified = c?.isComplianceContributorVerified ?? c?.IsComplianceContributorVerified;
+            if (!prevDesc && nextDesc) {
+                map.set(key, { ...prev, description: nextDesc });
+            }
+            // Ưu tiên dữ liệu mới hơn (có thể đến từ từng ticket) cho trạng thái xác minh.
+            if (typeof nextVerified === 'boolean') {
+                map.set(key, { ...map.get(key), isComplianceContributorVerified: nextVerified, IsComplianceContributorVerified: nextVerified });
+            }
         }
     }
 
@@ -407,6 +433,32 @@ function collectContributors(selectedStory, storyTickets) {
         }
     }
     return Array.from(map.values());
+}
+
+function getContributorUserId(c) {
+    return c?.userId ?? c?.UserId ?? c?.UserID ?? null;
+}
+
+function isContributorVerified(c) {
+    const v = c?.isComplianceContributorVerified ?? c?.IsComplianceContributorVerified;
+    if (typeof v === 'boolean') return v;
+    return coerceBool(v);
+}
+
+function canMarkContributorVerified(c) {
+    const v = c?.canMarkComplianceVerified ?? c?.CanMarkComplianceVerified;
+    if (typeof v === 'boolean') return v;
+    return true;
+}
+
+function isEvidenceVerified(d) {
+    const v = d?.isComplianceEvidenceVerified ?? d?.IsComplianceEvidenceVerified;
+    if (typeof v === 'boolean') return v;
+    return coerceBool(v);
+}
+
+function getEvidenceId(d) {
+    return d?.evidenceId ?? d?.EvidenceId ?? null;
 }
 
 function statusViLabel(status) {
@@ -618,10 +670,10 @@ export default function ViolationManagement() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [rows, setRows] = useState([]);
-    const [totalCount, setTotalCount] = useState(0);
+    const [_totalCount, setTotalCount] = useState(0);
     const [filters, setFilters] = useState({
         search: '',
-        statusFilter: 'OPEN',
+        statusFilter: 'NEW',
         flaggedOnly: false,
         historySource: 'ALL',
         historyAction: 'ALL',
@@ -629,8 +681,15 @@ export default function ViolationManagement() {
     const [selectedStory, setSelectedStory] = useState(null);
     const [storyTickets, setStoryTickets] = useState([]);
     const [storyTicketLoading, setStoryTicketLoading] = useState(false);
+    const [storyReportPage, setStoryReportPage] = useState(1);
+    const [commentReportPage, setCommentReportPage] = useState(1);
+    const [historyPage, setHistoryPage] = useState(1);
+    const [storyContributorVerificationFilter, setStoryContributorVerificationFilter] = useState('ALL'); // ALL | VERIFIED | UNVERIFIED
+    const [storyContributorVerificationBusy, setStoryContributorVerificationBusy] = useState(false);
     const [selectedComment, setSelectedComment] = useState(null);
     const [actionModal, setActionModal] = useState(null);
+    const [commentEvidenceVerificationFilter, setCommentEvidenceVerificationFilter] = useState('ALL'); // ALL | VERIFIED | UNVERIFIED
+    const [commentEvidenceVerificationBusy, setCommentEvidenceVerificationBusy] = useState(false);
     const [adminActionForm, setAdminActionForm] = useState({ requestKind: 'BAN_USER', message: '', proposedSuspendUntilUtc: '' });
     const [adminActionError, setAdminActionError] = useState('');
     const [adminActionSubmitting, setAdminActionSubmitting] = useState(false);
@@ -724,7 +783,7 @@ export default function ViolationManagement() {
                         pageSize: 1,
                         groupByStory: true,
                         claimFilter: 'mine',
-                        statuses: 'NEW,IN_REVIEW',
+                        statuses: reportStatusApiValue,
                     });
                     const mineProbeItems = readPaged(mineProbe).items;
                     if (Array.isArray(mineProbeItems) && mineProbeItems.length > 0) {
@@ -736,27 +795,23 @@ export default function ViolationManagement() {
                         return;
                     }
                 }
-                data = await fetchAllPagedItems(
-                    (pg, sz) =>
-                        getComplianceStoryReports({
-                            page: pg,
-                            pageSize: sz,
-                            groupByStory: true,
-                            sortBy: 'priority_desc',
-                            claimFilter: 'mine',
-                            statuses: reportStatusApiValue,
-                            search: filters.search || undefined,
-                            flaggedOnly: filters.flaggedOnly ? true : undefined,
-                        }),
-                    { chunkSize: COMPLIANCE_FETCH_CHUNK_STORY },
-                );
+                data = await getComplianceStoryReports({
+                    page: storyReportPage,
+                    pageSize: REPORT_PAGE_SIZE,
+                    groupByStory: true,
+                    sortBy: 'priority_desc',
+                    claimFilter: 'mine',
+                    statuses: reportStatusApiValue,
+                    search: filters.search || undefined,
+                    flaggedOnly: filters.flaggedOnly ? true : undefined,
+                });
             } else if (activeTab === 'comment-reports') {
                 if (!showClaimedCommentList && !afterClaim) {
                     const mineProbe = await getComplianceCommentReports({
                         page: 1,
                         pageSize: 1,
                         claimFilter: 'mine',
-                        status: 'NEW,IN_REVIEW',
+                        status: reportStatusApiValue,
                     });
                     const mineProbeItems = readPaged(mineProbe).items;
                     if (Array.isArray(mineProbeItems) && mineProbeItems.length > 0) {
@@ -768,29 +823,21 @@ export default function ViolationManagement() {
                         return;
                     }
                 }
-                data = await fetchAllPagedItems(
-                    (pg, sz) =>
-                        getComplianceCommentReports({
-                            page: pg,
-                            pageSize: sz,
-                            claimFilter: 'mine',
-                            status: reportStatusApiValue,
-                            search: filters.search || undefined,
-                        }),
-                    { chunkSize: COMPLIANCE_FETCH_CHUNK_COMMENT },
-                );
+                data = await getComplianceCommentReports({
+                    page: commentReportPage,
+                    pageSize: REPORT_PAGE_SIZE,
+                    claimFilter: 'mine',
+                    status: reportStatusApiValue,
+                    search: filters.search || undefined,
+                });
             } else if (activeTab === 'compliance-history') {
-                data = await fetchAllPagedItems(
-                    (pg, sz) =>
-                        getMyComplianceActivityLogs({
-                            page: pg,
-                            pageSize: sz,
-                            search: filters.search || undefined,
-                            source: filters.historySource && filters.historySource !== 'ALL' ? filters.historySource : undefined,
-                            action: filters.historyAction && filters.historyAction !== 'ALL' ? filters.historyAction : undefined,
-                        }),
-                    { chunkSize: COMPLIANCE_FETCH_CHUNK_STORY },
-                );
+                data = await getMyComplianceActivityLogs({
+                    page: historyPage,
+                    pageSize: REPORT_PAGE_SIZE,
+                    search: filters.search || undefined,
+                    source: filters.historySource && filters.historySource !== 'ALL' ? filters.historySource : undefined,
+                    action: filters.historyAction && filters.historyAction !== 'ALL' ? filters.historyAction : undefined,
+                });
             } else if (activeTab === 'lock-requests') {
                 data = await getAdminComplianceLockRequests({ status: 'PENDING' });
             } else if (activeTab === 'compliance-logs') {
@@ -847,19 +894,15 @@ export default function ViolationManagement() {
             // Fallback: một số runtime trả totalCount > 0 nhưng groupByStory rỗng.
             // Khi đó lấy raw report rows rồi gom nhóm tại FE để vẫn hiển thị queue và nút nhận duyệt.
             if (activeTab === 'story-reports' && normalizedItems.length === 0 && paged.totalCount > 0) {
-                const mergedFb = await fetchAllPagedItems(
-                    (pg, sz) =>
-                        getComplianceStoryReports({
-                            page: pg,
-                            pageSize: sz,
-                            groupByStory: false,
-                            claimFilter: 'mine',
-                            statuses: reportStatusApiValue,
-                            search: filters.search || undefined,
-                            sortBy: 'newest',
-                        }),
-                    { chunkSize: COMPLIANCE_FETCH_CHUNK_STORY },
-                );
+                const mergedFb = await getComplianceStoryReports({
+                    page: storyReportPage,
+                    pageSize: REPORT_PAGE_SIZE,
+                    groupByStory: false,
+                    claimFilter: 'mine',
+                    statuses: reportStatusApiValue,
+                    search: filters.search || undefined,
+                    sortBy: 'newest',
+                });
                 const raw = (mergedFb.items ?? []).map(normalizeStoryReportRow);
                 normalizedItems = groupStoryRows(raw);
             }
@@ -872,7 +915,20 @@ export default function ViolationManagement() {
         } finally {
             setLoading(false);
         }
-    }, [activeTab, adminLogType, filters.flaggedOnly, filters.historyAction, filters.historySource, filters.search, reportStatusApiValue, showClaimedStoryList, showClaimedCommentList]);
+    }, [
+        activeTab,
+        adminLogType,
+        filters.flaggedOnly,
+        filters.historyAction,
+        filters.historySource,
+        filters.search,
+        reportStatusApiValue,
+        showClaimedStoryList,
+        showClaimedCommentList,
+        storyReportPage,
+        commentReportPage,
+        historyPage,
+    ]);
 
     const openViolationPolicyModal = useCallback(async () => {
         setViolationPolicyModalOpen(true);
@@ -1043,6 +1099,7 @@ export default function ViolationManagement() {
     };
 
     const openStoryTicketsModal = async (story) => {
+        setStoryContributorVerificationFilter('ALL');
         setSelectedStory(story);
         setStoryTicketLoading(true);
         try {
@@ -1077,6 +1134,69 @@ export default function ViolationManagement() {
             alert(e?.response?.data?.message ?? e?.message ?? 'Không tải được chi tiết phiếu báo cáo.');
         } finally {
             setStoryTicketLoading(false);
+        }
+    };
+
+    const handleToggleStoryContributorVerification = async (contributor, nextChecked) => {
+        const storyId = selectedStory?.storyId ?? selectedStory?.StoryId;
+        if (!storyId) return;
+        const userId = getContributorUserId(contributor);
+        if (!userId) return;
+
+        const canMark = canMarkContributorVerified(contributor);
+        if (!canMark) {
+            showToast?.('Không thể đánh dấu xác minh cho mục này.', 'error');
+            return;
+        }
+
+        setStoryContributorVerificationBusy(true);
+        try {
+            const payload = nextChecked
+                ? { verifyUserIds: [userId] }
+                : { unverifyUserIds: [userId] };
+            await setComplianceStoryContributorVerification(storyId, payload);
+            await openStoryTicketsModal(selectedStory);
+            showToast?.('Đã cập nhật trạng thái xác minh.', 'success');
+        } catch (e) {
+            alert(e?.response?.data?.message ?? e?.message ?? 'Không thể cập nhật xác minh.');
+        } finally {
+            setStoryContributorVerificationBusy(false);
+        }
+    };
+
+    const handleToggleCommentEvidenceVerification = async (reporterDetail, nextChecked) => {
+        const commentId = selectedComment?.commentId ?? selectedComment?.CommentId;
+        if (!commentId) return;
+        const evidenceId = getEvidenceId(reporterDetail);
+        if (!evidenceId) return;
+
+        setCommentEvidenceVerificationBusy(true);
+        try {
+            const payload = nextChecked
+                ? { verifyEvidenceIds: [evidenceId] }
+                : { unverifyEvidenceIds: [evidenceId] };
+            await setComplianceCommentReportEvidenceVerification(commentId, payload);
+
+            setSelectedComment((prev) => {
+                if (!prev) return prev;
+                const nextDetails = Array.isArray(prev.reporterDetails)
+                    ? prev.reporterDetails.map((d) => {
+                        const id = getEvidenceId(d);
+                        if (!id || id !== evidenceId) return d;
+                        return {
+                            ...d,
+                            isComplianceEvidenceVerified: nextChecked,
+                            IsComplianceEvidenceVerified: nextChecked,
+                        };
+                    })
+                    : prev.reporterDetails;
+                return { ...prev, reporterDetails: nextDetails };
+            });
+            showToast?.('Đã cập nhật trạng thái xác minh.', 'success');
+        } catch (e) {
+            alert(e?.response?.data?.message ?? e?.message ?? 'Không thể cập nhật xác minh.');
+        } finally {
+            setCommentEvidenceVerificationBusy(false);
         }
     };
 
@@ -1416,6 +1536,7 @@ export default function ViolationManagement() {
         switch (action) {
             case 'detail':
                 setSelectedComment(row);
+                setCommentEvidenceVerificationFilter('ALL');
                 break;
             case 'account-history':
                 if (!row.commentUserId) {
@@ -1460,9 +1581,13 @@ export default function ViolationManagement() {
         }
     };
 
-    const renderStoryReports = () => (
-        <div style={rows.length > 5 ? { maxHeight: '52vh', overflowY: 'auto' } : undefined}>
-            <table className="w-full border-collapse table-fixed">
+    const renderStoryReports = () => {
+        const totalPages = Math.max(1, Math.ceil(_totalCount / REPORT_PAGE_SIZE));
+        const scrollWrapStyle = rows.length > 5 ? { maxHeight: '52vh', overflowY: 'auto' } : undefined;
+        return (
+            <div>
+                <div style={scrollWrapStyle}>
+                    <table className="w-full border-collapse table-fixed">
                 <thead><tr className="bg-slate-50">
                     <th style={th}>Ưu tiên</th>
                     <th style={th}>Truyện</th>
@@ -1541,13 +1666,29 @@ export default function ViolationManagement() {
                         </tr>
                     ))}
                 </tbody>
-            </table>
-        </div>
-    );
+                    </table>
+                </div>
+                {_totalCount > 0 && (
+                    <Pagination
+                        currentPage={storyReportPage}
+                        totalPages={totalPages}
+                        totalItems={_totalCount}
+                        itemsPerPage={REPORT_PAGE_SIZE}
+                        onPageChange={(p) => setStoryReportPage(p)}
+                        itemLabel="truyện"
+                    />
+                )}
+            </div>
+        );
+    };
 
-    const renderCommentReports = () => (
-        <div style={rows.length > 5 ? { maxHeight: '52vh', overflowY: 'auto' } : undefined}>
-            <table className="w-full border-collapse table-fixed">
+    const renderCommentReports = () => {
+        const totalPages = Math.max(1, Math.ceil(_totalCount / REPORT_PAGE_SIZE));
+        const scrollWrapStyle = rows.length > 5 ? { maxHeight: '52vh', overflowY: 'auto' } : undefined;
+        return (
+            <div>
+                <div style={scrollWrapStyle}>
+                    <table className="w-full border-collapse table-fixed">
                 <thead><tr className="bg-slate-50">
                     <th style={th}>Ưu tiên</th>
                     <th style={th}>Truyện</th>
@@ -1623,9 +1764,21 @@ export default function ViolationManagement() {
                         </tr>
                     ))}
                 </tbody>
-            </table>
-        </div>
-    );
+                    </table>
+                </div>
+                {_totalCount > 0 && (
+                    <Pagination
+                        currentPage={commentReportPage}
+                        totalPages={totalPages}
+                        totalItems={_totalCount}
+                        itemsPerPage={REPORT_PAGE_SIZE}
+                        onPageChange={(p) => setCommentReportPage(p)}
+                        itemLabel="bình luận"
+                    />
+                )}
+            </div>
+        );
+    };
 
     const renderLockRequests = () => (
         <div className="overflow-x-auto">
@@ -1651,9 +1804,12 @@ export default function ViolationManagement() {
         </div>
     );
 
-    const renderComplianceHistory = () => (
-        <div className="overflow-x-auto">
-            <table className="w-full border-collapse">
+    const renderComplianceHistory = () => {
+        const totalPages = Math.max(1, Math.ceil(_totalCount / REPORT_PAGE_SIZE));
+        return (
+            <div>
+                <div className="overflow-x-auto">
+                    <table className="w-full border-collapse">
                 <thead><tr className="bg-slate-50">
                     <th style={th}>Thời điểm</th>
                     <th style={th}>Nguồn</th>
@@ -1692,9 +1848,21 @@ export default function ViolationManagement() {
                         </tr>
                     ))}
                 </tbody>
-            </table>
-        </div>
-    );
+                    </table>
+                </div>
+                {_totalCount > 0 && totalPages > 1 && (
+                    <Pagination
+                        currentPage={historyPage}
+                        totalPages={totalPages}
+                        totalItems={_totalCount}
+                        itemsPerPage={REPORT_PAGE_SIZE}
+                        onPageChange={(p) => setHistoryPage(p)}
+                        itemLabel="lịch sử"
+                    />
+                )}
+            </div>
+        );
+    };
 
     return (
         <div className="max-w-[1720px] mx-auto px-4 md:px-6 py-6 space-y-6">
@@ -1794,17 +1962,52 @@ export default function ViolationManagement() {
                     {isReportTab && (
                         <>
                             <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
-                                <input value={filters.search} onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))} placeholder="Tìm theo mã, tên truyện, người báo cáo..." style={input} />
-                                <select value={filters.statusFilter} onChange={(e) => setFilters((p) => ({ ...p, statusFilter: e.target.value }))} style={input}>
+                                <input
+                                    value={filters.search}
+                                    onChange={(e) => {
+                                        const v = e.target.value;
+                                        setFilters((p) => ({ ...p, search: v }));
+                                        if (activeTab === 'story-reports') setStoryReportPage(1);
+                                        if (activeTab === 'comment-reports') setCommentReportPage(1);
+                                    }}
+                                    placeholder="Tìm theo mã, tên truyện, người báo cáo..."
+                                    style={input}
+                                />
+                                <select
+                                    value={filters.statusFilter}
+                                    onChange={(e) => {
+                                        const v = e.target.value;
+                                        setFilters((p) => ({ ...p, statusFilter: v }));
+                                        if (activeTab === 'story-reports') setStoryReportPage(1);
+                                        if (activeTab === 'comment-reports') setCommentReportPage(1);
+                                    }}
+                                    style={input}
+                                >
                                     {REPORT_STATUS_FILTER_OPTIONS.map((opt) => (
                                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                                     ))}
                                 </select>
-                                <button onClick={() => setFilters({ search: '', statusFilter: 'OPEN', flaggedOnly: false })} className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"><RotateCcw style={{ width: 14, height: 14 }} /> Đặt lại</button>
+                                <button
+                                    onClick={() => {
+                                        setFilters({ search: '', statusFilter: 'NEW', flaggedOnly: false });
+                                        setStoryReportPage(1);
+                                        setCommentReportPage(1);
+                                    }}
+                                    className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"
+                                >
+                                    <RotateCcw style={{ width: 14, height: 14 }} /> Đặt lại
+                                </button>
                             </div>
                             {activeTab === 'story-reports' && (
                                 <label className="inline-flex gap-2 mt-2 text-sm text-slate-700">
-                                    <input type="checkbox" checked={filters.flaggedOnly} onChange={(e) => setFilters((p) => ({ ...p, flaggedOnly: e.target.checked }))} />
+                                    <input
+                                        type="checkbox"
+                                        checked={filters.flaggedOnly}
+                                        onChange={(e) => {
+                                            setFilters((p) => ({ ...p, flaggedOnly: e.target.checked }));
+                                            setStoryReportPage(1);
+                                        }}
+                                    />
                                     Chỉ hiển thị truyện đã gắn cờ
                                 </label>
                             )}
@@ -1814,22 +2017,45 @@ export default function ViolationManagement() {
                         <div className="grid grid-cols-1 lg:grid-cols-4 gap-2">
                             <input
                                 value={filters.search}
-                                onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    setFilters((p) => ({ ...p, search: v }));
+                                    setHistoryPage(1);
+                                }}
                                 placeholder="Tìm theo đối tượng, nội dung..."
                                 style={input}
                             />
-                            <select value={filters.historySource} onChange={(e) => setFilters((p) => ({ ...p, historySource: e.target.value }))} style={input}>
+                            <select
+                                value={filters.historySource}
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    setFilters((p) => ({ ...p, historySource: v }));
+                                    setHistoryPage(1);
+                                }}
+                                style={input}
+                            >
                                 {COMPLIANCE_HISTORY_SOURCE_OPTIONS.map((opt) => (
                                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                                 ))}
                             </select>
-                            <select value={filters.historyAction} onChange={(e) => setFilters((p) => ({ ...p, historyAction: e.target.value }))} style={input}>
+                            <select
+                                value={filters.historyAction}
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    setFilters((p) => ({ ...p, historyAction: v }));
+                                    setHistoryPage(1);
+                                }}
+                                style={input}
+                            >
                                 {COMPLIANCE_HISTORY_ACTION_OPTIONS.map((opt) => (
                                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                                 ))}
                             </select>
                             <button
-                                onClick={() => setFilters((p) => ({ ...p, search: '', historySource: 'ALL', historyAction: 'ALL' }))}
+                                onClick={() => {
+                                    setFilters((p) => ({ ...p, search: '', historySource: 'ALL', historyAction: 'ALL' }));
+                                    setHistoryPage(1);
+                                }}
                                 className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"
                             >
                                 <RotateCcw style={{ width: 14, height: 14 }} /> Đặt lại
@@ -1910,8 +2136,25 @@ export default function ViolationManagement() {
                             <div className="rounded-lg border border-slate-200">
                                 <div className="px-3 py-2 border-b border-slate-200 text-sm font-semibold text-slate-800">Danh sách người báo cáo</div>
                                 <div className="p-3 grid gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs font-semibold text-slate-600 whitespace-nowrap">Lọc theo xác minh:</span>
+                                        <select
+                                            value={storyContributorVerificationFilter}
+                                            onChange={(e) => setStoryContributorVerificationFilter(e.target.value)}
+                                            style={input}
+                                        >
+                                            <option value="ALL">Tất cả</option>
+                                            <option value="VERIFIED">Đã xác minh</option>
+                                            <option value="UNVERIFIED">Chưa xác minh</option>
+                                        </select>
+                                    </div>
                                     {(() => {
-                                        const contributors = collectContributors(selectedStory, storyTickets);
+                                        let contributors = collectContributors(selectedStory, storyTickets);
+                                        if (storyContributorVerificationFilter === 'VERIFIED') {
+                                            contributors = contributors.filter((c) => isContributorVerified(c));
+                                        } else if (storyContributorVerificationFilter === 'UNVERIFIED') {
+                                            contributors = contributors.filter((c) => !isContributorVerified(c));
+                                        }
                                         if (contributors.length === 0) return <div className="text-sm text-slate-500">Chưa có dữ liệu người báo cáo.</div>;
                                         return (
                                             <div className="grid gap-2">
@@ -1934,9 +2177,20 @@ export default function ViolationManagement() {
                                                                 {String(c?.description ?? c?.Description ?? '').trim() || 'Không có mô tả.'}
                                                             </div>
                                                         </div>
-                                                        <span className="px-2 py-0.5 rounded-full text-xs bg-slate-50 text-slate-700 border border-slate-200">
-                                                            Vi phạm: {reasonCodeToViLabel(c?.reasonCode ?? c?.ReasonCode ?? c?.reasonLabelVi ?? c?.ReasonLabelVi)}
-                                                        </span>
+                                                        <div className="flex flex-col items-end gap-2">
+                                                            <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={isContributorVerified(c)}
+                                                                    disabled={!canMarkContributorVerified(c) || storyContributorVerificationBusy || storyTicketLoading}
+                                                                    onChange={(e) => handleToggleStoryContributorVerification(c, e.target.checked)}
+                                                                />
+                                                                <span>{isContributorVerified(c) ? 'Đã xác minh' : 'Chưa xác minh'}</span>
+                                                            </label>
+                                                            <span className="px-2 py-0.5 rounded-full text-xs bg-slate-50 text-slate-700 border border-slate-200">
+                                                                Vi phạm: {violationCategoryReasonDisplayVi(c)}
+                                                            </span>
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </div>
@@ -2123,7 +2377,7 @@ export default function ViolationManagement() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-slate-700">
                                 <div><span className="font-semibold">Truyện:</span> {selectedComment.storyTitle || '—'}</div>
                                 <div><span className="font-semibold">Người bình luận:</span> {selectedComment.commentUserDisplayName || '—'}</div>
-                                <div><span className="font-semibold">Lý do vi phạm:</span> {reasonCodeToViLabel(selectedComment.reasonCode) || selectedComment.reasonCode || '—'}</div>
+                                <div><span className="font-semibold">Lý do vi phạm:</span> {violationCategoryReasonDisplayVi(selectedComment) || selectedComment.reasonCode || '—'}</div>
                                 <div><span className="font-semibold">Số báo cáo:</span> {selectedComment.reportCount ?? 0}</div>
                             </div>
                             {publicStoryDetailPath(selectedComment.storyId) ? (
@@ -2156,29 +2410,68 @@ export default function ViolationManagement() {
                         </div>
                         <div className="rounded-xl border border-slate-200 bg-white p-4">
                             <div className="text-sm font-semibold text-slate-900 mb-2">Danh sách người báo cáo</div>
+                            <div className="flex items-center gap-2 mb-3">
+                                <span className="text-xs font-semibold text-slate-600 whitespace-nowrap">Lọc theo xác minh:</span>
+                                <select
+                                    value={commentEvidenceVerificationFilter}
+                                    onChange={(e) => setCommentEvidenceVerificationFilter(e.target.value)}
+                                    style={input}
+                                >
+                                    <option value="ALL">Tất cả</option>
+                                    <option value="VERIFIED">Đã xác minh</option>
+                                    <option value="UNVERIFIED">Chưa xác minh</option>
+                                </select>
+                            </div>
                             {Array.isArray(selectedComment.reporterDetails) && selectedComment.reporterDetails.length > 0 ? (
                                 <div className="grid gap-2">
-                                    {selectedComment.reporterDetails.map((item, idx) => (
-                                        <div key={`${item?.reporterDisplayName || 'nguoi-bao-cao'}-${idx}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                                            <div className="flex items-center justify-between gap-3 flex-wrap">
-                                                <div className="font-semibold flex items-center gap-2">
-                                                    <span>{idx + 1}. {item?.reporterDisplayName || 'Ẩn danh'}</span>
-                                                    {reporterRoleVi(extractReporterRole(item)) ? (
-                                                        <span className="px-2 py-0.5 rounded-full text-xs bg-indigo-50 text-indigo-700 border border-indigo-100">
-                                                            {reporterRoleVi(extractReporterRole(item))}
+                                    {(() => {
+                                        const filtered = selectedComment.reporterDetails.filter((item) => {
+                                            if (commentEvidenceVerificationFilter === 'VERIFIED') return isEvidenceVerified(item);
+                                            if (commentEvidenceVerificationFilter === 'UNVERIFIED') return !isEvidenceVerified(item);
+                                            return true;
+                                        });
+                                        if (filtered.length === 0) return <div className="text-sm text-slate-500">Chưa có dữ liệu theo bộ lọc.</div>;
+                                        return filtered.map((item, idx) => (
+                                            <div
+                                                key={`${item?.reporterDisplayName || 'nguoi-bao-cao'}-${idx}`}
+                                                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                                            >
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="text-sm font-semibold text-slate-900 truncate flex items-center gap-2">
+                                                            <span>{idx + 1}. {item?.reporterDisplayName || 'Ẩn danh'}</span>
+                                                            {reporterRoleVi(extractReporterRole(item)) ? (
+                                                                <span className="px-2 py-0.5 rounded-full text-xs bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                                                    {reporterRoleVi(extractReporterRole(item))}
+                                                                </span>
+                                                            ) : null}
+                                                        </div>
+                                                        <div className="text-xs text-slate-500 mt-0.5">
+                                                            <span className="font-semibold">Thời điểm báo cáo:</span> {formatDate(item?.reportedAtUtc)}
+                                                        </div>
+                                                        <div className="text-sm text-slate-700 mt-1 whitespace-pre-wrap">
+                                                            <span className="font-semibold">Nội dung báo cáo: </span>
+                                                            {String(item?.description ?? '').trim() || 'Không có mô tả.'}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-col items-end gap-2">
+                                                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={isEvidenceVerified(item)}
+                                                                disabled={commentEvidenceVerificationBusy}
+                                                                onChange={(e) => handleToggleCommentEvidenceVerification(item, e.target.checked)}
+                                                            />
+                                                            <span>{isEvidenceVerified(item) ? 'Đã xác minh' : 'Chưa xác minh'}</span>
+                                                        </label>
+                                                        <span className="px-2 py-0.5 rounded-full text-xs bg-slate-50 text-slate-700 border border-slate-200">
+                                                            Vi phạm: {violationCategoryReasonDisplayVi(item)}
                                                         </span>
-                                                    ) : null}
+                                                    </div>
                                                 </div>
-                                                <div className="text-xs text-slate-500"><span className="font-semibold">Thời điểm báo cáo:</span> {formatDate(item?.reportedAtUtc)}</div>
                                             </div>
-                                            <div className="mt-1 whitespace-pre-wrap"><span className="font-semibold">Nội dung báo cáo: </span>{String(item?.description ?? '').trim() || 'Không có mô tả.'}</div>
-                                            <div className="mt-2">
-                                                <span className="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-700 border border-slate-200">
-                                                    Vi phạm: {reasonCodeToViLabel(item?.reasonCode ?? item?.ReasonCode ?? item?.reasonLabelVi ?? item?.ReasonLabelVi)}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    ))}
+                                        ));
+                                    })()}
                                 </div>
                             ) : Array.isArray(selectedComment.reporterDisplayNames) && selectedComment.reporterDisplayNames.length > 0 ? (
                                 <div className="grid gap-2">
@@ -2622,4 +2915,4 @@ const td = { padding: '0.75rem', color: '#334155', verticalAlign: 'top', fontSiz
 const input = { border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.6rem 0.75rem', fontSize: '0.875rem', color: '#0f172a', background: '#f8fafc' };
 const btn = { display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', borderRadius: 8, padding: '0.4rem 0.7rem', cursor: 'pointer', whiteSpace: 'nowrap' };
 const menuBtn = { display: 'block', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', color: '#334155', borderRadius: 8, padding: '0.5rem 0.6rem', cursor: 'pointer', fontSize: '0.84rem' };
-const iconBtn = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, border: '1px solid #dbe2ea', background: '#fff', color: '#64748b', borderRadius: 10, cursor: 'pointer' };
+const _iconBtn = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, border: '1px solid #dbe2ea', background: '#fff', color: '#64748b', borderRadius: 10, cursor: 'pointer' };
