@@ -1,4 +1,4 @@
-﻿using DataAccessObjects.DAOs;
+using DataAccessObjects.DAOs;
 using Repositories;
 
 namespace Services.Implementations
@@ -7,7 +7,10 @@ namespace Services.Implementations
     public static class ModeratorReviewSlaHelper
     {
         public const int PolicyDaysAfterAuthorSubmit = 7;
-        private const double FallbackWarningDaysLeft = 2;
+        /// <summary>Cảnh báo nhẹ khi còn &lt; 3 ngày tới hạn duyệt (review_deadline_at).</summary>
+        private const double DeadlineWarningHours = 72;
+        /// <summary>Cảnh báo gấp khi còn ≤ 24 giờ.</summary>
+        private const double DeadlineCriticalHours = 24;
 
         public static DateTime NormalizeToUtc(DateTime value) => value.Kind switch
         {
@@ -61,10 +64,16 @@ namespace Services.Implementations
             return null;
         }
 
-        /// <summary>Mức cảnh báo theo thời gian đã chờ kể từ mốc gửi. Không có mốc: dùng hạn fallback (claim / ước lượng).</summary>
+        /// <summary>
+        /// Mức cảnh báo SLA. Ưu tiên <paramref name="fallbackDeadlineUtc"/> (hạn duyệt moderator / review_deadline_at hoặc gợi ý +7 ngày)
+        /// khi có — khớp quản lý xuất bản; chỉ dùng mốc tác giả gửi khi không có hạn fallback.
+        /// </summary>
         public static string ComputeSlaTimeStatus(DateTime? authorSubmittedUtc, DateTime? fallbackDeadlineUtc)
         {
             var now = DateTime.UtcNow;
+            if (fallbackDeadlineUtc.HasValue)
+                return ComputeTimeStatusFromDeadlineOnly(fallbackDeadlineUtc, now);
+
             if (authorSubmittedUtc.HasValue)
             {
                 var elapsed = now - NormalizeToUtc(authorSubmittedUtc.Value);
@@ -77,7 +86,7 @@ namespace Services.Implementations
                 return "OnTime";
             }
 
-            return ComputeTimeStatusFromDeadlineOnly(fallbackDeadlineUtc, now);
+            return "OnTime";
         }
 
         private static string ComputeTimeStatusFromDeadlineOnly(DateTime? deadlineUtc, DateTime nowUtc)
@@ -88,10 +97,11 @@ namespace Services.Implementations
             if (nowUtc > deadline)
                 return "Overdue";
             var hoursLeft = (deadline - nowUtc).TotalHours;
-            if (hoursLeft <= 24)
+            if (hoursLeft <= DeadlineCriticalHours)
                 return "Critical";
-            var daysLeft = (deadline - nowUtc).TotalDays;
-            return daysLeft <= FallbackWarningDaysLeft ? "Warning" : "OnTime";
+            if (hoursLeft < DeadlineWarningHours)
+                return "Warning";
+            return "OnTime";
         }
     }
 }

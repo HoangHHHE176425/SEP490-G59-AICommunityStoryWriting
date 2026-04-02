@@ -179,6 +179,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [escalateOpen, setEscalateOpen] = useState(false);
     const [escalateKind, setEscalateKind] = useState('EXTEND_DEADLINE');
     const [escalateReason, setEscalateReason] = useState('');
+    const [escalateReasonError, setEscalateReasonError] = useState('');
     const [escalateProposedDeadline, setEscalateProposedDeadline] = useState('');
     const [escalateSubmitting, setEscalateSubmitting] = useState(false);
     /** Đơn escalation gắn STORY (vd. trả cả truyện về hàng đợi) — tách khỏi assignment theo từng chương. */
@@ -446,12 +447,18 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
 
     const handleSubmitEscalation = async () => {
         const t = escalationTarget();
-        if (!t || !escalateReason.trim()) {
-            showToast('Vui lòng nhập lý do.', 'error');
+        setEscalateReasonError('');
+        if (!t) {
+            showToast('Không xác định được mục gửi đơn.', 'error');
             return;
         }
-        if (escalateReason.trim().length < 10) {
-            showToast('Lý do báo cáo cần ít nhất 10 ký tự (theo quy định hệ thống).', 'error');
+        const trimmedReason = escalateReason.trim();
+        if (!trimmedReason) {
+            setEscalateReasonError('Vui lòng nhập lý do.');
+            return;
+        }
+        if (trimmedReason.length < 10) {
+            setEscalateReasonError('Lý do cần ít nhất 10 ký tự (theo quy định hệ thống).');
             return;
         }
         if (escalateKind === 'EXTEND_DEADLINE') {
@@ -473,12 +480,13 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 targetType: t.targetType,
                 targetId: t.targetId,
                 requestKind: escalateKind,
-                reason: escalateReason.trim(),
+                reason: trimmedReason,
                 proposedDeadlineAt: escalateKind === 'EXTEND_DEADLINE' ? localDateTimeInputToIsoUtc(escalateProposedDeadline) : null,
             });
             showToast('Đã gửi đơn lên quản trị.', 'success');
             setEscalateOpen(false);
             setEscalateReason('');
+            setEscalateReasonError('');
             setEscalateProposedDeadline('');
             const dto = await getReviewAssignmentSelf(t.targetType, t.targetId);
             setReviewAssignment(dto);
@@ -972,6 +980,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                             type="button"
                                             onClick={() => {
                                                 setEscalateKind('EXTEND_DEADLINE');
+                                                setEscalateReasonError('');
                                                 setEscalateOpen(true);
                                             }}
                                             style={{
@@ -1833,7 +1842,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         zIndex: 10001,
                         padding: '1rem',
                     }}
-                    onClick={() => !escalateSubmitting && setEscalateOpen(false)}
+                    onClick={() => {
+                        if (escalateSubmitting) return;
+                        setEscalateReasonError('');
+                        setEscalateOpen(false);
+                    }}
                 >
                     <div
                         style={{
@@ -1904,30 +1917,54 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 </div>
                             ) : null}
                         </div>
-                        <label style={{ display: 'block', marginBottom: '1rem', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
-                            Lý do <span style={{ color: '#ef4444' }}>*</span>
-                            <textarea
-                                value={escalateReason}
-                                onChange={(e) => setEscalateReason(e.target.value)}
-                                rows={4}
-                                placeholder="Mô tả lý do (tối thiểu 10 ký tự)..."
-                                style={{
-                                    display: 'block',
-                                    width: '100%',
-                                    marginTop: '0.35rem',
-                                    padding: '0.5rem',
-                                    borderRadius: '8px',
-                                    border: '1px solid #cbd5e1',
-                                    fontFamily: 'inherit',
-                                    resize: 'vertical',
-                                }}
-                            />
-                        </label>
+                        <div style={{ marginBottom: '1rem' }}>
+                            <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
+                                Lý do <span style={{ color: '#ef4444' }}>*</span>
+                                <textarea
+                                    value={escalateReason}
+                                    onChange={(e) => {
+                                        setEscalateReason(e.target.value);
+                                        if (escalateReasonError) setEscalateReasonError('');
+                                    }}
+                                    rows={4}
+                                    placeholder="Mô tả lý do (tối thiểu 10 ký tự)..."
+                                    aria-invalid={!!escalateReasonError}
+                                    style={{
+                                        display: 'block',
+                                        width: '100%',
+                                        marginTop: '0.35rem',
+                                        padding: '0.5rem',
+                                        borderRadius: '8px',
+                                        border: escalateReasonError ? '2px solid #ef4444' : '1px solid #cbd5e1',
+                                        outline: escalateReasonError ? 'none' : undefined,
+                                        fontFamily: 'inherit',
+                                        resize: 'vertical',
+                                    }}
+                                />
+                            </label>
+                            {escalateReasonError ? (
+                                <div
+                                    role="alert"
+                                    style={{
+                                        marginTop: '0.5rem',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 600,
+                                        color: '#b91c1c',
+                                        lineHeight: 1.45,
+                                    }}
+                                >
+                                    {escalateReasonError}
+                                </div>
+                            ) : null}
+                        </div>
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
                             <button
                                 type="button"
                                 disabled={escalateSubmitting}
-                                onClick={() => setEscalateOpen(false)}
+                                onClick={() => {
+                                    setEscalateReasonError('');
+                                    setEscalateOpen(false);
+                                }}
                                 style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer' }}
                             >
                                 Đóng

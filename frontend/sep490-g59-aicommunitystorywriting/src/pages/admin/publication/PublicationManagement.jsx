@@ -5,7 +5,7 @@ import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories, getStoryById } from '../../../api/story/storyApi';
 import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, getRejectedChapterVersionsHistory, claimStory, claimChapter, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
 import { getProfileByUserId } from '../../../api/account/accountApi';
-import { reviewDeadlineAfterDaysUtc, localDateTimeInputToIsoUtc, worstTimeStatus } from '../../../utils/moderatorReviewSla';
+import { reviewDeadlineAfterDaysUtc, localDateTimeInputToIsoUtc, worstTimeStatus, pickReviewDeadlineIso } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 import { getActivePolicy } from '../../../api/policy/policyApi';
@@ -288,6 +288,7 @@ function mapPendingStoryToItem(s) {
         isClaimedByMe: s.isClaimedByMe ?? s.IsClaimedByMe ?? false,
         claimedByDisplayName: s.claimedByDisplayName ?? s.ClaimedByDisplayName ?? null,
         claimedAt: s.claimedAt ?? s.ClaimedAt ?? null,
+        deadlineAt: pickReviewDeadlineIso(s),
         pendingSince: s.pendingSince ?? s.PendingSince ?? null,
         timeStatus: s.timeStatus ?? s.TimeStatus ?? null,
         hasPendingEscalation: s.hasPendingEscalation ?? s.HasPendingEscalation ?? false,
@@ -376,6 +377,7 @@ function mapPendingChapterToItem(c) {
         isClaimedByMe: c.isClaimedByMe ?? c.IsClaimedByMe ?? false,
         claimedByDisplayName: c.claimedByDisplayName ?? c.ClaimedByDisplayName ?? null,
         claimedAt: c.claimedAt ?? c.ClaimedAt ?? null,
+        deadlineAt: pickReviewDeadlineIso(c),
         isEditRequest,
         pendingSince: c.pendingSince ?? c.PendingSince ?? null,
         timeStatus: c.timeStatus ?? c.TimeStatus ?? null,
@@ -793,6 +795,18 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                             .filter((t) => Number.isFinite(t));
                         const slaPendingSince = times.length ? new Date(Math.min(...times)).toISOString() : null;
                         const slaTimeStatus = worstTimeStatus(g.chapters.map((c) => c.timeStatus).filter(Boolean));
+                        const deadlineTimes = g.chapters
+                            .map((c) => pickReviewDeadlineIso(c))
+                            .filter(Boolean)
+                            .map((d) => new Date(d).getTime())
+                            .filter((t) => Number.isFinite(t));
+                        const storyIso = g.storyItem ? pickReviewDeadlineIso(g.storyItem) : null;
+                        const storyDl = storyIso ? new Date(storyIso).getTime() : NaN;
+                        const allDeadlineTimes = [...deadlineTimes, ...(Number.isFinite(storyDl) ? [storyDl] : [])];
+                        const groupDeadlineAt =
+                            allDeadlineTimes.length > 0
+                                ? new Date(Math.min(...allDeadlineTimes)).toISOString()
+                                : null;
                         const hasPendingEscalation = g.chapters.some((c) => c.hasPendingEscalation);
                         const adminRej = pickGroupAdminRejectedRelease(g.chapters, g.storyItem);
                         const adminExt = pickGroupAdminRejectedExtend(g.chapters, g.storyItem);
@@ -809,6 +823,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                             chapters: g.chapters,
                             representativePublication: rep,
                             chapterCount: g.chapters.length,
+                            deadlineAt: groupDeadlineAt,
                             slaPendingSince,
                             slaTimeStatus,
                             hasPendingEscalation,

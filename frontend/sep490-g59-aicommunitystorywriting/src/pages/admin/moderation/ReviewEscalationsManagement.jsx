@@ -19,7 +19,7 @@ import {
 import { getChapterReviewContent } from '../../../api/moderator/moderatorApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
 import { localDateTimeInputToIsoUtc } from '../../../utils/moderatorReviewSla';
-import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
+import { formatApiDateTimeVietnamVi } from '../../../utils/apiDateTime';
 
 /** Khi từ chối đơn escalation: ghi chú admin tối thiểu (ký tự, sau trim) — đồng bộ BE ReviewEscalationService. */
 const ADMIN_REJECT_NOTE_MIN_LENGTH = 10;
@@ -131,22 +131,24 @@ function kindLong(k) {
     return kindShort(k);
 }
 
-function formatUtcPlus7Vi(value) {
-    if (value == null || value === '') return '—';
-    const raw = String(value).trim().replace(' ', 'T');
-    const withUtc = /(Z|[+-]\d{2}:\d{2}|[+-]\d{4})$/i.test(raw) ? raw : `${raw}Z`;
-    const d = new Date(withUtc);
-    if (Number.isNaN(d.getTime())) return '—';
-    const vi = new Date(d.getTime() + 7 * 60 * 60 * 1000);
-    return vi.toLocaleString('vi-VN', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-    });
+/** Đích đơn escalation (STORY/CHAPTER) — nhãn tiếng Việt cho cột Loại. */
+function targetTypeVi(row) {
+    const tt = String(row?.targetType ?? row?.TargetType ?? '').trim().toUpperCase();
+    const map = {
+        STORY: 'Truyện',
+        CHAPTER: 'Chương',
+        MODERATOR: 'Kiểm duyệt viên',
+    };
+    return map[tt] || (tt || '—');
+}
+
+/** Nickname/email từ API — chuẩn hóa nhãn tiếng Việt khi hệ thống dùng từ tiếng Anh. */
+function senderDisplayNameVi(row) {
+    const raw = row?.senderName ?? row?.SenderName;
+    if (raw == null || String(raw).trim() === '') return '—';
+    const n = String(raw).trim();
+    if (/^moderator$/i.test(n)) return 'Kiểm duyệt viên';
+    return n;
 }
 
 function urgencyBadge(tier) {
@@ -1028,7 +1030,7 @@ export function ReviewEscalationsManagement() {
                                                                         : 'Trả đơn truyện về hàng đợi'}
                                                                 </td>
                                                                 <td style={{ ...tdBase, maxWidth: 260, fontSize: '0.75rem' }}>{truncate(row.message ?? '', 180) || '—'}</td>
-                                                                <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.resolvedAtUtc ?? row.resolved_at)}</td>
+                                                                <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeVietnamVi(row.resolvedAtUtc ?? row.resolved_at)}</td>
                                                                 <td style={{ ...tdBase, maxWidth: 240, fontSize: '0.75rem' }}>{truncate(note, 180) || '—'}</td>
                                                             </tr>
                                                         );
@@ -1055,13 +1057,13 @@ export function ReviewEscalationsManagement() {
                                                             return (
                                                                 <tr key={id}>
                                                                     <td style={tdBase}>{historyResultBadge(row.status ?? row.Status)}</td>
-                                                                    <td style={tdBase}>{row.targetType ?? row.TargetType}</td>
+                                                                    <td style={tdBase}>{targetTypeVi(row)}</td>
                                                                     <td style={tdBase}><TargetTitleCell row={row} /></td>
-                                                                    <td style={tdBase}>{row.senderName ?? row.SenderName ?? '—'}</td>
+                                                                    <td style={tdBase}>{senderDisplayNameVi(row)}</td>
                                                                     <td style={tdBase}>{kindShort(row.requestKind ?? row.RequestKind)}</td>
                                                                     <td style={tdBase}>{row.resolverName ?? row.ResolverName ?? '—'}</td>
-                                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatUtcPlus7Vi(row.resolvedAt ?? row.ResolvedAt)}</td>
-                                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeLocalVi(row.confirmedDeadlineAt ?? row.ConfirmedDeadlineAt)}</td>
+                                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeVietnamVi(row.resolvedAt ?? row.ResolvedAt)}</td>
+                                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{formatApiDateTimeVietnamVi(row.confirmedDeadlineAt ?? row.ConfirmedDeadlineAt)}</td>
                                                                     <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{note}</td>
                                                                     <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 200 }}>{reason || '—'}</td>
                                                                 </tr>
@@ -1115,7 +1117,7 @@ export function ReviewEscalationsManagement() {
                                                                 : 'Trả đơn truyện về hàng đợi'}
                                                         </td>
                                                         <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
-                                                            {formatApiDateTimeLocalVi(row.createdAtUtc ?? row.created_at)}
+                                                            {formatApiDateTimeVietnamVi(row.createdAtUtc ?? row.created_at)}
                                                         </td>
                                                         <td style={{ ...tdBase, maxWidth: 280, wordBreak: 'break-word', fontSize: '0.75rem' }}>
                                                             {row.message || '—'}
@@ -1144,12 +1146,12 @@ export function ReviewEscalationsManagement() {
                                             return (
                                                 <tr key={id}>
                                                     <td style={tdBase}>{urgencyBadge(row.urgencyTier ?? row.UrgencyTier)}</td>
-                                                    <td style={tdBase}>{row.targetType ?? row.TargetType}</td>
+                                                    <td style={tdBase}>{targetTypeVi(row)}</td>
                                                     <td style={tdBase}><TargetTitleCell row={row} /></td>
-                                                    <td style={tdBase}>{row.senderName ?? row.SenderName ?? '—'}</td>
+                                                    <td style={tdBase}>{senderDisplayNameVi(row)}</td>
                                                     <td style={tdBase}>{kindShort(row.requestKind ?? row.RequestKind)}</td>
                                                     <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>
-                                                        {formatUtcPlus7Vi(
+                                                        {formatApiDateTimeVietnamVi(
                                                             row.createdAtUtc ??
                                                             row.CreatedAtUtc ??
                                                             row.created_at ??
@@ -1158,7 +1160,7 @@ export function ReviewEscalationsManagement() {
                                                         )}
                                                     </td>
                                                     <td style={{ ...tdBase, maxWidth: 220, wordBreak: 'break-word', fontSize: '0.75rem' }}>{row.reason ?? row.Reason ?? '—'}</td>
-                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(row.proposedDeadlineAt ?? row.ProposedDeadlineAt)}</td>
+                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeVietnamVi(row.proposedDeadlineAt ?? row.ProposedDeadlineAt)}</td>
                                                     <td style={tdBase}>
                                                         <button
                                                             type="button"
@@ -1428,13 +1430,13 @@ export function ReviewEscalationsManagement() {
                                                     <td style={{ ...tdBase, fontSize: '0.75rem', color: T.slate }} title={String(id)}>{idShort}</td>
                                                     <td style={tdBase}>{logStatusBadge(x.status ?? x.Status)}</td>
                                                     <td style={tdBase}>{urgencyBadge(x.urgencyTier ?? x.UrgencyTier)}</td>
-                                                    <td style={tdBase}>{x.targetType ?? x.TargetType}</td>
+                                                    <td style={tdBase}>{targetTypeVi(x)}</td>
                                                     <td style={tdBase}><TargetTitleCell row={x} /></td>
                                                     <td style={tdBase}>{kindShort(x.requestKind ?? x.RequestKind)}</td>
-                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{x.senderName ?? x.SenderName ?? '—'}</td>
-                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeLocalVi(x.createdAt ?? x.CreatedAt)}</td>
+                                                    <td style={{ ...tdBase, fontSize: '0.75rem' }}>{senderDisplayNameVi(x)}</td>
+                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeVietnamVi(x.createdAt ?? x.CreatedAt)}</td>
                                                     <td style={{ ...tdBase, fontSize: '0.75rem' }}>{x.resolverName ?? x.ResolverName ?? '—'}</td>
-                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatUtcPlus7Vi(x.resolvedAt ?? x.ResolvedAt)}</td>
+                                                    <td style={{ ...tdBase, fontSize: '0.75rem', whiteSpace: 'nowrap' }}>{formatApiDateTimeVietnamVi(x.resolvedAt ?? x.ResolvedAt)}</td>
                                                     <td style={{ ...tdBase, fontSize: '0.75rem', maxWidth: 180 }}>{reason || '—'}</td>
                                                 </tr>
                                             );
@@ -1495,12 +1497,12 @@ export function ReviewEscalationsManagement() {
                                 <p style={{ margin: '0 0 6px' }}>
                                     <strong>{kindLong(resolveRow.requestKind ?? resolveRow.RequestKind)}</strong>
                                     {' — '}
-                                    {resolveRow.targetType ?? resolveRow.TargetType}
+                                    {targetTypeVi(resolveRow)}
                                     {' — '}
                                     <strong>{resolveRow.targetTitle ?? resolveRow.TargetTitle ?? resolveRow.targetId ?? resolveRow.TargetId}</strong>
                                 </p>
                                 <p style={{ margin: 0, color: T.slate }}>
-                                    Người gửi: {resolveRow.senderName ?? resolveRow.SenderName ?? '—'} · Thời gian gửi: {formatUtcPlus7Vi(
+                                    Người gửi: {senderDisplayNameVi(resolveRow)} · Thời gian gửi: {formatApiDateTimeVietnamVi(
                                         resolveRow.createdAtUtc ??
                                         resolveRow.CreatedAtUtc ??
                                         resolveRow.created_at ??
@@ -1613,10 +1615,10 @@ export function ReviewEscalationsManagement() {
                                                                             {wc != null && wc !== '' ? Number(wc).toLocaleString('vi-VN') : '—'}
                                                                         </td>
                                                                         <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
-                                                                            {formatApiDateTimeLocalVi(ps)}
+                                                                            {formatApiDateTimeVietnamVi(ps)}
                                                                         </td>
                                                                         <td style={{ ...tdBase, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
-                                                                            {formatApiDateTimeLocalVi(dl)}
+                                                                            {formatApiDateTimeVietnamVi(dl)}
                                                                         </td>
                                                                         <td style={{ ...tdBase, fontSize: '0.72rem', maxWidth: 140, wordBreak: 'break-word' }}>
                                                                             {claim || '—'}
@@ -1742,9 +1744,9 @@ export function ReviewEscalationsManagement() {
                                             cursor: 'default',
                                         }}
                                     >
-                                        {formatApiDateTimeLocalVi(resolveRow.proposedDeadlineAt ?? resolveRow.ProposedDeadlineAt)}
+                                        {formatApiDateTimeVietnamVi(resolveRow.proposedDeadlineAt ?? resolveRow.ProposedDeadlineAt)}
                                     </div>
-                                    <p style={{ fontSize: '0.75rem', color: T.slate, margin: '6px 0 0' }}>Theo hạn moderator đề xuất — không chỉnh sửa.</p>
+                                    <p style={{ fontSize: '0.75rem', color: T.slate, margin: '6px 0 0' }}>Theo hạn kiểm duyệt viên đề xuất — không chỉnh sửa.</p>
                                 </div>
                             )}
 
@@ -1844,7 +1846,7 @@ export function ReviewEscalationsManagement() {
                                 <p style={{ margin: 0, color: T.slate }}>
                                     Người gửi: {complianceResolveRow.requesterDisplayName ?? complianceResolveRow.requesterEmail ?? '—'}
                                     {' · '}
-                                    Thời gian gửi: {formatApiDateTimeLocalVi(
+                                    Thời gian gửi: {formatApiDateTimeVietnamVi(
                                         complianceResolveRow.createdAtUtc ??
                                         complianceResolveRow.CreatedAtUtc ??
                                         complianceResolveRow.created_at ??

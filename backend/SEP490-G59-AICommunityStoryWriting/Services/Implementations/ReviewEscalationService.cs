@@ -401,7 +401,7 @@ namespace Services.Implementations
 
             var title = ResolveTargetTitle(r.target_type, r.target_id);
             var now = DateTime.UtcNow;
-            var created = r.created_at.Kind == DateTimeKind.Utc ? r.created_at : r.created_at.ToUniversalTime();
+            var created = ToUtcInstantFromDb(r.created_at);
             var authorSubmitted = GetAuthorSubmissionUtcForReviewTarget(r.target_type, r.target_id);
 
             List<Guid>? releaseAffectedChapterIds = null;
@@ -430,7 +430,7 @@ namespace Services.Implementations
                 SenderName = NotificationDAO.GetUserDisplayName(r.sender_id),
                 CurrentAssignmentDeadlineAt = AsUtcForJson(assignmentDeadline),
                 AuthorSubmittedAtUtc = AsUtcForJson(authorSubmitted),
-                UrgencyTier = ComputeUrgencyTier(now, assignmentDeadline, created, r.status, r.request_kind),
+                UrgencyTier = ResolveListUrgencyTier(r, now, assignmentDeadline, created),
                 ResolverId = r.resolver_id,
                 ResolverName = r.resolver_id.HasValue ? NotificationDAO.GetUserDisplayName(r.resolver_id.Value) : null,
                 ResolverNote = r.resolver_note,
@@ -441,13 +441,29 @@ namespace Services.Implementations
         }
 
         /// <summary>Chuẩn hóa UTC + DateTimeKind.Utc để System.Text.Json ghi ISO kèm Z.</summary>
-        private static DateTime AsUtcForJson(DateTime dt)
-        {
-            var utc = dt.Kind == DateTimeKind.Utc ? dt : dt.ToUniversalTime();
-            return DateTime.SpecifyKind(utc, DateTimeKind.Utc);
-        }
+        private static DateTime AsUtcForJson(DateTime dt) =>
+            DateTime.SpecifyKind(ToUtcInstantFromDb(dt), DateTimeKind.Utc);
 
         private static DateTime? AsUtcForJson(DateTime? dt) => dt.HasValue ? AsUtcForJson(dt.Value) : null;
+
+        /// <summary>EF đọc datetime2 thường trả về Unspecified; dữ liệu escalation/assignment lưu theo UTC — không dùng ToUniversalTime() (sẽ lệch theo múi giờ máy chủ).</summary>
+        private static DateTime ToUtcInstantFromDb(DateTime dt) => dt.Kind switch
+        {
+            DateTimeKind.Utc => dt,
+            DateTimeKind.Local => dt.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc)
+        };
+
+        private static string ResolveListUrgencyTier(
+            review_escalation_requests r,
+            DateTime nowUtc,
+            DateTime? assignmentDeadline,
+            DateTime createdAtUtc)
+        {
+            if (!string.IsNullOrWhiteSpace(r.sender_urgency_tier))
+                return EscalationUrgencyHelper.Normalize(r.sender_urgency_tier);
+            return ComputeUrgencyTier(nowUtc, assignmentDeadline, createdAtUtc, r.status, r.request_kind);
+        }
 
         /// <summary>Mốc gửi duyệt: submitted_for_review_at (fallback ước lượng nếu chưa có cột / dữ liệu cũ).</summary>
         private DateTime? GetAuthorSubmissionUtcForReviewTarget(string targetType, Guid targetId) =>
@@ -468,7 +484,7 @@ namespace Services.Implementations
             if (string.Equals(requestKind, ReviewEscalationDAO.KindRelease, StringComparison.OrdinalIgnoreCase))
                 return "CRITICAL";
             var deadline = assignmentDeadline ?? createdAtUtc.AddDays(7);
-            var dl = deadline.Kind == DateTimeKind.Utc ? deadline : deadline.ToUniversalTime();
+            var dl = ToUtcInstantFromDb(deadline);
             if (nowUtc > dl)
                 return "CRITICAL";
             if ((nowUtc - createdAtUtc).TotalHours > 48)

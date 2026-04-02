@@ -90,6 +90,94 @@ export function policySuggestedEndUtc(claimedAtIso) {
     return new Date(t + POLICY_REVIEW_DAYS * 86400000);
 }
 
+const MS_PER_DAY = 86400000;
+
+/**
+ * Lấy chuỗi deadline từ item API (camelCase / PascalCase / snake_case).
+ * @param {Record<string, unknown>|null|undefined} obj
+ * @returns {string|null}
+ */
+export function pickReviewDeadlineIso(obj) {
+    if (obj == null || typeof obj !== 'object') return null;
+    const v = obj.deadlineAt ?? obj.DeadlineAt ?? obj.deadline_at;
+    if (v == null || v === '') return null;
+    const s = typeof v === 'string' ? v.trim() : v instanceof Date ? v.toISOString() : String(v);
+    const t = new Date(s).getTime();
+    return Number.isFinite(t) ? s : null;
+}
+
+/**
+ * Đếm ngược tới mốc deadline (ISO UTC, khớp review_deadline_at từ BE).
+ * @param {string|null|undefined} deadlineIsoUtc
+ * @param {Date} [now]
+ * @returns {string|null} Ví dụ "5 ngày 3 giờ 12 phút", "3 giờ 12 phút", "45 phút", "quá 1 ngày 2 giờ 5 phút".
+ */
+export function formatRemainingUntilUtcDeadline(deadlineIsoUtc, now = new Date()) {
+    if (deadlineIsoUtc == null || String(deadlineIsoUtc).trim() === '') return null;
+    const end = new Date(deadlineIsoUtc).getTime();
+    if (!Number.isFinite(end)) return null;
+    const ms = end - now.getTime();
+    if (ms <= 0) {
+        const lateMin = Math.max(0, Math.floor(-ms / 60000));
+        const overD = Math.floor(lateMin / (60 * 24));
+        const overH = Math.floor((lateMin % (60 * 24)) / 60);
+        const overM = lateMin % 60;
+        if (overD >= 1) return `${overD} ngày ${overH} giờ ${overM} phút`;
+        if (overH >= 1) return `${overH} giờ ${overM} phút`;
+        return `${Math.max(1, lateMin)} phút`;
+    }
+    const totalMin = Math.floor(ms / 60000);
+    const d = Math.floor(totalMin / (60 * 24));
+    const h = Math.floor((totalMin % (60 * 24)) / 60);
+    const m = totalMin % 60;
+    if (d >= 1) return `${d} ngày ${h} giờ ${m} phút`;
+    if (h >= 1) return `${h} giờ ${m} phút`;
+    if (totalMin >= 1) return `${m} phút`;
+    return 'dưới 1 phút';
+}
+
+/**
+ * Badge theo review_deadline_at: &lt; 1 ngày = đỏ; &lt; 3 ngày = cảnh báo nhẹ; còn lại xanh; quá hạn = đỏ đậm.
+ * @param {string|null|undefined} deadlineIsoUtc
+ * @param {Date} [now]
+ * @returns {{ bg: string, color: string, label: string } | null}
+ */
+export function getReviewDeadlineBadge(deadlineIsoUtc, now = new Date()) {
+    if (deadlineIsoUtc == null || String(deadlineIsoUtc).trim() === '') return null;
+    const end = new Date(deadlineIsoUtc).getTime();
+    if (!Number.isFinite(end)) return null;
+    const ms = end - now.getTime();
+    const remain = formatRemainingUntilUtcDeadline(deadlineIsoUtc, now);
+    if (remain == null) return null;
+
+    if (ms <= 0) {
+        return {
+            bg: '#fee2e2',
+            color: '#991b1b',
+            label: `Đã quá hạn (${remain})`,
+        };
+    }
+    if (ms < MS_PER_DAY) {
+        return {
+            bg: '#fee2e2',
+            color: '#991b1b',
+            label: `Còn ${remain}`,
+        };
+    }
+    if (ms < 3 * MS_PER_DAY) {
+        return {
+            bg: '#fef3c7',
+            color: '#92400e',
+            label: `Còn ${remain}`,
+        };
+    }
+    return {
+        bg: '#d1fae5',
+        color: '#065f46',
+        label: `Còn ${remain}`,
+    };
+}
+
 /** Style badge theo TimeStatus (đồng bộ tone với admin). */
 export function getSlaBadgeStyle(timeStatus) {
     const n = normalizeTimeStatus(timeStatus);
@@ -97,8 +185,8 @@ export function getSlaBadgeStyle(timeStatus) {
     const map = {
         ontime: { bg: '#d1fae5', color: '#065f46', label: 'Trong hạn' },
         warning: { bg: '#fef3c7', color: '#92400e', label: 'Cần chú ý' },
-        critical: { bg: '#ffedd5', color: '#9a3412', label: 'Gấp' },
-        overdue: { bg: '#fee2e2', color: '#991b1b', label: 'Quá hạn chính sách' },
+        critical: { bg: '#fee2e2', color: '#991b1b', label: 'Sắp hết hạn' },
+        overdue: { bg: '#fee2e2', color: '#991b1b', label: 'Quá hạn' },
     };
     return map[key] ?? { bg: '#f1f5f9', color: '#475569', label: n || '—' };
 }

@@ -16,7 +16,7 @@ namespace Services.DTOs.Moderation
         public DateTime? CurrentAssignmentDeadlineAt { get; set; }
         /// <summary>Thời điểm tác giả gửi duyệt (UTC) — hạn giao lại không được sớm hơn mốc này.</summary>
         public DateTime? AuthorSubmittedAtUtc { get; set; }
-        /// <summary>CRITICAL | HIGH | STANDARD — mức cần xử lý gấp (tính khi còn PENDING)</summary>
+        /// <summary>CRITICAL | HIGH | STANDARD — lấy từ sender_urgency_tier khi có; bản ghi cũ (null) dùng mức suy ra từ hạn assignment / tuổi đơn.</summary>
         public string UrgencyTier { get; set; } = null!;
 
         public Guid? ResolverId { get; set; }
