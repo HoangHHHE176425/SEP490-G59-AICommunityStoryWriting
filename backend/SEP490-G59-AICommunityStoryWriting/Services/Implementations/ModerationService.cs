@@ -66,6 +66,7 @@ namespace Services.Implementations
                 return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
 
             _reviewDeadlineForfeiture.ProcessOverdueClaims();
+            RunBannedAuthorClaimSweepIfNeeded();
 
             var filter = (claimFilter ?? "all").Trim().ToUpperInvariant();
             List<Guid>? excludeStoryIds = null;
@@ -101,7 +102,8 @@ namespace Services.Implementations
                 SortOrder = sortOrderNorm,
                 CategoryIds = categoryIdsFilter != null ? categoryIdsFilter.ToList() : null,
                 ExcludeStoryIds = excludeStoryIds != null && excludeStoryIds.Count > 0 ? excludeStoryIds : null,
-                IncludeStoryIds = includeStoryIds != null && includeStoryIds.Count > 0 ? includeStoryIds : null
+                IncludeStoryIds = includeStoryIds != null && includeStoryIds.Count > 0 ? includeStoryIds : null,
+                ExcludeBannedAuthors = moderatorId.HasValue
             };
             var result = _storyService.GetAll(query);
             var pendingEscalationStoryIds = ReviewEscalationDAO.GetPendingTargetIds(ReviewAssignmentDAO.TargetTypeStory);
@@ -148,6 +150,21 @@ namespace Services.Implementations
             string.Equals(sortBy, "deadline_at", StringComparison.OrdinalIgnoreCase)
             || !string.IsNullOrWhiteSpace(timeStatusFilter);
 
+        /// <summary>Hủy claim moderator trên truyện/chương của tác giả BANNED + ghi moderation_logs; gọi trước khi build hàng đợi.</summary>
+        private void RunBannedAuthorClaimSweepIfNeeded()
+        {
+            try
+            {
+                var n = BannedAuthorModerationSweep.Run();
+                if (n > 0)
+                    _ = _moderationHubNotifier?.NotifyPendingListChangedAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "BannedAuthorModerationSweep failed");
+            }
+        }
+
         private void EnrichPendingStoryItem(StoryListItemDto item, Guid? moderatorId, HashSet<Guid> pendingEscalationStoryIds)
         {
             var authorSubmitted = ModeratorReviewSlaHelper.GetAuthorSubmittedUtc(
@@ -176,6 +193,7 @@ namespace Services.Implementations
                 return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
 
             _reviewDeadlineForfeiture.ProcessOverdueClaims();
+            RunBannedAuthorClaimSweepIfNeeded();
 
             List<Guid>? storyIdsFilter = null;
             if (categoryIdsFilter != null && categoryIdsFilter.Count > 0)
@@ -224,7 +242,8 @@ namespace Services.Implementations
                 PageSize = useMemory ? ModeratorQueueInMemoryCap : pageSize,
                 Search = search,
                 SortBy = dbSortBy,
-                SortOrder = sortOrderNorm
+                SortOrder = sortOrderNorm,
+                ExcludeBannedStoryAuthors = moderatorId.HasValue
             };
             var result = _chapterService.GetAll(query);
             var pendingEscalationChapterIds = ReviewEscalationDAO.GetPendingTargetIds(ReviewAssignmentDAO.TargetTypeChapter);

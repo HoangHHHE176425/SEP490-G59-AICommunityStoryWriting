@@ -35,5 +35,8 @@ namespace Services.DTOs.Stories
 
         /// <summary>Khi false (mặc định): loại truyện bị compliance ẩn khỏi danh sách công khai.</summary>
         public bool IncludeComplianceHiddenInLists { get; set; }
+
+        /// <summary>Khi true: loại truyện có tác giả <c>users.status = BANNED</c> (hàng đợi nhận duyệt moderator).</summary>
+        public bool ExcludeBannedAuthors { get; set; }
     }
 }

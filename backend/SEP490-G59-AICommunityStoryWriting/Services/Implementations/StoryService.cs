@@ -138,6 +138,14 @@ namespace Services.Implementations
             if (!query.IncludeComplianceHiddenInLists)
                 storiesQuery = storiesQuery.Where(s => !s.compliance_hidden);
 
+            if (query.ExcludeBannedAuthors)
+            {
+                storiesQuery = storiesQuery.Where(s =>
+                    s.author == null
+                    || s.author.status == null
+                    || s.author.status.ToUpper() != "BANNED");
+            }
+
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
                 var searchLower = query.Search.ToLower();

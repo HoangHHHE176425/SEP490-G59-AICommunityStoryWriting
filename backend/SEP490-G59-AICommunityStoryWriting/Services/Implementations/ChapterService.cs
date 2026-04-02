@@ -257,6 +257,15 @@ namespace Services.Implementations
                 chaptersQuery = chaptersQuery.Where(c => includeIds.Contains(c.id));
             }
 
+            if (query.ExcludeBannedStoryAuthors)
+            {
+                chaptersQuery = chaptersQuery.Where(c =>
+                    c.story == null
+                    || c.story.author == null
+                    || c.story.author.status == null
+                    || c.story.author.status.ToUpper() != "BANNED");
+            }
+
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
                 var searchLower = query.Search.Trim().ToLower();

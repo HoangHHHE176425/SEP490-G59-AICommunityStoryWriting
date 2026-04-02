@@ -15,6 +15,7 @@ const ACTION_OPTIONS = [
     { value: 'APPROVED', label: 'Đã duyệt' },
     { value: 'REJECTED', label: 'Đã từ chối' },
     { value: ACTION_FILTER_FORFEIT_DEADLINE, label: 'Thu hồi đơn (quá hạn)' },
+    { value: 'BAN_AUTH_UNCLM', label: 'Hủy nhận (tác giả BAN)' },
 ];
 
 const TARGET_OPTIONS = [
@@ -70,6 +71,7 @@ function actionLabel(item) {
     if (a === 'APPROVED') return 'Duyệt';
     if (a === 'REJECTED') return 'Từ chối';
     if (a === 'AUTO_FORFEIT_DL' || a === 'AUTO_UNASSIGNED_DEADLINE') return 'Thu hồi đơn (quá hạn)';
+    if (a === 'BAN_AUTH_UNCLM') return 'Hủy nhận (tác giả BAN)';
     return item?.action || '—';
 }
 
@@ -80,6 +82,7 @@ function moderatorActionCellStyle(action) {
     if (a === 'AUTO_FORFEIT_DL' || a === 'AUTO_UNASSIGNED_DEADLINE') {
         return { color: '#c2410c', fontWeight: 600 };
     }
+    if (a === 'BAN_AUTH_UNCLM') return { color: '#7c3aed', fontWeight: 600 };
     return { color: '#475569', fontWeight: 600 };
 }
 

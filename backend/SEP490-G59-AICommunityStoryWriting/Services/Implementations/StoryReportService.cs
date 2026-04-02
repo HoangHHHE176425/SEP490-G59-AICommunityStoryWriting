@@ -833,15 +833,6 @@ public class StoryReportService : IStoryReportService
         if (decision is not ("APPROVE" or "REJECT"))
             throw new ArgumentException("Decision phải là APPROVE hoặc REJECT.");
 
-        // Khi REJECT: không cần ReasonCode. Khi APPROVE: bắt buộc ReasonCode hợp lệ để log lý do vi phạm.
-        if (decision == "APPROVE")
-        {
-            if (string.IsNullOrWhiteSpace(dto.ReasonCode))
-                throw new InvalidOperationException("Không tìm thấy lý do phù hợp.");
-            if (!StoryReportReasonCatalog.TryGet(dto.ReasonCode, out _))
-                throw new InvalidOperationException("Không tìm thấy lý do phù hợp.");
-        }
-
         var row = ComplianceAdminActionRequestDAO.GetTrackedById(requestId)
                   ?? throw new InvalidOperationException("Yêu cầu không tồn tại.");
         if (row.status != ComplianceAdminActionRequestDAO.StatusPending)
@@ -871,6 +862,7 @@ public class StoryReportService : IStoryReportService
         if (kind == ComplianceAdminActionRequestDAO.KindBanUser)
         {
             UserDAO.SetUserAccountStatus(row.target_user_id, "BANNED");
+            BannedAuthorModerationSweep.Run();
             ViolationLogDAO.Insert(adminId, row.target_user_id, "USER", row.target_user_id, "BAN",
                 dto.AdminNote ?? row.message, "ADMIN_APPROVE_COMPLIANCE_REQUEST");
             ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId,

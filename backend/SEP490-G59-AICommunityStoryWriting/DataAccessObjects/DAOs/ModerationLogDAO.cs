@@ -15,6 +15,34 @@ namespace DataAccessObjects.DAOs
 
         public const string DeadlineForfeitRejectionReasonVi = "Kiểm duyệt viên để quá hạn duyệt deadline";
 
+        /// <summary>Hủy nhận duyệt do tài khoản tác giả BAN (≤20 ký tự cho cột <c>action</c>).</summary>
+        public const string ActionClaimReleasedAuthorBanned = "BAN_AUTH_UNCLM";
+
+        public const string AuthorBannedUnclaimReasonVi = "Tác giả bị BAN; hệ thống hủy nhận duyệt tự động.";
+
+        /// <summary>SQL Server: một dòng log / cặp (moderator, truyện) cho hủy nhận do tác giả BAN.</summary>
+        public static void InsertBanAuthorUnclaimLogIfNotExists(
+            StoryPlatformDbContext context,
+            Guid moderatorId,
+            Guid storyId,
+            DateTime createdAtUtc)
+        {
+            var storyType = ReviewAssignmentDAO.TargetTypeStory;
+            var action = ActionClaimReleasedAuthorBanned;
+            var reason = AuthorBannedUnclaimReasonVi;
+
+            context.Database.ExecuteSqlInterpolated($@"
+IF NOT EXISTS (
+    SELECT 1 FROM [moderation_logs] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [moderator_id] = {moderatorId}
+      AND [target_id] = {storyId}
+      AND [target_type] IS NOT NULL AND UPPER([target_type]) = UPPER({storyType})
+      AND [action] = {action}
+)
+INSERT INTO [moderation_logs] ([moderator_id], [target_type], [target_id], [action], [rejection_reason], [created_at])
+VALUES ({moderatorId}, {storyType}, {storyId}, {action}, {reason}, {createdAtUtc})");
+        }
+
         /// <summary>Điều kiện EF (dịch được SQL): log chặn tái nhận sau quá hạn cho cặp moderator + truyện.</summary>
         private static IQueryable<moderation_logs> WhereDeadlineForfeitBlockForStory(
             IQueryable<moderation_logs> query,
