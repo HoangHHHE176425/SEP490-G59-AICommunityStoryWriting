@@ -228,6 +228,10 @@ namespace AIStory.API.Controllers
                 if (v != null && int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n))
                     query.MaxTotalChapters = n;
             }
+
+            var usesAiRaw = FirstQuery(request.Query, "usesAi", "UsesAi");
+            if (!string.IsNullOrWhiteSpace(usesAiRaw) && bool.TryParse(usesAiRaw, out var usesAi))
+                query.UsesAi = usesAi;
         }
 
         /// <summary>Báo cáo vi phạm truyện (cần đăng nhập).</summary>
@@ -268,6 +272,7 @@ namespace AIStory.API.Controllers
         {
             try
             {
+                MergeStoryListQueryFromRequest(Request, query);
                 if (User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE"))
                     query.IncludeComplianceHiddenInLists = true;
                 var result = _storyService.GetAll(query);

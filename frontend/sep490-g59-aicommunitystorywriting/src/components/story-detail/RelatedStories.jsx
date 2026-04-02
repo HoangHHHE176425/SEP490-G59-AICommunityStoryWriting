@@ -1,5 +1,6 @@
 import { Star, Play, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useRef } from 'react';
+import { Link } from 'react-router-dom';
 
 export function RelatedStories({ stories }) {
     const scrollContainerRef = useRef(null);
@@ -43,14 +44,14 @@ export function RelatedStories({ stories }) {
                     style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                 >
                     {stories.map((story) => (
-                        <a
+                        <Link
                             key={story.id}
-                            href="#"
+                            to={`/story/${story.id}`}
                             className="group flex flex-col gap-3 flex-shrink-0 w-[140px] sm:w-[160px] md:w-[180px]"
                         >
                             <div className="relative aspect-[2/3] rounded-lg overflow-hidden shadow-sm group-hover:shadow-xl group-hover:-translate-y-1 transition-all duration-300">
                                 <img
-                                    src={story.cover}
+                                    src={story.cover || '/logo.png'}
                                     alt={story.title}
                                     className="w-full h-full object-cover"
                                 />
@@ -79,7 +80,7 @@ export function RelatedStories({ stories }) {
                                     </span>
                                 </div>
                             </div>
-                        </a>
+                        </Link>
                     ))}
                 </div>
             </div>

@@ -133,6 +133,8 @@ export async function getStories(params = {}) {
     if (params.ageRating) q.append("ageRating", String(params.ageRating).trim());
     if (params.minTotalChapters != null) q.append("minTotalChapters", String(params.minTotalChapters));
     if (params.maxTotalChapters != null) q.append("maxTotalChapters", String(params.maxTotalChapters));
+    if (params.usesAi === true) q.append("usesAi", "true");
+    if (params.usesAi === false) q.append("usesAi", "false");
     const inc = params.includeStoryIds;
     if (Array.isArray(inc) && inc.length > 0) {
         inc.forEach((id) => {
