@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar, AlertTriangle, AlertCircle } from 'lucide-react';
 import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
+import { getStoryById } from '../../../api/story/storyApi';
 import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion, getReviewAssignmentSelf, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
 import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus, localDateTimeInputToIsoUtc, validateModeratorExtendProposedDeadline } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
@@ -184,6 +185,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [escalateSubmitting, setEscalateSubmitting] = useState(false);
     /** Đơn escalation gắn STORY (vd. trả cả truyện về hàng đợi) — tách khỏi assignment theo từng chương. */
     const [storyLevelReviewAssignment, setStoryLevelReviewAssignment] = useState(null);
+    /** users.status của tác giả (vd. BANNED) — từ GET /stories/:id để hiển thị ghi chú trong lịch sử moderator. */
+    const [authorAccountStatusFromApi, setAuthorAccountStatusFromApi] = useState(null);
 
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
@@ -201,7 +204,13 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 sortBy: options.sortBy ?? 'deadline_at',
                 sortOrder: options.sortOrder ?? 'asc',
             });
-            const publishedPromise = getChapters({ storyId: sid, status: 'PUBLISHED', page: 1, pageSize: 500 });
+            const publishedPromise = getChapters({
+                storyId: sid,
+                status: 'PUBLISHED',
+                page: 1,
+                pageSize: 500,
+                excludeBannedStoryAuthors: false,
+            });
             Promise.allSettled([pendingPromise, publishedPromise])
                 .then(([pendingResult, publishedResult]) => {
                     if (pendingResult.status === 'fulfilled') {
@@ -236,7 +245,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 .catch(() => setChapters([]))
                 .finally(() => setChaptersLoading(false));
         } else {
-            const params = { storyId: sid, pageSize: 100 };
+            const params = { storyId: sid, pageSize: 100, excludeBannedStoryAuthors: false };
             if (pubStatus === 'approved') params.status = 'PUBLISHED';
             const promise = getChapters(params);
             promise
@@ -252,6 +261,25 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     }, []);
 
     useEffect(() => {
+        if (!storyId) {
+            setAuthorAccountStatusFromApi(null);
+            return;
+        }
+        let cancelled = false;
+        setAuthorAccountStatusFromApi(null);
+        getStoryById(storyId)
+            .then((s) => {
+                if (cancelled) return;
+                const st = s?.authorAccountStatus ?? s?.AuthorAccountStatus ?? null;
+                setAuthorAccountStatusFromApi(st);
+            })
+            .catch(() => {
+                if (!cancelled) setAuthorAccountStatusFromApi(null);
+            });
+        return () => { cancelled = true; };
+    }, [storyId, publication?.id]);
+
+    useEffect(() => {
         const pubId = publication?.id ?? publication?.storyId ?? storyId ?? '';
         const newKey = { storyId: storyId ?? null, pubId: pubId ?? null };
         const keyChanged = loadKeyRef.current.storyId !== newKey.storyId || loadKeyRef.current.pubId !== newKey.pubId;
@@ -263,6 +291,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 setChaptersLoading(false);
                 setSelectedChapter(null);
                 setChapterReviewContent({});
+                setAuthorAccountStatusFromApi(null);
                 return;
             }
             // Chỉ clear và refetch khi mở publication khác; tránh effect re-run (vd publication.chapters ref mới) xóa chapters + chapterReviewContent → sidebar hiển thị sai.
@@ -550,7 +579,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     useEffect(() => {
         if (publication?.status !== 'rejected' || !storyId) return;
         let cancelled = false;
-        getChapters({ storyId, page: 1, pageSize: 500 })
+        getChapters({ storyId, page: 1, pageSize: 500, excludeBannedStoryAuthors: false })
             .then((res) => {
                 if (cancelled) return;
                 const items = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
@@ -649,7 +678,13 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 sortBy: 'deadline_at',
                                 sortOrder: 'asc',
                             }),
-                            getChapters({ storyId, status: 'PUBLISHED', page: 1, pageSize: 500 }),
+                            getChapters({
+                                storyId,
+                                status: 'PUBLISHED',
+                                page: 1,
+                                pageSize: 500,
+                                excludeBannedStoryAuthors: false,
+                            }),
                         ]);
                         const pubList = publishedRes?.items ?? publishedRes?.Items ?? publishedRes?.data ?? [];
                         const arr = Array.isArray(pubList) ? pubList : [];
@@ -808,6 +843,14 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     void slaTick;
     const policySlaLine = claimStartedForSla ? formatPolicySlaCountdown(claimStartedForSla).line : null;
 
+    const authorBanStatus = String(
+        authorAccountStatusFromApi
+        ?? publication?.authorAccountStatus
+        ?? publication?.author_account_status
+        ?? ''
+    ).toUpperCase();
+    const showAuthorBannedNote = authorBanStatus === 'BANNED';
+
     return (
         <>
             <ToastContainer />
@@ -890,6 +933,29 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     </span>
                                 )}
                             </div>
+                            {showAuthorBannedNote && (
+                                <div
+                                    role="status"
+                                    style={{
+                                        marginTop: '0.75rem',
+                                        padding: '0.6rem 0.75rem',
+                                        backgroundColor: '#fffbeb',
+                                        border: '1px solid #fcd34d',
+                                        borderRadius: '8px',
+                                        color: '#92400e',
+                                        fontSize: '0.8125rem',
+                                        display: 'flex',
+                                        gap: '0.5rem',
+                                        alignItems: 'flex-start',
+                                        lineHeight: 1.45,
+                                    }}
+                                >
+                                    <AlertTriangle style={{ width: '18px', height: '18px', flexShrink: 0, marginTop: '1px' }} aria-hidden />
+                                    <span>
+                                        Tài khoản tác giả đang ở trạng thái <strong>BANNED</strong>. Nội dung chương vẫn hiển thị phục vụ lịch sử kiểm duyệt.
+                                    </span>
+                                </div>
+                            )}
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>

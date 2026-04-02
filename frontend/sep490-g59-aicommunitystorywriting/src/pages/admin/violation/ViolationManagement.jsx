@@ -90,6 +90,13 @@ function mapStatusFilterToApiValue(filterValue) {
     return key;
 }
 
+/** Nội dung ô bảng đơn gửi admin: chuỗi rỗng → "—". */
+function requestFieldDisplay(value) {
+    if (value == null) return '—';
+    const s = String(value).trim();
+    return s || '—';
+}
+
 function formatDate(value) {
     if (!value) return '—';
     const raw = String(value).trim();
@@ -357,6 +364,7 @@ function penaltyTypeVi(p) {
         COMMENT_HIDDEN: 'Ẩn bình luận',
         COMMENT_UNHIDDEN: 'Hiện lại bình luận',
         BAN: 'Chặn tài khoản',
+        BAN_USER: 'Chặn tài khoản',
         SUSPEND_AUTHOR_WRITING: 'Tạm đình chỉ quyền viết',
     };
     return map[u] || (p || '—');
@@ -392,6 +400,78 @@ function complianceRequestStatusVi(s) {
     return s || '—';
 }
 
+/** Trạng thái đơn gửi admin (PENDING/APPROVED/REJECTED): màu badge. */
+function ComplianceRequestStatusPill({ status }) {
+    const u = String(status ?? '').trim().toUpperCase();
+    const label = complianceRequestStatusVi(status);
+    const tones = {
+        PENDING: { bg: '#fffbeb', color: '#b45309', border: '#fbbf24' },
+        APPROVED: { bg: '#ecfdf5', color: '#047857', border: '#34d399' },
+        REJECTED: { bg: '#fef2f2', color: '#991b1b', border: '#fca5a5' },
+    };
+    const t = tones[u] ?? { bg: '#f1f5f9', color: '#475569', border: '#cbd5e1' };
+    return (
+        <span
+            style={{
+                display: 'inline-block',
+                padding: '3px 10px',
+                borderRadius: 9999,
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                backgroundColor: t.bg,
+                color: t.color,
+                border: `1px solid ${t.border}`,
+                lineHeight: 1.35,
+            }}
+        >
+            {label}
+        </span>
+    );
+}
+
+/** Trạng thái dòng trong tab Lịch sử (theo nguồn + status API). */
+function ComplianceHistoryStatusPill({ item }) {
+    const src = String(item?.source ?? item?.Source ?? '').trim().toUpperCase();
+    const raw = item?.status ?? item?.Status;
+    const st = String(raw ?? '').trim().toUpperCase();
+    const pill = (label, t) => (
+        <span
+            style={{
+                display: 'inline-block',
+                padding: '3px 10px',
+                borderRadius: 9999,
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                backgroundColor: t.bg,
+                color: t.color,
+                border: `1px solid ${t.border}`,
+                lineHeight: 1.35,
+            }}
+        >
+            {label}
+        </span>
+    );
+    if (src === 'VIOLATION_ACTION') {
+        return pill('Hoàn tất', { bg: '#ecfdf5', color: '#047857', border: '#34d399' });
+    }
+    if (st === 'PENDING' || st === 'APPROVED' || st === 'REJECTED') {
+        return <ComplianceRequestStatusPill status={raw} />;
+    }
+    if (st === 'RESOLVED') {
+        return pill(statusViLabel('RESOLVED'), { bg: '#ecfdf5', color: '#047857', border: '#34d399' });
+    }
+    if (st === 'DISMISSED') {
+        return pill(statusViLabel('DISMISSED'), { bg: '#f1f5f9', color: '#475569', border: '#cbd5e1' });
+    }
+    if (st === 'NEW' || st === 'IN_REVIEW') {
+        return pill(statusViLabel(st), { bg: '#fffbeb', color: '#b45309', border: '#fbbf24' });
+    }
+    if (st === 'DONE') {
+        return pill('Hoàn tất', { bg: '#ecfdf5', color: '#047857', border: '#34d399' });
+    }
+    return <span style={{ color: '#64748b' }}>{raw || '—'}</span>;
+}
+
 function complianceHistorySourceVi(s) {
     const u = String(s ?? '').trim().toUpperCase();
     if (u === 'REPORT_RESOLUTION') return 'Xử lý phiếu báo cáo';
@@ -405,6 +485,14 @@ function complianceHistoryActionVi(action, source) {
     const src = String(source ?? '').trim().toUpperCase();
     const act = String(action ?? '').trim().toUpperCase();
     if (src === 'VIOLATION_ACTION') return penaltyTypeVi(action);
+    if (src === 'ADMIN_ACTION_REQUEST') return complianceAdminActionKindVi(action);
+    if (src === 'LOCK_REQUEST') {
+        if (act === 'UNLOCK') return 'Đã gỡ khóa / trả đơn về hàng đợi';
+        if (act === 'REASSIGN') return 'Đã giao lại đơn cho người khác';
+        if (act === 'REJECT') return 'Từ chối yêu cầu gỡ khóa';
+        if (!act) return '—';
+        return action || '—';
+    }
     if (act === 'RESOLVED' || act === 'DISMISSED' || act === 'NEW' || act === 'IN_REVIEW') return statusViLabel(act);
     if (act === 'PENDING' || act === 'APPROVED' || act === 'REJECTED') return complianceRequestStatusVi(act);
     return action || '—';
@@ -505,6 +593,8 @@ export default function ViolationManagement() {
     const [accountViolationRows, setAccountViolationRows] = useState([]);
     const [accountViolationLoading, setAccountViolationLoading] = useState(false);
     const [myRequestsModalOpen, setMyRequestsModalOpen] = useState(false);
+    /** cancel_claim = hủy nhận đơn / gỡ lock; ban_suspend = chặn TK / đình chỉ viết */
+    const [myRequestsTab, setMyRequestsTab] = useState('cancel_claim');
     const [myLockRequests, setMyLockRequests] = useState([]);
     const [myAdminRequests, setMyAdminRequests] = useState([]);
     const [myRequestsLoading, setMyRequestsLoading] = useState(false);
@@ -843,6 +933,7 @@ export default function ViolationManagement() {
     };
 
     const openMyRequestsModal = async () => {
+        setMyRequestsTab('cancel_claim');
         setMyRequestsModalOpen(true);
         setMyRequestsLoading(true);
         try {
@@ -1148,12 +1239,9 @@ export default function ViolationManagement() {
 
     const renderStoryReports = () => (
         <div className="overflow-x-auto">
-            <table className="w-full border-collapse" style={{ minWidth: 1460 }}>
+            <table className="w-full border-collapse" style={{ minWidth: 1100 }}>
                 <thead><tr className="bg-slate-50">
                     <th style={th}>Ưu tiên</th>
-                    <th style={th}>Mức độ</th>
-                    <th style={th}>Số báo cáo</th>
-                    <th style={th}>Trọng số thời gian</th>
                     <th style={th}>Truyện</th>
                     <th style={th}>Tác giả</th>
                     <th style={th}>Số người báo cáo</th>
@@ -1162,7 +1250,7 @@ export default function ViolationManagement() {
                 <tbody>
                     {rows.length === 0 && (
                         <tr>
-                            <td colSpan={8} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                            <td colSpan={5} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                         </tr>
                     )}
                     {rows.map((r) => (
@@ -1172,9 +1260,6 @@ export default function ViolationManagement() {
                                 return (
                                     <>
                                         <td style={td}>{(r.priorityScore ?? 0).toFixed?.(1) ?? r.priorityScore}</td>
-                                        <td style={td}>{(r.maxSeverityScore ?? 0).toFixed?.(1) ?? r.maxSeverityScore ?? '—'}</td>
-                                        <td style={td}>{r.reportCount ?? 0}</td>
-                                        <td style={td}>{r.timeWeight ?? 0}</td>
                                         <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                         <td style={td}>{r.authorDisplayName || '—'}</td>
                                         <td style={td}>
@@ -1276,12 +1361,9 @@ export default function ViolationManagement() {
 
     const renderCommentReports = () => (
         <div className="overflow-x-auto">
-            <table className="w-full border-collapse" style={{ minWidth: 1390 }}>
+            <table className="w-full border-collapse" style={{ minWidth: 1120 }}>
                 <thead><tr className="bg-slate-50">
                     <th style={th}>Ưu tiên</th>
-                    <th style={th}>Mức độ</th>
-                    <th style={th}>Số báo cáo</th>
-                    <th style={th}>Trọng số thời gian</th>
                     <th style={th}>Truyện</th>
                     <th style={th}>Người bình luận</th>
                     <th style={th}>Người báo</th>
@@ -1293,7 +1375,7 @@ export default function ViolationManagement() {
                 <tbody>
                     {rows.length === 0 && (
                         <tr>
-                            <td colSpan={11} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                            <td colSpan={8} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                         </tr>
                     )}
                     {rows.map((r) => (
@@ -1305,9 +1387,6 @@ export default function ViolationManagement() {
                                 return (
                                     <>
                                         <td style={td}>{Number(r.priorityScore ?? 0).toFixed(1)}</td>
-                                        <td style={td}>{Number(r.maxSeverityScore ?? 0).toFixed(1)}</td>
-                                        <td style={td}>{r.reportCount ?? 0}</td>
-                                        <td style={td}>{r.timeWeight ?? 0}</td>
                                         <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                         <td style={td}>{r.commentUserDisplayName || '—'}</td>
                                         <td style={td}>{reporterLabel}</td>
@@ -1436,13 +1515,14 @@ export default function ViolationManagement() {
                     <th style={th}>Thời điểm</th>
                     <th style={th}>Nguồn</th>
                     <th style={th}>Hành động</th>
+                    <th style={th}>Trạng thái</th>
                     <th style={th}>Đối tượng</th>
                     <th style={th}>Nội dung</th>
                 </tr></thead>
                 <tbody>
                     {rows.length === 0 && (
                         <tr>
-                            <td colSpan={5} className="p-6 text-center text-sm text-slate-500">Chưa có lịch sử xử lý vi phạm.</td>
+                            <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Chưa có lịch sử xử lý vi phạm.</td>
                         </tr>
                     )}
                     {rows.map((r) => (
@@ -1450,6 +1530,7 @@ export default function ViolationManagement() {
                             <td style={td}>{formatDate(r.createdAtUtc || r.resolvedAtUtc)}</td>
                             <td style={td}>{complianceHistorySourceVi(r.source)}</td>
                             <td style={td}>{complianceHistoryActionVi(r.action, r.source)}</td>
+                            <td style={td}><ComplianceHistoryStatusPill item={r} /></td>
                             <td style={td}>
                                 {String(r.targetType || '').toUpperCase() === 'STORY' ? (
                                     <>
@@ -2218,13 +2299,44 @@ export default function ViolationManagement() {
             )}
 
             {myRequestsModalOpen && (
-                <Modal title="Đơn đã gửi lên quản trị viên" maxWidth={900} onClose={() => setMyRequestsModalOpen(false)}>
+                <Modal
+                    title="Đơn đã gửi lên quản trị viên"
+                    maxWidth={1040}
+                    onClose={() => {
+                        setMyRequestsModalOpen(false);
+                        setMyRequestsTab('cancel_claim');
+                    }}
+                >
                     {myRequestsLoading ? (
                         <div className="text-sm text-slate-600">Đang tải...</div>
                     ) : (
-                        <div className="space-y-8">
-                            <section>
-                                <h4 className="text-base font-bold text-slate-900 mb-2">Yêu cầu gỡ khóa / giao lại</h4>
+                        <div className="flex flex-col gap-4">
+                            <div className="flex flex-wrap gap-1 border-b border-slate-200">
+                                <button
+                                    type="button"
+                                    className={`px-3 py-2 text-sm font-semibold rounded-t-md border-b-2 -mb-px transition-colors ${
+                                        myRequestsTab === 'cancel_claim'
+                                            ? 'border-sky-600 text-sky-800 bg-sky-50/80'
+                                            : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                                    }`}
+                                    onClick={() => setMyRequestsTab('cancel_claim')}
+                                >
+                                    Yêu cầu hủy nhận đơn
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`px-3 py-2 text-sm font-semibold rounded-t-md border-b-2 -mb-px transition-colors ${
+                                        myRequestsTab === 'ban_suspend'
+                                            ? 'border-sky-600 text-sky-800 bg-sky-50/80'
+                                            : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                                    }`}
+                                    onClick={() => setMyRequestsTab('ban_suspend')}
+                                >
+                                    Yêu cầu chặn tài khoản / tạm đình chỉ viết
+                                </button>
+                            </div>
+
+                            {myRequestsTab === 'cancel_claim' && (
                                 <div className="overflow-x-auto">
                                     <table className="w-full border-collapse text-sm">
                                         <thead>
@@ -2232,29 +2344,31 @@ export default function ViolationManagement() {
                                                 <th style={th}>Truyện</th>
                                                 <th style={th}>Trạng thái</th>
                                                 <th style={th}>Gửi lúc</th>
-                                                <th style={th}>Ghi chú / lý do từ chối</th>
+                                                <th style={th}>Lý do xử lý vi phạm gửi</th>
+                                                <th style={th}>Phản hồi quản trị viên</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {myLockRequests.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={4} className="p-4 text-center text-slate-500">Chưa có đơn.</td>
+                                                    <td colSpan={5} className="p-4 text-center text-slate-500">Chưa có đơn.</td>
                                                 </tr>
                                             ) : (
                                                 myLockRequests.map((row) => {
                                                     const st = String(row.status ?? row.Status ?? '').toUpperCase();
                                                     const rejected = st === 'REJECTED';
+                                                    const complianceMsg = requestFieldDisplay(row.message ?? row.Message);
+                                                    const adminNote = requestFieldDisplay(row.resolutionNote ?? row.ResolutionNote);
                                                     return (
                                                         <tr key={String(row.id ?? row.Id)} className="border-t border-slate-200">
                                                             <td style={td}>{row.storyTitle ?? row.StoryTitle ?? '—'}</td>
                                                             <td style={td}>
-                                                                <span style={rejected ? { color: '#991b1b', fontWeight: 600 } : undefined}>
-                                                                    {complianceRequestStatusVi(row.status ?? row.Status)}
-                                                                </span>
+                                                                <ComplianceRequestStatusPill status={row.status ?? row.Status} />
                                                             </td>
                                                             <td style={td}>{formatDate(row.createdAtUtc ?? row.CreatedAtUtc)}</td>
+                                                            <td style={td}><div className="max-w-[260px] whitespace-pre-wrap text-slate-800">{complianceMsg}</div></td>
                                                             <td style={{ ...td, ...(rejected ? { color: '#991b1b' } : {}) }}>
-                                                                {row.resolutionNote ?? row.ResolutionNote ?? '—'}
+                                                                <div className="max-w-[260px] whitespace-pre-wrap">{adminNote}</div>
                                                             </td>
                                                         </tr>
                                                     );
@@ -2263,9 +2377,9 @@ export default function ViolationManagement() {
                                         </tbody>
                                     </table>
                                 </div>
-                            </section>
-                            <section>
-                                <h4 className="text-base font-bold text-slate-900 mb-2">Yêu cầu chặn tài khoản / tạm đình chỉ viết</h4>
+                            )}
+
+                            {myRequestsTab === 'ban_suspend' && (
                                 <div className="overflow-x-auto">
                                     <table className="w-full border-collapse text-sm">
                                         <thead>
@@ -2274,30 +2388,32 @@ export default function ViolationManagement() {
                                                 <th style={th}>Loại</th>
                                                 <th style={th}>Trạng thái</th>
                                                 <th style={th}>Gửi lúc</th>
-                                                <th style={th}>Ghi chú / lý do từ chối</th>
+                                                <th style={th}>Lý do xử lý vi phạm gửi</th>
+                                                <th style={th}>Phản hồi quản trị viên</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {myAdminRequests.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={5} className="p-4 text-center text-slate-500">Chưa có đơn.</td>
+                                                    <td colSpan={6} className="p-4 text-center text-slate-500">Chưa có đơn.</td>
                                                 </tr>
                                             ) : (
                                                 myAdminRequests.map((row) => {
                                                     const st = String(row.status ?? row.Status ?? '').toUpperCase();
                                                     const rejected = st === 'REJECTED';
+                                                    const complianceMsg = requestFieldDisplay(row.message ?? row.Message);
+                                                    const adminNote = requestFieldDisplay(row.resolutionNote ?? row.ResolutionNote);
                                                     return (
                                                         <tr key={String(row.id ?? row.Id)} className="border-t border-slate-200">
                                                             <td style={td}>{row.storyTitle ?? row.StoryTitle ?? '—'}</td>
                                                             <td style={td}>{complianceAdminActionKindVi(row.requestKind ?? row.RequestKind)}</td>
                                                             <td style={td}>
-                                                                <span style={rejected ? { color: '#991b1b', fontWeight: 600 } : undefined}>
-                                                                    {complianceRequestStatusVi(row.status ?? row.Status)}
-                                                                </span>
+                                                                <ComplianceRequestStatusPill status={row.status ?? row.Status} />
                                                             </td>
                                                             <td style={td}>{formatDate(row.createdAtUtc ?? row.CreatedAtUtc)}</td>
+                                                            <td style={td}><div className="max-w-[240px] whitespace-pre-wrap text-slate-800">{complianceMsg}</div></td>
                                                             <td style={{ ...td, ...(rejected ? { color: '#991b1b' } : {}) }}>
-                                                                {row.resolutionNote ?? row.ResolutionNote ?? '—'}
+                                                                <div className="max-w-[240px] whitespace-pre-wrap">{adminNote}</div>
                                                             </td>
                                                         </tr>
                                                     );
@@ -2306,7 +2422,7 @@ export default function ViolationManagement() {
                                         </tbody>
                                     </table>
                                 </div>
-                            </section>
+                            )}
                         </div>
                     )}
                 </Modal>

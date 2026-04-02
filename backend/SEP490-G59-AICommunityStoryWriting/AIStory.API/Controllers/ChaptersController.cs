@@ -156,12 +156,20 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Giống <see cref="StoriesController"/>: binder để bool thiếu = false; list công khai mặc định ẩn chapter của tác giả BANNED.</summary>
-        private static void ApplyDefaultExcludeBannedStoryAuthorsFromQuery(HttpRequest request, ChapterQueryDto query)
+        /// <summary>Giống <see cref="StoriesController"/>: mặc định ẩn chapter của tác giả BANNED. Chỉ MODERATOR/ADMIN/COMPLIANCE đã đăng nhập mới được <c>excludeBannedStoryAuthors=false</c>.</summary>
+        private void ApplyExcludeBannedStoryAuthorsPolicy(ChapterQueryDto query)
         {
-            if (request.Query.Keys.Any(k => string.Equals(k, "excludeBannedStoryAuthors", StringComparison.OrdinalIgnoreCase)))
+            if (!Request.Query.Keys.Any(k => string.Equals(k, "excludeBannedStoryAuthors", StringComparison.OrdinalIgnoreCase)))
+            {
+                query.ExcludeBannedStoryAuthors = true;
                 return;
-            query.ExcludeBannedStoryAuthors = true;
+            }
+            if (query.ExcludeBannedStoryAuthors)
+                return;
+            var ok = User?.Identity?.IsAuthenticated == true &&
+                     (User.IsInRole("MODERATOR") || User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE"));
+            if (!ok)
+                query.ExcludeBannedStoryAuthors = true;
         }
 
         /// <summary>Lấy danh sách chapters với pagination và filtering (cho phép xem không cần đăng nhập)</summary>
@@ -171,7 +179,7 @@ namespace AIStory.API.Controllers
         {
             try
             {
-                ApplyDefaultExcludeBannedStoryAuthorsFromQuery(Request, query);
+                ApplyExcludeBannedStoryAuthorsPolicy(query);
                 var result = _chapterService.GetAll(query);
                 return Ok(result);
             }

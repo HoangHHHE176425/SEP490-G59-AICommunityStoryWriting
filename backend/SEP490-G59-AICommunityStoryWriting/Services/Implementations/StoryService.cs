@@ -799,6 +799,9 @@ namespace Services.Implementations
                 authorName = story.author_id.HasValue ? NotificationDAO.GetUserDisplayName(story.author_id.Value) : null;
                 authorAvatarUrl = story.author_id.HasValue ? UserProfileDAO.GetAvatarUrlForUser(story.author_id.Value) : null;
             }
+            string? authorAccountStatus = null;
+            if (includeComputedLookups && story.author_id.HasValue)
+                authorAccountStatus = UserDAO.GetAccountStatus(story.author_id.Value);
             return new StoryResponseDto
             {
                 Id = story.id,
@@ -809,6 +812,7 @@ namespace Services.Implementations
                 CategoryNames = categoryNames,
                 AuthorId = story.author_id,
                 AuthorName = authorName,
+                AuthorAccountStatus = authorAccountStatus,
                 AuthorAvatarUrl = authorAvatarUrl,
                 CoverImage = story.cover_image,
                 Status = story.status,
