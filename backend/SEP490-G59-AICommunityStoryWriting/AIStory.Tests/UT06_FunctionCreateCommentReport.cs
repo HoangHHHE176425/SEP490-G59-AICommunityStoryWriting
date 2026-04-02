@@ -3,11 +3,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Services.DTOs.CommentReports;
+using Services.Implementations;
 using Services.Interfaces;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Reflection;
 using System.Security.Claims;
+using System.Text.Json;
 using Xunit.Abstractions;
 
 namespace AIStory.Tests
@@ -16,8 +18,8 @@ namespace AIStory.Tests
     /// UT06 — tạo báo cáo comment (endpoint <see cref="CommentReportsController.ReportStoryComment"/>; unit test + mock <see cref="ICommentReportService"/>).
     /// <b>Đối soát ma trận UTCID vs product (<see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/>):</b>
     /// <list type="bullet">
-    /// <item><description><b>Đã bắt — test pass:</b> UTCID01 (happy), UTCID02 (comment không tồn tại), UTCID05 (ReasonCode không có catalog), UTCID06 (ReasonCode thiếu/null — controller), UTCID08–09 (Description null/whitespace optional), UTCID10 (story không tìm thấy / mismatch URL), UTCID11 (trùng báo cáo), UTCID12 (story chưa PUBLISH), UTCID13 (tự báo cáo comment mình).</description></item>
-    /// <item><description><b>Bug / thiếu — test fail cho đến khi sửa hoặc thống nhất spec:</b> UTCID03 (<c>commentId</c> null — REST <c>{{commentId:guid}}</c> không bind null; xử lý ở routing 404), UTCID04 (reporter không parse JWT → 401; <b>chưa</b> validate user tồn tại DB khi JWT có GUID), UTCID07 (ma trận Description &gt; 200 — product chỉ <c>MaxLength(4000)</c>).</description></item>
+    /// <item><description><b>Đã bắt — test pass:</b> UTCID01 (happy), UTCID02 (comment không tồn tại), UTCID04 (reporter không xác định → 401; JWT có id nhưng user không trong DB / <c>Guid.Empty</c> → <see cref="CommentReportService"/> + <see cref="IUserLookup"/>), UTCID05 (ReasonCode không có catalog), UTCID06 (ReasonCode thiếu/null — controller), UTCID07 (Description &gt; 200), UTCID08–09 (Description null/whitespace optional), UTCID10 (story không tìm thấy / mismatch URL), UTCID11 (trùng báo cáo), UTCID12 (story chưa PUBLISH), UTCID13 (tự báo cáo comment mình).</description></item>
+    /// <item><description><b>Bug / thiếu — test fail cho đến khi sửa hoặc thống nhất spec:</b> UTCID03 (<c>commentId</c> null — REST <c>{{commentId:guid}}</c> không bind null; xử lý ở routing 404).</description></item>
     /// <item><description><b>Hành vi product có nhưng chưa có UTCID riêng trong file:</b> comment không thuộc chapter URL (<c>ReportChapterComment</c>), chủ comment role không phải AUTHOR/USER (<c>Bạn không thể báo cáo bình luận này.</c>), comment thiếu <c>story_id</c> (<c>Comment has no story_id.</c>) — cùng họ <see cref="InvalidOperationException"/> → 400 như các case khác.</description></item>
     /// </list>
     /// </summary>
@@ -157,41 +159,62 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID03 — ma trận: <c>commentId</c> <b>null</b> → không tạo báo cáo, Return <c>false</c>, log &quot;Không tìm thấy comment&quot; (không assert đúng từng chữ).
-        /// <b>[BUG — chờ thống nhất spec / product]</b>
-        /// <see cref="CommentReportsController.ReportStoryComment"/> nhận <c>Guid commentId</c> từ route <c>stories/{{storyId}}/comments/{{commentId}}/reports</c> — <b>không thể null</b> trong signature C#. Client không gửi được &quot;null&quot; vào tham số này; thiếu segment hoặc không phải GUID hợp lệ thường do <b>routing</b> trả <c>404</c> (action không chạy), không có nhánh trong controller kiểm tra <c>commentId == null</c> như ma trận.
-        /// Nếu coi <see cref="Guid.Empty"/> tương đương &quot;không có id&quot;: <see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/> vẫn coi như không có comment (<c>Comment not found</c>) — gần <see cref="UTCID02_CreateCommentReport_ReturnsBadRequest_WhenCommentNotFound"/>, nhưng đó không phải literal null trong ma trận.
-        /// Sau khi làm rõ (tài liệu API, integration test 404, hoặc validate <c>Guid.Empty</c> với message thống nhất): xóa <c>Assert.Fail</c> hoặc thay bằng assert thật.
+        /// UTCID03 — ma trận: <c>commentId</c> null/không xác định → không tạo báo cáo (tương đương <c>Guid.Empty</c> trong unit test),
+        /// Return <c>false</c> + log &quot;Không tìm thấy comment&quot;.
         /// </summary>
         [Fact]
-        public void UTCID03_Bug_CreateCommentReport_CommentIdNull_PerSpec()
+        public async Task UTCID03_CreateCommentReport_ReturnsBadRequest_WhenCommentIdMissingOrEmpty()
         {
-            LogUtcContext("UTCID03 [BUG — ma trận commentId null]",
-                "Spec: commentId null → dừng, không lưu báo cáo.",
-                "Product API: route {commentId:guid} — không bind null vào Guid; không có check null trong ReportStoryComment.",
-                "Routing có thể 404 khi thiếu/sai segment — không cover trong unit test controller này.",
-                "Xóa Assert.Fail khi spec và implementation (hoặc test integration) đã thống nhất.");
+            LogUtcContext("UTCID03",
+                "Spec: commentId null/không xác định → dừng, không lưu báo cáo.",
+                "Test: mô phỏng bằng Guid.Empty; controller không gọi ICommentReportService.",
+                "Kỳ vọng: BadRequest + message Không tìm thấy comment.");
 
-            Assert.Fail(
-                "BUG UT06/UTCID03: Ma trận yêu cầu commentId null. " +
-                "CommentReportsController.ReportStoryComment(Guid storyId, Guid commentId, ...) không nhận null — commentId luôn là Guid từ URL. " +
-                "Cần thống nhất ma trận với REST (404 routing) hoặc bổ sung contract/validation rồi cập nhật test (integration hoặc Guid.Empty + message rõ). " +
-                "Tham chiếu từ chối khi không có comment: UTCID02 / Comment not found trong CommentReportService.");
+            var storyId = Guid.NewGuid();
+            var commentId = Guid.Empty;
+            var reporterId = Guid.NewGuid();
+            var controller = CreateCommentReportsControllerSut(out var serviceMock);
+
+            var request = new CreateCommentReportRequestDto
+            {
+                ReasonCode = "OTHER",
+                Description = new string('c', 40)
+            };
+
+            var identity = new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
+                authenticationType: "Test");
+            controller.ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+            };
+
+            var result = await controller.ReportStoryComment(storyId, commentId, request);
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+            Assert.NotNull(badRequest.Value);
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
+            Assert.Equal("Không tìm thấy comment.", doc.RootElement.GetProperty("message").GetString());
+
+            serviceMock.Verify(s => s.CreateCommentReportAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CreateCommentReportRequestDto>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<Guid?>()), Times.Never);
         }
 
         /// <summary>
-        /// UTCID04 — ma trận: <c>reporterId</c> null <b>hoặc</b> user không tồn tại → không tạo báo cáo; Return <c>false</c>, log &quot;USER không tồn tại&quot; (không assert đúng từng chữ).
-        /// <b>[BUG — chờ product]</b> Product mới bắt một phần: <see cref="CommentReportsController.GetCurrentUserId"/> không parse được id từ JWT → <c>401 Unauthorized</c> (message hiện tại: &quot;Cần đăng nhập để báo cáo.&quot; — không bắt buộc trùng ma trận).
-        /// Chưa có kiểm tra user tồn tại trong DB khi JWT có GUID hợp lệ — <see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/> không lookup <c>users</c> theo <c>reporterId</c>.
-        /// Sau khi bổ sung validate + assert cho nhánh &quot;JWT có id nhưng user không có trong DB&quot;: xóa <c>Assert.Fail</c> cuối method (hoặc thay bằng assert thật); giữ assert 401 nếu vẫn cần.
+        /// UTCID04 — không xác định được người báo cáo <b>hoặc</b> user không còn trong CSDL → không tạo báo cáo; message kiểu &quot;USER không tồn tại&quot;.
+        /// (A) API: <see cref="CommentReportsController.ReportStoryComment"/> — không parse được user từ JWT → <c>401</c>, không gọi service.
+        /// (B) <see cref="CommentReportService.CreateCommentReportAsync"/>: <c>IUserLookup.Exists(reporterId)==false</c> hoặc <c>reporterId == Guid.Empty</c> → <see cref="InvalidOperationException"/> trước khi load comment / ghi DB.
         /// </summary>
         [Fact]
-        public async Task UTCID04_CreateCommentReport_Bug_ReporterValidationIncomplete_PerSpec()
+        public async Task UTCID04_CreateCommentReport_Rejects_WhenReporterInvalidOrUserNotInDatabase()
         {
-            LogUtcContext("UTCID04 [BUG — ma trận reporter / user]",
-                "Spec: reporterId null hoặc user không tồn tại → không tạo báo cáo (ma trận: false).",
-                "Product hiện: 401 khi không parse được id từ JWT; chưa reject khi JWT có GUID nhưng user không có trong DB.",
-                "Phần assert: kiểm tra nhánh 401 + service không gọi (hồi quy). Cuối test: Assert.Fail cho đến khi đủ ma trận.",
+            LogUtcContext("UTCID04 — reporter không hợp lệ / user không tồn tại",
+                "Spec: không tạo báo cáo; API 401 khi thiếu identity; service từ chối khi Empty hoặc !Exists.",
                 "Không assert message từng chữ so với ma trận.");
 
             var storyId = Guid.NewGuid();
@@ -225,14 +248,24 @@ namespace AIStory.Tests
                     It.IsAny<Guid?>()),
                 Times.Never);
 
-            _output.WriteLine(
-                "[BUG UT06/UTCID04] Cần thêm Exists(reporterId) (hoặc tương đương) và assert: JWT hợp lệ + user không trong DB → từ chối. " +
-                "Sau đó xóa Assert.Fail phía dưới.");
+            var reporterId = Guid.NewGuid();
+            var userLookup = new Mock<IUserLookup>(MockBehavior.Strict);
+            userLookup.Setup(x => x.Exists(reporterId)).Returns(false);
+            var sut = new CommentReportService(userLookup.Object, notificationHubNotifier: null);
 
-            Assert.Fail(
-                "BUG UT06/UTCID04: Ma trận yêu cầu đủ cả 'reporter không xác định' và 'user không tồn tại trong hệ thống'. " +
-                "Product chỉ đáp ứng nhánh JWT không parse được id (401). " +
-                "Implement kiểm tra user tồn tại trong CreateCommentReportAsync (hoặc controller) + bổ sung assert trong test này, rồi gỡ Fail.");
+            var ex = await Record.ExceptionAsync(() =>
+                sut.CreateCommentReportAsync(commentId, reporterId, request, expectedStoryId: storyId));
+            var ioe = Assert.IsType<InvalidOperationException>(ex);
+            Assert.Equal("USER không tồn tại.", ioe.Message);
+            userLookup.Verify(x => x.Exists(reporterId), Times.Once);
+
+            var userLookupEmpty = new Mock<IUserLookup>(MockBehavior.Strict);
+            var sutEmpty = new CommentReportService(userLookupEmpty.Object, notificationHubNotifier: null);
+            var exEmpty = await Record.ExceptionAsync(() =>
+                sutEmpty.CreateCommentReportAsync(commentId, Guid.Empty, request, expectedStoryId: storyId));
+            var ioeEmpty = Assert.IsType<InvalidOperationException>(exEmpty);
+            Assert.Equal("USER không tồn tại.", ioeEmpty.Message);
+            userLookupEmpty.Verify(x => x.Exists(It.IsAny<Guid>()), Times.Never);
         }
 
         /// <summary>
@@ -340,19 +373,15 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID07 — ma trận: <c>Description</c> &gt; <b>200</b> ký tự → không hợp lệ (Return false / không lưu), log kiểu &quot;kí tự quá dài&quot; (không assert đúng từng chữ).
-        /// <b>[BUG — chờ product]</b> Hiện chỉ <c>[MaxLength(4000)]</c> trên <see cref="CreateCommentReportRequestDto.Description"/>; <see cref="Services.Implementations.CommentReportService.CreateCommentReportAsync"/> không kiểm tra độ dài 200.
-        /// Dùng <see cref="Validator.TryValidateObject"/> (cùng rule với DataAnnotations khi API validate model).
-        /// Sau khi đặt <c>MaxLength(200)</c> hoặc validate trong <see cref="Services.Implementations.CommentReportService"/>: chuỗi 201 ký tự phải invalid → test <b>pass</b>.
-        /// Vẫn assert &gt;4000 invalid để giữ sanity với giới hạn hiện có của product.
+        /// UTCID07 — ma trận: <c>Description</c> &gt; <b>200</b> ký tự → không hợp lệ, không lưu; message kiểu &quot;ký tự quá dài&quot;.
+        /// Product: <see cref="CreateCommentReportRequestDto.Description"/> <c>[MaxLength(200)]</c> + <see cref="CommentReportService.CreateCommentReportAsync"/> ném <see cref="ArgumentException"/> nếu vượt quá.
         /// </summary>
         [Fact]
-        public void UTCID07_CreateCommentReport_Bug_DescriptionMustRejectWhenOver200Chars_PerSpec()
+        public async Task UTCID07_CreateCommentReport_Rejects_WhenDescriptionExceeds200Characters()
         {
-            LogUtcContext("UTCID07 [BUG — ma trận >200 ký tự]",
-                "Kỳ vọng spec: Description length > 200 → reject (không cần khớp từng chữ message).",
-                "Product hiện: MaxLength(4000); cần thêm giới hạn 200 ở DTO hoặc CommentReportService.",
-                "Khi sửa xong, TryValidate(201 chars) phải trả false.");
+            LogUtcContext("UTCID07 — Description > 200 ký tự",
+                "Kỳ vọng: DataAnnotations + service đều từ chối > 200 ký tự.",
+                "Không assert đúng từng chữ message so với ma trận.");
 
             static bool TryValidate(CreateCommentReportRequestDto dto, out List<ValidationResult> results)
             {
@@ -361,30 +390,28 @@ namespace AIStory.Tests
                 return Validator.TryValidateObject(dto, ctx, results, validateAllProperties: true);
             }
 
-            var overProductLimit = new CreateCommentReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = new string('f', 4001)
-            };
-            Assert.False(TryValidate(overProductLimit, out var errorsOver));
-            Assert.Contains(errorsOver, e => e.MemberNames.Contains(nameof(CreateCommentReportRequestDto.Description)));
-
-            var over200PerMatrix = new CreateCommentReportRequestDto
+            var over201 = new CreateCommentReportRequestDto
             {
                 ReasonCode = "OTHER",
                 Description = new string('g', 201)
             };
-            var descriptionStillValidOnCurrentProduct = TryValidate(over200PerMatrix, out var errors201);
-            if (descriptionStillValidOnCurrentProduct)
-            {
-                _output.WriteLine(
-                    "[BUG UT06/UTCID07] 201 ký tự vẫn hợp lệ: thêm MaxLength(200) hoặc if (Description?.Length > 200) throw/return trong CommentReportService.");
-            }
+            Assert.False(TryValidate(over201, out var errors201));
+            Assert.Contains(errors201, e => e.MemberNames.Contains(nameof(CreateCommentReportRequestDto.Description)));
 
-            Assert.False(descriptionStillValidOnCurrentProduct,
-                "BUG UT06/UTCID07: Theo ma trận, Description > 200 ký tự phải không hợp lệ. " +
-                "Sửa CreateCommentReportRequestDto / CommentReportService rồi chạy lại test.");
-            Assert.NotEmpty(errors201);
+            var wayOver = new CreateCommentReportRequestDto
+            {
+                ReasonCode = "OTHER",
+                Description = new string('f', 4001)
+            };
+            Assert.False(TryValidate(wayOver, out var errorsLong));
+            Assert.Contains(errorsLong, e => e.MemberNames.Contains(nameof(CreateCommentReportRequestDto.Description)));
+
+            var userLookup = new Mock<IUserLookup>(MockBehavior.Strict);
+            var sut = new CommentReportService(userLookup.Object, notificationHubNotifier: null);
+            var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
+                sut.CreateCommentReportAsync(Guid.NewGuid(), Guid.NewGuid(), over201));
+            Assert.Contains("quá dài", ex.Message, StringComparison.OrdinalIgnoreCase);
+            userLookup.Verify(x => x.Exists(It.IsAny<Guid>()), Times.Never);
         }
 
         /// <summary>

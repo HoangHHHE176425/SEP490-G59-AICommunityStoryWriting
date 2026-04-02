@@ -87,11 +87,8 @@ namespace AIStory.Tests
                 "Từ chối khi authorId gọi API không phải chủ story (ownership).",
                 "Precondition: story tồn tại; user/story hợp lệ; order_index chưa trùng; title/content/access hợp lệ.",
                 "Input: Create(req, otherAuthorId) với otherAuthorId != story.author_id.",
-                "Kỳ vọng spec: exception + không Add chapter.",
-                "Ghi chú: product hiện có thể chưa throw (Create overload bỏ qua authorId).");
+                "Kỳ vọng spec: exception + không Add chapter.");
 
-            // Expected by spec, currently FAILS until product bug is fixed:
-            // ChapterService.Create(request, authorId) must reject when authorId != story.author_id.
             var authorId = Guid.NewGuid();
             var storyId = Guid.NewGuid();
             var story = new stories
@@ -127,7 +124,8 @@ namespace AIStory.Tests
 
             // Use a DIFFERENT author than the story owner -> must be rejected by ownership validation.
             var otherAuthorId = Guid.NewGuid();
-            Assert.Throws<InvalidOperationException>(() => sut.Create(req, otherAuthorId));
+            var ex = Assert.Throws<UnauthorizedAccessException>(() => sut.Create(req, otherAuthorId));
+            Assert.Equal("Bạn không phải tác giả của truyện này.", ex.Message);
             chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
         }
 
@@ -350,13 +348,7 @@ namespace AIStory.Tests
                 "FREE nhưng coinPrice > 0 → spec yêu cầu fail (không được âm thầm ép về 0 rồi tạo).",
                 "Precondition: story + author hợp lệ; order_index chưa trùng.",
                 "Input: AccessType=FREE; CoinPrice=10.",
-                "Kỳ vọng spec: exception + không Add.",
-                "Ghi chú: product hiện có thể ép coinPrice=0 và vẫn Add.");
-
-            // UTCID06 – FREE nhưng truyền coinPrice > 0 (spec: phải fail, không tạo chapter).
-            // Expected by spec, currently FAILS until product is fixed:
-            // Hiện tại ChapterService.Create() chỉ ép coinPrice = 0 cho FREE, không throw.
-            // Khi product thêm validate (throw exception), test này sẽ PASS.
+                "Kỳ vọng spec: ArgumentException + không Add.");
 
             var ownerAuthorId = Guid.NewGuid();
             var storyId = Guid.NewGuid();
@@ -388,14 +380,13 @@ namespace AIStory.Tests
                 CoinPrice = 10
             };
 
-            Assert.Throws<Exception>(() => sut.Create(req, ownerAuthorId));
+            Assert.Throws<ArgumentException>(() => sut.Create(req, ownerAuthorId));
             chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
         }
 
         /// <summary>
         /// UTCID07 – title null hoặc chỉ khoảng trắng: spec yêu cầu fail, không tạo chapter.
-        /// Expected by spec, currently FAILS until product validates required title/content:
-        /// EnsureUniqueChapterTitleForStory chỉ return sớm khi title rỗng, không throw.
+        /// Product: <see cref="ChapterService.Create"/> từ chối qua <c>ArgumentException</c> trước khi gọi EnsureUniqueChapterTitleForStory.
         /// </summary>
         [Fact]
         public void UTCID07_CreateChapter_Fail_WhenTitleMissingOrWhitespace()
@@ -439,15 +430,13 @@ namespace AIStory.Tests
                     CoinPrice = 0
                 };
 
-                Assert.Throws<Exception>(() => sut.Create(req, ownerAuthorId));
+                Assert.Throws<ArgumentException>(() => sut.Create(req, ownerAuthorId));
                 chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
             }
         }
 
         /// <summary>
-        /// UTCID08 – content chỉ khoảng trắng: spec yêu cầu fail, không tạo chapter.
-        /// Expected by spec, currently FAILS until product validates required non-whitespace content.
-        /// Hiện tại Create() không reject content whitespace-only (wordCount = 0 nhưng vẫn Add).
+        /// UTCID08 – content chỉ khoảng trắng: spec yêu cầu fail, không tạo chapter; message nghiệp vụ (vd. đầy đủ thông tin).
         /// </summary>
         [Fact]
         public void UTCID08_CreateChapter_Fail_WhenContentIsWhitespaceOnly()
@@ -456,8 +445,7 @@ namespace AIStory.Tests
                 "Content chỉ khoảng trắng → spec: fail, không tạo chapter.",
                 "Precondition: story + author; title hợp lệ; order_index chưa trùng; FREE/coinPrice=0.",
                 "Input: Content = whitespace-only (tab/space/newline).",
-                "Kỳ vọng spec: exception + không Add.",
-                "Ghi chú: product có thể vẫn Add (wordCount=0).");
+                "Kỳ vọng spec: InvalidOperationException + không Add.");
 
             var ownerAuthorId = Guid.NewGuid();
             var storyId = Guid.NewGuid();
@@ -489,14 +477,13 @@ namespace AIStory.Tests
                 CoinPrice = 0
             };
 
-            Assert.Throws<Exception>(() => sut.Create(req, ownerAuthorId));
+            var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(req, ownerAuthorId));
+            Assert.Contains("Vui lòng điền đầy đủ thông tin", ex.Message, StringComparison.Ordinal);
             chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
         }
 
         /// <summary>
-        /// UTCID09 – content &lt; 500 ký tự (nhưng không phải chỉ whitespace): spec yêu cầu fail, không tạo chapter.
-        /// Bảng testcase có thể ghi message "Dữ liệu quá lớn" — đó là nhầm (quá lớn ≠ quá ngắn); test chỉ assert có exception + không Add.
-        /// Expected by spec, currently FAILS until product validates độ dài tối thiểu content (giống UTCID02 nhưng case FREE).
+        /// UTCID09 – content &lt; 500 ký tự (có ký tự thực, không phải chỉ whitespace): fail tại tầng service, không Add; message phản ánh quá ngắn (không dùng kiểu &quot;quá lớn&quot;).
         /// </summary>
         [Fact]
         public void UTCID09_CreateChapter_Fail_WhenContentShorterThan500Characters()
@@ -505,8 +492,7 @@ namespace AIStory.Tests
                 "FREE: content có ký tự nhưng độ dài < 500 → spec: fail.",
                 "Precondition: story + author; order_index chưa trùng.",
                 "Input: Content length = 499; AccessType=FREE; CoinPrice=0.",
-                "Kỳ vọng spec: exception + không Add.",
-                "Ghi chú: product có thể chưa validate min length cho FREE.");
+                "Kỳ vọng: InvalidOperationException (quá ngắn / tối thiểu 500 ký tự) + không Add.");
 
             var ownerAuthorId = Guid.NewGuid();
             var storyId = Guid.NewGuid();
@@ -538,7 +524,10 @@ namespace AIStory.Tests
                 CoinPrice = 0
             };
 
-            Assert.Throws<Exception>(() => sut.Create(req, ownerAuthorId));
+            var ex = Assert.Throws<InvalidOperationException>(() => sut.Create(req, ownerAuthorId));
+            Assert.Contains("quá ngắn", ex.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("500", ex.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("quá lớn", ex.Message, StringComparison.OrdinalIgnoreCase);
             chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
         }
 
@@ -630,9 +619,7 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID13 – user đăng nhập không phải chủ story (không phải tác giả truyện): không được tạo chapter; input khác hợp lệ.
-        /// Expected by spec, currently FAILS: Create(request, authorId) hiện gọi Create(request) và không so authorId với story.author_id.
-        /// Không assert đúng từng chữ message ("Bạn không phải tác giả").
+        /// UTCID13 – user không phải chủ story: <see cref="ChapterService.Create"/> so <c>authorId</c> với <c>story.author_id</c>; API trả 403.
         /// </summary>
         [Fact]
         public void UTCID13_CreateChapter_Fail_WhenUserIsNotStoryAuthor()
@@ -641,8 +628,7 @@ namespace AIStory.Tests
                 "User không phải chủ story (ma trận: không phải tác giả truyện) → chỉ owner được tạo chapter.",
                 "Precondition: story tồn tại; payload hợp lệ; order_index chưa trùng.",
                 "Input: Create(req, loggedInUserNotOwner) với Guid khác story.author_id.",
-                "Kỳ vọng spec: exception + không Add.",
-                "Ghi chú: service có thể bỏ qua authorId.");
+                "Kỳ vọng: UnauthorizedAccessException + message chứa \"Bạn không phải tác giả\" + không Add.");
 
             var ownerAuthorId = Guid.NewGuid();
             var storyId = Guid.NewGuid();
@@ -675,25 +661,22 @@ namespace AIStory.Tests
             };
 
             var loggedInUserNotOwner = Guid.NewGuid();
-            Assert.Throws<Exception>(() => sut.Create(req, loggedInUserNotOwner));
+            var ex = Assert.Throws<UnauthorizedAccessException>(() => sut.Create(req, loggedInUserNotOwner));
+            Assert.Equal("Bạn không phải tác giả của truyện này.", ex.Message);
             chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
         }
 
         /// <summary>
-        /// UTCID14 – user có role tác giả nhưng story không thuộc họ (author khác chủ story): chỉ được thao tác trên story của mình.
-        /// Khác UTCID13 trên ma trận testcase (role vs ownership); ở tầng ChapterService chỉ có authorId Guid — mô phỏng bằng user khác story.author_id.
-        /// Expected by spec, currently FAILS: Create(request, authorId) không so authorId với story.author_id.
-        /// Không assert đúng từng chữ message ("Bạn không phải tác giả của truyện này").
+        /// UTCID14 – tác giả (user khác) không phải chủ <c>story.author_id</c> không được tạo chương; message kiểu &quot;Bạn không phải tác giả của truyện này&quot;; API 403.
         /// </summary>
         [Fact]
         public void UTCID14_CreateChapter_Fail_WhenCallerAuthorDoesNotOwnStory()
         {
             LogUtcContext("UTCID14",
-                "Tác giả khác (domain: có role author) nhưng không sở hữu story này → không được tạo chapter.",
+                "Tác giả khác chủ story (có thể là author trên hệ thống nhưng không sở hữu story này) → không được tạo chapter.",
                 "Precondition: story.author_id = storyOwnerId; payload hợp lệ.",
                 "Input: Create(req, anotherAuthorUserId) ≠ storyOwnerId.",
-                "Khác UTCID13 trên bảng testcase (role/ownership); tại service chỉ so Guid.",
-                "Kỳ vọng spec: exception + không Add.");
+                "Kỳ vọng: UnauthorizedAccessException, message đầy đủ, không Add.");
 
             var storyOwnerId = Guid.NewGuid();
             var anotherAuthorUserId = Guid.NewGuid();
@@ -726,7 +709,8 @@ namespace AIStory.Tests
                 CoinPrice = 0
             };
 
-            Assert.Throws<Exception>(() => sut.Create(req, anotherAuthorUserId));
+            var ex = Assert.Throws<UnauthorizedAccessException>(() => sut.Create(req, anotherAuthorUserId));
+            Assert.Equal("Bạn không phải tác giả của truyện này.", ex.Message);
             chapterRepoMock.Verify(x => x.Add(It.IsAny<chapters>()), Times.Never);
         }
 

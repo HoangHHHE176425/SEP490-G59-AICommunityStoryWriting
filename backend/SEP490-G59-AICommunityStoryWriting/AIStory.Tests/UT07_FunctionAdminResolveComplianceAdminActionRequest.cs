@@ -7,6 +7,7 @@ using Services.DTOs.StoryReports;
 using Services.Interfaces;
 using System;
 using System.Security.Claims;
+using System.Text.Json;
 using Xunit.Abstractions;
 
 namespace AIStory.Tests
@@ -55,6 +56,7 @@ namespace AIStory.Tests
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
                 Decision = "APPROVE",
+                ReasonCode = "OTHER",
                 AdminNote = "ok",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
@@ -103,6 +105,7 @@ namespace AIStory.Tests
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
                 Decision = "REJECT",
+                ReasonCode = "OTHER",
                 AdminNote = "nope",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
@@ -133,22 +136,47 @@ namespace AIStory.Tests
 
         /// <summary>
         /// UTCID03 — ma trận: requestId <b>null</b> → không xác định được comment/yêu cầu để xử lý (ma trận: Return <c>false</c> + log).
-        /// Product hiện: controller <see cref="AdminComplianceStoryReportsController.ResolveAdminActionRequest(Guid, AdminResolveComplianceAdminActionRequestDto)"/>
-        /// nhận <c>requestId</c> dạng <c>Guid</c> (từ route param), nên ở tầng C# không thể truyền <c>null</c>.
-        /// Routing thường sẽ trả <c>404</c>/không gọi action nếu segment không phải GUID hợp lệ.
-        /// Test: hiện không thể biểu diễn trực tiếp case “requestId null” theo contract; viết dưới dạng <b>[BUG]</b> để chờ product đổi contract/validate (ví dụ chuyển về <c>Guid?</c> và kiểm tra null).
+        /// REST: segment <c>{requestId:guid}</c> không tạo được tham số C# <c>null</c>; product xử lý tương đương bằng <see cref="Guid.Empty"/> (ID không hợp lệ / không xác định)
+        /// — <see cref="AdminComplianceStoryReportsController.ResolveAdminActionRequest"/> trả <c>400</c>, log cảnh báo, <b>không</b> gọi service.
         /// </summary>
         [Fact]
-        public void UTCID03_Bug_AdminResolveComplianceAdminActionRequest_RequestIdNull_PerSpec()
+        public async System.Threading.Tasks.Task UTCID03_AdminResolveComplianceAdminActionRequest_ReturnsBadRequest_WhenRequestIdEffectivelyMissing()
         {
-            LogUtcContext("UTCID03 [BUG — requestId null]",
-                "Spec: requestId null → dừng, không xử lý.",
-                "Product contract: ResolveAdminActionRequest nhận requestId kiểu Guid (route {requestId:guid}) → không thể null ở C#.",
-                "Hệ quả: test không thể mô phỏng đúng input null; chỉ có thể dùng Guid.Empty tương đương 'not found' (không đúng ma trận).");
+            LogUtcContext("UTCID03",
+                "Spec: requestId null / không xác định → dừng, không xử lý (ma trận: false + log).",
+                "Product: Guid.Empty tại controller → 400 + message Không tìm thấy comment.; không gọi IStoryReportService.");
 
-            Assert.Fail(
-                "BUG UT07/UTCID03: Ma trận yêu cầu requestId null, nhưng API/controller/service đang nhận requestId là Guid (không Nullable) từ route constraint {requestId:guid} nên không thể biểu diễn 'null' trong unit test theo contract hiện tại. " +
-                "Cần thống nhất spec/REST (404 routing) hoặc đổi contract (Guid? + check null) rồi cập nhật test để pass.");
+            var adminId = Guid.NewGuid();
+            var body = new AdminResolveComplianceAdminActionRequestDto
+            {
+                Decision = "REJECT",
+                ReasonCode = "OTHER",
+                AdminNote = "nope",
+                SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
+            };
+
+            var controller = CreateSut(out var serviceMock);
+
+            var identity = new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, adminId.ToString()) },
+                authenticationType: "Test");
+
+            controller.ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+            };
+
+            var result = await controller.ResolveAdminActionRequest(Guid.Empty, body);
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+            Assert.NotNull(badRequest.Value);
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
+            Assert.Equal("Không tìm thấy comment.", doc.RootElement.GetProperty("message").GetString());
+
+            serviceMock.Verify(
+                s => s.AdminResolveComplianceAdminActionRequestAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<AdminResolveComplianceAdminActionRequestDto>()),
+                Times.Never);
         }
 
         /// <summary>
@@ -169,6 +197,7 @@ namespace AIStory.Tests
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
                 Decision = "APPROVE",
+                ReasonCode = "OTHER",
                 AdminNote = "ok",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
@@ -195,78 +224,27 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID05 — ma trận: <c>reasonCode</c> không tồn tại → không xử lý yêu cầu compliance (ma trận: Return <c>false</c>).
-        /// <b>[BUG — mismatch contract]</b> Endpoint/controller này hiện tại <c>không nhận</c> tham số <c>reasonCode</c> từ request:
-        /// <see cref="AdminComplianceStoryReportsController.ResolveAdminActionRequest(Guid, AdminResolveComplianceAdminActionRequestDto)"/>
-        /// chỉ nhận <c>requestId</c> (route) và DTO <see cref="AdminResolveComplianceAdminActionRequestDto"/> (có <c>Decision</c>/<c>AdminNote</c>/<c>SuspendUntilUtc</c>).
-        /// Vì vậy không thể mô phỏng input “reasonCode không tồn tại” đúng theo contract hiện tại.
+        /// UTCID05 — ma trận: <c>reasonCode</c> không tồn tại trong catalog → không xử lý (Return <c>false</c> + log &quot;Không tìm thấy lý do phù hợp&quot;).
+        /// Product: <see cref="Services.StoryReporting.StoryReportReasonCatalog.TryGet"/> false → <c>400</c>, không gọi service.
         /// </summary>
         [Fact]
-        public void UTCID05_Bug_AdminResolveComplianceAdminActionRequest_ReasonCodeNotFound_PerSpec()
+        public async System.Threading.Tasks.Task UTCID05_AdminResolveComplianceAdminActionRequest_ReturnsBadRequest_WhenReasonCodeUnknown()
         {
-            LogUtcContext("UTCID05 [BUG — reasonCode mismatch]",
-                "Spec: reasonCode không tồn tại → không xử lý.",
-                "Product contract mismatch: ResolveAdminActionRequest không có field reasonCode trong DTO.",
-                "Không thể assert nhánh “không tồn tại lý do phù hợp” cho case này trong unit test tầng controller.");
-
-            Assert.Fail(
-                "BUG UT07/UTCID05: Ma trận yêu cầu validate reasonCode, nhưng endpoint ResolveAdminActionRequest hiện không nhận reasonCode trong request body/parameters. " +
-                "Nếu product muốn hỗ trợ case này, cần bổ sung contract (vd: thêm reasonCode vào DTO hoặc có endpoint khác) và validate ở service/controller; " +
-                "sau đó mới cập nhật test để pass theo đúng nghiệp vụ.");
-        }
-
-        /// <summary>
-        /// UTCID06 — ma trận: <c>reasonCode</c> null → không xử lý yêu cầu compliance (ma trận: Return <c>false</c>).
-        /// <b>[BUG — mismatch contract]</b> Endpoint/controller này không nhận <c>reasonCode</c> từ request:
-        /// <see cref="AdminComplianceStoryReportsController.ResolveAdminActionRequest(Guid, AdminResolveComplianceAdminActionRequestDto)"/>
-        /// chỉ nhận <c>requestId</c> và DTO <see cref="AdminResolveComplianceAdminActionRequestDto"/> (có <c>Decision</c>/<c>AdminNote</c>/<c>SuspendUntilUtc</c>).
-        /// Vì vậy không thể mô phỏng/verify nghiệp vụ “không tìm thấy lý do phù hợp” cho case <c>reasonCode = null</c> trong unit test hiện tại.
-        /// </summary>
-        [Fact]
-        public void UTCID06_Bug_AdminResolveComplianceAdminActionRequest_ReasonCodeNull_PerSpec()
-        {
-            LogUtcContext("UTCID06 [BUG — reasonCode null mismatch]",
-                "Spec: reasonCode null → không xử lý.",
-                "Product contract mismatch: ResolveAdminActionRequest không có reasonCode trong DTO.",
-                "Không thể assert nhánh 'Không tìm thấy lý do phù hợp' cho case này theo contract unit test hiện tại.");
-
-            Assert.Fail(
-                "BUG UT07/UTCID06: Ma trận yêu cầu validate reasonCode, nhưng endpoint ResolveAdminActionRequest hiện không nhận reasonCode trong request body/parameters. " +
-                "Nếu product muốn hỗ trợ case này, cần bổ sung contract (vd: thêm reasonCode vào DTO hoặc cung cấp endpoint riêng) + validate ở service/controller; " +
-                "sau đó cập nhật test để pass.");
-        }
-
-        /// <summary>
-        /// UTCID07 — ma trận: <c>description</c> &gt; 200 ký tự → không xử lý yêu cầu compliance (ma trận: Return <c>false</c> + log &quot;kí tự quá dài&quot;).
-        /// <b>[BUG — ánh xạ field]</b> Endpoint/controller trong UT07 đang resolve compliance theo
-        /// <see cref="AdminResolveComplianceAdminActionRequestDto"/> (fields gồm <c>Decision</c>, <c>AdminNote</c>, <c>SuspendUntilUtc</c>),
-        /// không có field <c>description</c> riêng. Mình ánh xạ <c>description</c> trong ma trận sang <c>AdminNote</c> để thử validate độ dài.
-        /// Product hiện tại: controller/service chưa validate độ dài <c>AdminNote</c> (không thấy rule MaxLength &lt;= 200 ở DTO/service).
-        /// Test: kỳ vọng reject trước khi gọi service; nếu vẫn gọi service và trả OK thì coi là bug.
-        /// </summary>
-        [Fact]
-        public async System.Threading.Tasks.Task UTCID07_Bug_AdminResolveComplianceAdminActionRequest_DescriptionTooLong_PerSpec()
-        {
-            LogUtcContext("UTCID07 [BUG — description/length]",
-                "Spec: description > 200 → không xử lý.",
-                "UT07 mapping: dùng AdminNote làm description.",
-                "Kỳ vọng: controller reject trước khi gọi service (không cần assert message từng chữ).");
+            LogUtcContext("UTCID05",
+                "Spec: reasonCode không tồn tại → dừng xử lý.",
+                "Product: ReasonCode không có trong StoryReportReasonCatalog → 400 + Không tìm thấy lý do phù hợp.");
 
             var requestId = Guid.NewGuid();
             var adminId = Guid.NewGuid();
-            var controller = CreateSut(out var serviceMock);
-
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
-                Decision = "APPROVE",
-                // mô phỏng description > 200
-                AdminNote = new string('x', 201),
+                Decision = "REJECT",
+                ReasonCode = "NOT_IN_CATALOG_XYZ",
+                AdminNote = "nope",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
 
-            serviceMock
-                .Setup(s => s.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, body))
-                .Returns(System.Threading.Tasks.Task.CompletedTask);
+            var controller = CreateSut(out var serviceMock);
 
             controller.ControllerContext = new ControllerContext
             {
@@ -281,13 +259,103 @@ namespace AIStory.Tests
 
             var result = await controller.ResolveAdminActionRequest(requestId, body);
 
-            if (result is OkObjectResult ok && ok.StatusCode == StatusCodes.Status200OK)
-            {
-                _output.WriteLine("[BUG UT07/UTCID07] Backend chưa validate độ dài AdminNote/description > 200. Cần bổ sung check MaxLength(200) ở DTO/service/controller để trả BadRequest trước khi gọi service.");
-                Assert.Fail("BUG UT07/UTCID07: Expected reject for description/AdminNote > 200, but API returned 200 OK.");
-            }
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+            Assert.NotNull(badRequest.Value);
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
+            Assert.Equal("Không tìm thấy lý do phù hợp.", doc.RootElement.GetProperty("message").GetString());
 
-            // Nếu future product reject đúng thì không gọi service.
+            serviceMock.Verify(
+                s => s.AdminResolveComplianceAdminActionRequestAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<AdminResolveComplianceAdminActionRequestDto>()),
+                Times.Never);
+        }
+
+        /// <summary>
+        /// UTCID06 — ma trận: <c>reasonCode</c> null / không xác định → không xử lý (Return <c>false</c> + log &quot;Không tìm thấy lý do phù hợp&quot;).
+        /// Product: <see cref="AdminResolveComplianceAdminActionRequestDto.ReasonCode"/> bắt buộc (không null/blank); controller trả <c>400</c>, log cảnh báo, không gọi service.
+        /// </summary>
+        [Fact]
+        public async System.Threading.Tasks.Task UTCID06_AdminResolveComplianceAdminActionRequest_ReturnsBadRequest_WhenReasonCodeMissing()
+        {
+            LogUtcContext("UTCID06",
+                "Spec: reasonCode null/blank → dừng xử lý.",
+                "Product: string.IsNullOrWhiteSpace(ReasonCode) → 400 + message Không tìm thấy lý do phù hợp.; không gọi IStoryReportService.");
+
+            var requestId = Guid.NewGuid();
+            var adminId = Guid.NewGuid();
+            var body = new AdminResolveComplianceAdminActionRequestDto
+            {
+                Decision = "REJECT",
+                ReasonCode = null,
+                AdminNote = "nope",
+                SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
+            };
+
+            var controller = CreateSut(out var serviceMock);
+
+            controller.ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(
+                        new ClaimsIdentity(
+                            new[] { new Claim(ClaimTypes.NameIdentifier, adminId.ToString()) },
+                            authenticationType: "Test"))
+                }
+            };
+
+            var result = await controller.ResolveAdminActionRequest(requestId, body);
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+            Assert.NotNull(badRequest.Value);
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
+            Assert.Equal("Không tìm thấy lý do phù hợp.", doc.RootElement.GetProperty("message").GetString());
+
+            serviceMock.Verify(
+                s => s.AdminResolveComplianceAdminActionRequestAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<AdminResolveComplianceAdminActionRequestDto>()),
+                Times.Never);
+        }
+
+        /// <summary>
+        /// UTCID07 — ma trận: mô tả (<c>AdminNote</c>) &gt; 200 ký tự → không xử lý; message kiểu &quot;ký tự quá dài&quot;.
+        /// Product: <see cref="AdminComplianceStoryReportsController.ResolveAdminActionRequest"/> trả <c>400</c> trước khi gọi service; DTO <see cref="AdminResolveComplianceAdminActionRequestDto"/> <c>[MaxLength(200)]</c>; service có guard tương tự.
+        /// </summary>
+        [Fact]
+        public async System.Threading.Tasks.Task UTCID07_AdminResolveComplianceAdminActionRequest_ReturnsBadRequest_WhenAdminNoteExceeds200Characters()
+        {
+            LogUtcContext("UTCID07 — AdminNote / description > 200 ký tự",
+                "Spec: không resolve; không persist.",
+                "Ánh xạ ma trận: description → AdminNote.",
+                "Kỳ vọng: BadRequest; service không được gọi.");
+
+            var requestId = Guid.NewGuid();
+            var adminId = Guid.NewGuid();
+            var controller = CreateSut(out var serviceMock);
+
+            var body = new AdminResolveComplianceAdminActionRequestDto
+            {
+                Decision = "APPROVE",
+                ReasonCode = "OTHER",
+                AdminNote = new string('x', 201),
+                SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
+            };
+
+            controller.ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(
+                        new ClaimsIdentity(
+                            new[] { new Claim(ClaimTypes.NameIdentifier, adminId.ToString()) },
+                            authenticationType: "Test"))
+                }
+            };
+
+            var result = await controller.ResolveAdminActionRequest(requestId, body);
+
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
             serviceMock.Verify(
                 s => s.AdminResolveComplianceAdminActionRequestAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<AdminResolveComplianceAdminActionRequestDto>()),
                 Times.Never);
@@ -314,6 +382,7 @@ namespace AIStory.Tests
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
                 Decision = "APPROVE",
+                ReasonCode = "OTHER",
                 AdminNote = "   \t  \n  ",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
@@ -362,6 +431,7 @@ namespace AIStory.Tests
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
                 Decision = "APPROVE",
+                ReasonCode = "OTHER",
                 AdminNote = " \t  ",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
@@ -391,21 +461,18 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID10 — ma trận: không tìm thấy story tương ứng với comment → không xử lý yêu cầu compliance (ma trận: Return false).
-        /// <b>[BUG — spec gap / mismatch]</b> Endpoint UT07 đang resolve <i>story compliance admin action request</i> bằng
-        /// <see cref="Services.Implementations.StoryReportService.AdminResolveComplianceAdminActionRequestAsync(Guid, Guid, AdminResolveComplianceAdminActionRequestDto)"/>
-        /// và chỉ kiểm tra tồn tại requestId + trạng thái pending/approved/rejected + kind.
-        /// Product hiện tại <b>không</b> validate “story_id của yêu cầu có tồn tại” (hoặc mapping “comment -> story”) ở tầng này.
-        /// Vì vậy unit test hiện tại không thể đạt được nhánh “Không tìm thấy truyện” đúng theo spec bằng contract UT07.
-        /// Test dưới đây cố tình mock service trả OK và <see cref="Assert.Fail(string)"/> để đánh dấu bug/thiếu validate.
+        /// UTCID10 — ma trận: không tìm thấy story (ánh xạ ngữ cảnh: story tương ứng comment/báo cáo) → không xử lý request compliance
+        /// (Return <c>false</c> + log &quot;Không tìm thấy truyện&quot;).
+        /// Product: <see cref="Services.Implementations.StoryReportService.AdminResolveComplianceAdminActionRequestAsync"/> kiểm tra
+        /// <c>StoryDAO.GetById(row.story_id)</c>; ném <see cref="InvalidOperationException"/> (&quot;Không tìm thấy truyện.&quot;); controller trả <c>400</c>.
+        /// Test: mock service ném exception tương đương — xác nhận mapping HTTP (message theo product).
         /// </summary>
         [Fact]
-        public async System.Threading.Tasks.Task UTCID10_Bug_AdminResolveComplianceAdminActionRequest_StoryNotFoundForComment_PerSpec()
+        public async System.Threading.Tasks.Task UTCID10_AdminResolveComplianceAdminActionRequest_ReturnsBadRequest_WhenStoryNotFoundForComplianceRequest()
         {
-            LogUtcContext("UTCID10 [BUG — missing story for comment]",
-                "Spec: không tìm thấy truyện tương ứng với comment → không xử lý.",
-                "UT07 mismatch: ResolveAdminActionRequest không có commentId/storyId riêng để kiểm tra mapping.",
-                "Product code check: AdminResolveComplianceAdminActionRequestAsync chỉ GetTrackedById(requestId), không load/validate story_id tồn tại.");
+            LogUtcContext("UTCID10",
+                "Spec: không tìm thấy truyện gắn với yêu cầu → không resolve.",
+                "Product: InvalidOperationException Không tìm thấy truyện.; controller 400 + log cảnh báo.");
 
             var requestId = Guid.NewGuid();
             var adminId = Guid.NewGuid();
@@ -414,13 +481,14 @@ namespace AIStory.Tests
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
                 Decision = "APPROVE",
+                ReasonCode = "OTHER",
                 AdminNote = "note",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
 
             serviceMock
                 .Setup(s => s.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, body))
-                .Returns(System.Threading.Tasks.Task.CompletedTask);
+                .ThrowsAsync(new InvalidOperationException("Không tìm thấy truyện."));
 
             controller.ControllerContext = new ControllerContext
             {
@@ -435,13 +503,13 @@ namespace AIStory.Tests
 
             var result = await controller.ResolveAdminActionRequest(requestId, body);
 
-            if (result is OkObjectResult ok && ok.StatusCode == StatusCodes.Status200OK)
-            {
-                _output.WriteLine(
-                    "[BUG UT07/UTCID10] Backend hiện chưa validate 'story không tồn tại' theo spec. " +
-                    "Cần bổ sung lookup/validate mapping story_id trước khi resolve và trả BadRequest/exception tương ứng.");
-                Assert.Fail("BUG UT07/UTCID10: Expected reject when story for comment not found, but API returned 200 OK.");
-            }
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+            Assert.NotNull(badRequest.Value);
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
+            Assert.Equal("Không tìm thấy truyện.", doc.RootElement.GetProperty("message").GetString());
+
+            serviceMock.Verify(s => s.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, body), Times.Once);
         }
 
         /// <summary>
@@ -465,6 +533,7 @@ namespace AIStory.Tests
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
                 Decision = "REJECT",
+                ReasonCode = "OTHER",
                 AdminNote = "note",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
@@ -515,14 +584,15 @@ namespace AIStory.Tests
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
                 Decision = "APPROVE",
+                ReasonCode = "OTHER",
                 AdminNote = "note",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
 
-            // Mô phỏng backend hiện không reject theo story.status (thiếu validate).
+            // Mô phỏng backend validate story.status != PUBLISHED.
             serviceMock
                 .Setup(s => s.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, body))
-                .Returns(System.Threading.Tasks.Task.CompletedTask);
+                .ThrowsAsync(new InvalidOperationException("Truyện chưa được PUBLISH"));
 
             controller.ControllerContext = new ControllerContext
             {
@@ -537,28 +607,27 @@ namespace AIStory.Tests
 
             var result = await controller.ResolveAdminActionRequest(requestId, body);
 
-            if (result is OkObjectResult ok && ok.StatusCode == StatusCodes.Status200OK)
-            {
-                _output.WriteLine("[BUG UT07/UTCID12] Backend chưa validate story.status != PUBLISHED để reject theo spec. " +
-                                 "Cần bổ sung lookup/validate story trước khi resolve và trả BadRequest/exception phù hợp.");
-                Assert.Fail("BUG UT07/UTCID12: Expected reject when story not published, but API returned 200 OK.");
-            }
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+            Assert.NotNull(badRequest.Value);
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
+            Assert.Equal("Truyện chưa được PUBLISH", doc.RootElement.GetProperty("message").GetString());
+
+            serviceMock.Verify(s => s.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, body), Times.Once);
         }
 
         /// <summary>
-        /// UTCID13 — ma trận: reporter là chủ comment → không được tự báo cáo → không xử lý yêu cầu compliance (ma trận: Return <c>false</c> + log).
-        /// <b>[BUG — contract mismatch]</b> Endpoint UT07 hiện tại là resolve <i>admin action request</i> (route theo <c>requestId</c> và DTO gồm
-        /// <c>Decision/AdminNote/SuspendUntilUtc</c>) nên <b>không có</b> tham số để biểu diễn “comment owner vs reporterId”.
-        /// Vì vậy unit test theo contract hiện không mô phỏng được self-report case đúng nghĩa; mình tạo bug placeholder:
-        /// nếu controller vẫn trả <c>200 OK</c> (mock service OK) thì đánh dấu thiếu validate theo spec.
+        /// UTCID13 — reporter là chủ comment → không được tự báo cáo → không xử lý yêu cầu compliance.
+        /// Product/service: nếu <c>requester_id == target_user_id</c> thì ném <see cref="InvalidOperationException"/> (&quot;Không thể tự báo cáo chính mình&quot;);
+        /// controller trả <c>400</c> + log cảnh báo; không gọi resolve.
         /// </summary>
         [Fact]
         public async System.Threading.Tasks.Task UTCID13_Bug_AdminResolveComplianceAdminActionRequest_SelfReportCommentOwner_PerSpec()
         {
             LogUtcContext("UTCID13 [BUG — self report comment owner]",
-                "Spec: reporter là chủ comment → không được phép xử lý.",
-                "UT07 contract mismatch: ResolveAdminActionRequest không nhận commentId/reporterId để kiểm tra self-report.",
-                "Kỳ vọng: reject; hiện tại (với mock service OK) controller có thể vẫn trả 200 → fail để đánh dấu bug.");
+                "Spec: reporter là chủ comment → không được phép xử lý (Return false + log).",
+                "Test: mô phỏng service ném InvalidOperationException 'Không thể tự báo cáo chính mình'.",
+                "Kỳ vọng: 400 BadRequest; không còn Ok 200.");
 
             var requestId = Guid.NewGuid();
             var adminId = Guid.NewGuid();
@@ -567,13 +636,14 @@ namespace AIStory.Tests
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
                 Decision = "APPROVE",
+                ReasonCode = "OTHER",
                 AdminNote = "note",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
 
             serviceMock
                 .Setup(s => s.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, body))
-                .Returns(System.Threading.Tasks.Task.CompletedTask);
+                .ThrowsAsync(new InvalidOperationException("Không thể tự báo cáo chính mình"));
 
             controller.ControllerContext = new ControllerContext
             {
@@ -588,12 +658,11 @@ namespace AIStory.Tests
 
             var result = await controller.ResolveAdminActionRequest(requestId, body);
 
-            if (result is OkObjectResult ok && ok.StatusCode == StatusCodes.Status200OK)
-            {
-                _output.WriteLine("[BUG UT07/UTCID13] Endpoint UT07 không có contract để kiểm tra self-report theo spec. " +
-                                 "Cần validate ở endpoint tương ứng khi tạo compliance request (request compliance) hoặc mở rộng contract cho resolve nếu thật sự cần.");
-                Assert.Fail("BUG UT07/UTCID13: Expected reject for self-report comment owner, but API returned 200 OK.");
-            }
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+            Assert.NotNull(badRequest.Value);
+            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
+            Assert.Equal("Không thể tự báo cáo chính mình", doc.RootElement.GetProperty("message").GetString());
 
             serviceMock.Verify(s => s.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, body), Times.Once);
         }

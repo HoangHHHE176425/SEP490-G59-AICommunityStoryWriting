@@ -34,6 +34,9 @@ public class CoCreationResponse
     /// <summary>Dàn ý do Agent 1 tạo (rỗng nếu IdeaContradictionFeedback có giá trị).</summary>
     public string Outline { get; set; } = null!;
 
+    /// <summary>Tiêu đề chương gợi ý (Agent 1). Null nếu không sinh được hoặc nhánh mâu thuẫn ý tưởng.</summary>
+    public string? SuggestedChapterTitle { get; set; }
+
     /// <summary>Nội dung cuối (đã qua kiểm duyệt hoặc bản cuối sau khi hết số lần sửa). Rỗng nếu IdeaContradictionFeedback có giá trị.</summary>
     public string FinalContent { get; set; } = null!;
 
@@ -60,6 +63,9 @@ public class CoCreationResponse
 
     /// <summary>Thời gian chạy từng bước (ms): Outline, Write, Guardrail, Length_Expand, … Null nếu không đo.</summary>
     public List<AgentDuration>? AgentDurations { get; set; }
+
+    /// <summary>Khi có giá trị: có chương trước slot đang soạn chưa PUBLISHED nhưng đã có nội dung — bản AI có thể lệch mạch nháp.</summary>
+    public string? ContextWarning { get; set; }
 }
 
 /// <summary>Một bước trong pipeline co-create và thời gian chạy (ms).</summary>

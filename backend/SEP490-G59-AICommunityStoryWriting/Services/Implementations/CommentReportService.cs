@@ -18,10 +18,12 @@ public class CommentReportService : ICommentReportService
     private const string CommentTargetType = "COMMENT";
     private static readonly string[] DefaultOpenStatuses = { "NEW", "IN_REVIEW" };
     private static readonly string ComplianceTargetType = ReviewAssignmentDAO.TargetTypeComplianceCommentReports;
+    private readonly IUserLookup _userLookup;
     private readonly INotificationHubNotifier? _notificationHubNotifier;
 
-    public CommentReportService(INotificationHubNotifier? notificationHubNotifier = null)
+    public CommentReportService(IUserLookup userLookup, INotificationHubNotifier? notificationHubNotifier = null)
     {
+        _userLookup = userLookup;
         _notificationHubNotifier = notificationHubNotifier;
     }
 
@@ -65,10 +67,18 @@ public class CommentReportService : ICommentReportService
         Guid? expectedChapterId = null)
     {
         if (request == null) throw new ArgumentException("Request is required.");
+        if (commentId == Guid.Empty)
+            throw new InvalidOperationException("Không tìm thấy comment.");
         if (!CommentReportReasonCatalog.TryGet(request.ReasonCode, out _))
             throw new ArgumentException("Invalid reason code.");
 
-        var comment = CommentDAO.GetById(commentId) ?? throw new InvalidOperationException("Comment not found.");
+        if (request.Description != null && request.Description.Length > 200)
+            throw new ArgumentException("Ký tự quá dài: mô tả báo cáo tối đa 200 ký tự.");
+
+        if (reporterId == Guid.Empty || !_userLookup.Exists(reporterId))
+            throw new InvalidOperationException("USER không tồn tại.");
+
+        var comment = CommentDAO.GetById(commentId) ?? throw new InvalidOperationException("Không tìm thấy comment.");
 
         if (expectedStoryId.HasValue && comment.story_id != expectedStoryId.Value)
             throw new InvalidOperationException("Comment not belong to this story.");

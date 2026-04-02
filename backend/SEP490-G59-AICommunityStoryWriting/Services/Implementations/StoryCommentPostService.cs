@@ -10,6 +10,7 @@ namespace Services.Implementations;
 public class StoryCommentPostService : IStoryCommentPostService
 {
     private readonly IStoryLookup _storyLookup;
+    private readonly IUserLookup _userLookup;
     private readonly IUserActivityLookup _userActivityLookup;
     private readonly IStoryCommentCommand _commentCommand;
     private readonly ICommentReactionReader _reactionReader;
@@ -18,6 +19,7 @@ public class StoryCommentPostService : IStoryCommentPostService
 
     public StoryCommentPostService(
         IStoryLookup storyLookup,
+        IUserLookup userLookup,
         IUserActivityLookup userActivityLookup,
         IStoryCommentCommand commentCommand,
         ICommentReactionReader reactionReader,
@@ -25,6 +27,7 @@ public class StoryCommentPostService : IStoryCommentPostService
         ILogger<StoryCommentPostService> logger)
     {
         _storyLookup = storyLookup;
+        _userLookup = userLookup;
         _userActivityLookup = userActivityLookup;
         _commentCommand = commentCommand;
         _reactionReader = reactionReader;
@@ -49,6 +52,12 @@ public class StoryCommentPostService : IStoryCommentPostService
 
         if (!string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
             return StoryCommentPostOutcome.BadRequest("Chỉ có thể comment truyện đã PUBLISHED.");
+
+        if (!_userLookup.Exists(userId))
+        {
+            _logger.LogWarning("Story comment rejected: user {UserId} does not exist.", userId);
+            return StoryCommentPostOutcome.BadRequest("User không tồn tại.");
+        }
 
         if (!_userActivityLookup.HasReadAnyChapterOfStory(userId, storyId))
             return StoryCommentPostOutcome.BadRequest("Bạn cần đọc ít nhất một chapter trước khi comment.");

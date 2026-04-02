@@ -49,6 +49,8 @@ public class CommentReportsController : ControllerBase
         if (!userId.HasValue) return Unauthorized(new { message = "Cần đăng nhập để báo cáo." });
         if (request == null || string.IsNullOrWhiteSpace(request.ReasonCode))
             return BadRequest(new { message = "ReasonCode is required." });
+        if (commentId == Guid.Empty)
+            return BadRequest(new { message = "Không tìm thấy comment." });
 
         try
         {
@@ -82,6 +84,8 @@ public class CommentReportsController : ControllerBase
         if (!userId.HasValue) return Unauthorized(new { message = "Cần đăng nhập để báo cáo." });
         if (request == null || string.IsNullOrWhiteSpace(request.ReasonCode))
             return BadRequest(new { message = "ReasonCode is required." });
+        if (commentId == Guid.Empty)
+            return BadRequest(new { message = "Không tìm thấy comment." });
 
         try
         {

@@ -114,8 +114,8 @@ namespace Services.Implementations
                 {
                     var asc = string.Equals(sortOrderNorm, "asc", StringComparison.OrdinalIgnoreCase);
                     list = asc
-                        ? list.OrderBy(i => i.PendingSince ?? DateTime.MaxValue).ToList()
-                        : list.OrderByDescending(i => i.PendingSince ?? DateTime.MinValue).ToList();
+                        ? list.OrderBy(i => i.DeadlineAt ?? DateTime.MaxValue).ToList()
+                        : list.OrderByDescending(i => i.DeadlineAt ?? DateTime.MinValue).ToList();
                 }
 
                 var total = list.Count;
@@ -156,7 +156,7 @@ namespace Services.Implementations
 
             item.HasPendingEscalation = pendingEscalationStoryIds.Contains(item.Id);
             var fallbackDeadline = ResolveReviewDeadlineUtc(pendingSince, claim);
-            item.DeadlineAt = null;
+            item.DeadlineAt = ApiDateTime.AsUtcForJson(fallbackDeadline);
             item.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
         }
 
@@ -234,8 +234,8 @@ namespace Services.Implementations
                 {
                     var asc = string.Equals(sortOrderNorm, "asc", StringComparison.OrdinalIgnoreCase);
                     list = asc
-                        ? list.OrderBy(i => i.PendingSince ?? DateTime.MaxValue).ToList()
-                        : list.OrderByDescending(i => i.PendingSince ?? DateTime.MinValue).ToList();
+                        ? list.OrderBy(i => i.DeadlineAt ?? DateTime.MaxValue).ToList()
+                        : list.OrderByDescending(i => i.DeadlineAt ?? DateTime.MinValue).ToList();
                 }
 
                 var total = list.Count;
@@ -449,7 +449,7 @@ namespace Services.Implementations
             item.HasPendingEscalation = pendingEscalationChapterIds.Contains(item.Id)
                 || (sid.HasValue && pendingEscalationStoryIds.Contains(sid.Value));
             var fallbackDeadline = ResolveReviewDeadlineUtc(pendingSince, claim);
-            item.DeadlineAt = null;
+            item.DeadlineAt = ApiDateTime.AsUtcForJson(fallbackDeadline);
             item.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
 
             var pendingVersionsList = _versionRepository.GetByChapterId(item.Id)

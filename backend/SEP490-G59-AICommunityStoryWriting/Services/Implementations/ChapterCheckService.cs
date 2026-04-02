@@ -16,6 +16,7 @@ namespace Services.Implementations;
 public class ChapterCheckService : IChapterCheckService
 {
     private const string ActionChapterCheck = "CHAPTER_CHECK";
+    private const string ActionChapterCheckBanned = "CHAPTER_CHECK_BANNED";
     private static readonly TimeSpan SpellCacheTtl = TimeSpan.FromMinutes(10);
     // Common Vietnamese orthographic variants accepted in modern usage; do not flag as typo.
     private static readonly HashSet<string> AcceptedVariantPairs = new(StringComparer.OrdinalIgnoreCase)
@@ -43,21 +44,15 @@ public class ChapterCheckService : IChapterCheckService
         _cache = cache;
     }
 
-    public async Task<CheckChapterResponse> CheckAsync(CheckChapterRequest request, Guid? userId, CancellationToken cancellationToken = default)
+    /// <summary>Gộp từ cấm + chính tả (chỉ dùng cho unit test ma trận; API công khai đã tách hai endpoint).</summary>
+    internal async Task<CheckChapterResponse> CheckAsync(CheckChapterSpellingRequest request, Guid? userId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Content))
             return new CheckChapterResponse { Passed = true, Summary = "Nội dung trống, không cần kiểm tra." };
 
-        var content = request.Content.Trim();
-        if (content.Length > 50000)
-            content = content[..50000] + "\n[... nội dung bị cắt bớt ...]";
-
-        // 1) Kiểm tra từ cấm (BannedWords) – config ContentGuardrail:BannedWords / AI:CoCreateBannedWords
+        var content = NormalizeContentForCheck(request.Content);
         var storyId = request.StoryId ?? Guid.Empty;
-        var guardrailResult = await _guardrail.CheckAsync(storyId, content, cancellationToken);
-        var policyViolations = new List<PolicyViolationItem>();
-        foreach (var v in guardrailResult.Violations)
-            policyViolations.Add(new PolicyViolationItem { Type = v.Type, Description = v.Message, Quote = v.Quote });
+        var policyViolations = await CollectPolicyViolationsAsync(storyId, content, cancellationToken);
 
         var (spellingIssues, summary, spellRawError) = await RunSpellingCheckInternalAsync(request.ChapterTitle, content, cancellationToken);
 
@@ -98,14 +93,51 @@ public class ChapterCheckService : IChapterCheckService
         };
     }
 
-    public async Task<CheckChapterResponse> CheckSpellingOnlyAsync(CheckChapterRequest request, Guid? userId, CancellationToken cancellationToken = default)
+    public async Task<CheckChapterResponse> CheckBannedWordsOnlyAsync(CheckChapterBannedWordsRequest request, Guid? userId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Content))
             return new CheckChapterResponse { Passed = true, Summary = "Nội dung trống, không cần kiểm tra." };
 
-        var content = request.Content.Trim();
-        if (content.Length > 50000)
-            content = content[..50000] + "\n[... nội dung bị cắt bớt ...]";
+        var content = NormalizeContentForCheck(request.Content);
+        var storyId = request.StoryId ?? Guid.Empty;
+        var policyViolations = await CollectPolicyViolationsAsync(storyId, content, cancellationToken);
+
+        if (userId.HasValue)
+        {
+            _aiUsageLogRepository.Log(new ai_usage_logs
+            {
+                user_id = userId.Value,
+                story_id = request.StoryId,
+                chapter_id = null,
+                action_type = ActionChapterCheckBanned,
+                model_name = "BannedWords",
+                prompt_tokens = 0,
+                completion_tokens = 0,
+                total_tokens = 0,
+                status = "SUCCESS",
+                created_at = DateTime.UtcNow
+            });
+        }
+
+        var passed = policyViolations.Count == 0;
+        return new CheckChapterResponse
+        {
+            Passed = passed,
+            SpellingIssues = new List<SpellingIssue>(),
+            PolicyViolations = policyViolations,
+            HasInappropriateContent = false,
+            Summary = passed
+                ? "Không phát hiện từ cấm hoặc vi phạm theo danh sách."
+                : "Nội dung có từ cấm/vi phạm chính sách. Xem policyViolations."
+        };
+    }
+
+    public async Task<CheckChapterResponse> CheckSpellingOnlyAsync(CheckChapterSpellingRequest request, Guid? userId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Content))
+            return new CheckChapterResponse { Passed = true, Summary = "Nội dung trống, không cần kiểm tra." };
+
+        var content = NormalizeContentForCheck(request.Content);
 
         var (spellingIssues, summary, spellRawError) = await RunSpellingCheckInternalAsync(request.ChapterTitle, content, cancellationToken);
 
@@ -142,6 +174,26 @@ public class ChapterCheckService : IChapterCheckService
             PolicyViolations = new List<PolicyViolationItem>(),
             Summary = summary
         };
+    }
+
+    private static string NormalizeContentForCheck(string raw)
+    {
+        var content = raw.Trim();
+        if (content.Length > 50000)
+            content = content[..50000] + "\n[... nội dung bị cắt bớt ...]";
+        return content;
+    }
+
+    private async Task<List<PolicyViolationItem>> CollectPolicyViolationsAsync(
+        Guid storyId,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var guardrailResult = await _guardrail.CheckAsync(storyId, content, cancellationToken);
+        var policyViolations = new List<PolicyViolationItem>();
+        foreach (var v in guardrailResult.Violations)
+            policyViolations.Add(new PolicyViolationItem { Type = v.Type, Description = v.Message, Quote = v.Quote });
+        return policyViolations;
     }
 
     /// <summary>Gọi AI chính tả + cache. Trả rawError nếu không đọc được phản hồi.</summary>
