@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -155,6 +156,14 @@ namespace AIStory.API.Controllers
             }
         }
 
+        /// <summary>Giống <see cref="StoriesController"/>: binder để bool thiếu = false; list công khai mặc định ẩn chapter của tác giả BANNED.</summary>
+        private static void ApplyDefaultExcludeBannedStoryAuthorsFromQuery(HttpRequest request, ChapterQueryDto query)
+        {
+            if (request.Query.Keys.Any(k => string.Equals(k, "excludeBannedStoryAuthors", StringComparison.OrdinalIgnoreCase)))
+                return;
+            query.ExcludeBannedStoryAuthors = true;
+        }
+
         /// <summary>Lấy danh sách chapters với pagination và filtering (cho phép xem không cần đăng nhập)</summary>
         [HttpGet]
         [AllowAnonymous]
@@ -162,6 +171,7 @@ namespace AIStory.API.Controllers
         {
             try
             {
+                ApplyDefaultExcludeBannedStoryAuthorsFromQuery(Request, query);
                 var result = _chapterService.GetAll(query);
                 return Ok(result);
             }

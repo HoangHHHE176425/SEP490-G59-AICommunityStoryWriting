@@ -340,6 +340,7 @@ namespace Services.Implementations
                 MinTotalChapters = query.MinTotalChapters,
                 MaxTotalChapters = query.MaxTotalChapters,
                 IncludeComplianceHiddenInLists = query.IncludeComplianceHiddenInLists,
+                ExcludeBannedAuthors = query.ExcludeBannedAuthors,
             };
 
             return GetAll(authorQuery);
