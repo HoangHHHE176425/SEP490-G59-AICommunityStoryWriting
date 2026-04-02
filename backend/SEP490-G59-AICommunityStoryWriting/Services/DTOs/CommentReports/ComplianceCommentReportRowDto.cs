@@ -56,9 +56,16 @@ public class ComplianceCommentReportRowDto
 
 public class ComplianceCommentReporterDetailDto
 {
+    public Guid EvidenceId { get; set; }
+    public Guid ReportId { get; set; }
+    public Guid ReporterUserId { get; set; }
+
     public string? ReporterDisplayName { get; set; }
     public DateTime? ReportedAtUtc { get; set; }
     public string? Description { get; set; }
     public string? ReasonLabelVi { get; set; }
+
+    /// <summary>COMPLIANCE đã lưu đánh dấu xác minh cho request báo cáo này.</summary>
+    public bool IsComplianceEvidenceVerified { get; set; }
 }
 
