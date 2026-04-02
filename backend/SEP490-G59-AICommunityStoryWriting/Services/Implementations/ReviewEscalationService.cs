@@ -199,12 +199,11 @@ namespace Services.Implementations
             var list = rows.Select(r => MapToListItem(r)).ToList();
             if (!string.IsNullOrWhiteSpace(urgencyTier))
             {
-                var u = urgencyTier.Trim().ToUpperInvariant();
+                var u = EscalationUrgencyHelper.ToDisplayTier(urgencyTier.Trim());
                 list = list.Where(x => string.Equals(x.UrgencyTier, u, StringComparison.OrdinalIgnoreCase)).ToList();
             }
             list = list
-                .OrderByDescending(x => x.UrgencyTier == "CRITICAL")
-                .ThenByDescending(x => x.UrgencyTier == "HIGH")
+                .OrderByDescending(x => x.UrgencyTier == EscalationUrgencyHelper.Critical)
                 .ThenBy(x => x.CurrentAssignmentDeadlineAt ?? DateTime.MaxValue)
                 .ThenBy(x => x.CreatedAt)
                 .ToList();
@@ -262,13 +261,12 @@ namespace Services.Implementations
             };
         }
 
-        public (int critical, int high, int standard) CountPendingUrgencyBuckets()
+        public (int critical, int standard) CountPendingUrgencyBuckets()
         {
             var list = ListPendingForAdmin(null);
             return (
-                list.Count(x => x.UrgencyTier == "CRITICAL"),
-                list.Count(x => x.UrgencyTier == "HIGH"),
-                list.Count(x => x.UrgencyTier == "STANDARD"));
+                list.Count(x => x.UrgencyTier == EscalationUrgencyHelper.Critical),
+                list.Count(x => x.UrgencyTier == EscalationUrgencyHelper.Standard));
         }
 
         public void Resolve(Guid resolverId, Guid requestId, AdminResolveReviewEscalationDto dto)
@@ -430,7 +428,7 @@ namespace Services.Implementations
                 SenderName = NotificationDAO.GetUserDisplayName(r.sender_id),
                 CurrentAssignmentDeadlineAt = AsUtcForJson(assignmentDeadline),
                 AuthorSubmittedAtUtc = AsUtcForJson(authorSubmitted),
-                UrgencyTier = ResolveListUrgencyTier(r, now, assignmentDeadline, created),
+                UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(ResolveListUrgencyTier(r, now, assignmentDeadline, created)),
                 ResolverId = r.resolver_id,
                 ResolverName = r.resolver_id.HasValue ? NotificationDAO.GetUserDisplayName(r.resolver_id.Value) : null,
                 ResolverNote = r.resolver_note,

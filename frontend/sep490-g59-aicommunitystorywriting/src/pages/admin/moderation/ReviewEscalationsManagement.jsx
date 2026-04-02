@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { ShieldCheck, ListFilter } from 'lucide-react';
 import { Pagination } from '../../../components/pagination/Pagination';
-import { getActivePolicy } from '../../../api/policy/policyApi';
-import { PolicyBody } from '../../../components/policy/PolicyBody';
 import {
     getPendingReviewEscalations,
     resolveReviewEscalation,
@@ -88,7 +86,6 @@ const T = {
     bg: '#f8fafc',
     card: '#ffffff',
     critical: { bg: '#fee2e2', fg: '#991b1b', border: '#fecaca' },
-    high: { bg: '#ffedd5', fg: '#9a3412', border: '#fed7aa' },
     standard: { bg: '#f1f5f9', fg: '#475569', border: '#e2e8f0' },
 };
 
@@ -155,10 +152,10 @@ function urgencyBadge(tier) {
     const t = String(tier || '').toUpperCase();
     const map = {
         CRITICAL: { ...T.critical, label: 'Nghiêm trọng' },
-        HIGH: { ...T.high, label: 'Cao' },
         STANDARD: { ...T.standard, label: 'Thông thường' },
     };
-    const c = map[t] ?? { ...T.standard, label: tier || '—' };
+    const norm = t === 'CRITICAL' ? 'CRITICAL' : 'STANDARD';
+    const c = map[norm] ?? { ...T.standard, label: tier || '—' };
     return (
         <span
             style={{
@@ -216,8 +213,18 @@ function truncate(str, max) {
     return `${t.slice(0, max)}…`;
 }
 
+/** Đồng bộ BE: moderator dùng UrgencyTier (từ sender_urgency_tier); compliance lock/action dùng urgency_tier trên bảng tương ứng — chỉ CRITICAL | STANDARD. */
 function urgencyKeyFromRow(row) {
-    return String(row?.urgencyTier ?? row?.urgency_tier ?? 'STANDARD').toUpperCase();
+    const raw = String(
+        row?.urgencyTier
+        ?? row?.UrgencyTier
+        ?? row?.senderUrgencyTier
+        ?? row?.SenderUrgencyTier
+        ?? row?.sender_urgency_tier
+        ?? row?.urgency_tier
+        ?? 'STANDARD',
+    ).toUpperCase();
+    return raw === 'CRITICAL' ? 'CRITICAL' : 'STANDARD';
 }
 
 function toDateTimeLocalInput(value) {
@@ -292,7 +299,7 @@ export function ReviewEscalationsManagement() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [items, setItems] = useState([]);
-    const [counts, setCounts] = useState({ critical: 0, high: 0, standard: 0 });
+    const [counts, setCounts] = useState({ critical: 0, standard: 0 });
     const [historyTotal, setHistoryTotal] = useState(0);
 
     const [resolveRow, setResolveRow] = useState(null);
@@ -335,32 +342,6 @@ export function ReviewEscalationsManagement() {
     const [historyRequestType, setHistoryRequestType] = useState('');
     const [historyPage, setHistoryPage] = useState(1);
     const [historyPageSize] = useState(10);
-    const [moderatorPolicyModalOpen, setModeratorPolicyModalOpen] = useState(false);
-    const [moderatorPolicyLoading, setModeratorPolicyLoading] = useState(false);
-    const [moderatorPolicyError, setModeratorPolicyError] = useState('');
-    const [moderatorAuthorPolicy, setModeratorAuthorPolicy] = useState(null);
-    const [moderatorProcessModalOpen, setModeratorProcessModalOpen] = useState(false);
-
-    const openModeratorPolicyModal = useCallback(async () => {
-        setModeratorPolicyModalOpen(true);
-        setModeratorPolicyLoading(true);
-        setModeratorPolicyError('');
-        try {
-            const authorPolicy = await getActivePolicy('AUTHOR');
-            setModeratorAuthorPolicy(authorPolicy);
-        } catch (e) {
-            const msg =
-                e?.response?.data?.message
-                ?? e?.response?.data?.Message
-                ?? e?.message
-                ?? 'Không thể tải policy tác giả.';
-            setModeratorPolicyError(msg);
-            setModeratorAuthorPolicy(null);
-        } finally {
-            setModeratorPolicyLoading(false);
-        }
-    }, []);
-
     const loadOrders = useCallback(async () => {
         setLoading(true);
         setError(null);
@@ -384,7 +365,7 @@ export function ReviewEscalationsManagement() {
                     });
                     setItems(merged);
                     setHistoryTotal(merged.length);
-                    setCounts({ critical: 0, high: 0, standard: 0 });
+                    setCounts({ critical: 0, standard: 0 });
                     return;
                 }
                 const [pendingLockRes, pendingActionRes] = await Promise.all([
@@ -401,10 +382,9 @@ export function ReviewEscalationsManagement() {
                 const complianceCounts = pendingAll.reduce((acc, row) => {
                     const k = urgencyKeyFromRow(row);
                     if (k === 'CRITICAL') acc.critical += 1;
-                    else if (k === 'HIGH') acc.high += 1;
                     else acc.standard += 1;
                     return acc;
-                }, { critical: 0, high: 0, standard: 0 });
+                }, { critical: 0, standard: 0 });
                 const pending = !tier
                     ? pendingAll
                     : pendingAll.filter((x) => urgencyKeyFromRow(x) === tier);
@@ -418,7 +398,7 @@ export function ReviewEscalationsManagement() {
                 const total = rh?.totalCount ?? rh?.TotalCount ?? hist.length;
                 setItems(Array.isArray(hist) ? hist : []);
                 setHistoryTotal(total);
-                setCounts({ critical: 0, high: 0, standard: 0 });
+                setCounts({ critical: 0, standard: 0 });
                 return;
             }
             const r = await getPendingReviewEscalations(tier || undefined);
@@ -426,7 +406,6 @@ export function ReviewEscalationsManagement() {
             const c = r?.counts ?? r?.Counts ?? {};
             setCounts({
                 critical: c.critical ?? c.Critical ?? 0,
-                high: c.high ?? c.High ?? 0,
                 standard: c.standard ?? c.Standard ?? 0,
             });
         } catch (e) {
@@ -508,6 +487,10 @@ export function ReviewEscalationsManagement() {
         if (mainTab !== 'orders') return;
         loadOrders();
     }, [mainTab, loadOrders]);
+
+    useEffect(() => {
+        setTier('');
+    }, [orderSourceTab]);
 
     useEffect(() => {
         if (mainTab !== 'log') return;
@@ -765,22 +748,6 @@ export function ReviewEscalationsManagement() {
                 <p style={{ fontSize: '0.875rem', color: T.slate, margin: 0, maxWidth: '42rem', lineHeight: 1.55 }}>
                     Quản lý đơn của kiểm duyệt viên và xử lý vi phạm viên, bao gồm đơn chờ xử lý, lịch sử đã xử lý và nhật ký tra cứu.
                 </p>
-                <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <button
-                        type="button"
-                        onClick={openModeratorPolicyModal}
-                        style={{ padding: '0.5rem 0.85rem', borderRadius: 8, border: `1px solid ${T.border}`, background: T.card, color: T.title, fontSize: '0.8125rem', fontWeight: 700, cursor: 'pointer' }}
-                    >
-                        Xem chính sách hệ thống
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setModeratorProcessModalOpen(true)}
-                        style={{ padding: '0.5rem 0.85rem', borderRadius: 8, border: `1px solid ${T.border}`, background: T.card, color: T.title, fontSize: '0.8125rem', fontWeight: 700, cursor: 'pointer' }}
-                    >
-                        Xem quy trình duyệt xuất bản
-                    </button>
-                </div>
             </div>
 
             {/* Tab cấp cao — card + pill như bộ lọc PublicationManagement */}
@@ -886,14 +853,10 @@ export function ReviewEscalationsManagement() {
 
                         {listMode === 'pending' && (
                             <div style={{ marginBottom: '1.25rem' }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
                                     <div style={{ borderRadius: '12px', border: `1px solid ${T.critical.border}`, background: T.critical.bg, padding: '1rem' }}>
                                         <p style={{ fontSize: '0.75rem', color: T.critical.fg, margin: 0, fontWeight: 600 }}>Nghiêm trọng</p>
                                         <p style={{ fontSize: '1.5rem', fontWeight: 700, color: T.critical.fg, margin: '0.35rem 0 0' }}>{counts.critical}</p>
-                                    </div>
-                                    <div style={{ borderRadius: '12px', border: `1px solid ${T.high.border}`, background: T.high.bg, padding: '1rem' }}>
-                                        <p style={{ fontSize: '0.75rem', color: T.high.fg, margin: 0, fontWeight: 600 }}>Cao</p>
-                                        <p style={{ fontSize: '1.5rem', fontWeight: 700, color: T.high.fg, margin: '0.35rem 0 0' }}>{counts.high}</p>
                                     </div>
                                     <div style={{ borderRadius: '12px', border: `1px solid ${T.standard.border}`, background: T.standard.bg, padding: '1rem' }}>
                                         <p style={{ fontSize: '0.75rem', color: T.standard.fg, margin: 0, fontWeight: 600 }}>Thông thường</p>
@@ -904,7 +867,6 @@ export function ReviewEscalationsManagement() {
                                     {[
                                         { key: '', label: 'Tất cả', color: T.sky },
                                         { key: 'CRITICAL', label: 'Chỉ nghiêm trọng', color: '#ef4444' },
-                                        { key: 'HIGH', label: 'Chỉ cao', color: '#f97316' },
                                         { key: 'STANDARD', label: 'Chỉ thông thường', color: '#64748b' },
                                     ].map((b) => {
                                         const active = tier === b.key;
@@ -1094,7 +1056,7 @@ export function ReviewEscalationsManagement() {
                                     <thead>
                                         <tr>
                                             {(orderSourceTab === 'compliance'
-                                                ? ['Trạng thái', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Gửi lúc', 'Lý do', '']
+                                                ? ['Mức độ', 'Loại đơn', 'Truyện', 'Người gửi', 'Yêu cầu', 'Gửi lúc', 'Lý do', '']
                                                 : ['Mức độ', 'Loại', 'Tiêu đề', 'Người gửi', 'Yêu cầu', 'Gửi lúc', 'Lý do', 'Hạn đề xuất', '']
                                             ).map((h) => (
                                                 <th key={h || 'a'} style={thBase}>{h}</th>
@@ -1107,7 +1069,7 @@ export function ReviewEscalationsManagement() {
                                             if (orderSourceTab === 'compliance') {
                                                 return (
                                                     <tr key={id}>
-                                                        <td style={tdBase}>{logStatusBadge(row.status ?? row.Status)}</td>
+                                                        <td style={tdBase}>{urgencyBadge(urgencyKeyFromRow(row))}</td>
                                                         <td style={tdBase}>{row.__reqType === 'ADMIN_ACTION' ? 'Yêu cầu xử lý tài khoản' : 'Yêu cầu trả đơn về hàng đợi'}</td>
                                                         <td style={tdBase}>{row.storyTitle ?? row.story?.title ?? '—'}</td>
                                                         <td style={tdBase}>{row.requesterDisplayName ?? row.requesterEmail ?? '—'}</td>
@@ -1145,7 +1107,7 @@ export function ReviewEscalationsManagement() {
                                             }
                                             return (
                                                 <tr key={id}>
-                                                    <td style={tdBase}>{urgencyBadge(row.urgencyTier ?? row.UrgencyTier)}</td>
+                                                    <td style={tdBase}>{urgencyBadge(urgencyKeyFromRow(row))}</td>
                                                     <td style={tdBase}>{targetTypeVi(row)}</td>
                                                     <td style={tdBase}><TargetTitleCell row={row} /></td>
                                                     <td style={tdBase}>{senderDisplayNameVi(row)}</td>
@@ -1429,7 +1391,7 @@ export function ReviewEscalationsManagement() {
                                                 <tr key={id}>
                                                     <td style={{ ...tdBase, fontSize: '0.75rem', color: T.slate }} title={String(id)}>{idShort}</td>
                                                     <td style={tdBase}>{logStatusBadge(x.status ?? x.Status)}</td>
-                                                    <td style={tdBase}>{urgencyBadge(x.urgencyTier ?? x.UrgencyTier)}</td>
+                                                    <td style={tdBase}>{urgencyBadge(urgencyKeyFromRow(x))}</td>
                                                     <td style={tdBase}>{targetTypeVi(x)}</td>
                                                     <td style={tdBase}><TargetTitleCell row={x} /></td>
                                                     <td style={tdBase}>{kindShort(x.requestKind ?? x.RequestKind)}</td>
@@ -1926,104 +1888,6 @@ export function ReviewEscalationsManagement() {
                             >
                                 {complianceResolving ? 'Đang xử lý...' : 'Chấp nhận'}
                             </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {moderatorPolicyModalOpen && (
-                <div
-                    style={{
-                        position: 'fixed',
-                        inset: 0,
-                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                        zIndex: 10060,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '1rem',
-                    }}
-                    onClick={() => setModeratorPolicyModalOpen(false)}
-                >
-                    <div
-                        style={{
-                            background: T.card,
-                            borderRadius: '12px',
-                            maxWidth: 920,
-                            width: '100%',
-                            maxHeight: '85vh',
-                            overflow: 'auto',
-                            border: `1px solid ${T.border}`,
-                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div style={{ padding: '1rem 1.25rem', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, color: T.title }}>Chính sách hệ thống cho kiểm duyệt viên</h3>
-                            <button type="button" onClick={() => setModeratorPolicyModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
-                        </div>
-                        <div style={{ padding: '1rem 1.25rem' }}>
-                            {moderatorPolicyLoading ? (
-                                <div style={{ fontSize: '0.875rem', color: T.slate }}>Đang tải policy tác giả...</div>
-                            ) : moderatorPolicyError ? (
-                                <div style={{ padding: '0.75rem 1rem', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', color: '#991b1b', fontSize: '0.875rem' }}>
-                                    {moderatorPolicyError}
-                                </div>
-                            ) : moderatorAuthorPolicy ? (
-                                <div>
-                                    <div style={{ marginBottom: 10, fontSize: '0.8125rem', color: T.slate }}>
-                                        Policy AUTHOR đang áp dụng{moderatorAuthorPolicy.version ? ` · phiên bản v${moderatorAuthorPolicy.version}` : ''}.
-                                    </div>
-                                    <PolicyBody content={moderatorAuthorPolicy.content} />
-                                </div>
-                            ) : (
-                                <div style={{ fontSize: '0.875rem', color: T.slate }}>Chưa có policy AUTHOR đang áp dụng.</div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {moderatorProcessModalOpen && (
-                <div
-                    style={{
-                        position: 'fixed',
-                        inset: 0,
-                        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                        zIndex: 10060,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: '1rem',
-                    }}
-                    onClick={() => setModeratorProcessModalOpen(false)}
-                >
-                    <div
-                        style={{
-                            background: T.card,
-                            borderRadius: '12px',
-                            maxWidth: 780,
-                            width: '100%',
-                            maxHeight: '85vh',
-                            overflow: 'auto',
-                            border: `1px solid ${T.border}`,
-                            boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        <div style={{ padding: '1rem 1.25rem', borderBottom: `1px solid ${T.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 700, color: T.title }}>Quy trình duyệt xuất bản dành cho kiểm duyệt viên</h3>
-                            <button type="button" onClick={() => setModeratorProcessModalOpen(false)} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
-                        </div>
-                        <div style={{ padding: '1rem 1.25rem', fontSize: '0.875rem', color: T.slateDark, lineHeight: 1.6 }}>
-                            <p style={{ margin: '0 0 8px', fontWeight: 700, color: T.title }}>Quy trình đề xuất (ngắn gọn):</p>
-                            <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 8 }}>
-                                <li>Nhận đơn chờ duyệt và kiểm tra nhanh thông tin truyện/chương, loại đơn và mức độ ưu tiên.</li>
-                                <li>Đọc nội dung cần duyệt, đối chiếu policy AUTHOR và các tiêu chí chất lượng nội dung của hệ thống.</li>
-                                <li>Đưa ra quyết định rõ ràng: chấp nhận hoặc từ chối, ghi chú ngắn gọn, đúng trọng tâm.</li>
-                                <li>Nếu cần thêm thời gian hoặc cần trả đơn, gửi yêu cầu lên quản trị viên theo đúng loại đơn.</li>
-                                <li>Hoàn tất xử lý, đảm bảo trạng thái đơn và nhật ký đã được cập nhật đầy đủ để truy vết.</li>
-                            </ol>
                         </div>
                     </div>
                 </div>

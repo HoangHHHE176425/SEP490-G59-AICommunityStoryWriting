@@ -570,9 +570,9 @@ public class StoryReportService : IStoryReportService
             Message = x.message,
             Status = x.status,
             CreatedAtUtc = createdUtc,
-            UrgencyTier = EscalationUrgencyHelper.Merge(
+            UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(EscalationUrgencyHelper.Merge(
                 EscalationUrgencyHelper.ComputeFromRequestAge(createdUtc, DateTime.UtcNow),
-                x.urgency_tier),
+                x.urgency_tier)),
             ResolvedAtUtc = resolvedUtc,
             ResolutionNote = x.resolution_note,
             ResolutionAction = x.resolution_action
@@ -915,9 +915,9 @@ public class StoryReportService : IStoryReportService
             RequesterId = x.requester_id,
             RequesterDisplayName = RName(x.requester),
             CreatedAtUtc = x.created_at,
-            UrgencyTier = EscalationUrgencyHelper.Merge(
+            UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(EscalationUrgencyHelper.Merge(
                 EscalationUrgencyHelper.ComputeFromRequestAge(createdUtc, DateTime.UtcNow),
-                x.urgency_tier),
+                x.urgency_tier)),
             ResolvedAtUtc = x.resolved_at,
             ResolutionNote = x.resolution_note,
             ResolutionAction = x.resolution_action
