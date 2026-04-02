@@ -17,7 +17,8 @@ public static class StoryReportDAO
         string? UserEmail,
         string ReasonCode,
         string? Description,
-        DateTime CreatedAtUtc);
+        DateTime CreatedAtUtc,
+        DateTime? ComplianceVerifiedAtUtc);
 
     /// <summary>Chi tiết từng người báo cáo (cho màn compliance).</summary>
     public static Dictionary<Guid, List<StoryReportContributorRecord>> GetContributorsByStoryIds(IEnumerable<Guid> storyIds)
@@ -38,7 +39,8 @@ public static class StoryReportDAO
                 Email = u.email,
                 c.reason_category,
                 c.description,
-                c.created_at
+                c.created_at,
+                c.compliance_verified_at_utc
             }).ToList();
 
         var rows = raw.Select(x => new StoryReportContributorRecord(
@@ -47,7 +49,8 @@ public static class StoryReportDAO
             x.Email,
             string.IsNullOrWhiteSpace(x.reason_category) ? "OTHER" : x.reason_category.Trim().ToUpperInvariant(),
             x.description,
-            x.created_at)).ToList();
+            x.created_at,
+            x.compliance_verified_at_utc)).ToList();
 
         return rows
             .GroupBy(r => r.StoryId)
