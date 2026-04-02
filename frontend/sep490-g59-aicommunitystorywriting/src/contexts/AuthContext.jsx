@@ -4,8 +4,8 @@ import * as accountApi from '../api/account/accountApi';
 import * as policyApi from '../api/policy/policyApi';
 import { createNotificationHubConnection } from '../api/notification/notificationHub';
 
-// Preserve context identity across Vite HMR to avoid "useAuth must be used within AuthProvider"
-// when modules reload and recreate a new Context instance.
+// Giữ nguyên identity của context trong Vite HMR để tránh lỗi
+// "useAuth phải được sử dụng bên trong AuthProvider" khi module reload và tạo lại Context mới.
 // eslint-disable-next-line no-undef
 const AuthContext =
     import.meta?.hot?.data?.AuthContext ?? createContext(null);
@@ -214,7 +214,7 @@ export function AuthProvider({ children }) {
 export function useAuth() {
     const context = useContext(AuthContext);
     if (!context) {
-        throw new Error('useAuth must be used within AuthProvider');
+        throw new Error('useAuth phải được sử dụng bên trong AuthProvider.');
     }
     return context;
 }

@@ -1787,7 +1787,7 @@ export function AuthorStoryManagement({ onBack }) {
                                     onClick={async () => {
                                         const amount = Number(withdrawAmount);
                                         if (!amount || amount < MIN_WITHDRAW_COINS) {
-                                            setWithdrawError('Minimum withdrawal amount is 50,000 VND.');
+                                            setWithdrawError('Số tiền rút tối thiểu là 50.000 VND.');
                                             return;
                                         }
                                         if (!selectedBankAccount?.bank_bin && !BANK_BIN_MAP[selectedBankAccount?.bank_name || '']) {
