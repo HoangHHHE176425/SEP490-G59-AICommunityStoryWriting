@@ -335,6 +335,8 @@ namespace Services.Implementations
                 return dto;
             }).ToList();
 
+            ApplyChapterCommentCounts(items, chapterList.Select(c => c.id));
+
             EnrichChapterListItemsWithReviewSla(chapterList, items);
             EnrichModeratorRejectionHistoryForChapterList(chapterList, items);
 
@@ -384,6 +386,7 @@ namespace Services.Implementations
                 }
                 return dto;
             }).ToList();
+            ApplyChapterCommentCounts(items, chapterList.Select(c => c.id));
             EnrichChapterListItemsWithReviewSla(chapterList, items);
             EnrichModeratorRejectionHistoryForChapterList(chapterList, items);
             return items;
@@ -400,6 +403,7 @@ namespace Services.Implementations
                 dto.RejectionReason = reason;
                 dto.RejectedAt = rejectedAt;
             }
+            dto.CommentCount = CommentDAO.GetApprovedCommentCountByChapterId(chapter.id);
             return dto;
         }
 
@@ -878,6 +882,13 @@ namespace Services.Implementations
                 CreatedAt = chapter.created_at,
                 UpdatedAt = chapter.updated_at
             };
+        }
+
+        private static void ApplyChapterCommentCounts(List<ChapterListItemDto> items, IEnumerable<Guid> chapterIds)
+        {
+            var countMap = CommentDAO.GetApprovedCommentCountsByChapterIds(chapterIds);
+            foreach (var dto in items)
+                dto.CommentCount = countMap.GetValueOrDefault(dto.Id, 0);
         }
 
         private ChapterListItemDto MapToListItemDto(chapters chapter, string? storyTitle = null)

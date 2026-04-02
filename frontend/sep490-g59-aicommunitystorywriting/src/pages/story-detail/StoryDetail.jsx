@@ -250,6 +250,7 @@ export function StoryDetail() {
                             title: ch.title ?? ch.Title ?? `Chương ${num}`,
                             time: updatedAt ? formatTimeAgo(updatedAt) : '',
                             views: Number(ch.viewCount ?? ch.ViewCount ?? ch.views ?? 0) || 0,
+                            commentCount: Number(ch.commentCount ?? ch.CommentCount ?? 0) || 0,
                             isNew: idx >= rawItems.length - newCount,
                             isLocked: isPaidLocked,
                             unlockKnown,

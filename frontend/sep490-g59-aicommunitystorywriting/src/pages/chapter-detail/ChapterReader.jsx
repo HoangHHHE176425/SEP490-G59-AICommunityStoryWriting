@@ -113,6 +113,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                         content,
                         publishedAt: chapterRes?.publishedAt ?? chapterRes?.PublishedAt ?? chapterRes?.updatedAt ? formatTimeAgo(chapterRes.updatedAt ?? chapterRes.UpdatedAt) : '',
                         views: Number(chapterRes?.viewCount ?? chapterRes?.ViewCount ?? 0) || 0,
+                        commentCount: Number(chapterRes?.commentCount ?? chapterRes?.CommentCount ?? 0) || 0,
                         words: wordCount,
                         isPaidLocked,
                         coinPrice,
@@ -223,6 +224,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                 content,
                 publishedAt: chapterRes?.publishedAt ?? chapterRes?.PublishedAt ?? chapterRes?.updatedAt ? formatTimeAgo(chapterRes.updatedAt ?? chapterRes.UpdatedAt) : prev?.publishedAt ?? '',
                 views: Number(chapterRes?.viewCount ?? chapterRes?.ViewCount ?? prev?.views ?? 0) || 0,
+                commentCount: Number(chapterRes?.commentCount ?? chapterRes?.CommentCount ?? prev?.commentCount ?? 0) || 0,
                 words: wordCount,
                 isPaidLocked,
                 coinPrice,
@@ -267,6 +269,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         content: '',
         publishedAt: '',
         views: 0,
+        commentCount: 0,
         words: 0,
         isPaidLocked: false,
         coinPrice: 0,
@@ -278,9 +281,17 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         content: 'Chưa có nội dung.',
         publishedAt: '',
         views: 0,
+        commentCount: 0,
         words: 0,
         isPaidLocked: false,
         coinPrice: 0,
+    };
+
+    const chapterForContentDisplay = {
+        ...chapterForContent,
+        commentCount: commentsLoading
+            ? (chapterForContent.commentCount ?? 0)
+            : (Array.isArray(comments) ? comments.length : chapterForContent.commentCount ?? 0),
     };
 
     const handleBackClick = () => {
@@ -413,7 +424,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
 
             {/* Chapter Content */}
             <ChapterContent
-                chapter={chapterForContent}
+                chapter={chapterForContentDisplay}
                 fontSize={fontSize}
                 fontFamily={fontFamily}
                 backgroundColor={backgroundColor}

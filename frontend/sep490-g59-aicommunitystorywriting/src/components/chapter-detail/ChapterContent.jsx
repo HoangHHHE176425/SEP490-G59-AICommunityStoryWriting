@@ -24,7 +24,7 @@ export function ChapterContent({
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', marginTop: '1rem', fontSize: '0.875rem', color: '#64748b' }}>
                         <span>{chapter.publishedAt}</span>
                         <span>•</span>
-                        <span>{chapter.views.toLocaleString()} lượt đọc</span>
+                        <span>{(Number(chapter.commentCount ?? 0) || 0).toLocaleString()} bình luận</span>
                         <span>•</span>
                         <span>{chapter.words.toLocaleString()} từ</span>
                     </div>

@@ -3,7 +3,7 @@ import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'luc
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
-import { indexRag, suggestNextChapter, coCreate, checkBannedWords, checkChapter, compareChapterPreview, getAiUsageLimit, pickAiContextWarning } from '../../api/ai/aiApi';
+import { indexRag, suggestNextChapter, coCreate, checkBannedWords, checkChapterSpelling, compareChapterPreview, getAiUsageLimit, pickAiContextWarning } from '../../api/ai/aiApi';
 import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 import { refresh as refreshAuth } from '../../api/auth/authApi';
 import { translateCoCreateOutlineLabels } from '../../utils/coCreateOutlineLabelsVi';
@@ -1012,7 +1012,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         setManualSpellingCheckLoading(true);
         setChapterCheckModal({ open: true, loading: true, data: null, error: null, mode: 'spelling-support' });
         try {
-            const res = await checkChapter({
+            const res = await checkChapterSpelling({
                 content: chapterData.content,
                 storyId: storyId ?? null,
                 chapterTitle: chapterData.title ?? null,
