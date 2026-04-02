@@ -22,6 +22,9 @@ namespace Services.Implementations
         private const int MaxDeadlineDaysAhead = 366;
         private const int ModeratorQueueInMemoryCap = 5000;
 
+        private const string MsgBlockedAfterDeadlineForfeit =
+            "Bạn đã để quá hạn duyệt với truyện này; hệ thống đã trả đơn về hàng đợi. Bạn không thể nhận duyệt lại truyện này.";
+
         private readonly IStoryRepository _storyRepository;
         private readonly IChapterRepository _chapterRepository;
         private readonly IChapterVersionRepository _versionRepository;
@@ -30,6 +33,7 @@ namespace Services.Implementations
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly IModerationHubNotifier? _moderationHubNotifier;
         private readonly INotificationHubNotifier? _notificationHubNotifier;
+        private readonly IReviewDeadlineForfeitureService _reviewDeadlineForfeiture;
         private readonly ILogger<ModerationService> _logger;
 
         public ModerationService(
@@ -39,6 +43,7 @@ namespace Services.Implementations
             IStoryService storyService,
             IChapterService chapterService,
             IServiceScopeFactory scopeFactory,
+            IReviewDeadlineForfeitureService reviewDeadlineForfeiture,
             ILogger<ModerationService> logger,
             IModerationHubNotifier? moderationHubNotifier = null,
             INotificationHubNotifier? notificationHubNotifier = null)
@@ -49,6 +54,7 @@ namespace Services.Implementations
             _storyService = storyService;
             _chapterService = chapterService;
             _scopeFactory = scopeFactory;
+            _reviewDeadlineForfeiture = reviewDeadlineForfeiture;
             _logger = logger;
             _moderationHubNotifier = moderationHubNotifier;
             _notificationHubNotifier = notificationHubNotifier;
@@ -58,6 +64,8 @@ namespace Services.Implementations
         {
             if (categoryIdsFilter != null && categoryIdsFilter.Count == 0)
                 return new PagedResultDto<StoryListItemDto> { Items = new List<StoryListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+
+            _reviewDeadlineForfeiture.ProcessOverdueClaims();
 
             var filter = (claimFilter ?? "all").Trim().ToUpperInvariant();
             List<Guid>? excludeStoryIds = null;
@@ -158,12 +166,16 @@ namespace Services.Implementations
             var fallbackDeadline = ResolveReviewDeadlineUtc(pendingSince, claim);
             item.DeadlineAt = ApiDateTime.AsUtcForJson(fallbackDeadline);
             item.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
+            if (moderatorId.HasValue)
+                item.BlockedFromClaimDueToPriorDeadlineForfeit = ModerationLogDAO.HasDeadlineForfeitBlockOnStory(moderatorId.Value, item.Id);
         }
 
         public PagedResultDto<ChapterListItemDto> GetPendingChapters(int page = 1, int pageSize = 20, Guid? storyId = null, string? search = null, string? sortBy = null, string? sortOrder = null, IReadOnlyList<Guid>? categoryIdsFilter = null, Guid? moderatorId = null, string? claimFilter = null, string? timeStatusFilter = null)
         {
             if (categoryIdsFilter != null && categoryIdsFilter.Count == 0)
                 return new PagedResultDto<ChapterListItemDto> { Items = new List<ChapterListItemDto>(), TotalCount = 0, Page = page, PageSize = pageSize };
+
+            _reviewDeadlineForfeiture.ProcessOverdueClaims();
 
             List<Guid>? storyIdsFilter = null;
             if (categoryIdsFilter != null && categoryIdsFilter.Count > 0)
@@ -451,6 +463,8 @@ namespace Services.Implementations
             var fallbackDeadline = ResolveReviewDeadlineUtc(pendingSince, claim);
             item.DeadlineAt = ApiDateTime.AsUtcForJson(fallbackDeadline);
             item.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
+            if (moderatorId.HasValue && sid.HasValue)
+                item.BlockedFromClaimDueToPriorDeadlineForfeit = ModerationLogDAO.HasDeadlineForfeitBlockOnStory(moderatorId.Value, sid.Value);
 
             var pendingVersionsList = _versionRepository.GetByChapterId(item.Id)
                 .Where(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase))
@@ -650,6 +664,8 @@ namespace Services.Implementations
                 return false;
             if (allowedCategoryIds != null && allowedCategoryIds.Count > 0 && !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
                 return false;
+            if (ModerationLogDAO.HasDeadlineForfeitBlockOnStory(moderatorId, storyId))
+                throw new InvalidOperationException(MsgBlockedAfterDeadlineForfeit);
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeStory, storyId))
                 return false;
             var ok = ReviewAssignmentDAO.TryClaim(ReviewAssignmentDAO.TargetTypeStory, storyId, moderatorId, deadlineUtc);
@@ -681,6 +697,9 @@ namespace Services.Implementations
                 if (story == null || !story.category.Any(c => allowedCategoryIds.Contains(c.id)))
                     return false;
             }
+            if (chapter.story_id.HasValue
+                && ModerationLogDAO.HasDeadlineForfeitBlockOnStory(moderatorId, chapter.story_id.Value))
+                throw new InvalidOperationException(MsgBlockedAfterDeadlineForfeit);
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, chapterId))
                 return false;
             var ok = ReviewAssignmentDAO.TryClaim(ReviewAssignmentDAO.TargetTypeChapter, chapterId, moderatorId, deadlineUtc);

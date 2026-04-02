@@ -346,9 +346,11 @@ export function PublicationList({
                                         const pubId = pub.type === 'story' ? (pub.storyId ?? pub.id) : (pub.chapterId ?? pub.id);
                                         const isClaiming = claimingId === pubId;
                                         const claimedByOther = pub.claimedByDisplayName && !pub.isClaimedByMe;
-                                        const disabled = claimedByOther || isClaiming;
+                                        const blockedPrior = !!pub.blockedFromClaimDueToPriorDeadlineForfeit;
+                                        const disabled = claimedByOther || isClaiming || blockedPrior;
                                         let label = 'Nhận duyệt đơn';
                                         if (isClaiming) label = '...';
+                                        else if (blockedPrior) label = 'Không thể nhận lại';
                                         else if (claimedByOther) label = `Đã nhận bởi ${pub.claimedByDisplayName}`;
                                         return (
                                             <button
@@ -359,6 +361,7 @@ export function PublicationList({
                                                     else onClaimChapter?.(pub.chapterId ?? pub.id);
                                                 }}
                                                 disabled={disabled}
+                                                title={blockedPrior ? 'Bạn đã để quá hạn duyệt với truyện này; không thể nhận lại.' : undefined}
                                                 style={{
                                                     padding: '0.625rem 1rem',
                                                     backgroundColor: disabled ? '#e2e8f0' : '#0ea5e9',

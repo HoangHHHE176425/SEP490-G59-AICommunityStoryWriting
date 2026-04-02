@@ -297,6 +297,7 @@ function mapPendingStoryToItem(s) {
         isCurrentClaimRejection: s.isCurrentClaimRejection ?? s.IsCurrentClaimRejection ?? null,
         adminRejectedExtendNote: s.adminRejectedExtendNote ?? s.AdminRejectedExtendNote ?? null,
         adminRejectedExtendAt: s.adminRejectedExtendAt ?? s.AdminRejectedExtendAt ?? null,
+        blockedFromClaimDueToPriorDeadlineForfeit: s.blockedFromClaimDueToPriorDeadlineForfeit ?? s.BlockedFromClaimDueToPriorDeadlineForfeit ?? false,
     };
 }
 
@@ -387,6 +388,7 @@ function mapPendingChapterToItem(c) {
         isCurrentClaimRejection: c.isCurrentClaimRejection ?? c.IsCurrentClaimRejection ?? null,
         adminRejectedExtendNote: c.adminRejectedExtendNote ?? c.AdminRejectedExtendNote ?? null,
         adminRejectedExtendAt: c.adminRejectedExtendAt ?? c.AdminRejectedExtendAt ?? null,
+        blockedFromClaimDueToPriorDeadlineForfeit: c.blockedFromClaimDueToPriorDeadlineForfeit ?? c.BlockedFromClaimDueToPriorDeadlineForfeit ?? false,
     };
 }
 
@@ -498,6 +500,9 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                         .filter((t) => Number.isFinite(t));
                     const submittedAtIso = submittedAtMs.length ? new Date(Math.min(...submittedAtMs)).toISOString() : null;
 
+                    const blockedPriorDeadline =
+                        !!(storyMeta?.blockedFromClaimDueToPriorDeadlineForfeit)
+                        || storyChapters.some((c) => c.blockedFromClaimDueToPriorDeadlineForfeit);
                     grouped.push({
                         _claimType: 'story_group',
                         _claimId: storyId,
@@ -512,6 +517,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                         _isStoryUnclaimed: isStoryUnclaimed,
                         _chapterCount: chapterIds.length,
                         _submittedAt: submittedAtIso,
+                        _blockedFromPriorDeadlineForfeit: blockedPriorDeadline,
                     });
                 }
                 setClaimModalItems(grouped);
@@ -810,6 +816,9 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                         const hasPendingEscalation = g.chapters.some((c) => c.hasPendingEscalation);
                         const adminRej = pickGroupAdminRejectedRelease(g.chapters, g.storyItem);
                         const adminExt = pickGroupAdminRejectedExtend(g.chapters, g.storyItem);
+                        const blockedPriorDeadline =
+                            !!(g.storyItem?.blockedFromClaimDueToPriorDeadlineForfeit)
+                            || g.chapters.some((c) => c.blockedFromClaimDueToPriorDeadlineForfeit);
                         groupedList.push({
                             type: 'story_group',
                             id: g.storyId,
@@ -827,6 +836,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                             slaPendingSince,
                             slaTimeStatus,
                             hasPendingEscalation,
+                            blockedFromClaimDueToPriorDeadlineForfeit: blockedPriorDeadline,
                             ...adminRej,
                             ...adminExt,
                         });
@@ -1135,8 +1145,12 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
 
     /** Lấy thông báo lỗi khi claim (404 = đã được moderator khác nhận). */
     const getClaimErrorMessage = (err) => {
-        if (err?.response?.status === 404) {
+        const status = err?.response?.status;
+        if (status === 404) {
             return err?.response?.data?.message ?? 'Đã được moderator khác nhận duyệt.';
+        }
+        if (status === 400) {
+            return err?.response?.data?.message ?? err?.message ?? 'Không thể nhận duyệt đơn.';
         }
         return err?.response?.data?.message ?? err?.message ?? 'Không thể nhận duyệt đơn.';
     };
@@ -1693,6 +1707,12 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                                                                 ))}
                                                                             </div>
                                                                         )}
+                                                                        {item._blockedFromPriorDeadlineForfeit ? (
+                                                                            <div style={{ fontSize: '0.75rem', color: '#b45309', marginTop: '0.5rem', lineHeight: 1.45, display: 'flex', alignItems: 'flex-start', gap: '0.35rem' }}>
+                                                                                <span aria-hidden="true" style={{ flexShrink: 0 }}>⚠️</span>
+                                                                                <span>Bạn đã để quá hạn duyệt với truyện này; hệ thống đã trả đơn về hàng đợi. Bạn không thể nhận duyệt lại truyện này.</span>
+                                                                            </div>
+                                                                        ) : null}
                                                                     </div>
                                                                     <button
                                                                         type="button"
@@ -1700,20 +1720,28 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                                                             setClaimReviewDeadlineLocal(getDefaultDatetimeLocalForClaim());
                                                                             setClaimConfirmTarget(confirmPayload);
                                                                         }}
-                                                                        disabled={claimingId === (item._claimId ?? item.storyId)}
+                                                                        disabled={
+                                                                            item._blockedFromPriorDeadlineForfeit
+                                                                            || claimingId === (item._claimId ?? item.storyId)
+                                                                        }
+                                                                        title={item._blockedFromPriorDeadlineForfeit ? 'Không thể nhận lại sau khi để quá hạn duyệt' : undefined}
                                                                         style={{
                                                                             padding: '0.5rem 0.875rem',
                                                                             fontSize: '0.8125rem',
                                                                             fontWeight: 600,
-                                                                            backgroundColor: '#0ea5e9',
-                                                                            color: '#fff',
+                                                                            backgroundColor: item._blockedFromPriorDeadlineForfeit ? '#e2e8f0' : '#0ea5e9',
+                                                                            color: item._blockedFromPriorDeadlineForfeit ? '#64748b' : '#fff',
                                                                             border: 'none',
                                                                             borderRadius: '8px',
-                                                                            cursor: claimingId === (item._claimId ?? item.storyId) ? 'wait' : 'pointer',
+                                                                            cursor: item._blockedFromPriorDeadlineForfeit || claimingId === (item._claimId ?? item.storyId) ? 'not-allowed' : 'pointer',
                                                                             opacity: claimingId === (item._claimId ?? item.storyId) ? 0.7 : 1,
                                                                         }}
                                                                     >
-                                                                        {claimingId === (item._claimId ?? item.storyId) ? '...' : 'Nhận duyệt đơn'}
+                                                                        {item._blockedFromPriorDeadlineForfeit
+                                                                            ? 'Không thể nhận lại'
+                                                                            : claimingId === (item._claimId ?? item.storyId)
+                                                                                ? '...'
+                                                                                : 'Nhận duyệt đơn'}
                                                                     </button>
                                                                 </div>
                                                             );

@@ -7,11 +7,135 @@ namespace DataAccessObjects.DAOs
 {
     public static class ModerationLogDAO
     {
+        /// <summary>Hệ thống tự trả đơn về hàng đợi vì moderator quá hạn duyệt — ghi nhận để chặn moderator nhận lại cùng truyện. Tối đa 20 ký tự (cột <c>action</c> trong DB / Fluent).</summary>
+        public const string ActionAutoUnassignedDeadline = "AUTO_FORFEIT_DL";
+
+        /// <summary>Mã dài trước đây — vượt quá cột DB nên insert có thể lỗi; vẫn dùng khi kiểm tra chặn nếu đã có bản ghi.</summary>
+        public const string ActionAutoUnassignedDeadlineLegacyLong = "AUTO_UNASSIGNED_DEADLINE";
+
+        public const string DeadlineForfeitRejectionReasonVi = "Kiểm duyệt viên để quá hạn duyệt deadline";
+
+        /// <summary>Điều kiện EF (dịch được SQL): log chặn tái nhận sau quá hạn cho cặp moderator + truyện.</summary>
+        private static IQueryable<moderation_logs> WhereDeadlineForfeitBlockForStory(
+            IQueryable<moderation_logs> query,
+            Guid moderatorId,
+            Guid storyId)
+        {
+            var storyType = ReviewAssignmentDAO.TargetTypeStory;
+            return query.Where(m =>
+                m.moderator_id == moderatorId
+                && m.target_id == storyId
+                && m.target_type != null
+                && m.target_type.ToUpper() == storyType
+                && m.action != null
+                && (m.action == ActionAutoUnassignedDeadline
+                    || m.action == ActionAutoUnassignedDeadlineLegacyLong
+                    || m.action.ToUpper() == ActionAutoUnassignedDeadline
+                    || m.action.ToUpper() == ActionAutoUnassignedDeadlineLegacyLong));
+        }
+
         public static void Add(moderation_logs log)
         {
             using var context = new StoryPlatformDbContext();
             context.moderation_logs.Add(log);
             context.SaveChanges();
+        }
+
+        /// <summary>Moderator đã bị hệ thống thu hồi claim do quá hạn — không được nhận duyệt lại cùng truyện.</summary>
+        public static void AddDeadlineForfeitLog(Guid moderatorId, Guid storyId)
+        {
+            if (HasDeadlineForfeitBlockOnStory(moderatorId, storyId))
+                return;
+            Add(new moderation_logs
+            {
+                moderator_id = moderatorId,
+                target_type = ReviewAssignmentDAO.TargetTypeStory,
+                target_id = storyId,
+                action = ActionAutoUnassignedDeadline,
+                rejection_reason = DeadlineForfeitRejectionReasonVi,
+                created_at = DateTime.UtcNow
+            });
+        }
+
+        /// <summary>
+        /// SQL Server: tối đa một dòng log chặn quá hạn cho cặp (moderator, truyện). Dùng trong transaction hiện tại;
+        /// UPDLOCK/HOLDLOCK giảm phantom khi nhiều instance API chạy song song.
+        /// </summary>
+        private static void InsertDeadlineForfeitLogIfNotExists(StoryPlatformDbContext context, Guid moderatorId, Guid storyId, DateTime createdAtUtc)
+        {
+            var storyType = ReviewAssignmentDAO.TargetTypeStory;
+            var action = ActionAutoUnassignedDeadline;
+            var leg = ActionAutoUnassignedDeadlineLegacyLong;
+            var reason = DeadlineForfeitRejectionReasonVi;
+
+            context.Database.ExecuteSqlInterpolated($@"
+IF NOT EXISTS (
+    SELECT 1 FROM [moderation_logs] WITH (UPDLOCK, HOLDLOCK)
+    WHERE [moderator_id] = {moderatorId}
+      AND [target_id] = {storyId}
+      AND [target_type] IS NOT NULL AND UPPER([target_type]) = UPPER({storyType})
+      AND [action] IS NOT NULL
+      AND ([action] = {action} OR [action] = {leg}
+           OR UPPER([action]) = UPPER({action}) OR UPPER([action]) = UPPER({leg}))
+)
+INSERT INTO [moderation_logs] ([moderator_id], [target_type], [target_id], [action], [rejection_reason], [created_at])
+VALUES ({moderatorId}, {storyType}, {storyId}, {action}, {reason}, {createdAtUtc})");
+        }
+
+        /// <summary>Hoàn thành claim quá hạn và (nếu có story) ghi tối đa một moderation_logs trong một transaction.</summary>
+        public static bool TryForfeitOverdueModerationClaim(
+            string targetType,
+            Guid targetId,
+            Guid assigneeId,
+            DateTime utcNow,
+            Guid? storyIdForDeadlineBlock)
+        {
+            using var context = new StoryPlatformDbContext();
+            var strategy = context.Database.CreateExecutionStrategy();
+            return strategy.Execute(() =>
+            {
+                using var tx = context.Database.BeginTransaction();
+                try
+                {
+                    var cur = context.review_assignments.FirstOrDefault(r =>
+                        r.target_type == targetType
+                        && r.target_id == targetId
+                        && r.status == ReviewAssignmentDAO.StatusClaimed
+                        && r.assignee_id == assigneeId);
+                    if (cur == null)
+                    {
+                        tx.Rollback();
+                        return false;
+                    }
+
+                    if (cur.review_deadline_at == null || cur.review_deadline_at >= utcNow)
+                    {
+                        tx.Rollback();
+                        return false;
+                    }
+
+                    cur.status = ReviewAssignmentDAO.StatusCompleted;
+                    cur.completed_at = utcNow;
+                    context.SaveChanges();
+
+                    if (storyIdForDeadlineBlock.HasValue)
+                        InsertDeadlineForfeitLogIfNotExists(context, assigneeId, storyIdForDeadlineBlock.Value, utcNow);
+
+                    tx.Commit();
+                    return true;
+                }
+                catch
+                {
+                    tx.Rollback();
+                    throw;
+                }
+            });
+        }
+
+        public static bool HasDeadlineForfeitBlockOnStory(Guid moderatorId, Guid storyId)
+        {
+            using var context = new StoryPlatformDbContext();
+            return WhereDeadlineForfeitBlockForStory(context.moderation_logs.AsNoTracking(), moderatorId, storyId).Any();
         }
 
         public static (string? reason, DateTime? rejectedAt) GetLatestRejection(string targetType, Guid targetId)
