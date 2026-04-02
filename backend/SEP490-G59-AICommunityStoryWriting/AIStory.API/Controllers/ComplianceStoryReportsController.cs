@@ -219,6 +219,42 @@ public class ComplianceStoryReportsController : ControllerBase
         }
     }
 
+    /// <summary>COMPLIANCE: lưu đánh dấu xác minh cho từng người báo (story_report_contributors).</summary>
+    [HttpPost("stories/{storyId:guid}/contributor-verification")]
+    public async Task<IActionResult> SetStoryContributorVerification(
+        Guid storyId,
+        [FromBody] SetComplianceStoryContributorVerifiedRequestDto? body)
+    {
+        var uid = GetCurrentUserId();
+        if (!uid.HasValue)
+            return Unauthorized();
+        if (body == null)
+            return BadRequest(new { message = "Body is required." });
+        var actorIsAdmin = User.IsInRole("ADMIN");
+        try
+        {
+            var n = await _storyReportService.SetComplianceStoryContributorVerifiedAsync(
+                storyId,
+                uid.Value,
+                body,
+                actorIsAdmin);
+            return Ok(new { message = "Đã cập nhật đánh dấu xác minh.", updatedCount = n });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SetStoryContributorVerification failed");
+            return StatusCode(500, new { message = "Lỗi khi lưu đánh dấu xác minh.", error = ex.Message });
+        }
+    }
+
     /// <summary>COMPLIANCE đang lock truyện: đóng hết mọi báo cáo mở (NEW/IN_REVIEW) của truyện.</summary>
     [HttpPost("stories/{storyId:guid}/resolve-all-open")]
     public async Task<IActionResult> ComplianceResolveAllOpenForStory(Guid storyId, [FromBody] ComplianceResolveReportRequestDto? body)

@@ -12,6 +12,7 @@ import { Footer } from '../../components/homepage/Footer';
 import { Header } from '../../components/homepage/Header';
 import {
     getStoryById,
+    getStories,
     recordStoryView,
     getViewerKeyForViewCache,
     hasViewedStoryInCooldown,
@@ -79,6 +80,7 @@ export function StoryDetail() {
     const [reportSubmitting, setReportSubmitting] = useState(false);
     const [reportError, setReportError] = useState(null);
     const [reportReasonOptions, setReportReasonOptions] = useState({ story: [], comment: [] });
+    const [relatedStoriesData, setRelatedStoriesData] = useState([]);
 
     const normalizeReasonOptions = useCallback((list) => {
         const rows = Array.isArray(list) ? list : [];
@@ -188,6 +190,14 @@ export function StoryDetail() {
                     const totalComments = Number(storyRes?.totalComments ?? storyRes?.TotalComments ?? 0);
                     const totalChapters = rawItems.length;
                     const authorId = storyRes?.authorId ?? storyRes?.AuthorId;
+                    const categoryIdsRaw =
+                        storyRes?.categoryIds ??
+                        storyRes?.CategoryIds ??
+                        storyRes?.categories?.map?.((x) => x?.id ?? x?.Id) ??
+                        [];
+                    const categoryIds = Array.isArray(categoryIdsRaw)
+                        ? categoryIdsRaw.map((x) => String(x || '').trim()).filter(Boolean)
+                        : [];
                     setIsFollowing(!!(storyRes?.userIsFollowing ?? storyRes?.UserIsFollowing));
                     const progressStatusRaw = (storyRes?.storyProgressStatus ?? storyRes?.StoryProgressStatus ?? 'ONGOING')?.toString?.() ?? 'ONGOING';
                     const progressUpper = String(progressStatusRaw).toUpperCase();
@@ -223,6 +233,7 @@ export function StoryDetail() {
                         lastReadChapterId: storyRes?.lastReadChapterId ?? storyRes?.LastReadChapterId ?? null,
                         lastReadChapterTitle: storyRes?.lastReadChapterTitle ?? storyRes?.LastReadChapterTitle ?? null,
                         lastReadAt: (storyRes?.lastReadAt ?? storyRes?.LastReadAt) ? formatTimeAgo(storyRes?.lastReadAt ?? storyRes?.LastReadAt) : null,
+                        categoryIds,
                     };
                     const newCount = 3; // số chương mới nhất được gắn nhãn MỚI
                     setChapters(rawItems.map((ch, idx) => {
@@ -310,6 +321,58 @@ export function StoryDetail() {
             clearTimeout(id);
         };
     }, [storyId, viewerKey]);
+
+    useEffect(() => {
+        let cancelled = false;
+        const categoryIds = Array.isArray(story?.categoryIds) ? story.categoryIds : [];
+        if (!storyId || categoryIds.length === 0) {
+            setRelatedStoriesData([]);
+            return;
+        }
+
+        getStories({
+            page: 1,
+            pageSize: 24,
+            status: 'PUBLISHED',
+            categoryIds,
+        })
+            .then((res) => {
+                if (cancelled) return;
+                const items = Array.isArray(res?.items)
+                    ? res.items
+                    : Array.isArray(res?.Items)
+                        ? res.Items
+                        : Array.isArray(res)
+                            ? res
+                            : [];
+
+                const normalized = items
+                    .map((it) => {
+                        const id = it?.id ?? it?.Id;
+                        if (!id) return null;
+                        return {
+                            id: String(id),
+                            title: it?.title ?? it?.Title ?? 'Không có tiêu đề',
+                            cover: resolveBackendUrl(it?.coverImage ?? it?.CoverImage ?? ''),
+                            author: it?.authorName ?? it?.AuthorName ?? 'Tác giả',
+                            rating: Number(it?.avgRating ?? it?.AvgRating ?? 0) || 0,
+                            chapters: Number(it?.totalChapters ?? it?.TotalChapters ?? 0) || 0,
+                        };
+                    })
+                    .filter(Boolean)
+                    .filter((it) => it.id !== String(storyId))
+                    .slice(0, 12);
+
+                setRelatedStoriesData(normalized);
+            })
+            .catch(() => {
+                if (!cancelled) setRelatedStoriesData([]);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [storyId, story?.categoryIds]);
 
     const loadComments = useCallback((options = {}) => {
         if (!storyId) return;
@@ -418,35 +481,6 @@ export function StoryDetail() {
         }
     };
 
-    const relatedStories = Array.from({ length: 5 }, (_, i) => ({
-        id: i + 2,
-        title: ['Đấu Phá Thương Khung', 'Vũ Luyện Đỉnh Phong', 'Thần Ấn Vương Tọa', 'Tuyệt Thế Đường Môn', 'Đấu La Đại Lục'][i],
-        cover: `https://images.unsplash.com/photo-${['1589998059171', '1612036801632', '1614729939124', '1589998059171', '1612036801632'][i]}-988d887df646?w=300&h=400&fit=crop`,
-        author: ['Thiên Tằm Thổ Đậu', 'Ngã Cật Tây Hồng Thị', 'Đường Gia Tam Thiếu', 'Đường Gia Tam Thiếu', 'Đường Gia Tam Thiếu'][i],
-        rating: 4.5 + (i * 0.1),
-        // chapters: Math.floor(Math.random() * 500) + 100,
-        chapters: 100,
-    }));
-
-    const moreRelatedStories = Array.from({ length: 8 }, (_, i) => ({
-        id: i + 10,
-        title: [
-            'Tu Chân Phản Phái',
-            'Ngã Dục Phong Thiên',
-            'Thông Thiên Chi Lộ',
-            'Tinh Thần Biến',
-            'Bách Luyện Thành Thần',
-            'Tam Bộ Thiên Môn',
-            'Tương Thần',
-            'Ngũ Hành Thiên'
-        ][i],
-        cover: `https://images.unsplash.com/photo-${['1589998059171', '1612036801632', '1614729939124', '1610926597998', '1598669266459', '1762554914464', '1764768306669', '1633901605644'][i]}-988d887df646?w=300&h=400&fit=crop`,
-        author: ['Ngạo Vô Thường', 'Mộng Nhập Thần Cơ', 'Vô Tội', 'Hồ Thuyết Bát Đạo', 'Thập Lý Kiếm Thần', 'Hắc Tâm Bất Tử', 'Bạch Kim Hành', 'Phương Tưởng'][i],
-        rating: 4.3 + (i * 0.05),
-        // chapters: Math.floor(Math.random() * 800) + 200,
-        chapters: 200,
-        genre: ['Tiên hiệp', 'Huyền huyễn', 'Tu tiên'][i % 3],
-    }));
 
     const handleReportComment = (commentId) => {
         setReportingCommentId(commentId);
@@ -762,9 +796,11 @@ export function StoryDetail() {
                 </div>
 
                 {/* Related Stories Section - Full Width */}
-                <div className="mt-10">
-                    <RelatedStories stories={[...relatedStories, ...moreRelatedStories]} />
-                </div>
+                {relatedStoriesData.length > 0 && (
+                    <div className="mt-10">
+                        <RelatedStories stories={relatedStoriesData} />
+                    </div>
+                )}
             </div>
 
             {/* Modals */}

@@ -14,4 +14,9 @@ public partial class story_report_contributors
     public string? description { get; set; }
 
     public DateTime created_at { get; set; }
+
+    /// <summary>COMPLIANCE đã đánh dấu request báo cáo của user này là đã xác minh.</summary>
+    public DateTime? compliance_verified_at_utc { get; set; }
+
+    public Guid? compliance_verified_by_user_id { get; set; }
 }

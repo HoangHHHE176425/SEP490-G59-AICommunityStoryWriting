@@ -14,7 +14,7 @@ export function ChapterContent({
     const coinPrice = Number(chapter?.coinPrice ?? 0) || 0;
 
     return (
-        <div style={{ maxWidth: '800px', margin: '0 auto', padding: '2rem 1.5rem' }}>
+        <div style={{ maxWidth: '1600px', margin: '0 auto', padding: '2rem 1.5rem' }}>
             {/* Chapter Header */}
             <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
                 <h2 style={{ fontSize: '1.875rem', fontWeight: 'bold', color: '#1e293b', margin: 0 }}>
@@ -126,7 +126,11 @@ export function ChapterContent({
                         fontSize: `${fontSize}px`,
                         fontFamily: fontFamily,
                         lineHeight: lineHeight,
-                        textAlign: 'justify'
+                        textAlign: 'justify',
+                        maxHeight: '80vh',
+                        overflowY: 'auto',
+                        overscrollBehavior: 'contain',
+                        WebkitOverflowScrolling: 'touch'
                     }}
                 >
                     {(chapter.content || '')

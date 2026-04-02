@@ -958,7 +958,9 @@ public class StoryReportService : IStoryReportService
                 ReportedAtUtc = NormalizeUtc(primary.created_at),
                 DetailNote = cnt > 1
                     ? $"Ticket gộp {cnt} người; chưa có dòng chi tiết trong story_report_contributors — chỉ hiển thị người đại diện trên báo cáo."
-                    : null
+                    : null,
+                CanMarkComplianceVerified = false,
+                IsComplianceContributorVerified = false
             }
         };
     }
@@ -974,8 +976,57 @@ public class StoryReportService : IStoryReportService
             ReasonLabelVi = def?.LabelVi ?? r.ReasonCode,
             Description = r.Description,
             ReportedAtUtc = NormalizeUtc(r.CreatedAtUtc),
-            DetailNote = null
+            DetailNote = null,
+            CanMarkComplianceVerified = true,
+            IsComplianceContributorVerified = r.ComplianceVerifiedAtUtc.HasValue
         };
+    }
+
+    public async Task<int> SetComplianceStoryContributorVerifiedAsync(
+        Guid storyId,
+        Guid actorUserId,
+        SetComplianceStoryContributorVerifiedRequestDto dto,
+        bool actorIsAdmin)
+    {
+        if (dto == null) throw new ArgumentException("Request is required.");
+
+        var toVerify = (dto.VerifyUserIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct().ToList();
+        var toUnverify = (dto.UnverifyUserIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct().ToList();
+        if (toVerify.Count == 0 && toUnverify.Count == 0)
+            return 0;
+        if (toVerify.Intersect(toUnverify).Any())
+            throw new ArgumentException("Không được trùng user giữa đánh dấu và gỡ đánh dấu.");
+
+        if (!actorIsAdmin && !ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, storyId, actorUserId))
+            throw new InvalidOperationException("Chỉ compliance đang nhận (lock) truyện này mới được đánh dấu xác minh.");
+
+        var allIds = toVerify.Concat(toUnverify).Distinct().ToList();
+
+        await using var context = new StoryPlatformDbContext();
+        var rows = await context.story_report_contributors
+            .Where(c => c.story_id == storyId && allIds.Contains(c.user_id))
+            .ToListAsync();
+
+        if (rows.Count != allIds.Count)
+            throw new InvalidOperationException("Một hoặc nhiều người báo cáo không tồn tại cho truyện này.");
+
+        var now = DateTime.UtcNow;
+        foreach (var row in rows)
+        {
+            if (toVerify.Contains(row.user_id))
+            {
+                row.compliance_verified_at_utc = now;
+                row.compliance_verified_by_user_id = actorUserId;
+            }
+            else if (toUnverify.Contains(row.user_id))
+            {
+                row.compliance_verified_at_utc = null;
+                row.compliance_verified_by_user_id = null;
+            }
+        }
+
+        await context.SaveChangesAsync();
+        return rows.Count;
     }
 
     public Task<bool> ComplianceResolveReportAsync(Guid reportId, Guid complianceUserId, ComplianceResolveReportRequestDto? dto)

@@ -12,4 +12,9 @@ public class StoryReportContributorDto
 
     /// <summary>Khi chưa có dòng contributor trong DB nhưng ticket gộp nhiều người.</summary>
     public string? DetailNote { get; set; }
+
+    /// <summary>Có dòng <c>story_report_contributors</c> — compliance được đánh dấu xác minh.</summary>
+    public bool CanMarkComplianceVerified { get; set; } = true;
+
+    public bool IsComplianceContributorVerified { get; set; }
 }

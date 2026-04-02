@@ -157,6 +157,40 @@ public class ComplianceCommentReportsController : ControllerBase
         }
     }
 
+    /// <summary>COMPLIANCE: lưu đánh dấu xác minh cho từng request báo cáo (report_evidences) trong thread.</summary>
+    [HttpPost("comments/{commentId:guid}/evidence-verification")]
+    public async Task<IActionResult> SetCommentReportEvidenceVerification(
+        Guid commentId,
+        [FromBody] SetComplianceCommentReportEvidenceVerifiedRequestDto? body)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue) return Unauthorized(new { message = "Cần đăng nhập." });
+        if (body == null) return BadRequest(new { message = "Body is required." });
+        var actorIsAdmin = User.IsInRole("ADMIN");
+
+        try
+        {
+            var n = await _commentReportService.SetComplianceCommentReportEvidenceVerifiedAsync(
+                commentId,
+                userId.Value,
+                body,
+                actorIsAdmin);
+            return Ok(new { message = "Đã cập nhật đánh dấu xác minh.", updatedCount = n });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "Lỗi khi lưu đánh dấu xác minh.", error = ex.Message });
+        }
+    }
+
     [Authorize(Roles = "COMPLIANCE")]
     [HttpPost("comments/{commentId:guid}/claim")]
     public async Task<IActionResult> ClaimCommentReports(Guid commentId)
