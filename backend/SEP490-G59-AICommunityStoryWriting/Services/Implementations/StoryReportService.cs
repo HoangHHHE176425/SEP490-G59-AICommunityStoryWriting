@@ -15,11 +15,16 @@ public class StoryReportService : IStoryReportService
 {
     private static readonly string ComplianceTargetType = ReviewAssignmentDAO.TargetTypeComplianceStoryReports;
     private readonly IUserLookup _userLookup;
+    private readonly IUserActivityLookup _userActivityLookup;
     private readonly INotificationHubNotifier? _notificationHubNotifier;
 
-    public StoryReportService(IUserLookup userLookup, INotificationHubNotifier? notificationHubNotifier = null)
+    public StoryReportService(
+        IUserLookup userLookup,
+        IUserActivityLookup userActivityLookup,
+        INotificationHubNotifier? notificationHubNotifier = null)
     {
         _userLookup = userLookup;
+        _userActivityLookup = userActivityLookup;
         _notificationHubNotifier = notificationHubNotifier;
     }
 
@@ -54,6 +59,10 @@ public class StoryReportService : IStoryReportService
         var st = (story.status ?? "").Trim().ToUpperInvariant();
         if (st != "PUBLISHED")
             throw new InvalidOperationException("Chỉ có thể báo cáo truyện đã PUBLISHED.");
+
+        // Giống đánh giá: yêu cầu có log READ_CHAPTER cho truyện.
+        if (!_userActivityLookup.HasReadAnyChapterOfStory(reporterId, storyId))
+            throw new InvalidOperationException("Bạn cần đọc ít nhất một chapter trước khi gửi báo cáo.");
 
         if (story.author_id == reporterId)
             throw new InvalidOperationException("Bạn không thể báo cáo truyện của chính mình.");
