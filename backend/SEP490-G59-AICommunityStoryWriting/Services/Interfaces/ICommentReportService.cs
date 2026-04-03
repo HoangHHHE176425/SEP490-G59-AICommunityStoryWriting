@@ -55,5 +55,12 @@ public interface ICommentReportService
         Guid complianceUserId,
         ComplianceResolveCommentReportRequestDto? dto,
         bool actorIsAdmin);
+
+    /// <summary>COMPLIANCE: đánh dấu / gỡ đánh dấu xác minh cho từng request báo cáo (report_evidences) trong thread.</summary>
+    Task<int> SetComplianceCommentReportEvidenceVerifiedAsync(
+        Guid commentId,
+        Guid actorUserId,
+        SetComplianceCommentReportEvidenceVerifiedRequestDto dto,
+        bool actorIsAdmin);
 }
 

@@ -1,4 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using BusinessObjects;
 using BusinessObjects.Entities;
@@ -302,7 +302,7 @@ namespace AIStory.API.Controllers
                 return Ok(new
                 {
                     items = r.Items,
-                    counts = new { critical = r.Critical, high = r.High, standard = r.Standard }
+                    counts = new { critical = r.Critical, standard = r.Standard }
                 });
             }
             catch (Exception ex)
@@ -312,7 +312,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Đơn báo cáo hạn duyệt từ moderator — chỉ PENDING. Lọc urgencyTier: CRITICAL | HIGH | STANDARD.</summary>
+        /// <summary>Đơn báo cáo hạn duyệt từ moderator — chỉ PENDING. Lọc urgencyTier: CRITICAL | STANDARD.</summary>
         [HttpGet("review-escalations/pending")]
         public IActionResult GetPendingReviewEscalations([FromQuery] string? urgencyTier = null)
         {
@@ -325,7 +325,7 @@ namespace AIStory.API.Controllers
                 return Ok(new
                 {
                     items,
-                    counts = new { critical = counts.critical, high = counts.high, standard = counts.standard }
+                    counts = new { critical = counts.critical, standard = counts.standard }
                 });
             }
             catch (Exception ex)

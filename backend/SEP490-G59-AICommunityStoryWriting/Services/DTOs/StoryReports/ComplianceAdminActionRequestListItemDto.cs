@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 
 namespace Services.DTOs.StoryReports;
 
@@ -18,7 +18,7 @@ public class ComplianceAdminActionRequestListItemDto
     public string? RequesterDisplayName { get; set; }
     public DateTime CreatedAtUtc { get; set; }
 
-    /// <summary>Mức hiệu lực (lưu + tuổi đơn).</summary>
+    /// <summary>CRITICAL | STANDARD (HIGH gộp vào STANDARD) — từ urgency_tier + tuổi đơn.</summary>
     public string UrgencyTier { get; set; } = "";
 
     public DateTime? ResolvedAtUtc { get; set; }

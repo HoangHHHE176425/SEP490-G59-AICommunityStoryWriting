@@ -1,7 +1,10 @@
+import { stripHtmlToText } from '../../../utils/richText';
+
 // Helper function to count words
 const countWords = (text) => {
-    if (!text || !text.trim()) return 0;
-    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+    const plain = stripHtmlToText(text);
+    if (!plain) return 0;
+    return plain.split(/\s+/).filter(word => word.length > 0).length;
 };
 
 export function ChapterList({

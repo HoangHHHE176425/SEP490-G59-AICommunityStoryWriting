@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { BookOpen, Clock, Eye, ChevronRight, Lock, X } from 'lucide-react';
+import { BookOpen, Clock, MessageCircle, ChevronRight, Lock, X } from 'lucide-react';
 
 export function ChapterList({ chapters, storyId, lastReadChapterId }) {
     const navigate = useNavigate();
@@ -77,9 +77,9 @@ export function ChapterList({ chapters, storyId, lastReadChapterId }) {
                                             <Clock className="w-3 h-3" />
                                             {chapter.time}
                                         </span>
-                                        <span className="flex items-center gap-1">
-                                            <Eye className="w-3 h-3" />
-                                            {chapter.views.toLocaleString()}
+                                        <span className="flex items-center gap-1" title="Số bình luận">
+                                            <MessageCircle className="w-3 h-3" />
+                                            {(Number(chapter.commentCount ?? chapter.CommentCount ?? chapter.comments ?? 0) || 0).toLocaleString()}
                                         </span>
                                     </div>
                                 </div>

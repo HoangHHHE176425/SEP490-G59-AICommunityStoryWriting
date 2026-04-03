@@ -65,9 +65,8 @@ export function Footer() {
                                 Chính sách bảo mật
                             </Link>
                         </li>
-                        <li><a className="hover:text-primary transition-colors" href="#">Câu hỏi thường gặp</a></li>
+                        <li><Link to="/faq" className="hover:text-primary transition-colors">Câu hỏi thường gặp</Link></li>
                         <li><Link to="/about-us" className="hover:text-primary transition-colors">Về chúng tôi</Link></li>
-                        <li><a className="hover:text-primary transition-colors" href="#">Liên hệ bản quyền</a></li>
                     </ul>
                 </div>
             </div>

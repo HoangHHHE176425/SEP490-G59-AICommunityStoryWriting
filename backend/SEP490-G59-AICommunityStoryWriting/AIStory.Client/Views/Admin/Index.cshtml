@@ -1544,12 +1544,13 @@
 
                     var r = await ApiService.adminGetPendingUnifiedEscalations(escalationTierFilter || null);
                     unifiedEscalationPendingCache = r && r.items ? r.items : [];
-                    var counts = (r && r.counts) ? r.counts : { critical: 0, high: 0, standard: 0 };
+                    var counts = (r && r.counts) ? r.counts : { critical: 0, standard: 0 };
                     var c0 = counts.critical != null ? counts.critical : counts.Critical;
-                    var h0 = counts.high != null ? counts.high : counts.High;
+                    var h0 = counts.high != null ? counts.high : (counts.High != null ? counts.High : 0);
                     var s0 = counts.standard != null ? counts.standard : counts.Standard;
                     document.getElementById('escCountCritical').textContent = c0;
-                    document.getElementById('escCountHigh').textContent = h0;
+                    var escHighEl = document.getElementById('escCountHigh');
+                    if (escHighEl) escHighEl.textContent = h0;
                     document.getElementById('escCountStandard').textContent = s0;
                     var navB = document.getElementById('navEscCriticalBadge');
                     if (navB) {

@@ -12,7 +12,7 @@ public class ComplianceLockRequestListItemDto
     public string Status { get; set; } = "";
     public DateTime CreatedAtUtc { get; set; }
 
-    /// <summary>Mức hiệu lực (lưu + tuổi đơn).</summary>
+    /// <summary>CRITICAL | STANDARD (HIGH gộp vào STANDARD) — từ urgency_tier + tuổi đơn.</summary>
     public string UrgencyTier { get; set; } = "";
 
     public DateTime? ResolvedAtUtc { get; set; }

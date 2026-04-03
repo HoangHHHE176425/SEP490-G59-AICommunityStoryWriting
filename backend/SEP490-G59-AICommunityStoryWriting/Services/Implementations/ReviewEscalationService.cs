@@ -199,12 +199,11 @@ namespace Services.Implementations
             var list = rows.Select(r => MapToListItem(r)).ToList();
             if (!string.IsNullOrWhiteSpace(urgencyTier))
             {
-                var u = urgencyTier.Trim().ToUpperInvariant();
+                var u = EscalationUrgencyHelper.ToDisplayTier(urgencyTier.Trim());
                 list = list.Where(x => string.Equals(x.UrgencyTier, u, StringComparison.OrdinalIgnoreCase)).ToList();
             }
             list = list
-                .OrderByDescending(x => x.UrgencyTier == "CRITICAL")
-                .ThenByDescending(x => x.UrgencyTier == "HIGH")
+                .OrderByDescending(x => x.UrgencyTier == EscalationUrgencyHelper.Critical)
                 .ThenBy(x => x.CurrentAssignmentDeadlineAt ?? DateTime.MaxValue)
                 .ThenBy(x => x.CreatedAt)
                 .ToList();
@@ -262,13 +261,12 @@ namespace Services.Implementations
             };
         }
 
-        public (int critical, int high, int standard) CountPendingUrgencyBuckets()
+        public (int critical, int standard) CountPendingUrgencyBuckets()
         {
             var list = ListPendingForAdmin(null);
             return (
-                list.Count(x => x.UrgencyTier == "CRITICAL"),
-                list.Count(x => x.UrgencyTier == "HIGH"),
-                list.Count(x => x.UrgencyTier == "STANDARD"));
+                list.Count(x => x.UrgencyTier == EscalationUrgencyHelper.Critical),
+                list.Count(x => x.UrgencyTier == EscalationUrgencyHelper.Standard));
         }
 
         public void Resolve(Guid resolverId, Guid requestId, AdminResolveReviewEscalationDto dto)
@@ -401,7 +399,7 @@ namespace Services.Implementations
 
             var title = ResolveTargetTitle(r.target_type, r.target_id);
             var now = DateTime.UtcNow;
-            var created = r.created_at.Kind == DateTimeKind.Utc ? r.created_at : r.created_at.ToUniversalTime();
+            var created = ToUtcInstantFromDb(r.created_at);
             var authorSubmitted = GetAuthorSubmissionUtcForReviewTarget(r.target_type, r.target_id);
 
             List<Guid>? releaseAffectedChapterIds = null;
@@ -430,7 +428,7 @@ namespace Services.Implementations
                 SenderName = NotificationDAO.GetUserDisplayName(r.sender_id),
                 CurrentAssignmentDeadlineAt = AsUtcForJson(assignmentDeadline),
                 AuthorSubmittedAtUtc = AsUtcForJson(authorSubmitted),
-                UrgencyTier = ComputeUrgencyTier(now, assignmentDeadline, created, r.status, r.request_kind),
+                UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(ResolveListUrgencyTier(r, now, assignmentDeadline, created)),
                 ResolverId = r.resolver_id,
                 ResolverName = r.resolver_id.HasValue ? NotificationDAO.GetUserDisplayName(r.resolver_id.Value) : null,
                 ResolverNote = r.resolver_note,
@@ -441,13 +439,29 @@ namespace Services.Implementations
         }
 
         /// <summary>Chuẩn hóa UTC + DateTimeKind.Utc để System.Text.Json ghi ISO kèm Z.</summary>
-        private static DateTime AsUtcForJson(DateTime dt)
-        {
-            var utc = dt.Kind == DateTimeKind.Utc ? dt : dt.ToUniversalTime();
-            return DateTime.SpecifyKind(utc, DateTimeKind.Utc);
-        }
+        private static DateTime AsUtcForJson(DateTime dt) =>
+            DateTime.SpecifyKind(ToUtcInstantFromDb(dt), DateTimeKind.Utc);
 
         private static DateTime? AsUtcForJson(DateTime? dt) => dt.HasValue ? AsUtcForJson(dt.Value) : null;
+
+        /// <summary>EF đọc datetime2 thường trả về Unspecified; dữ liệu escalation/assignment lưu theo UTC — không dùng ToUniversalTime() (sẽ lệch theo múi giờ máy chủ).</summary>
+        private static DateTime ToUtcInstantFromDb(DateTime dt) => dt.Kind switch
+        {
+            DateTimeKind.Utc => dt,
+            DateTimeKind.Local => dt.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(dt, DateTimeKind.Utc)
+        };
+
+        private static string ResolveListUrgencyTier(
+            review_escalation_requests r,
+            DateTime nowUtc,
+            DateTime? assignmentDeadline,
+            DateTime createdAtUtc)
+        {
+            if (!string.IsNullOrWhiteSpace(r.sender_urgency_tier))
+                return EscalationUrgencyHelper.Normalize(r.sender_urgency_tier);
+            return ComputeUrgencyTier(nowUtc, assignmentDeadline, createdAtUtc, r.status, r.request_kind);
+        }
 
         /// <summary>Mốc gửi duyệt: submitted_for_review_at (fallback ước lượng nếu chưa có cột / dữ liệu cũ).</summary>
         private DateTime? GetAuthorSubmissionUtcForReviewTarget(string targetType, Guid targetId) =>
@@ -468,7 +482,7 @@ namespace Services.Implementations
             if (string.Equals(requestKind, ReviewEscalationDAO.KindRelease, StringComparison.OrdinalIgnoreCase))
                 return "CRITICAL";
             var deadline = assignmentDeadline ?? createdAtUtc.AddDays(7);
-            var dl = deadline.Kind == DateTimeKind.Utc ? deadline : deadline.ToUniversalTime();
+            var dl = ToUtcInstantFromDb(deadline);
             if (nowUtc > dl)
                 return "CRITICAL";
             if ((nowUtc - createdAtUtc).TotalHours > 48)

@@ -27,7 +27,7 @@ function formatTimeAgo(dateStr) {
     return date.toLocaleDateString('vi-VN');
 }
 
-export function ChapterReader({ onBack, onNavigateToStory }) {
+export function ChapterReader({ onBack }) {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const { user, loading: authLoading } = useAuth();
@@ -98,10 +98,10 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                     const coinPrice = Number(chapterRes?.coinPrice ?? chapterRes?.CoinPrice ?? 0) || 0;
                     const isUnlocked = Boolean(
                         chapterRes?.isUnlocked ??
-                            chapterRes?.IsUnlocked ??
-                            chapterRes?.unlocked ??
-                            chapterRes?.Unlocked ??
-                            false
+                        chapterRes?.IsUnlocked ??
+                        chapterRes?.unlocked ??
+                        chapterRes?.Unlocked ??
+                        false
                     );
                     const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && !isUnlocked;
                     const contentRaw = chapterRes?.content ?? chapterRes?.Content ?? '';
@@ -113,6 +113,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                         content,
                         publishedAt: chapterRes?.publishedAt ?? chapterRes?.PublishedAt ?? chapterRes?.updatedAt ? formatTimeAgo(chapterRes.updatedAt ?? chapterRes.UpdatedAt) : '',
                         views: Number(chapterRes?.viewCount ?? chapterRes?.ViewCount ?? 0) || 0,
+                        commentCount: Number(chapterRes?.commentCount ?? chapterRes?.CommentCount ?? 0) || 0,
                         words: wordCount,
                         isPaidLocked,
                         coinPrice,
@@ -122,10 +123,10 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                         const chPrice = Number(ch.coinPrice ?? ch.CoinPrice ?? 0) || 0;
                         const chUnlocked = Boolean(
                             ch.isUnlocked ??
-                                ch.IsUnlocked ??
-                                ch.unlocked ??
-                                ch.Unlocked ??
-                                false
+                            ch.IsUnlocked ??
+                            ch.unlocked ??
+                            ch.Unlocked ??
+                            false
                         );
                         return {
                             number: (ch.orderIndex ?? ch.OrderIndex ?? idx) + 1,
@@ -171,6 +172,18 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         if (urlChapterId) loadComments();
     }, [urlChapterId, loadComments]);
 
+    // Cuộn tới bình luận khi URL có #comment-{guid} (vd. từ màn xử lý vi phạm).
+    useEffect(() => {
+        const h = location.hash || '';
+        if (!h || !/^#comment-/i.test(h)) return;
+        if (commentsLoading) return;
+        const elId = h.slice(1);
+        const fid = requestAnimationFrame(() => {
+            document.getElementById(elId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        return () => cancelAnimationFrame(fid);
+    }, [location.hash, commentsLoading, comments.length]);
+
     const handleSubmitComment = useCallback(async (content, parentId) => {
         if (!urlChapterId) return;
         if (chapter?.isPaidLocked) {
@@ -207,10 +220,10 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
             const coinPrice = Number(chapterRes?.coinPrice ?? chapterRes?.CoinPrice ?? 0) || 0;
             const isUnlocked = Boolean(
                 chapterRes?.isUnlocked ??
-                    chapterRes?.IsUnlocked ??
-                    chapterRes?.unlocked ??
-                    chapterRes?.Unlocked ??
-                    false
+                chapterRes?.IsUnlocked ??
+                chapterRes?.unlocked ??
+                chapterRes?.Unlocked ??
+                false
             );
             const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && !isUnlocked;
             const contentRaw = chapterRes?.content ?? chapterRes?.Content ?? '';
@@ -223,6 +236,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                 content,
                 publishedAt: chapterRes?.publishedAt ?? chapterRes?.PublishedAt ?? chapterRes?.updatedAt ? formatTimeAgo(chapterRes.updatedAt ?? chapterRes.UpdatedAt) : prev?.publishedAt ?? '',
                 views: Number(chapterRes?.viewCount ?? chapterRes?.ViewCount ?? prev?.views ?? 0) || 0,
+                commentCount: Number(chapterRes?.commentCount ?? chapterRes?.CommentCount ?? prev?.commentCount ?? 0) || 0,
                 words: wordCount,
                 isPaidLocked,
                 coinPrice,
@@ -267,6 +281,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         content: '',
         publishedAt: '',
         views: 0,
+        commentCount: 0,
         words: 0,
         isPaidLocked: false,
         coinPrice: 0,
@@ -278,9 +293,17 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         content: 'Chưa có nội dung.',
         publishedAt: '',
         views: 0,
+        commentCount: 0,
         words: 0,
         isPaidLocked: false,
         coinPrice: 0,
+    };
+
+    const chapterForContentDisplay = {
+        ...chapterForContent,
+        commentCount: commentsLoading
+            ? (chapterForContent.commentCount ?? 0)
+            : (Array.isArray(comments) ? comments.length : chapterForContent.commentCount ?? 0),
     };
 
     const handleBackClick = () => {
@@ -292,13 +315,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
     };
 
     const handleHomeClick = () => {
-        if (onNavigateToStory) {
-            onNavigateToStory();
-        } else if (urlStoryId) {
-            navigate(`/story/${urlStoryId}`);
-        } else {
-            navigate('/home');
-        }
+        navigate('/home');
     };
 
     const currentIndex = allChapters.findIndex((ch) => ch.chapterId === urlChapterId);
@@ -337,6 +354,38 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
     const handleThemeChange = (bg, text) => {
         setBackgroundColor(bg);
         setTextColor(text);
+    };
+
+    const adImageBaseStyle = {
+        width: '100%',
+        height: 'calc(100vh - 116px)',
+        minHeight: '620px',
+        borderRadius: '1.1rem',
+        boxShadow: '0 18px 42px rgba(2, 6, 23, 0.34)',
+        color: '#ffffff',
+        padding: '1.25rem',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        border: '1px solid rgba(130, 255, 178, 0.42)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
+        position: 'relative',
+        overflow: 'hidden',
+    };
+
+    const centerLogoStyle = {
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        width: '160px',
+        height: '160px',
+        objectFit: 'contain',
+        opacity: 0.22,
+        filter: 'grayscale(1) brightness(2.2)',
+        pointerEvents: 'none',
+        userSelect: 'none',
     };
 
     if (urlStoryId && urlChapterId && loading) {
@@ -411,17 +460,81 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                 onChapterSelect={handleChapterSelect}
             />
 
-            {/* Chapter Content */}
-            <ChapterContent
-                chapter={chapterForContent}
-                fontSize={fontSize}
-                fontFamily={fontFamily}
-                backgroundColor={backgroundColor}
-                textColor={textColor}
-                lineHeight={lineHeight}
-                onPayClick={handleUnlockChapter}
-                isUnlocking={unlocking}
-            />
+            {/* Chapter Content + Ad Sidebars */}
+            <div className="max-w-[2048px] mx-auto px-2 xl:grid xl:grid-cols-[260px_minmax(0,1fr)_260px] xl:gap-4">
+                <aside className="hidden xl:block">
+                    <div style={{ position: 'sticky', top: '96px' }}>
+                        <div
+                            style={{
+                                ...adImageBaseStyle,
+                                background: 'radial-gradient(circle at 12% 10%, rgba(96, 165, 250, 0.22), transparent 34%), linear-gradient(155deg, #020617 0%, #16a34a 52%, #3b82f6 100%)',
+                            }}
+                        >
+                            <img src="/logo.png" alt="" aria-hidden="true" style={centerLogoStyle} />
+                            <div>
+                                <div style={{ display: 'inline-block', fontSize: '0.71rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', backgroundColor: 'rgba(110, 231, 183, 0.2)', border: '1px solid rgba(110, 231, 183, 0.45)', color: '#dcfce7', padding: '0.35rem 0.55rem', borderRadius: '999px' }}>
+                                    Dành cho Tác giả
+                                </div>
+                                <h3 style={{ fontSize: '1.52rem', lineHeight: 1.23, fontWeight: 800, margin: '0.95rem 0 0 0', color: '#f8fafc' }}>
+                                    Nơi tác giả xây dựng cộng đồng độc giả trung thành
+                                </h3>
+                                <div style={{ width: '56px', height: '2px', backgroundColor: 'rgba(134, 239, 172, 0.95)', marginTop: '0.9rem', borderRadius: '999px' }} />
+                            </div>
+                            <div>
+                                <p style={{ margin: 0, fontSize: '0.92rem', lineHeight: 1.58, opacity: 0.95, color: '#e2e8f0' }}>
+                                    Đăng truyện, theo dõi tương tác và phát triển thương hiệu cá nhân trên nền tảng.
+                                </p>
+                                <div style={{ marginTop: '0.85rem', fontSize: '0.77rem', letterSpacing: '0.08em', color: '#bbf7d0' }}>
+                                    SÁNG TÁC • XUẤT BẢN • KẾT NỐI
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+
+                <div>
+                    <ChapterContent
+                        chapter={chapterForContentDisplay}
+                        fontSize={fontSize}
+                        fontFamily={fontFamily}
+                        backgroundColor={backgroundColor}
+                        textColor={textColor}
+                        lineHeight={lineHeight}
+                        onPayClick={handleUnlockChapter}
+                        isUnlocking={unlocking}
+                    />
+                </div>
+
+                <aside className="hidden xl:block">
+                    <div style={{ position: 'sticky', top: '96px' }}>
+                        <div
+                            style={{
+                                ...adImageBaseStyle,
+                                background: 'radial-gradient(circle at 86% 8%, rgba(96, 165, 250, 0.2), transparent 32%), linear-gradient(160deg, #030712 0%, #22c55e 50%, #2563eb 100%)',
+                            }}
+                        >
+                            <img src="/logo.png" alt="" aria-hidden="true" style={centerLogoStyle} />
+                            <div>
+                                <div style={{ display: 'inline-block', fontSize: '0.71rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', backgroundColor: 'rgba(110, 231, 183, 0.2)', border: '1px solid rgba(110, 231, 183, 0.45)', color: '#dcfce7', padding: '0.35rem 0.55rem', borderRadius: '999px' }}>
+                                    AI Đồng hành
+                                </div>
+                                <h3 style={{ fontSize: '1.52rem', lineHeight: 1.23, fontWeight: 800, margin: '0.95rem 0 0 0', color: '#f8fafc' }}>
+                                    AI hỗ trợ gợi ý nội dung và nâng cao trải nghiệm đọc
+                                </h3>
+                                <div style={{ width: '56px', height: '2px', backgroundColor: 'rgba(134, 239, 172, 0.95)', marginTop: '0.9rem', borderRadius: '999px' }} />
+                            </div>
+                            <div>
+                                <p style={{ margin: 0, fontSize: '0.92rem', lineHeight: 1.58, opacity: 0.95, color: '#e2e8f0' }}>
+                                    Từ khám phá truyện phù hợp đến tối ưu mạch đọc, AI giúp hành trình mượt mà hơn.
+                                </p>
+                                <div style={{ marginTop: '0.85rem', fontSize: '0.77rem', letterSpacing: '0.08em', color: '#bbf7d0' }}>
+                                    THÔNG MINH • CÁ NHÂN HÓA • HIỆU QUẢ
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+            </div>
 
             {/* Navigation Buttons */}
             <ChapterNavigation

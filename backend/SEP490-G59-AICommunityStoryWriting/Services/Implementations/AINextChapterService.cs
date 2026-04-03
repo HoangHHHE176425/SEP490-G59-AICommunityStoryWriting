@@ -54,12 +54,14 @@ namespace Services.Implementations
             if (story.author_id != authorUserId)
                 throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được sử dụng tính năng gợi ý chương.");
 
-            var chapters = _chapterRepository.GetByStoryId(request.StoryId)
-                .OrderBy(c => c.order_index)
-                .ToList();
+            var allChaptersOrdered = _chapterRepository.GetByStoryId(request.StoryId).OrderBy(c => c.order_index).ToList();
+            var targetOrderForWarning = ResolveSuggestTargetOrderIndex(request, allChaptersOrdered);
+            var contextWarning = ChapterAiContextWarningHelper.GetWarningIfApplicable(allChaptersOrdered, targetOrderForWarning);
+
+            var chapters = _chapterRepository.GetPublishedByStoryId(request.StoryId).ToList();
             var hasContent = chapters.Any(c => !string.IsNullOrWhiteSpace(c.content));
             if (!hasContent)
-                throw new InvalidOperationException("Truyện cần có ít nhất một chương đã có nội dung để gợi ý chương tiếp theo.");
+                throw new InvalidOperationException("Truyện cần có ít nhất một chương đã xuất bản (PUBLISHED) và có nội dung để gợi ý chương tiếp theo.");
 
             await _ragService.TryEnsureIndexedAsync(request.StoryId, afterChapterId: request.AfterChapterId, cancellationToken);
             if (!_ragService.IsRagAvailableForStory(request.StoryId))
@@ -170,8 +172,28 @@ namespace Services.Implementations
                 {
                     StoryTitle = story.title,
                     ChaptersIncluded = 0
-                }
+                },
+                ContextWarning = contextWarning
             };
+        }
+
+        private static int ResolveSuggestTargetOrderIndex(SuggestNextChapterRequest request, List<chapters> allOrdered)
+        {
+            if (request.ChapterId.HasValue)
+            {
+                var ch = allOrdered.FirstOrDefault(c => c.id == request.ChapterId.Value);
+                if (ch != null)
+                    return ch.order_index;
+            }
+
+            if (request.AfterChapterId.HasValue)
+            {
+                var after = allOrdered.FirstOrDefault(c => c.id == request.AfterChapterId.Value);
+                if (after != null)
+                    return after.order_index + 1;
+            }
+
+            return allOrdered.Count == 0 ? 0 : allOrdered.Max(c => c.order_index) + 1;
         }
 
         private const string DbContextLabel = "=== DỮ LIỆU TỪ CƠ SỞ DỮ LIỆU (ngữ cảnh truyện: RAG, Character Memory, Event Memory, Story State) — Dùng làm tham chiếu bắt buộc ===";

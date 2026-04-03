@@ -9,7 +9,6 @@ using Services.DTOs.Admin;
 using Services.DTOs.Admin.Compliance;
 using Services.DTOs.StoryReports;
 using Services.Interfaces;
-using Services.StoryReporting;
 
 namespace AIStory.API.Controllers;
 
@@ -168,18 +167,11 @@ public class AdminComplianceStoryReportsController : ControllerBase
         if (!uid.HasValue) return Unauthorized();
         if (body == null || string.IsNullOrWhiteSpace(body.Decision))
             return BadRequest(new { message = "Decision is required." });
+        var decision = (body.Decision ?? "").Trim().ToUpperInvariant();
         if (body.AdminNote != null && body.AdminNote.Length > 200)
             return BadRequest(new { message = "Ký tự quá dài: mô tả tối đa 200 ký tự." });
-        if (string.IsNullOrWhiteSpace(body.ReasonCode))
-        {
-            _logger.LogWarning("Không tìm thấy lý do phù hợp.");
-            return BadRequest(new { message = "Không tìm thấy lý do phù hợp." });
-        }
-        if (!StoryReportReasonCatalog.TryGet(body.ReasonCode, out _))
-        {
-            _logger.LogWarning("Không tìm thấy lý do phù hợp.");
-            return BadRequest(new { message = "Không tìm thấy lý do phù hợp." });
-        }
+        // Resolve đơn compliance admin-action (chặn tài khoản / đình chỉ viết) không dùng StoryReportReasonCatalog;
+        // lý do chi tiết nằm ở nội dung đơn + ghi chú admin.
         if (requestId == Guid.Empty)
         {
             _logger.LogWarning("Không tìm thấy comment.");

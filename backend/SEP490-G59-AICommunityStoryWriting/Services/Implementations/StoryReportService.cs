@@ -15,11 +15,16 @@ public class StoryReportService : IStoryReportService
 {
     private static readonly string ComplianceTargetType = ReviewAssignmentDAO.TargetTypeComplianceStoryReports;
     private readonly IUserLookup _userLookup;
+    private readonly IUserActivityLookup _userActivityLookup;
     private readonly INotificationHubNotifier? _notificationHubNotifier;
 
-    public StoryReportService(IUserLookup userLookup, INotificationHubNotifier? notificationHubNotifier = null)
+    public StoryReportService(
+        IUserLookup userLookup,
+        IUserActivityLookup userActivityLookup,
+        INotificationHubNotifier? notificationHubNotifier = null)
     {
         _userLookup = userLookup;
+        _userActivityLookup = userActivityLookup;
         _notificationHubNotifier = notificationHubNotifier;
     }
 
@@ -54,6 +59,10 @@ public class StoryReportService : IStoryReportService
         var st = (story.status ?? "").Trim().ToUpperInvariant();
         if (st != "PUBLISHED")
             throw new InvalidOperationException("Chỉ có thể báo cáo truyện đã PUBLISHED.");
+
+        // Giống đánh giá: yêu cầu có log READ_CHAPTER cho truyện.
+        if (!_userActivityLookup.HasReadAnyChapterOfStory(reporterId, storyId))
+            throw new InvalidOperationException("Bạn cần đọc ít nhất một chapter trước khi gửi báo cáo.");
 
         if (story.author_id == reporterId)
             throw new InvalidOperationException("Bạn không thể báo cáo truyện của chính mình.");
@@ -570,9 +579,9 @@ public class StoryReportService : IStoryReportService
             Message = x.message,
             Status = x.status,
             CreatedAtUtc = createdUtc,
-            UrgencyTier = EscalationUrgencyHelper.Merge(
+            UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(EscalationUrgencyHelper.Merge(
                 EscalationUrgencyHelper.ComputeFromRequestAge(createdUtc, DateTime.UtcNow),
-                x.urgency_tier),
+                x.urgency_tier)),
             ResolvedAtUtc = resolvedUtc,
             ResolutionNote = x.resolution_note,
             ResolutionAction = x.resolution_action
@@ -829,11 +838,6 @@ public class StoryReportService : IStoryReportService
         if (dto.AdminNote != null && dto.AdminNote.Length > 200)
             throw new ArgumentException("Ký tự quá dài: mô tả tối đa 200 ký tự.");
 
-        if (string.IsNullOrWhiteSpace(dto.ReasonCode))
-            throw new InvalidOperationException("Không tìm thấy lý do phù hợp.");
-        if (!StoryReportReasonCatalog.TryGet(dto.ReasonCode, out _))
-            throw new InvalidOperationException("Không tìm thấy lý do phù hợp.");
-
         var decision = (dto.Decision ?? "").Trim().ToUpperInvariant();
         if (decision is not ("APPROVE" or "REJECT"))
             throw new ArgumentException("Decision phải là APPROVE hoặc REJECT.");
@@ -867,6 +871,7 @@ public class StoryReportService : IStoryReportService
         if (kind == ComplianceAdminActionRequestDAO.KindBanUser)
         {
             UserDAO.SetUserAccountStatus(row.target_user_id, "BANNED");
+            BannedAuthorModerationSweep.Run();
             ViolationLogDAO.Insert(adminId, row.target_user_id, "USER", row.target_user_id, "BAN",
                 dto.AdminNote ?? row.message, "ADMIN_APPROVE_COMPLIANCE_REQUEST");
             ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId,
@@ -919,9 +924,9 @@ public class StoryReportService : IStoryReportService
             RequesterId = x.requester_id,
             RequesterDisplayName = RName(x.requester),
             CreatedAtUtc = x.created_at,
-            UrgencyTier = EscalationUrgencyHelper.Merge(
+            UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(EscalationUrgencyHelper.Merge(
                 EscalationUrgencyHelper.ComputeFromRequestAge(createdUtc, DateTime.UtcNow),
-                x.urgency_tier),
+                x.urgency_tier)),
             ResolvedAtUtc = x.resolved_at,
             ResolutionNote = x.resolution_note,
             ResolutionAction = x.resolution_action
@@ -962,7 +967,9 @@ public class StoryReportService : IStoryReportService
                 ReportedAtUtc = NormalizeUtc(primary.created_at),
                 DetailNote = cnt > 1
                     ? $"Ticket gộp {cnt} người; chưa có dòng chi tiết trong story_report_contributors — chỉ hiển thị người đại diện trên báo cáo."
-                    : null
+                    : null,
+                CanMarkComplianceVerified = false,
+                IsComplianceContributorVerified = false
             }
         };
     }
@@ -978,8 +985,57 @@ public class StoryReportService : IStoryReportService
             ReasonLabelVi = def?.LabelVi ?? r.ReasonCode,
             Description = r.Description,
             ReportedAtUtc = NormalizeUtc(r.CreatedAtUtc),
-            DetailNote = null
+            DetailNote = null,
+            CanMarkComplianceVerified = true,
+            IsComplianceContributorVerified = r.ComplianceVerifiedAtUtc.HasValue
         };
+    }
+
+    public async Task<int> SetComplianceStoryContributorVerifiedAsync(
+        Guid storyId,
+        Guid actorUserId,
+        SetComplianceStoryContributorVerifiedRequestDto dto,
+        bool actorIsAdmin)
+    {
+        if (dto == null) throw new ArgumentException("Request is required.");
+
+        var toVerify = (dto.VerifyUserIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct().ToList();
+        var toUnverify = (dto.UnverifyUserIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct().ToList();
+        if (toVerify.Count == 0 && toUnverify.Count == 0)
+            return 0;
+        if (toVerify.Intersect(toUnverify).Any())
+            throw new ArgumentException("Không được trùng user giữa đánh dấu và gỡ đánh dấu.");
+
+        if (!actorIsAdmin && !ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, storyId, actorUserId))
+            throw new InvalidOperationException("Chỉ compliance đang nhận (lock) truyện này mới được đánh dấu xác minh.");
+
+        var allIds = toVerify.Concat(toUnverify).Distinct().ToList();
+
+        await using var context = new StoryPlatformDbContext();
+        var rows = await context.story_report_contributors
+            .Where(c => c.story_id == storyId && allIds.Contains(c.user_id))
+            .ToListAsync();
+
+        if (rows.Count != allIds.Count)
+            throw new InvalidOperationException("Một hoặc nhiều người báo cáo không tồn tại cho truyện này.");
+
+        var now = DateTime.UtcNow;
+        foreach (var row in rows)
+        {
+            if (toVerify.Contains(row.user_id))
+            {
+                row.compliance_verified_at_utc = now;
+                row.compliance_verified_by_user_id = actorUserId;
+            }
+            else if (toUnverify.Contains(row.user_id))
+            {
+                row.compliance_verified_at_utc = null;
+                row.compliance_verified_by_user_id = null;
+            }
+        }
+
+        await context.SaveChangesAsync();
+        return rows.Count;
     }
 
     public Task<bool> ComplianceResolveReportAsync(Guid reportId, Guid complianceUserId, ComplianceResolveReportRequestDto? dto)

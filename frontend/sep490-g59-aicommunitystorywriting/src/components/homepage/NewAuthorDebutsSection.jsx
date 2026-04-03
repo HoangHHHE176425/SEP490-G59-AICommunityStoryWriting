@@ -183,6 +183,7 @@ export function NewAuthorDebutsSection() {
 
             return {
               id: story.id ?? story.Id,
+              authorId,
               story: story.title ?? story.Title ?? 'Không có tiêu đề',
               author: {
                 name: authorDisplay,
@@ -266,7 +267,19 @@ export function NewAuthorDebutsSection() {
           </div>
         ) : (
           debuts.map((item) => (
-            <div key={item.id} className="group p-5 border border-gray-200 rounded-xl hover:border-[#13EC5B] hover:shadow-md transition-all cursor-pointer">
+            <div
+              key={item.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => item.id != null && String(item.id) !== '' && navigate(`/story/${item.id}`)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  if (item.id != null && String(item.id) !== '') navigate(`/story/${item.id}`);
+                }
+              }}
+              className="group p-5 border border-gray-200 rounded-xl hover:border-[#13EC5B] hover:shadow-md transition-all cursor-pointer"
+            >
               <div className="flex gap-4">
                 {/* Story Image */}
                 <div className="w-24 h-32 rounded-lg overflow-hidden flex-shrink-0">
@@ -285,6 +298,7 @@ export function NewAuthorDebutsSection() {
                     {item.authorId ? (
                       <Link
                         to={`/authors/${item.authorId}`}
+                        onClick={(e) => e.stopPropagation()}
                         className="flex items-center gap-2 flex-1 min-w-0 rounded-lg -m-1 p-1 hover:bg-gray-50 transition-colors"
                       >
                         <div className="w-8 h-8 rounded-full overflow-hidden border border-gray-200 flex-shrink-0">

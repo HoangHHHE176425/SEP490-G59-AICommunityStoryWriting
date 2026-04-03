@@ -39,7 +39,7 @@ const STORY_PROGRESS_MAP = {
  *   summary (required — khớp validate bước 1 StoryEditor),
  *   categoryIds?: string[] (Guid),
  *   ageRating?: string (ALL, 13+, 16+, 18+),
- *   storyProgressStatus?: string (ONGOING, COMPLETED, HIATUS),
+ *   storyProgressStatus?: (bị bỏ qua — API luôn gửi ONGOING khi tạo mới),
  *   authorId?: string (Guid - dev mode khi chưa có auth),
  *   coverImage?: File | string (base64 dataURL)
  * }
@@ -70,12 +70,9 @@ export async function createStory(data) {
     }
 
     const ageRating = AGE_RATING_MAP[data.ageRating] || data.ageRating || "ALL";
-    const rawProgress = data.storyProgressStatus || data.status || "";
-    const storyProgress =
-        STORY_PROGRESS_MAP[rawProgress] ||
-        (["ONGOING", "COMPLETED", "HIATUS"].includes(String(rawProgress).toUpperCase()) ? String(rawProgress).toUpperCase() : "ONGOING");
     formData.append("AgeRating", ageRating);
-    formData.append("StoryProgressStatus", storyProgress);
+    // Tạo mới truyện: BE bắt buộc ONGOING (Đang ra); không dùng giá trị từ form để tránh gửi nhầm.
+    formData.append("StoryProgressStatus", "ONGOING");
 
     if (data.authorId) {
         formData.append("AuthorId", data.authorId);
@@ -133,6 +130,8 @@ export async function getStories(params = {}) {
     if (params.ageRating) q.append("ageRating", String(params.ageRating).trim());
     if (params.minTotalChapters != null) q.append("minTotalChapters", String(params.minTotalChapters));
     if (params.maxTotalChapters != null) q.append("maxTotalChapters", String(params.maxTotalChapters));
+    if (params.usesAi === true) q.append("usesAi", "true");
+    if (params.usesAi === false) q.append("usesAi", "false");
     const inc = params.includeStoryIds;
     if (Array.isArray(inc) && inc.length > 0) {
         inc.forEach((id) => {

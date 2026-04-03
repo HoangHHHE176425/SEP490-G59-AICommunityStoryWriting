@@ -122,7 +122,7 @@ export function AuthorDashboard({ onBack }) {
             summary: storyData.note || '',
             categoryIds: storyData.categoryIds || [],
             ageRating: storyData.ageRating,
-            storyProgressStatus: storyData.storyProgressStatus || storyData.status,
+            storyProgressStatus: 'Đang ra',
             coverImage: storyData.cover,
         };
         const created = await createStory(payload);
