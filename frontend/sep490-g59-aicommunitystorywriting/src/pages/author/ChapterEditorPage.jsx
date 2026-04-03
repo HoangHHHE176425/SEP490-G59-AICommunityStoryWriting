@@ -3,15 +3,18 @@ import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins, Copy, Chec
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
+import { RichTextEditor } from '../../components/common/RichTextEditor';
 import { indexRag, suggestNextChapter, coCreate, checkBannedWords, checkChapterSpelling, compareChapterPreview, getAiUsageLimit, pickAiContextWarning } from '../../api/ai/aiApi';
 import { getChapters, getChapterVersions } from '../../api/chapter/chapterApi';
 import { refresh as refreshAuth } from '../../api/auth/authApi';
 import { translateCoCreateOutlineLabels } from '../../utils/coCreateOutlineLabelsVi';
+import { stripHtmlToText } from '../../utils/richText';
 
 // Helper function to count words
 const countWords = (text) => {
-    if (!text || !text.trim()) return 0;
-    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+    const plain = stripHtmlToText(text);
+    if (!plain) return 0;
+    return plain.split(/\s+/).filter(word => word.length > 0).length;
 };
 
 /** Lấy chuỗi JSON dàn ý thực từ outline (bỏ hướng dẫn + ví dụ mẫu). Ưu tiên khối có "scenes" ở cuối chuỗi. */
@@ -251,8 +254,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         fontSize: 16,
         fontFamily: 'Arial, sans-serif',
         backgroundColor: '#ffffff',
-        isBold: false,
-        isItalic: false,
     });
 
     const [isSaving, setIsSaving] = useState(false);
@@ -801,7 +802,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             showToast('Tên chương không được vượt quá 50 ký tự', 'error');
             return;
         }
-        if (!chapterData.content.trim()) {
+        if (!stripHtmlToText(chapterData.content)) {
             showToast('Vui lòng nhập nội dung chương', 'error');
             return;
         }
@@ -865,7 +866,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         try {
             setChapterCheckModal({ open: false, loading: true, data: null, error: null, mode: 'banned' });
             const res = await checkBannedWords({
-                content: chapterData.content,
+                content: stripHtmlToText(chapterData.content),
                 storyId: storyId ?? null,
                 chapterTitle: chapterData.title ?? null,
             });
@@ -902,7 +903,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                     const refreshRes = await refreshAuth();
                     if (refreshRes?.success) {
                         const res2 = await checkBannedWords({
-                            content: chapterData.content,
+                            content: stripHtmlToText(chapterData.content),
                             storyId: storyId ?? null,
                             chapterTitle: chapterData.title ?? null,
                         });
@@ -986,7 +987,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             const cid = chapter?.id ?? chapter?.Id ?? null;
             const cmp = await compareChapterPreview({
                 ...(cid ? { chapterId: cid } : { storyId, orderIndex }),
-                content: chapterData.content,
+                content: stripHtmlToText(chapterData.content),
             });
             const hasBoth = Boolean(cmp?.hasBothContents ?? cmp?.HasBothContents);
             const score = cmp?.similarityScore ?? cmp?.SimilarityScore;
@@ -1074,7 +1075,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     };
 
     const handleManualBannedWordsCheck = async () => {
-        if (!chapterData.content.trim()) {
+        if (!stripHtmlToText(chapterData.content)) {
             showToast('Vui lòng nhập nội dung chương trước khi kiểm tra.', 'error');
             return;
         }
@@ -1082,7 +1083,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         setChapterCheckModal({ open: true, loading: true, data: null, error: null, mode: 'spelling-support' });
         try {
             const res = await checkChapterSpelling({
-                content: chapterData.content,
+                content: stripHtmlToText(chapterData.content),
                 storyId: storyId ?? null,
                 chapterTitle: chapterData.title ?? null,
             });
@@ -2438,7 +2439,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             </div>
                             {readOnly && (
                                 <div style={{ padding: '0.75rem 1rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8125rem', color: '#64748b' }}>
-                                    Cỡ chữ: {editorSettings.fontSize}px · Font: {fontFamilies.find(f => f.value === editorSettings.fontFamily)?.name ?? editorSettings.fontFamily} · Nền: {backgroundColors.find(b => b.value === editorSettings.backgroundColor)?.name ?? editorSettings.backgroundColor} · Kiểu: {editorSettings.isBold ? 'Đậm' : 'Thường'}{editorSettings.isItalic ? ' + Nghiêng' : ''}
+                                    Cỡ chữ: {editorSettings.fontSize}px · Font: {fontFamilies.find(f => f.value === editorSettings.fontFamily)?.name ?? editorSettings.fontFamily} · Nền: {backgroundColors.find(b => b.value === editorSettings.backgroundColor)?.name ?? editorSettings.backgroundColor}
                                 </div>
                             )}
 
@@ -2463,7 +2464,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         </button>
                                     </div>
 
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>
                                         {/* Font Size */}
                                         <div>
                                             <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
@@ -2538,49 +2539,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                             </div>
                                         </div>
 
-                                        {/* Font Style */}
-                                        <div>
-                                            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                                Kiểu chữ
-                                            </label>
-                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setEditorSettings({ ...editorSettings, isBold: !editorSettings.isBold })}
-                                                    title="In đậm"
-                                                    style={{
-                                                        minWidth: '44px',
-                                                        height: '40px',
-                                                        border: editorSettings.isBold ? '3px solid #13ec5b' : '1px solid #e5e7eb',
-                                                        borderRadius: '8px',
-                                                        backgroundColor: editorSettings.isBold ? '#f0fdf4' : '#ffffff',
-                                                        color: '#111827',
-                                                        fontWeight: 700,
-                                                        cursor: 'pointer',
-                                                    }}
-                                                >
-                                                    B
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setEditorSettings({ ...editorSettings, isItalic: !editorSettings.isItalic })}
-                                                    title="In nghiêng"
-                                                    style={{
-                                                        minWidth: '44px',
-                                                        height: '40px',
-                                                        border: editorSettings.isItalic ? '3px solid #13ec5b' : '1px solid #e5e7eb',
-                                                        borderRadius: '8px',
-                                                        backgroundColor: editorSettings.isItalic ? '#f0fdf4' : '#ffffff',
-                                                        color: '#111827',
-                                                        fontStyle: 'italic',
-                                                        fontWeight: 600,
-                                                        cursor: 'pointer',
-                                                    }}
-                                                >
-                                                    I
-                                                </button>
-                                            </div>
-                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -2590,28 +2548,16 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                 <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
                                     Nội dung chương <span style={{ color: '#ef4444' }}>*</span>
                                 </label>
-                                <textarea
-                                    value={chapterData.content}
+                                <RichTextEditor
+                                    value={chapterData.content || ''}
                                     readOnly={readOnly}
-                                    disabled={readOnly}
-                                    onChange={(e) => !readOnly && setChapterData({ ...chapterData, content: e.target.value })}
-                                    placeholder="Nhập nội dung chương của bạn...&#10;&#10;Bạn có thể sử dụng AI để gợi ý nội dung bằng cách click vào các nút phía trên."
-                                    rows={25}
-                                    style={{
-                                        width: '100%',
-                                        padding: '1rem',
-                                        backgroundColor: readOnly ? '#f1f5f9' : editorSettings.backgroundColor,
-                                        border: '1px solid #e5e7eb',
-                                        borderRadius: '8px',
-                                        fontSize: `${editorSettings.fontSize}px`,
-                                        fontFamily: editorSettings.fontFamily,
-                                        fontWeight: editorSettings.isBold ? 700 : 400,
-                                        fontStyle: editorSettings.isItalic ? 'italic' : 'normal',
-                                        outline: 'none',
-                                        cursor: readOnly ? 'default' : undefined,
-                                        resize: 'vertical',
-                                        lineHeight: '1.8'
-                                    }}
+                                    onChange={(html) => !readOnly && setChapterData({ ...chapterData, content: html })}
+                                    placeholder="Nhập nội dung chương của bạn... Bạn có thể bôi đen một đoạn rồi dùng toolbar để in đậm/in nghiêng/font."
+                                    minHeight={520}
+                                    backgroundColor={readOnly ? '#f1f5f9' : editorSettings.backgroundColor}
+                                    borderRadius="8px"
+                                    fontSize={editorSettings.fontSize}
+                                    fontFamily={editorSettings.fontFamily}
                                 />
                                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
                                     <p style={{ fontSize: '0.75rem', color: countWords(chapterData.content) < 500 ? '#ef4444' : '#9ca3af', margin: 0 }}>

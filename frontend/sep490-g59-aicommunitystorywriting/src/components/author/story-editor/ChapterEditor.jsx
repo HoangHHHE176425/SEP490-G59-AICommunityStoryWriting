@@ -3,10 +3,13 @@ import { Sparkles, Settings, X, Lock, Unlock, Coins, Copy, Check } from 'lucide-
 import { useToast } from './Toast';
 import { indexRag, suggestNextChapter, coCreate, getAiUsageLimit, pickAiContextWarning } from '../../../api/ai/aiApi';
 import { translateCoCreateOutlineLabels } from '../../../utils/coCreateOutlineLabelsVi';
+import { RichTextEditor } from '../../common/RichTextEditor';
+import { stripHtmlToText } from '../../../utils/richText';
 
 const countWords = (text) => {
-    if (!text || !text.trim()) return 0;
-    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+    const plain = stripHtmlToText(text);
+    if (!plain) return 0;
+    return plain.split(/\s+/).filter(word => word.length > 0).length;
 };
 
 function extractOutlineJson(raw) {
@@ -147,8 +150,6 @@ export function ChapterEditor({
         fontSize: 16,
         fontFamily: 'Arial, sans-serif',
         backgroundColor: '#ffffff',
-        isBold: false,
-        isItalic: false,
     });
     const [showSuggestPopup, setShowSuggestPopup] = useState(false);
     const [suggestLoading, setSuggestLoading] = useState(false);
@@ -1016,7 +1017,7 @@ export function ChapterEditor({
                                 </button>
                             </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
                                 {/* Font Size */}
                                 <div>
                                     <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
@@ -1084,49 +1085,6 @@ export function ChapterEditor({
                                     </div>
                                 </div>
 
-                                {/* Font Style */}
-                                <div>
-                                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                        Kiểu chữ
-                                    </label>
-                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                        <button
-                                            type="button"
-                                            onClick={() => setEditorSettings({ ...editorSettings, isBold: !editorSettings.isBold })}
-                                            title="In đậm"
-                                            style={{
-                                                minWidth: '40px',
-                                                height: '32px',
-                                                border: editorSettings.isBold ? '2px solid #13ec5b' : '1px solid #e5e7eb',
-                                                borderRadius: '6px',
-                                                backgroundColor: editorSettings.isBold ? '#f0fdf4' : '#ffffff',
-                                                color: '#111827',
-                                                fontWeight: 700,
-                                                cursor: 'pointer',
-                                            }}
-                                        >
-                                            B
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => setEditorSettings({ ...editorSettings, isItalic: !editorSettings.isItalic })}
-                                            title="In nghiêng"
-                                            style={{
-                                                minWidth: '40px',
-                                                height: '32px',
-                                                border: editorSettings.isItalic ? '2px solid #13ec5b' : '1px solid #e5e7eb',
-                                                borderRadius: '6px',
-                                                backgroundColor: editorSettings.isItalic ? '#f0fdf4' : '#ffffff',
-                                                color: '#111827',
-                                                fontStyle: 'italic',
-                                                fontWeight: 600,
-                                                cursor: 'pointer',
-                                            }}
-                                        >
-                                            I
-                                        </button>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     )}
@@ -1136,25 +1094,15 @@ export function ChapterEditor({
                         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
                             Nội dung <span style={{ color: '#ef4444' }}>*</span>
                         </label>
-                        <textarea
-                            value={chapter.content}
-                            onChange={(e) => onChange('content', e.target.value)}
+                        <RichTextEditor
+                            value={chapter.content || ''}
+                            onChange={(html) => onChange('content', html)}
                             placeholder="Nhập nội dung chương của bạn..."
-                            rows={20}
-                            style={{
-                                width: '100%',
-                                padding: '1rem',
-                                backgroundColor: editorSettings.backgroundColor,
-                                border: '1px solid #e5e7eb',
-                                borderRadius: '4px',
-                                fontSize: `${editorSettings.fontSize}px`,
-                                fontFamily: editorSettings.fontFamily,
-                                fontWeight: editorSettings.isBold ? 700 : 400,
-                                fontStyle: editorSettings.isItalic ? 'italic' : 'normal',
-                                outline: 'none',
-                                resize: 'vertical',
-                                lineHeight: '1.8'
-                            }}
+                            minHeight={420}
+                            backgroundColor={editorSettings.backgroundColor}
+                            borderRadius="4px"
+                            fontSize={editorSettings.fontSize}
+                            fontFamily={editorSettings.fontFamily}
                         />
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem' }}>
                             <p style={{ fontSize: '0.75rem', color: countWords(chapter.content) < 500 ? '#ef4444' : '#9ca3af', margin: 0 }}>

@@ -9,11 +9,13 @@ import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useAuth } from '../../contexts/AuthContext';
 import { checkBannedWords, checkChapterSpelling } from '../../api/ai/aiApi';
+import { stripHtmlToText } from '../../utils/richText';
 
 // Helper function to count words
 const countWords = (text) => {
-    if (!text || !text.trim()) return 0;
-    return text.trim().split(/\s+/).filter(word => word.length > 0).length;
+    const plain = stripHtmlToText(text);
+    if (!plain) return 0;
+    return plain.split(/\s+/).filter(word => word.length > 0).length;
 };
 
 export function StoryEditor({ story, onSave, onCancel }) {
@@ -162,7 +164,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
             showToast(`Cần ít nhất ${minChapters} chương để tiếp tục`, 'error');
             return false;
         }
-        const invalidChapters = chapters.filter(ch => !ch.title.trim() || !ch.content.trim());
+        const invalidChapters = chapters.filter((ch) => !ch.title.trim() || !stripHtmlToText(ch.content));
         if (invalidChapters.length > 0) {
             showToast(`Có ${invalidChapters.length} chương chưa hoàn thành`, 'error');
             return false;
@@ -258,7 +260,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
     const handleManualSpellingCheck = async () => {
         const ch = chapters[currentChapterIndex];
         if (!ch) return;
-        if (!String(ch.content ?? '').trim()) {
+        if (!stripHtmlToText(ch.content)) {
             setChapterCheckModal({
                 open: true,
                 loading: false,
@@ -273,7 +275,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
         try {
             setChapterCheckModal({ open: true, loading: true, mode: 'spelling-support', data: null, error: null });
             const res = await checkChapterSpelling({
-                content: ch.content,
+                content: stripHtmlToText(ch.content),
                 storyId: story?.id ?? story?.Id ?? null,
                 chapterTitle: ch.title ?? null,
             });
@@ -307,7 +309,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
             const ch = chapters[i];
             if (!ch) continue;
 
-            const content = String(ch.content ?? '').trim();
+            const content = stripHtmlToText(ch.content);
             if (!content) continue; // validateStep2 sẽ chặn nên nhánh này chủ yếu để guard.
 
             try {

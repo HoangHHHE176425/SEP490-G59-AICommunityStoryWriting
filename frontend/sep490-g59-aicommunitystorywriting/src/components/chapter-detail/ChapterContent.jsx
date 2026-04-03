@@ -1,4 +1,5 @@
 import { Lock } from 'lucide-react';
+import { sanitizeRichTextHtml } from '../../utils/richText';
 
 export function ChapterContent({
     chapter,
@@ -133,14 +134,22 @@ export function ChapterContent({
                         WebkitOverflowScrolling: 'touch'
                     }}
                 >
-                    {(chapter.content || '')
-                        .split('\n\n')
-                        .filter(Boolean)
-                        .map((paragraph, index) => (
-                            <p key={index} style={{ marginBottom: '1.5em', textIndent: '2em' }}>
-                                {paragraph}
-                            </p>
-                        ))}
+                    {/<[a-z][\s\S]*>/i.test(String(chapter.content || '')) ? (
+                        <div
+                            dangerouslySetInnerHTML={{
+                                __html: sanitizeRichTextHtml(chapter.content || '').trim() || '<p></p>',
+                            }}
+                        />
+                    ) : (
+                        (chapter.content || '')
+                            .split('\n\n')
+                            .filter(Boolean)
+                            .map((paragraph, index) => (
+                                <p key={index} style={{ marginBottom: '1.5em', textIndent: '2em' }}>
+                                    {paragraph}
+                                </p>
+                            ))
+                    )}
                 </div>
             )}
         </div>
