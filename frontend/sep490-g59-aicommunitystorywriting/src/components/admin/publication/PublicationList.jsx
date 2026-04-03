@@ -1,5 +1,5 @@
 import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen, UserCheck, AlertCircle, RotateCcw } from 'lucide-react';
-import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus } from '../../../utils/moderatorReviewSla';
+import { getSlaBadgeStyle, getReviewDeadlineBadge, normalizeTimeStatus, pickReviewDeadlineIso } from '../../../utils/moderatorReviewSla';
 import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 
 export function PublicationList({
@@ -108,6 +108,14 @@ export function PublicationList({
         return normalizeTimeStatus(pub.timeStatus);
     };
 
+    /** Hạn duyệt từ BE (review_deadline_at → DeadlineAt), UTC. Nhóm truyện: đã gộp sớm nhất vào pub.deadlineAt. */
+    const deadlineAtForPub = (pub) => {
+        if (pub.type === 'story_group') {
+            return pickReviewDeadlineIso(pub) ?? pickReviewDeadlineIso(pub.representativePublication);
+        }
+        return pickReviewDeadlineIso(pub);
+    };
+
     if (publications.length === 0) {
         return (
             <div style={{
@@ -194,8 +202,28 @@ export function PublicationList({
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
                                         {getTypeBadge(pub)}
                                         {getStatusBadge(pub.status)}
-                                        {showModeratorSla && pub.status === 'pending' && timeStatusForPub(pub) && (() => {
-                                            const sla = getSlaBadgeStyle(timeStatusForPub(pub));
+                                        {showModeratorSla && pub.status === 'pending' && (() => {
+                                            const dl = deadlineAtForPub(pub);
+                                            const byDeadline = dl ? getReviewDeadlineBadge(dl) : null;
+                                            if (byDeadline) {
+                                                return (
+                                                    <span
+                                                        style={{
+                                                            fontSize: '0.75rem',
+                                                            fontWeight: 600,
+                                                            padding: '0.25rem 0.5rem',
+                                                            borderRadius: '9999px',
+                                                            backgroundColor: byDeadline.bg,
+                                                            color: byDeadline.color,
+                                                        }}
+                                                    >
+                                                        Thời hạn: {byDeadline.label}
+                                                    </span>
+                                                );
+                                            }
+                                            const ts = timeStatusForPub(pub);
+                                            if (!ts) return null;
+                                            const sla = getSlaBadgeStyle(ts);
                                             return (
                                                 <span style={{
                                                     fontSize: '0.75rem',
@@ -205,7 +233,7 @@ export function PublicationList({
                                                     backgroundColor: sla.bg,
                                                     color: sla.color,
                                                 }}>
-                                                    Thời hạn SLA: {sla.label}
+                                                    Thời hạn: {sla.label}
                                                 </span>
                                             );
                                         })()}
@@ -318,9 +346,11 @@ export function PublicationList({
                                         const pubId = pub.type === 'story' ? (pub.storyId ?? pub.id) : (pub.chapterId ?? pub.id);
                                         const isClaiming = claimingId === pubId;
                                         const claimedByOther = pub.claimedByDisplayName && !pub.isClaimedByMe;
-                                        const disabled = claimedByOther || isClaiming;
+                                        const blockedPrior = !!pub.blockedFromClaimDueToPriorDeadlineForfeit;
+                                        const disabled = claimedByOther || isClaiming || blockedPrior;
                                         let label = 'Nhận duyệt đơn';
                                         if (isClaiming) label = '...';
+                                        else if (blockedPrior) label = 'Không thể nhận lại';
                                         else if (claimedByOther) label = `Đã nhận bởi ${pub.claimedByDisplayName}`;
                                         return (
                                             <button
@@ -331,6 +361,7 @@ export function PublicationList({
                                                     else onClaimChapter?.(pub.chapterId ?? pub.id);
                                                 }}
                                                 disabled={disabled}
+                                                title={blockedPrior ? 'Bạn đã để quá hạn duyệt với truyện này; không thể nhận lại.' : undefined}
                                                 style={{
                                                     padding: '0.625rem 1rem',
                                                     backgroundColor: disabled ? '#e2e8f0' : '#0ea5e9',
@@ -475,24 +506,6 @@ export function PublicationList({
                                     </div>
                                 )}
                             </div>
-
-                            {showModeratorSla && pub.status === 'pending' && claimedAtForPub(pub) && (() => {
-                                const { line } = formatPolicySlaCountdown(claimedAtForPub(pub));
-                                if (!line) return null;
-                                return (
-                                    <div style={{
-                                        marginBottom: '0.75rem',
-                                        padding: '0.5rem 0.75rem',
-                                        backgroundColor: '#f8fafc',
-                                        borderRadius: '8px',
-                                        borderLeft: '3px solid #0ea5e9',
-                                        fontSize: '0.8125rem',
-                                        color: '#334155',
-                                    }}>
-                                        {line}
-                                    </div>
-                                );
-                            })()}
 
                             {/* Categories */}
                             {Array.isArray(pub.categories) && pub.categories.length > 0 && (

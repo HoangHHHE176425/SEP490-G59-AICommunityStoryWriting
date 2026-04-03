@@ -1,4 +1,4 @@
-﻿using AIStory.API.Controllers;
+using AIStory.API.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -224,27 +224,31 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID05 — ma trận: <c>reasonCode</c> không tồn tại trong catalog → không xử lý (Return <c>false</c> + log &quot;Không tìm thấy lý do phù hợp&quot;).
-        /// Product: <see cref="Services.StoryReporting.StoryReportReasonCatalog.TryGet"/> false → <c>400</c>, không gọi service.
+        /// UTCID05 — resolve đơn compliance admin-action không bắt buộc ReasonCode trong catalog.
+        /// APPROVE với mã không tồn tại trong <see cref="Services.StoryReporting.StoryReportReasonCatalog"/> vẫn chuyển xuống service (UI có thể không gửi mã chuẩn).
         /// </summary>
         [Fact]
-        public async System.Threading.Tasks.Task UTCID05_AdminResolveComplianceAdminActionRequest_ReturnsBadRequest_WhenReasonCodeUnknown()
+        public async System.Threading.Tasks.Task UTCID05_AdminResolveComplianceAdminActionRequest_Succeeds_WhenApproveWithUnknownReasonCode()
         {
             LogUtcContext("UTCID05",
-                "Spec: reasonCode không tồn tại → dừng xử lý.",
-                "Product: ReasonCode không có trong StoryReportReasonCatalog → 400 + Không tìm thấy lý do phù hợp.");
+                "Spec: APPROVE + reasonCode không có trong catalog.",
+                "Product: controller không chặn; service xử lý BAN/SUSPEND theo đơn + AdminNote.");
 
             var requestId = Guid.NewGuid();
             var adminId = Guid.NewGuid();
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
-                Decision = "REJECT",
+                Decision = "APPROVE",
                 ReasonCode = "NOT_IN_CATALOG_XYZ",
-                AdminNote = "nope",
+                AdminNote = "ok",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
 
             var controller = CreateSut(out var serviceMock);
+
+            serviceMock
+                .Setup(s => s.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, body))
+                .Returns(System.Threading.Tasks.Task.CompletedTask);
 
             controller.ControllerContext = new ControllerContext
             {
@@ -259,39 +263,36 @@ namespace AIStory.Tests
 
             var result = await controller.ResolveAdminActionRequest(requestId, body);
 
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            Assert.NotNull(badRequest.Value);
-            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
-            Assert.Equal("Không tìm thấy lý do phù hợp.", doc.RootElement.GetProperty("message").GetString());
-
-            serviceMock.Verify(
-                s => s.AdminResolveComplianceAdminActionRequestAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<AdminResolveComplianceAdminActionRequestDto>()),
-                Times.Never);
+            var ok = Assert.IsType<OkObjectResult>(result);
+            Assert.Equal(StatusCodes.Status200OK, ok.StatusCode);
+            serviceMock.Verify(s => s.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, body), Times.Once);
         }
 
         /// <summary>
-        /// UTCID06 — ma trận: <c>reasonCode</c> null / không xác định → không xử lý (Return <c>false</c> + log &quot;Không tìm thấy lý do phù hợp&quot;).
-        /// Product: <see cref="AdminResolveComplianceAdminActionRequestDto.ReasonCode"/> bắt buộc (không null/blank); controller trả <c>400</c>, log cảnh báo, không gọi service.
+        /// UTCID06 — APPROVE chặn tài khoản / đình chỉ viết: frontend có thể không gửi <c>ReasonCode</c>; vẫn 200 và gọi service.
         /// </summary>
         [Fact]
-        public async System.Threading.Tasks.Task UTCID06_AdminResolveComplianceAdminActionRequest_ReturnsBadRequest_WhenReasonCodeMissing()
+        public async System.Threading.Tasks.Task UTCID06_AdminResolveComplianceAdminActionRequest_Succeeds_WhenApproveWithMissingReasonCode()
         {
             LogUtcContext("UTCID06",
-                "Spec: reasonCode null/blank → dừng xử lý.",
-                "Product: string.IsNullOrWhiteSpace(ReasonCode) → 400 + message Không tìm thấy lý do phù hợp.; không gọi IStoryReportService.");
+                "Spec: APPROVE + ReasonCode null.",
+                "Product: không yêu cầu ReasonCode cho resolve admin-action compliance.");
 
             var requestId = Guid.NewGuid();
             var adminId = Guid.NewGuid();
             var body = new AdminResolveComplianceAdminActionRequestDto
             {
-                Decision = "REJECT",
+                Decision = "APPROVE",
                 ReasonCode = null,
-                AdminNote = "nope",
+                AdminNote = "tôi đồng ý xử lý",
                 SuspendUntilUtc = DateTime.UtcNow.AddDays(2)
             };
 
             var controller = CreateSut(out var serviceMock);
+
+            serviceMock
+                .Setup(s => s.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, body))
+                .Returns(System.Threading.Tasks.Task.CompletedTask);
 
             controller.ControllerContext = new ControllerContext
             {
@@ -306,15 +307,9 @@ namespace AIStory.Tests
 
             var result = await controller.ResolveAdminActionRequest(requestId, body);
 
-            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
-            Assert.NotNull(badRequest.Value);
-            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
-            Assert.Equal("Không tìm thấy lý do phù hợp.", doc.RootElement.GetProperty("message").GetString());
-
-            serviceMock.Verify(
-                s => s.AdminResolveComplianceAdminActionRequestAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<AdminResolveComplianceAdminActionRequestDto>()),
-                Times.Never);
+            var ok = Assert.IsType<OkObjectResult>(result);
+            Assert.Equal(StatusCodes.Status200OK, ok.StatusCode);
+            serviceMock.Verify(s => s.AdminResolveComplianceAdminActionRequestAsync(requestId, adminId, body), Times.Once);
         }
 
         /// <summary>

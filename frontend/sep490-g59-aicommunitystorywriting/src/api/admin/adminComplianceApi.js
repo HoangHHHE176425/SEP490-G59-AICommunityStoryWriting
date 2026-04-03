@@ -179,3 +179,23 @@ export async function getMyComplianceActivityLogs(params = {}) {
     const res = await axiosInstance.get(`/compliance/story-reports/my-activity-logs${query ? `?${query}` : ''}`);
     return res.data;
 }
+
+/** COMPLIANCE: đánh dấu / gỡ xác minh cho từng contributor trong story_report_contributors. */
+export async function setComplianceStoryContributorVerification(storyId, body = {}) {
+    const payload = body && Object.keys(body).length > 0 ? body : {};
+    const res = await axiosInstance.post(
+        `/compliance/story-reports/stories/${encodeURIComponent(storyId)}/contributor-verification`,
+        payload,
+    );
+    return res.data;
+}
+
+/** COMPLIANCE: đánh dấu / gỡ xác minh cho từng report_evidences trong comment report. */
+export async function setComplianceCommentReportEvidenceVerification(commentId, body = {}) {
+    const payload = body && Object.keys(body).length > 0 ? body : {};
+    const res = await axiosInstance.post(
+        `/compliance/comment-reports/comments/${encodeURIComponent(commentId)}/evidence-verification`,
+        payload,
+    );
+    return res.data;
+}

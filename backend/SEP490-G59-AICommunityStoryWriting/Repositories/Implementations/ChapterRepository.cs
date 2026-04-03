@@ -5,9 +5,6 @@ namespace Repositories
 {
     public class ChapterRepository : IChapterRepository
     {
-        private static bool IsPublishedChapter(chapters c) =>
-            string.Equals(c.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase);
-
         public IQueryable<chapters> GetAll()
             => ChapterDAO.GetAll();
 
@@ -21,7 +18,12 @@ namespace Repositories
 
         public IReadOnlyList<chapters> GetPublishedByStoryId(Guid storyId)
             => ChapterDAO.GetAll()
-                .Where(c => c.story_id == storyId && IsPublishedChapter(c))
+                // EF Core chỉ translate được biểu thức dạng "c.status == 'PUBLISHED'" (không translate được helper method C#).
+                // Dùng ToUpperInvariant để so sánh case-insensitive.
+                .Where(c =>
+                    c.story_id == storyId
+                    && c.status != null
+                    && c.status.ToUpper() == "PUBLISHED")
                 .OrderBy(c => c.order_index)
                 .ToList();
 

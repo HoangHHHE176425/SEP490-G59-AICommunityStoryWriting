@@ -34,6 +34,9 @@ public class CoCreationResponse
     /// <summary>Dàn ý do Agent 1 tạo (rỗng nếu IdeaContradictionFeedback có giá trị).</summary>
     public string Outline { get; set; } = null!;
 
+    /// <summary>Tiêu đề chương gợi ý (Agent 1). Null nếu không sinh được hoặc nhánh mâu thuẫn ý tưởng.</summary>
+    public string? SuggestedChapterTitle { get; set; }
+
     /// <summary>Nội dung cuối (đã qua kiểm duyệt hoặc bản cuối sau khi hết số lần sửa). Rỗng nếu IdeaContradictionFeedback có giá trị.</summary>
     public string FinalContent { get; set; } = null!;
 

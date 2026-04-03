@@ -2,7 +2,16 @@ import { useState, useEffect } from 'react';
 import { X, Plus, ChevronDown } from 'lucide-react';
 import { getCategoriesWithPagination } from '../../../api/category/categoryApi';
 
-export function StoryInfoForm({ formData, onChange, onImageUpload, readOnlyFields = false, allowProgressOptions = null, disabledProgressOptions = [] }) {
+export function StoryInfoForm({
+    formData,
+    onChange,
+    onImageUpload,
+    readOnlyFields = false,
+    allowProgressOptions = null,
+    disabledProgressOptions = [],
+    /** Truyện mới: khóa dropdown trạng thái tiến độ ở «Đang ra». */
+    lockStoryProgressStatus = false,
+}) {
 
     const statusOptions = Array.isArray(allowProgressOptions) && allowProgressOptions.length > 0
         ? allowProgressOptions
@@ -178,44 +187,69 @@ export function StoryInfoForm({ formData, onChange, onImageUpload, readOnlyField
                         </div>
                     </div>
 
-                    {/* Status */}
+                    {/* Status — truyện mới: cố định «Đang ra», không dùng dropdown để tránh nhầm là có thể đổi */}
                     <div>
                         <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                            Trạng thái
+                            Trạng thái{lockStoryProgressStatus ? <span style={{ color: '#dc2626', marginLeft: '2px' }}>*</span> : null}
                         </label>
-                        <div style={{ position: 'relative' }}>
-                            <select
-                                value={formData.status}
-                                onChange={(e) => onChange('status', e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '0.75rem',
-                                    backgroundColor: '#f9fafb',
-                                    border: '1px solid #e5e7eb',
-                                    borderRadius: '4px',
-                                    fontSize: '0.875rem',
-                                    outline: 'none',
-                                    appearance: 'none',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                {statusOptions.map((opt) => (
-                                    <option key={opt} value={opt} disabled={Array.isArray(disabledProgressOptions) && disabledProgressOptions.includes(opt)}>
-                                        {opt}
-                                    </option>
-                                ))}
-                            </select>
-                            <ChevronDown style={{
-                                position: 'absolute',
-                                right: '0.75rem',
-                                top: '50%',
-                                transform: 'translateY(-50%)',
-                                width: '16px',
-                                height: '16px',
-                                pointerEvents: 'none',
-                                color: '#6b7280'
-                            }} />
-                        </div>
+                        {lockStoryProgressStatus ? (
+                            <>
+                                <div
+                                    title="Truyện mới luôn ở trạng thái Đang ra"
+                                    style={{
+                                        width: '100%',
+                                        padding: '0.75rem',
+                                        backgroundColor: '#f3f4f6',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '4px',
+                                        fontSize: '0.875rem',
+                                        color: '#111827',
+                                        cursor: 'default',
+                                        userSelect: 'none',
+                                    }}
+                                >
+                                    Đang ra
+                                </div>
+                                <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.375rem', marginBottom: 0 }}>
+                                    Truyện mới bắt buộc ở trạng thái «Đang ra»; sau khi xuất bản bạn có thể đổi trong mục chỉnh sửa truyện.
+                                </p>
+                            </>
+                        ) : (
+                            <div style={{ position: 'relative' }}>
+                                <select
+                                    value={formData.status}
+                                    onChange={(e) => onChange('status', e.target.value)}
+                                    disabled={readOnlyFields}
+                                    style={{
+                                        width: '100%',
+                                        padding: '0.75rem',
+                                        backgroundColor: readOnlyFields ? '#f3f4f6' : '#f9fafb',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '4px',
+                                        fontSize: '0.875rem',
+                                        outline: 'none',
+                                        appearance: 'none',
+                                        cursor: readOnlyFields ? 'not-allowed' : 'pointer',
+                                    }}
+                                >
+                                    {statusOptions.map((opt) => (
+                                        <option key={opt} value={opt} disabled={Array.isArray(disabledProgressOptions) && disabledProgressOptions.includes(opt)}>
+                                            {opt}
+                                        </option>
+                                    ))}
+                                </select>
+                                <ChevronDown style={{
+                                    position: 'absolute',
+                                    right: '0.75rem',
+                                    top: '50%',
+                                    transform: 'translateY(-50%)',
+                                    width: '16px',
+                                    height: '16px',
+                                    pointerEvents: 'none',
+                                    color: '#6b7280'
+                                }} />
+                            </div>
+                        )}
                     </div>
 
                     {/* Age Rating */}

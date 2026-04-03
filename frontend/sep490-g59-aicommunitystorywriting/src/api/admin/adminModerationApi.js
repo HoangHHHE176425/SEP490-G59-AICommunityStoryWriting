@@ -1,8 +1,8 @@
 import axiosInstance from '../axiosInstance';
 
 /**
- * @param {string} [urgencyTier] - CRITICAL | HIGH | STANDARD
- * @returns {Promise<{ items, counts: { critical, high, standard } }>}
+ * @param {string} [urgencyTier] - CRITICAL | STANDARD
+ * @returns {Promise<{ items, counts: { critical, standard } }>}
  */
 export async function getPendingReviewEscalations(urgencyTier) {
     const q = new URLSearchParams();

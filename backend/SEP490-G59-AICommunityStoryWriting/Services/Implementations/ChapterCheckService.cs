@@ -45,7 +45,7 @@ public class ChapterCheckService : IChapterCheckService
     }
 
     /// <summary>Gộp từ cấm + chính tả (chỉ dùng cho unit test ma trận; API công khai đã tách hai endpoint).</summary>
-    internal async Task<CheckChapterResponse> CheckAsync(CheckChapterRequest request, Guid? userId, CancellationToken cancellationToken = default)
+    internal async Task<CheckChapterResponse> CheckAsync(CheckChapterSpellingRequest request, Guid? userId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Content))
             return new CheckChapterResponse { Passed = true, Summary = "Nội dung trống, không cần kiểm tra." };
@@ -93,7 +93,7 @@ public class ChapterCheckService : IChapterCheckService
         };
     }
 
-    public async Task<CheckChapterResponse> CheckBannedWordsOnlyAsync(CheckChapterRequest request, Guid? userId, CancellationToken cancellationToken = default)
+    public async Task<CheckChapterResponse> CheckBannedWordsOnlyAsync(CheckChapterBannedWordsRequest request, Guid? userId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Content))
             return new CheckChapterResponse { Passed = true, Summary = "Nội dung trống, không cần kiểm tra." };
@@ -132,7 +132,7 @@ public class ChapterCheckService : IChapterCheckService
         };
     }
 
-    public async Task<CheckChapterResponse> CheckSpellingOnlyAsync(CheckChapterRequest request, Guid? userId, CancellationToken cancellationToken = default)
+    public async Task<CheckChapterResponse> CheckSpellingOnlyAsync(CheckChapterSpellingRequest request, Guid? userId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.Content))
             return new CheckChapterResponse { Passed = true, Summary = "Nội dung trống, không cần kiểm tra." };

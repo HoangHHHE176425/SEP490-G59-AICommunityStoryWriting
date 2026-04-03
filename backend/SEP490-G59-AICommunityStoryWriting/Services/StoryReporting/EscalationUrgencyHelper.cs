@@ -1,4 +1,4 @@
-﻿namespace Services;
+namespace Services;
 
 /// <summary>Chuẩn hóa mức độ escalation (moderator + compliance): STANDARD &lt; HIGH &lt; CRITICAL.</summary>
 public static class EscalationUrgencyHelper
@@ -25,6 +25,10 @@ public static class EscalationUrgencyHelper
         if (t == High) return High;
         return Standard;
     }
+
+    /// <summary>UI / admin chỉ còn 2 mức: CRITICAL và STANDARD — HIGH gộp vào STANDARD.</summary>
+    public static string ToDisplayTier(string? tier) =>
+        Normalize(tier) == Critical ? Critical : Standard;
 
     /// <summary>Lấy mức cao nhất trong danh sách (theo loại đơn, thời gian chờ, v.v.).</summary>
     public static string Merge(params string?[] tiers)

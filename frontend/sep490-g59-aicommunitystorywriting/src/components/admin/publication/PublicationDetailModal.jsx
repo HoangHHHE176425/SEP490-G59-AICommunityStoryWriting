@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { X, CheckCircle, XCircle, BookOpen, FileText, Clock, User, Calendar, AlertTriangle, AlertCircle } from 'lucide-react';
 import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
+import { getStoryById } from '../../../api/story/storyApi';
 import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion, getReviewAssignmentSelf, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
 import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus, localDateTimeInputToIsoUtc, validateModeratorExtendProposedDeadline } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
+import { sanitizeRichTextHtml } from '../../../utils/richText';
 import { useToast } from '../../author/story-editor/Toast';
 
 /** Map API chapter list item sang format modal cần. Khi API trả về pendingVersionTitle/pendingVersionWordCount (list chờ duyệt) thì dùng cho sidebar ngay. */
@@ -138,6 +140,28 @@ function buildRejectedHistoryTimeline(selectedChapter, chapters, fetchedRejectio
     return deduped;
 }
 
+function renderChapterContent(content, contentStyle) {
+    const raw = String(content ?? '');
+    const trimmed = raw.trim();
+    if (!trimmed) {
+        return <div style={contentStyle}>—</div>;
+    }
+    const hasHtmlTag = /<[a-z][\s\S]*>/i.test(trimmed);
+    if (hasHtmlTag) {
+        return (
+            <div
+                style={contentStyle}
+                dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(trimmed) || '<p>—</p>' }}
+            />
+        );
+    }
+    return (
+        <div style={contentStyle}>
+            {trimmed}
+        </div>
+    );
+}
+
 export function PublicationDetailModal({ publication, onClose, onApprove, onReject, onRefresh }) {
     const { showToast, ToastContainer } = useToast();
     const [chapters, setChapters] = useState([]);
@@ -179,10 +203,13 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [escalateOpen, setEscalateOpen] = useState(false);
     const [escalateKind, setEscalateKind] = useState('EXTEND_DEADLINE');
     const [escalateReason, setEscalateReason] = useState('');
+    const [escalateReasonError, setEscalateReasonError] = useState('');
     const [escalateProposedDeadline, setEscalateProposedDeadline] = useState('');
     const [escalateSubmitting, setEscalateSubmitting] = useState(false);
     /** Đơn escalation gắn STORY (vd. trả cả truyện về hàng đợi) — tách khỏi assignment theo từng chương. */
     const [storyLevelReviewAssignment, setStoryLevelReviewAssignment] = useState(null);
+    /** users.status của tác giả (vd. BANNED) — từ GET /stories/:id để hiển thị ghi chú trong lịch sử moderator. */
+    const [authorAccountStatusFromApi, setAuthorAccountStatusFromApi] = useState(null);
 
     const storyId = publication?.storyId ?? publication?.story_id ?? publication?.id;
 
@@ -200,7 +227,13 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 sortBy: options.sortBy ?? 'deadline_at',
                 sortOrder: options.sortOrder ?? 'asc',
             });
-            const publishedPromise = getChapters({ storyId: sid, status: 'PUBLISHED', page: 1, pageSize: 500 });
+            const publishedPromise = getChapters({
+                storyId: sid,
+                status: 'PUBLISHED',
+                page: 1,
+                pageSize: 500,
+                excludeBannedStoryAuthors: false,
+            });
             Promise.allSettled([pendingPromise, publishedPromise])
                 .then(([pendingResult, publishedResult]) => {
                     if (pendingResult.status === 'fulfilled') {
@@ -235,7 +268,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 .catch(() => setChapters([]))
                 .finally(() => setChaptersLoading(false));
         } else {
-            const params = { storyId: sid, pageSize: 100 };
+            const params = { storyId: sid, pageSize: 100, excludeBannedStoryAuthors: false };
             if (pubStatus === 'approved') params.status = 'PUBLISHED';
             const promise = getChapters(params);
             promise
@@ -251,6 +284,25 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     }, []);
 
     useEffect(() => {
+        if (!storyId) {
+            setAuthorAccountStatusFromApi(null);
+            return;
+        }
+        let cancelled = false;
+        setAuthorAccountStatusFromApi(null);
+        getStoryById(storyId)
+            .then((s) => {
+                if (cancelled) return;
+                const st = s?.authorAccountStatus ?? s?.AuthorAccountStatus ?? null;
+                setAuthorAccountStatusFromApi(st);
+            })
+            .catch(() => {
+                if (!cancelled) setAuthorAccountStatusFromApi(null);
+            });
+        return () => { cancelled = true; };
+    }, [storyId, publication?.id]);
+
+    useEffect(() => {
         const pubId = publication?.id ?? publication?.storyId ?? storyId ?? '';
         const newKey = { storyId: storyId ?? null, pubId: pubId ?? null };
         const keyChanged = loadKeyRef.current.storyId !== newKey.storyId || loadKeyRef.current.pubId !== newKey.pubId;
@@ -262,6 +314,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 setChaptersLoading(false);
                 setSelectedChapter(null);
                 setChapterReviewContent({});
+                setAuthorAccountStatusFromApi(null);
                 return;
             }
             // Chỉ clear và refetch khi mở publication khác; tránh effect re-run (vd publication.chapters ref mới) xóa chapters + chapterReviewContent → sidebar hiển thị sai.
@@ -446,12 +499,18 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
 
     const handleSubmitEscalation = async () => {
         const t = escalationTarget();
-        if (!t || !escalateReason.trim()) {
-            showToast('Vui lòng nhập lý do.', 'error');
+        setEscalateReasonError('');
+        if (!t) {
+            showToast('Không xác định được mục gửi đơn.', 'error');
             return;
         }
-        if (escalateReason.trim().length < 10) {
-            showToast('Lý do báo cáo cần ít nhất 10 ký tự (theo quy định hệ thống).', 'error');
+        const trimmedReason = escalateReason.trim();
+        if (!trimmedReason) {
+            setEscalateReasonError('Vui lòng nhập lý do.');
+            return;
+        }
+        if (trimmedReason.length < 10) {
+            setEscalateReasonError('Lý do cần ít nhất 10 ký tự (theo quy định hệ thống).');
             return;
         }
         if (escalateKind === 'EXTEND_DEADLINE') {
@@ -473,12 +532,13 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 targetType: t.targetType,
                 targetId: t.targetId,
                 requestKind: escalateKind,
-                reason: escalateReason.trim(),
+                reason: trimmedReason,
                 proposedDeadlineAt: escalateKind === 'EXTEND_DEADLINE' ? localDateTimeInputToIsoUtc(escalateProposedDeadline) : null,
             });
             showToast('Đã gửi đơn lên quản trị.', 'success');
             setEscalateOpen(false);
             setEscalateReason('');
+            setEscalateReasonError('');
             setEscalateProposedDeadline('');
             const dto = await getReviewAssignmentSelf(t.targetType, t.targetId);
             setReviewAssignment(dto);
@@ -542,7 +602,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     useEffect(() => {
         if (publication?.status !== 'rejected' || !storyId) return;
         let cancelled = false;
-        getChapters({ storyId, page: 1, pageSize: 500 })
+        getChapters({ storyId, page: 1, pageSize: 500, excludeBannedStoryAuthors: false })
             .then((res) => {
                 if (cancelled) return;
                 const items = Array.isArray(res) ? res : (res?.items ?? res?.Items ?? []);
@@ -641,7 +701,13 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 sortBy: 'deadline_at',
                                 sortOrder: 'asc',
                             }),
-                            getChapters({ storyId, status: 'PUBLISHED', page: 1, pageSize: 500 }),
+                            getChapters({
+                                storyId,
+                                status: 'PUBLISHED',
+                                page: 1,
+                                pageSize: 500,
+                                excludeBannedStoryAuthors: false,
+                            }),
                         ]);
                         const pubList = publishedRes?.items ?? publishedRes?.Items ?? publishedRes?.data ?? [];
                         const arr = Array.isArray(pubList) ? pubList : [];
@@ -800,6 +866,14 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     void slaTick;
     const policySlaLine = claimStartedForSla ? formatPolicySlaCountdown(claimStartedForSla).line : null;
 
+    const authorBanStatus = String(
+        authorAccountStatusFromApi
+        ?? publication?.authorAccountStatus
+        ?? publication?.author_account_status
+        ?? ''
+    ).toUpperCase();
+    const showAuthorBannedNote = authorBanStatus === 'BANNED';
+
     return (
         <>
             <ToastContainer />
@@ -882,6 +956,29 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     </span>
                                 )}
                             </div>
+                            {showAuthorBannedNote && (
+                                <div
+                                    role="status"
+                                    style={{
+                                        marginTop: '0.75rem',
+                                        padding: '0.6rem 0.75rem',
+                                        backgroundColor: '#fffbeb',
+                                        border: '1px solid #fcd34d',
+                                        borderRadius: '8px',
+                                        color: '#92400e',
+                                        fontSize: '0.8125rem',
+                                        display: 'flex',
+                                        gap: '0.5rem',
+                                        alignItems: 'flex-start',
+                                        lineHeight: 1.45,
+                                    }}
+                                >
+                                    <AlertTriangle style={{ width: '18px', height: '18px', flexShrink: 0, marginTop: '1px' }} aria-hidden />
+                                    <span>
+                                        Tài khoản tác giả đang ở trạng thái <strong>BANNED</strong>. Nội dung chương vẫn hiển thị phục vụ lịch sử kiểm duyệt.
+                                    </span>
+                                </div>
+                            )}
                         </div>
 
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
@@ -972,6 +1069,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                             type="button"
                                             onClick={() => {
                                                 setEscalateKind('EXTEND_DEADLINE');
+                                                setEscalateReasonError('');
                                                 setEscalateOpen(true);
                                             }}
                                             style={{
@@ -1347,9 +1445,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                                     overflowY: 'auto',
                                                                     padding: '2.5rem 3rem'
                                                                 }}>
-                                                                    <div style={contentStyle}>
-                                                                        {versionContent || '—'}
-                                                                    </div>
+                                                                    {renderChapterContent(versionContent, contentStyle)}
                                                                 </div>
                                                             );
                                                         }
@@ -1396,14 +1492,10 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                                     padding: '2.5rem 3rem'
                                                                 }}>
                                                                     {contentTab === 'original' && (
-                                                                        <div style={contentStyle}>
-                                                                            {originalContent}
-                                                                        </div>
+                                                                        renderChapterContent(originalContent, contentStyle)
                                                                     )}
                                                                     {contentTab === 'version' && (
-                                                                        <div style={contentStyle}>
-                                                                            {versionContent || '—'}
-                                                                        </div>
+                                                                        renderChapterContent(versionContent, contentStyle)
                                                                     )}
                                                                 </div>
                                                             </>
@@ -1416,9 +1508,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                             overflowY: 'auto',
                                                             padding: '2.5rem 3rem'
                                                         }}>
-                                                            <div style={contentStyle}>
-                                                                {chapterContents[selectedChapter.id] ?? 'Đang tải nội dung...'}
-                                                            </div>
+                                                            {renderChapterContent(chapterContents[selectedChapter.id] ?? 'Đang tải nội dung...', contentStyle)}
                                                         </div>
                                                     );
                                                 })()}
@@ -1833,7 +1923,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                         zIndex: 10001,
                         padding: '1rem',
                     }}
-                    onClick={() => !escalateSubmitting && setEscalateOpen(false)}
+                    onClick={() => {
+                        if (escalateSubmitting) return;
+                        setEscalateReasonError('');
+                        setEscalateOpen(false);
+                    }}
                 >
                     <div
                         style={{
@@ -1904,30 +1998,54 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 </div>
                             ) : null}
                         </div>
-                        <label style={{ display: 'block', marginBottom: '1rem', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
-                            Lý do <span style={{ color: '#ef4444' }}>*</span>
-                            <textarea
-                                value={escalateReason}
-                                onChange={(e) => setEscalateReason(e.target.value)}
-                                rows={4}
-                                placeholder="Mô tả lý do (tối thiểu 10 ký tự)..."
-                                style={{
-                                    display: 'block',
-                                    width: '100%',
-                                    marginTop: '0.35rem',
-                                    padding: '0.5rem',
-                                    borderRadius: '8px',
-                                    border: '1px solid #cbd5e1',
-                                    fontFamily: 'inherit',
-                                    resize: 'vertical',
-                                }}
-                            />
-                        </label>
+                        <div style={{ marginBottom: '1rem' }}>
+                            <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
+                                Lý do <span style={{ color: '#ef4444' }}>*</span>
+                                <textarea
+                                    value={escalateReason}
+                                    onChange={(e) => {
+                                        setEscalateReason(e.target.value);
+                                        if (escalateReasonError) setEscalateReasonError('');
+                                    }}
+                                    rows={4}
+                                    placeholder="Mô tả lý do (tối thiểu 10 ký tự)..."
+                                    aria-invalid={!!escalateReasonError}
+                                    style={{
+                                        display: 'block',
+                                        width: '100%',
+                                        marginTop: '0.35rem',
+                                        padding: '0.5rem',
+                                        borderRadius: '8px',
+                                        border: escalateReasonError ? '2px solid #ef4444' : '1px solid #cbd5e1',
+                                        outline: escalateReasonError ? 'none' : undefined,
+                                        fontFamily: 'inherit',
+                                        resize: 'vertical',
+                                    }}
+                                />
+                            </label>
+                            {escalateReasonError ? (
+                                <div
+                                    role="alert"
+                                    style={{
+                                        marginTop: '0.5rem',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 600,
+                                        color: '#b91c1c',
+                                        lineHeight: 1.45,
+                                    }}
+                                >
+                                    {escalateReasonError}
+                                </div>
+                            ) : null}
+                        </div>
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
                             <button
                                 type="button"
                                 disabled={escalateSubmitting}
-                                onClick={() => setEscalateOpen(false)}
+                                onClick={() => {
+                                    setEscalateReasonError('');
+                                    setEscalateOpen(false);
+                                }}
                                 style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer' }}
                             >
                                 Đóng

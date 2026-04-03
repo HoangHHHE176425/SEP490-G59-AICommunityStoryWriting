@@ -27,7 +27,7 @@ function formatTimeAgo(dateStr) {
     return date.toLocaleDateString('vi-VN');
 }
 
-export function ChapterReader({ onBack, onNavigateToStory }) {
+export function ChapterReader({ onBack }) {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const { user, loading: authLoading } = useAuth();
@@ -98,10 +98,10 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                     const coinPrice = Number(chapterRes?.coinPrice ?? chapterRes?.CoinPrice ?? 0) || 0;
                     const isUnlocked = Boolean(
                         chapterRes?.isUnlocked ??
-                            chapterRes?.IsUnlocked ??
-                            chapterRes?.unlocked ??
-                            chapterRes?.Unlocked ??
-                            false
+                        chapterRes?.IsUnlocked ??
+                        chapterRes?.unlocked ??
+                        chapterRes?.Unlocked ??
+                        false
                     );
                     const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && !isUnlocked;
                     const contentRaw = chapterRes?.content ?? chapterRes?.Content ?? '';
@@ -113,6 +113,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                         content,
                         publishedAt: chapterRes?.publishedAt ?? chapterRes?.PublishedAt ?? chapterRes?.updatedAt ? formatTimeAgo(chapterRes.updatedAt ?? chapterRes.UpdatedAt) : '',
                         views: Number(chapterRes?.viewCount ?? chapterRes?.ViewCount ?? 0) || 0,
+                        commentCount: Number(chapterRes?.commentCount ?? chapterRes?.CommentCount ?? 0) || 0,
                         words: wordCount,
                         isPaidLocked,
                         coinPrice,
@@ -122,10 +123,10 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                         const chPrice = Number(ch.coinPrice ?? ch.CoinPrice ?? 0) || 0;
                         const chUnlocked = Boolean(
                             ch.isUnlocked ??
-                                ch.IsUnlocked ??
-                                ch.unlocked ??
-                                ch.Unlocked ??
-                                false
+                            ch.IsUnlocked ??
+                            ch.unlocked ??
+                            ch.Unlocked ??
+                            false
                         );
                         return {
                             number: (ch.orderIndex ?? ch.OrderIndex ?? idx) + 1,
@@ -171,6 +172,18 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         if (urlChapterId) loadComments();
     }, [urlChapterId, loadComments]);
 
+    // Cuộn tới bình luận khi URL có #comment-{guid} (vd. từ màn xử lý vi phạm).
+    useEffect(() => {
+        const h = location.hash || '';
+        if (!h || !/^#comment-/i.test(h)) return;
+        if (commentsLoading) return;
+        const elId = h.slice(1);
+        const fid = requestAnimationFrame(() => {
+            document.getElementById(elId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        return () => cancelAnimationFrame(fid);
+    }, [location.hash, commentsLoading, comments.length]);
+
     const handleSubmitComment = useCallback(async (content, parentId) => {
         if (!urlChapterId) return;
         if (chapter?.isPaidLocked) {
@@ -207,10 +220,10 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
             const coinPrice = Number(chapterRes?.coinPrice ?? chapterRes?.CoinPrice ?? 0) || 0;
             const isUnlocked = Boolean(
                 chapterRes?.isUnlocked ??
-                    chapterRes?.IsUnlocked ??
-                    chapterRes?.unlocked ??
-                    chapterRes?.Unlocked ??
-                    false
+                chapterRes?.IsUnlocked ??
+                chapterRes?.unlocked ??
+                chapterRes?.Unlocked ??
+                false
             );
             const isPaidLocked = accessType === 'PAID' && coinPrice > 0 && !isUnlocked;
             const contentRaw = chapterRes?.content ?? chapterRes?.Content ?? '';
@@ -223,6 +236,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
                 content,
                 publishedAt: chapterRes?.publishedAt ?? chapterRes?.PublishedAt ?? chapterRes?.updatedAt ? formatTimeAgo(chapterRes.updatedAt ?? chapterRes.UpdatedAt) : prev?.publishedAt ?? '',
                 views: Number(chapterRes?.viewCount ?? chapterRes?.ViewCount ?? prev?.views ?? 0) || 0,
+                commentCount: Number(chapterRes?.commentCount ?? chapterRes?.CommentCount ?? prev?.commentCount ?? 0) || 0,
                 words: wordCount,
                 isPaidLocked,
                 coinPrice,
@@ -267,6 +281,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         content: '',
         publishedAt: '',
         views: 0,
+        commentCount: 0,
         words: 0,
         isPaidLocked: false,
         coinPrice: 0,
@@ -278,9 +293,17 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
         content: 'Chưa có nội dung.',
         publishedAt: '',
         views: 0,
+        commentCount: 0,
         words: 0,
         isPaidLocked: false,
         coinPrice: 0,
+    };
+
+    const chapterForContentDisplay = {
+        ...chapterForContent,
+        commentCount: commentsLoading
+            ? (chapterForContent.commentCount ?? 0)
+            : (Array.isArray(comments) ? comments.length : chapterForContent.commentCount ?? 0),
     };
 
     const handleBackClick = () => {
@@ -292,13 +315,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
     };
 
     const handleHomeClick = () => {
-        if (onNavigateToStory) {
-            onNavigateToStory();
-        } else if (urlStoryId) {
-            navigate(`/story/${urlStoryId}`);
-        } else {
-            navigate('/home');
-        }
+        navigate('/home');
     };
 
     const currentIndex = allChapters.findIndex((ch) => ch.chapterId === urlChapterId);
@@ -477,7 +494,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
 
                 <div>
                     <ChapterContent
-                        chapter={chapterForContent}
+                        chapter={chapterForContentDisplay}
                         fontSize={fontSize}
                         fontFamily={fontFamily}
                         backgroundColor={backgroundColor}

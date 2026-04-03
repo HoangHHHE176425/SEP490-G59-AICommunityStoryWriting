@@ -273,6 +273,22 @@ namespace DataAccessObjects.DAOs
             return u.author_writing_suspended_until > DateTime.UtcNow;
         }
 
+        /// <summary>Kiểm tra users.status == BANNED (thư viện / lọc danh sách công khai).</summary>
+        public static bool IsAccountBanned(Guid userId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.AsNoTracking().FirstOrDefault(x => x.id == userId);
+            return u != null && string.Equals(u.status, "BANNED", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Giá trị users.status (ACTIVE, BANNED, …) cho DTO hiển thị nội bộ.</summary>
+        public static string? GetAccountStatus(Guid userId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.AsNoTracking().FirstOrDefault(x => x.id == userId);
+            return u?.status;
+        }
+
         public static void SetAuthorWritingSuspendedUntil(Guid userId, DateTime? untilUtc)
         {
             using var context = new StoryPlatformDbContext();

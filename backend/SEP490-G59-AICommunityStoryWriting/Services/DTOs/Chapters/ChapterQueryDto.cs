@@ -20,5 +20,8 @@ namespace Services.DTOs.Chapters
         public string? AccessType { get; set; }
         public string? SortBy { get; set; } = "order_index"; // order_index, created_at, published_at, title
         public string? SortOrder { get; set; } = "asc"; // asc, desc
+
+        /// <summary>Khi true: loại chapter thuộc truyện có tác giả BANNED (hàng đợi moderator).</summary>
+        public bool ExcludeBannedStoryAuthors { get; set; }
     }
 }

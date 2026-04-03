@@ -334,9 +334,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Chỉ kiểm tra từ cấm / guardrail (không gọi AI chính tả). Body: <see cref="CheckChapterRequest"/>.</summary>
+        /// <summary>Chỉ kiểm tra từ cấm / guardrail (không gọi AI chính tả).</summary>
         [HttpPost("check-chapter-banned-words")]
-        public async Task<IActionResult> CheckChapterBannedWords([FromBody] CheckChapterRequest request, CancellationToken cancellationToken)
+        public async Task<IActionResult> CheckChapterBannedWords([FromBody] CheckChapterBannedWordsRequest request, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(request.Content))
                 return BadRequest(new { message = "Content (nội dung chương) là bắt buộc." });
@@ -363,9 +363,9 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Chỉ kiểm tra chính tả (AI). Body: <see cref="CheckChapterRequest"/>; không chạy guardrail từ cấm.</summary>
+        /// <summary>Chỉ kiểm tra chính tả (AI); không chạy guardrail từ cấm.</summary>
         [HttpPost("check-chapter-spelling")]
-        public async Task<IActionResult> CheckChapterSpelling([FromBody] CheckChapterRequest request, CancellationToken cancellationToken)
+        public async Task<IActionResult> CheckChapterSpelling([FromBody] CheckChapterSpellingRequest request, CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(request.Content))
                 return BadRequest(new { message = "Content (nội dung chương) là bắt buộc." });

@@ -20,6 +20,12 @@ namespace Services.DTOs.Chapters
         public DateTime? CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
 
+        /// <summary>Số bình luận APPROVED trên chương (story detail, reader).</summary>
+        public int CommentCount { get; set; }
+
+        /// <summary>Moderator đã từng để quá hạn với truyện chứa chương — không được nhận duyệt lại chương/truyện này.</summary>
+        public bool BlockedFromClaimDueToPriorDeadlineForfeit { get; set; }
+
         /// <summary>Trong queue moderator: đã được moderator hiện tại nhận duyệt (lock).</summary>
         public bool IsClaimedByMe { get; set; }
         /// <summary>Trong queue moderator: tên người đang duyệt (nickname hoặc email).</summary>

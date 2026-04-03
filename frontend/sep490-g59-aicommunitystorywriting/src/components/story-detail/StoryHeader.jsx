@@ -18,10 +18,36 @@ function authorFollowersLabel(author) {
     return { text: formatStatNumber(Math.max(0, n)), showBadge: !!authorId };
 }
 
-export default function StoryHeader({ story, isFollowing, onToggleFollow, onOpenRating, hasUserRated = false, userRatingStars = null, onOpenReport, onReadStory }) {
+const MSG_LOGIN_REPORT = 'Vui lòng đăng nhập để báo cáo vi phạm.';
+const MSG_LOGIN_RATE = 'Vui lòng đăng nhập để đánh giá.';
+const MSG_READ_BEFORE_REPORT = 'Bạn cần đọc ít nhất 1 chương trước khi gửi báo cáo.';
+const MSG_READ_BEFORE_RATE = 'Bạn cần đọc ít nhất 1 chương trước khi đánh giá.';
+
+export default function StoryHeader({
+    story,
+    isFollowing,
+    onToggleFollow,
+    onOpenRating,
+    hasUserRated = false,
+    userRatingStars = null,
+    onOpenReport,
+    onReadStory,
+    isLoggedIn = false,
+    hasReadAnyChapter = false,
+}) {
     const author = story?.author;
     const authorId = author?.id || author?.userId;
     const { text: followerBadgeText, showBadge: showFollowerBadge } = authorFollowersLabel(author);
+
+    /** Chưa đăng nhập hoặc chưa đọc chương nào → không mở được dialog, chỉ tooltip. */
+    const reportBlocked = !isLoggedIn || !hasReadAnyChapter;
+    const reportBlockTitle = !isLoggedIn ? MSG_LOGIN_REPORT : MSG_READ_BEFORE_REPORT;
+
+    /** Chưa đăng nhập hoặc chưa đọc chương → không mở modal đánh giá, chỉ tooltip. */
+    const ratingBlocked =
+        !hasUserRated &&
+        (!isLoggedIn || !hasReadAnyChapter);
+    const ratingBlockTitle = !isLoggedIn ? MSG_LOGIN_RATE : MSG_READ_BEFORE_RATE;
     return (
         <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="p-6">
@@ -168,22 +194,48 @@ export default function StoryHeader({ story, isFollowing, onToggleFollow, onOpen
                                     <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
                                     Bạn đã đánh giá{userRatingStars != null && userRatingStars > 0 ? ` (${userRatingStars} sao)` : ''}
                                 </span>
+                            ) : ratingBlocked ? (
+                                <span className="inline-flex rounded-full" title={ratingBlockTitle}>
+                                    <button
+                                        type="button"
+                                        disabled
+                                        className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-80 pointer-events-none"
+                                    >
+                                        <Star className="w-4 h-4" />
+                                        Đánh giá
+                                    </button>
+                                </span>
                             ) : (
                                 <button
+                                    type="button"
                                     onClick={onOpenRating}
-                                    className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 text-sm font-bold rounded-full hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all"
+                                    className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-full transition-all bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40"
                                 >
                                     <Star className="w-4 h-4" />
                                     Đánh giá
                                 </button>
                             )}
-                            <button
-                                onClick={onOpenReport}
-                                className="flex items-center gap-2 px-4 py-2.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-sm font-bold rounded-full hover:bg-red-100 dark:hover:bg-red-900/40 transition-all"
-                            >
-                                <Flag className="w-4 h-4" />
-                                Báo cáo
-                            </button>
+                            {reportBlocked ? (
+                                <span className="inline-flex rounded-full" title={reportBlockTitle}>
+                                    <button
+                                        type="button"
+                                        disabled
+                                        className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-80 pointer-events-none"
+                                    >
+                                        <Flag className="w-4 h-4" />
+                                        Báo cáo
+                                    </button>
+                                </span>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={onOpenReport}
+                                    className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-full transition-all bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40"
+                                >
+                                    <Flag className="w-4 h-4" />
+                                    Báo cáo
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

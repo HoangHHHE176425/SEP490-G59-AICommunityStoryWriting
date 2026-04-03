@@ -99,7 +99,9 @@ namespace AIStory.API
             builder.Services.AddScoped<IAdminPolicyService, AdminPolicyService>();
             builder.Services.AddScoped<IAdminUserService, AdminUserService>();
             builder.Services.AddScoped<IModeratorCategoryAssignmentRepository, ModeratorCategoryAssignmentRepository>();
+            builder.Services.AddScoped<IReviewDeadlineForfeitureService, ReviewDeadlineForfeitureService>();
             builder.Services.AddScoped<IModerationService, ModerationService>();
+            builder.Services.AddHostedService<ReviewDeadlineForfeitureBackgroundService>();
             builder.Services.AddScoped<IReviewEscalationService, ReviewEscalationService>();
             builder.Services.AddScoped<IAdminUnifiedEscalationService, AdminUnifiedEscalationService>();
             builder.Services.AddScoped<IStoryReportService, StoryReportService>();
