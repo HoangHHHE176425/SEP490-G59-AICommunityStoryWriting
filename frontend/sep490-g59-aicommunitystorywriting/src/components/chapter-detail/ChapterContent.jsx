@@ -13,6 +13,7 @@ export function ChapterContent({
 }) {
     const isPaidLocked = chapter?.isPaidLocked === true;
     const coinPrice = Number(chapter?.coinPrice ?? 0) || 0;
+    const isRichText = /<[a-z][\s\S]*>/i.test(String(chapter.content || ''));
 
     return (
         <div style={{ maxWidth: '1600px', margin: '0 auto', padding: '2rem 1.5rem' }}>
@@ -134,12 +135,51 @@ export function ChapterContent({
                         WebkitOverflowScrolling: 'touch'
                     }}
                 >
-                    {/<[a-z][\s\S]*>/i.test(String(chapter.content || '')) ? (
-                        <div
-                            dangerouslySetInnerHTML={{
-                                __html: sanitizeRichTextHtml(chapter.content || '').trim() || '<p></p>',
-                            }}
-                        />
+                    {isRichText ? (
+                        <>
+                            <style>{`
+                                .chapter-reader-richtext {
+                                    word-break: break-word;
+                                }
+                                .chapter-reader-richtext p {
+                                    margin: 0 0 1.5em 0;
+                                    text-indent: 2em;
+                                }
+                                .chapter-reader-richtext p:last-child {
+                                    margin-bottom: 0;
+                                }
+                                .chapter-reader-richtext h1,
+                                .chapter-reader-richtext h2,
+                                .chapter-reader-richtext h3,
+                                .chapter-reader-richtext h4,
+                                .chapter-reader-richtext h5,
+                                .chapter-reader-richtext h6 {
+                                    margin: 0 0 1rem 0;
+                                    line-height: 1.4;
+                                    text-indent: 0;
+                                }
+                                .chapter-reader-richtext ul,
+                                .chapter-reader-richtext ol {
+                                    margin: 0 0 1.2em 1.8em;
+                                    padding: 0;
+                                }
+                                .chapter-reader-richtext li {
+                                    margin-bottom: 0.4em;
+                                }
+                                .chapter-reader-richtext blockquote {
+                                    margin: 0 0 1.2em 0;
+                                    padding-left: 1em;
+                                    border-left: 3px solid #cbd5e1;
+                                    color: #475569;
+                                }
+                            `}</style>
+                            <div
+                                className="chapter-reader-richtext"
+                                dangerouslySetInnerHTML={{
+                                    __html: sanitizeRichTextHtml(chapter.content || '').trim() || '<p></p>',
+                                }}
+                            />
+                        </>
                     ) : (
                         (chapter.content || '')
                             .split('\n\n')

@@ -27,7 +27,7 @@ function formatTimeAgo(dateStr) {
     return date.toLocaleDateString('vi-VN');
 }
 
-export function ChapterReader({ onBack, onNavigateToStory }) {
+export function ChapterReader({ onBack }) {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const { user, loading: authLoading } = useAuth();
@@ -315,13 +315,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
     };
 
     const handleHomeClick = () => {
-        if (onNavigateToStory) {
-            onNavigateToStory();
-        } else if (urlStoryId) {
-            navigate(`/story/${urlStoryId}`);
-        } else {
-            navigate('/home');
-        }
+        navigate('/home');
     };
 
     const currentIndex = allChapters.findIndex((ch) => ch.chapterId === urlChapterId);
@@ -500,7 +494,7 @@ export function ChapterReader({ onBack, onNavigateToStory }) {
 
                 <div>
                     <ChapterContent
-                        chapter={chapterForContent}
+                        chapter={chapterForContentDisplay}
                         fontSize={fontSize}
                         fontFamily={fontFamily}
                         backgroundColor={backgroundColor}

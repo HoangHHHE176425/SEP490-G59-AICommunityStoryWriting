@@ -6,6 +6,7 @@ import { getStoryById } from '../../../api/story/storyApi';
 import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion, getReviewAssignmentSelf, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
 import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus, localDateTimeInputToIsoUtc, validateModeratorExtendProposedDeadline } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
+import { sanitizeRichTextHtml } from '../../../utils/richText';
 import { useToast } from '../../author/story-editor/Toast';
 
 /** Map API chapter list item sang format modal cần. Khi API trả về pendingVersionTitle/pendingVersionWordCount (list chờ duyệt) thì dùng cho sidebar ngay. */
@@ -137,6 +138,28 @@ function buildRejectedHistoryTimeline(selectedChapter, chapters, fetchedRejectio
 
     deduped.sort((a, b) => b.ts - a.ts);
     return deduped;
+}
+
+function renderChapterContent(content, contentStyle) {
+    const raw = String(content ?? '');
+    const trimmed = raw.trim();
+    if (!trimmed) {
+        return <div style={contentStyle}>—</div>;
+    }
+    const hasHtmlTag = /<[a-z][\s\S]*>/i.test(trimmed);
+    if (hasHtmlTag) {
+        return (
+            <div
+                style={contentStyle}
+                dangerouslySetInnerHTML={{ __html: sanitizeRichTextHtml(trimmed) || '<p>—</p>' }}
+            />
+        );
+    }
+    return (
+        <div style={contentStyle}>
+            {trimmed}
+        </div>
+    );
 }
 
 export function PublicationDetailModal({ publication, onClose, onApprove, onReject, onRefresh }) {
@@ -1422,9 +1445,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                                     overflowY: 'auto',
                                                                     padding: '2.5rem 3rem'
                                                                 }}>
-                                                                    <div style={contentStyle}>
-                                                                        {versionContent || '—'}
-                                                                    </div>
+                                                                    {renderChapterContent(versionContent, contentStyle)}
                                                                 </div>
                                                             );
                                                         }
@@ -1471,14 +1492,10 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                                     padding: '2.5rem 3rem'
                                                                 }}>
                                                                     {contentTab === 'original' && (
-                                                                        <div style={contentStyle}>
-                                                                            {originalContent}
-                                                                        </div>
+                                                                        renderChapterContent(originalContent, contentStyle)
                                                                     )}
                                                                     {contentTab === 'version' && (
-                                                                        <div style={contentStyle}>
-                                                                            {versionContent || '—'}
-                                                                        </div>
+                                                                        renderChapterContent(versionContent, contentStyle)
                                                                     )}
                                                                 </div>
                                                             </>
@@ -1491,9 +1508,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                                             overflowY: 'auto',
                                                             padding: '2.5rem 3rem'
                                                         }}>
-                                                            <div style={contentStyle}>
-                                                                {chapterContents[selectedChapter.id] ?? 'Đang tải nội dung...'}
-                                                            </div>
+                                                            {renderChapterContent(chapterContents[selectedChapter.id] ?? 'Đang tải nội dung...', contentStyle)}
                                                         </div>
                                                     );
                                                 })()}
