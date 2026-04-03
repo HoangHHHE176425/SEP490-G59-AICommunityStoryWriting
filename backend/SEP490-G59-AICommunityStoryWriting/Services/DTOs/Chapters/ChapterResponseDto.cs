@@ -22,6 +22,9 @@ namespace Services.DTOs.Chapters
         public DateTime? CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
 
+        /// <summary>Số bình luận APPROVED trên chương (reader / story detail).</summary>
+        public int CommentCount { get; set; }
+
         public string? RejectionReason { get; set; }
         public DateTime? RejectedAt { get; set; }
     }

@@ -11,6 +11,8 @@ namespace Services.DTOs.Stories
         public string? CategoryNames { get; set; }
         public Guid? AuthorId { get; set; }
         public string? AuthorName { get; set; }
+        /// <summary>Trạng thái tài khoản tác giả (users.status), ví dụ BANNED — cho moderator/admin.</summary>
+        public string? AuthorAccountStatus { get; set; }
         /// <summary>Đường dẫn avatar tác giả (user_profiles.avatar_url).</summary>
         public string? AuthorAvatarUrl { get; set; }
 

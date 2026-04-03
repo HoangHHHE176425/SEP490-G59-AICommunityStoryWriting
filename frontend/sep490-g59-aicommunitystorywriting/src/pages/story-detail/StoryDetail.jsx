@@ -261,6 +261,7 @@ export function StoryDetail() {
                             title: ch.title ?? ch.Title ?? `Chương ${num}`,
                             time: updatedAt ? formatTimeAgo(updatedAt) : '',
                             views: Number(ch.viewCount ?? ch.ViewCount ?? ch.views ?? 0) || 0,
+                            commentCount: Number(ch.commentCount ?? ch.CommentCount ?? 0) || 0,
                             isNew: idx >= rawItems.length - newCount,
                             isLocked: isPaidLocked,
                             unlockKnown,
@@ -442,6 +443,9 @@ export function StoryDetail() {
         };
     }, [user?.id, reviews]);
 
+    /** Đồng bộ với BE (READ_CHAPTER): có tiến độ đọc chương từ getStoryById. */
+    const hasReadAnyChapter = Boolean(story?.lastReadChapterId);
+
     // Load đánh giá ngay khi có storyId để tab hiển thị đúng số (0) trước khi user click tab
     useEffect(() => {
         if (storyId) loadReviews();
@@ -522,8 +526,26 @@ export function StoryDetail() {
 
     const handleOpenRating = () => {
         if (hasUserRated) return; // Mỗi user chỉ được đánh giá 1 lần
+        if (!user?.id) {
+            showToast('Vui lòng đăng nhập để đánh giá.', 'warning');
+            return;
+        }
+        if (!hasReadAnyChapter) {
+            showToast('Bạn cần đọc ít nhất 1 chương trước khi đánh giá.', 'warning');
+            return;
+        }
         setRatingError(null);
         setIsRatingModalOpen(true);
+    };
+
+    const handleOpenStoryReport = () => {
+        if (!user?.id) {
+            showToast('Vui lòng đăng nhập để báo cáo vi phạm.', 'warning');
+            return;
+        }
+        setReportError(null);
+        loadReportReasons('story');
+        setIsReportStoryModalOpen(true);
     };
 
     const handleCloseRatingModal = () => {
@@ -582,6 +604,14 @@ export function StoryDetail() {
 
     const handleSubmitStoryReport = async (payload) => {
         if (!storyId) return false;
+        if (!user?.id) {
+            setReportError('Vui lòng đăng nhập để gửi báo cáo vi phạm.');
+            return false;
+        }
+        if (!hasReadAnyChapter) {
+            setReportError('Bạn cần đọc ít nhất 1 chương trước khi gửi báo cáo.');
+            return false;
+        }
         setReportSubmitting(true);
         setReportError(null);
         try {
@@ -652,11 +682,9 @@ export function StoryDetail() {
                             onOpenRating={handleOpenRating}
                             hasUserRated={hasUserRated}
                             userRatingStars={userRatingStars}
-                            onOpenReport={() => {
-                                setReportError(null);
-                                loadReportReasons('story');
-                                setIsReportStoryModalOpen(true);
-                            }}
+                            isLoggedIn={!!user?.id}
+                            hasReadAnyChapter={hasReadAnyChapter}
+                            onOpenReport={handleOpenStoryReport}
                             onReadStory={() => {
                                 const first = chapters[0];
                                 if (first?.chapterId && storyId) {
@@ -821,6 +849,7 @@ export function StoryDetail() {
                 reasonOptions={reportReasonOptions.comment}
                 submitting={reportSubmitting}
                 errorMessage={reportError}
+                onClearError={() => setReportError(null)}
             />
 
             <ReportModal
@@ -834,6 +863,7 @@ export function StoryDetail() {
                 reasonOptions={reportReasonOptions.story}
                 submitting={reportSubmitting}
                 errorMessage={reportError}
+                onClearError={() => setReportError(null)}
             />
             <ToastContainer />
             <Footer />

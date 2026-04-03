@@ -8,6 +8,8 @@ public class ComplianceCommentReportRowDto
     public Guid ReportId { get; set; }
     public Guid CommentId { get; set; }
     public Guid StoryId { get; set; }
+    /// <summary>null = bình luận cấp truyện; có giá trị = bình luận trên chương đó.</summary>
+    public Guid? ChapterId { get; set; }
     public string? StoryTitle { get; set; }
 
     public Guid CommentUserId { get; set; }

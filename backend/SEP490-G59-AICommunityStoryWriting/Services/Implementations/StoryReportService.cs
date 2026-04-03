@@ -15,11 +15,16 @@ public class StoryReportService : IStoryReportService
 {
     private static readonly string ComplianceTargetType = ReviewAssignmentDAO.TargetTypeComplianceStoryReports;
     private readonly IUserLookup _userLookup;
+    private readonly IUserActivityLookup _userActivityLookup;
     private readonly INotificationHubNotifier? _notificationHubNotifier;
 
-    public StoryReportService(IUserLookup userLookup, INotificationHubNotifier? notificationHubNotifier = null)
+    public StoryReportService(
+        IUserLookup userLookup,
+        IUserActivityLookup userActivityLookup,
+        INotificationHubNotifier? notificationHubNotifier = null)
     {
         _userLookup = userLookup;
+        _userActivityLookup = userActivityLookup;
         _notificationHubNotifier = notificationHubNotifier;
     }
 
@@ -54,6 +59,10 @@ public class StoryReportService : IStoryReportService
         var st = (story.status ?? "").Trim().ToUpperInvariant();
         if (st != "PUBLISHED")
             throw new InvalidOperationException("Chỉ có thể báo cáo truyện đã PUBLISHED.");
+
+        // Giống đánh giá: yêu cầu có log READ_CHAPTER cho truyện.
+        if (!_userActivityLookup.HasReadAnyChapterOfStory(reporterId, storyId))
+            throw new InvalidOperationException("Bạn cần đọc ít nhất một chapter trước khi gửi báo cáo.");
 
         if (story.author_id == reporterId)
             throw new InvalidOperationException("Bạn không thể báo cáo truyện của chính mình.");
@@ -570,9 +579,9 @@ public class StoryReportService : IStoryReportService
             Message = x.message,
             Status = x.status,
             CreatedAtUtc = createdUtc,
-            UrgencyTier = EscalationUrgencyHelper.Merge(
+            UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(EscalationUrgencyHelper.Merge(
                 EscalationUrgencyHelper.ComputeFromRequestAge(createdUtc, DateTime.UtcNow),
-                x.urgency_tier),
+                x.urgency_tier)),
             ResolvedAtUtc = resolvedUtc,
             ResolutionNote = x.resolution_note,
             ResolutionAction = x.resolution_action
@@ -833,15 +842,6 @@ public class StoryReportService : IStoryReportService
         if (decision is not ("APPROVE" or "REJECT"))
             throw new ArgumentException("Decision phải là APPROVE hoặc REJECT.");
 
-        // Khi REJECT: không cần ReasonCode. Khi APPROVE: bắt buộc ReasonCode hợp lệ để log lý do vi phạm.
-        if (decision == "APPROVE")
-        {
-            if (string.IsNullOrWhiteSpace(dto.ReasonCode))
-                throw new InvalidOperationException("Không tìm thấy lý do phù hợp.");
-            if (!StoryReportReasonCatalog.TryGet(dto.ReasonCode, out _))
-                throw new InvalidOperationException("Không tìm thấy lý do phù hợp.");
-        }
-
         var row = ComplianceAdminActionRequestDAO.GetTrackedById(requestId)
                   ?? throw new InvalidOperationException("Yêu cầu không tồn tại.");
         if (row.status != ComplianceAdminActionRequestDAO.StatusPending)
@@ -871,6 +871,7 @@ public class StoryReportService : IStoryReportService
         if (kind == ComplianceAdminActionRequestDAO.KindBanUser)
         {
             UserDAO.SetUserAccountStatus(row.target_user_id, "BANNED");
+            BannedAuthorModerationSweep.Run();
             ViolationLogDAO.Insert(adminId, row.target_user_id, "USER", row.target_user_id, "BAN",
                 dto.AdminNote ?? row.message, "ADMIN_APPROVE_COMPLIANCE_REQUEST");
             ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId,
@@ -923,9 +924,9 @@ public class StoryReportService : IStoryReportService
             RequesterId = x.requester_id,
             RequesterDisplayName = RName(x.requester),
             CreatedAtUtc = x.created_at,
-            UrgencyTier = EscalationUrgencyHelper.Merge(
+            UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(EscalationUrgencyHelper.Merge(
                 EscalationUrgencyHelper.ComputeFromRequestAge(createdUtc, DateTime.UtcNow),
-                x.urgency_tier),
+                x.urgency_tier)),
             ResolvedAtUtc = x.resolved_at,
             ResolutionNote = x.resolution_note,
             ResolutionAction = x.resolution_action

@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.EntityFrameworkCore;
@@ -40,7 +40,7 @@ public class AdminUnifiedEscalationService : IAdminUnifiedEscalationService
             items.Add(new AdminUnifiedEscalationPendingItemDto
             {
                 Source = SrcReview,
-                UrgencyTier = EscalationUrgencyHelper.Normalize(x.UrgencyTier),
+                UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(x.UrgencyTier),
                 ModeratorEscalation = x
             });
         }
@@ -50,7 +50,7 @@ public class AdminUnifiedEscalationService : IAdminUnifiedEscalationService
             items.Add(new AdminUnifiedEscalationPendingItemDto
             {
                 Source = SrcLock,
-                UrgencyTier = EscalationUrgencyHelper.Normalize(x.UrgencyTier),
+                UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(x.UrgencyTier),
                 ComplianceLock = x
             });
         }
@@ -60,24 +60,22 @@ public class AdminUnifiedEscalationService : IAdminUnifiedEscalationService
             items.Add(new AdminUnifiedEscalationPendingItemDto
             {
                 Source = SrcAction,
-                UrgencyTier = EscalationUrgencyHelper.Normalize(x.UrgencyTier),
+                UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(x.UrgencyTier),
                 ComplianceAdminAction = x
             });
         }
 
         var critical = items.Count(i => i.UrgencyTier == EscalationUrgencyHelper.Critical);
-        var high = items.Count(i => i.UrgencyTier == EscalationUrgencyHelper.High);
         var standard = items.Count(i => i.UrgencyTier == EscalationUrgencyHelper.Standard);
 
         if (!string.IsNullOrWhiteSpace(urgencyTierFilter))
         {
-            var u = urgencyTierFilter.Trim().ToUpperInvariant();
+            var u = EscalationUrgencyHelper.ToDisplayTier(urgencyTierFilter.Trim());
             items = items.Where(i => string.Equals(i.UrgencyTier, u, StringComparison.OrdinalIgnoreCase)).ToList();
         }
 
         items = items
             .OrderByDescending(i => i.UrgencyTier == EscalationUrgencyHelper.Critical)
-            .ThenByDescending(i => i.UrgencyTier == EscalationUrgencyHelper.High)
             .ThenBy(GetSortKey)
             .ToList();
 
@@ -85,7 +83,7 @@ public class AdminUnifiedEscalationService : IAdminUnifiedEscalationService
         {
             Items = items,
             Critical = critical,
-            High = high,
+            High = 0,
             Standard = standard
         };
     }

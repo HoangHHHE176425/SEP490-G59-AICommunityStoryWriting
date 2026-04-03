@@ -349,5 +349,40 @@ namespace DataAccessObjects.DAOs
                 }
             });
         }
+
+        /// <summary>Các claim moderator (STORY/CHAPTER) đã quá <c>review_deadline_at</c> (UTC).</summary>
+        public static List<(string TargetType, Guid TargetId, Guid AssigneeId)> ListOverdueModerationClaims(DateTime utcNow)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.review_assignments
+                .AsNoTracking()
+                .Where(r =>
+                    r.status == StatusClaimed
+                    && r.target_type != null
+                    && (r.target_type == TargetTypeStory || r.target_type == TargetTypeChapter)
+                    && r.review_deadline_at != null
+                    && r.review_deadline_at < utcNow)
+                .Select(r => new ValueTuple<string, Guid, Guid>(r.target_type!, r.target_id, r.assignee_id))
+                .ToList();
+        }
+
+        /// <summary>Đánh dấu COMPLETED nếu vẫn CLAIMED và đã quá hạn — dùng khi hệ thống tự trả về hàng đợi.</summary>
+        public static bool TryForfeitOverdueClaim(string targetType, Guid targetId, Guid assigneeId, DateTime utcNow)
+        {
+            using var context = new StoryPlatformDbContext();
+            var cur = context.review_assignments.FirstOrDefault(r =>
+                r.target_type == targetType
+                && r.target_id == targetId
+                && r.status == StatusClaimed
+                && r.assignee_id == assigneeId);
+            if (cur == null)
+                return false;
+            if (cur.review_deadline_at == null || cur.review_deadline_at >= utcNow)
+                return false;
+            cur.status = StatusCompleted;
+            cur.completed_at = utcNow;
+            context.SaveChanges();
+            return true;
+        }
     }
 }

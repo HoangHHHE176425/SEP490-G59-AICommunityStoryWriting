@@ -202,6 +202,10 @@ namespace AIStory.API.Controllers
                     return NotFound(new { message = "Truyện không tồn tại, không ở trạng thái chờ duyệt, hoặc đã được moderator khác nhận duyệt." });
                 return NoContent();
             }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
             catch (ArgumentException ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -287,6 +291,10 @@ namespace AIStory.API.Controllers
                 if (!ok)
                     return NotFound(new { message = "Chapter không tồn tại, không ở trạng thái chờ duyệt, hoặc đã được moderator khác nhận duyệt." });
                 return NoContent();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
             }
             catch (ArgumentException ex)
             {

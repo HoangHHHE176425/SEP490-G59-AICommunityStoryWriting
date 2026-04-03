@@ -33,6 +33,9 @@ namespace Services.DTOs.Stories
         /// <summary>Thời gian cập nhật gần nhất (max giữa story.updated_at và chapter.updated_at mới nhất).</summary>
         public DateTime? LatestUpdatedAt { get; set; }
 
+        /// <summary>Moderator đã từng để quá hạn với truyện này — không được nhận duyệt lại.</summary>
+        public bool BlockedFromClaimDueToPriorDeadlineForfeit { get; set; }
+
         /// <summary>Trong queue moderator: đã được moderator hiện tại nhận duyệt (lock).</summary>
         public bool IsClaimedByMe { get; set; }
         /// <summary>Trong queue moderator: tên người đang duyệt (nickname hoặc email).</summary>

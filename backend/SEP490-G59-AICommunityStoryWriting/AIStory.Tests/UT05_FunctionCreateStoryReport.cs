@@ -1,4 +1,4 @@
-﻿using AIStory.API.Controllers;
+using AIStory.API.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -188,7 +188,8 @@ namespace AIStory.Tests
             var reporterId = Guid.NewGuid();
             var userLookup = new Mock<IUserLookup>(MockBehavior.Strict);
             userLookup.Setup(x => x.Exists(reporterId)).Returns(false);
-            var sut = new StoryReportService(userLookup.Object, notificationHubNotifier: null);
+            var activityLookup = new Mock<IUserActivityLookup>(MockBehavior.Loose);
+            var sut = new StoryReportService(userLookup.Object, activityLookup.Object, notificationHubNotifier: null);
 
             var ex = await Record.ExceptionAsync(() => sut.CreateStoryReportAsync(storyId, reporterId, request));
             var ioe = Assert.IsType<InvalidOperationException>(ex);
@@ -196,7 +197,8 @@ namespace AIStory.Tests
             userLookup.Verify(x => x.Exists(reporterId), Times.Once);
 
             var userLookupEmpty = new Mock<IUserLookup>(MockBehavior.Strict);
-            var sutEmpty = new StoryReportService(userLookupEmpty.Object, notificationHubNotifier: null);
+            var activityLookupEmpty = new Mock<IUserActivityLookup>(MockBehavior.Loose);
+            var sutEmpty = new StoryReportService(userLookupEmpty.Object, activityLookupEmpty.Object, notificationHubNotifier: null);
             var exEmpty = await Record.ExceptionAsync(() => sutEmpty.CreateStoryReportAsync(storyId, Guid.Empty, request));
             var ioeEmpty = Assert.IsType<InvalidOperationException>(exEmpty);
             Assert.Equal("USER không tồn tại.", ioeEmpty.Message);
@@ -325,7 +327,8 @@ namespace AIStory.Tests
             Assert.Contains(errorsLong, e => e.MemberNames.Contains(nameof(CreateStoryReportRequestDto.Description)));
 
             var userLookup = new Mock<IUserLookup>(MockBehavior.Strict);
-            var sut = new StoryReportService(userLookup.Object, notificationHubNotifier: null);
+            var activityLookup = new Mock<IUserActivityLookup>(MockBehavior.Loose);
+            var sut = new StoryReportService(userLookup.Object, activityLookup.Object, notificationHubNotifier: null);
             var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
                 sut.CreateStoryReportAsync(Guid.NewGuid(), Guid.NewGuid(), over201));
             Assert.Contains("quá dài", ex.Message, StringComparison.OrdinalIgnoreCase);

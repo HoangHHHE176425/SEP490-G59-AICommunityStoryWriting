@@ -1,4 +1,4 @@
-﻿using BusinessObjects;
+using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -75,6 +75,28 @@ namespace DataAccessObjects.DAOs
                             && statuses.Contains(c.status ?? string.Empty))
                 .OrderBy(c => c.created_at)
                 .ToList();
+        }
+
+        /// <summary>Đếm comment APPROVED gắn với một chapter (chapter_id = chapterId).</summary>
+        public static int GetApprovedCommentCountByChapterId(Guid chapterId)
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.comments.AsNoTracking()
+                .Count(c => c.chapter_id == chapterId && c.status == "APPROVED");
+        }
+
+        /// <summary>Đếm comment APPROVED theo từng chapter (batch, cho danh sách chương).</summary>
+        public static Dictionary<Guid, int> GetApprovedCommentCountsByChapterIds(IEnumerable<Guid> chapterIds)
+        {
+            var ids = chapterIds?.Distinct().ToList() ?? new List<Guid>();
+            if (ids.Count == 0)
+                return new Dictionary<Guid, int>();
+
+            using var context = new StoryPlatformDbContext();
+            return context.comments.AsNoTracking()
+                .Where(c => c.chapter_id != null && ids.Contains(c.chapter_id.Value) && c.status == "APPROVED")
+                .GroupBy(c => c.chapter_id!.Value)
+                .ToDictionary(g => g.Key, g => g.Count());
         }
 
         public static comments AddStoryComment(Guid storyId, Guid userId, string content, Guid? parentId = null, string status = "APPROVED")
