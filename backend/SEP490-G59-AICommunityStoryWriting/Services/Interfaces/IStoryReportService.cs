@@ -18,6 +18,13 @@ public interface IStoryReportService
     /// <summary>COMPLIANCE đang lock: đóng mọi báo cáo NEW/IN_REVIEW của truyện.</summary>
     Task<int> ComplianceResolveOpenReportsForStoryAsync(Guid storyId, Guid complianceUserId, ComplianceResolveReportRequestDto? dto);
 
+    /// <summary>Đánh dấu / gỡ đánh dấu xác minh cho từng người báo (story_report_contributors).</summary>
+    Task<int> SetComplianceStoryContributorVerifiedAsync(
+        Guid storyId,
+        Guid actorUserId,
+        SetComplianceStoryContributorVerifiedRequestDto dto,
+        bool actorIsAdmin);
+
     /// <summary>Lịch sử báo cáo do chính compliance này đánh dấu đã xử lý.</summary>
     Task<PagedComplianceStoryReportsDto> QueryMyResolvedComplianceReportsAsync(int page, int pageSize, Guid complianceUserId, string? search);
 

@@ -3,14 +3,19 @@ import { RotateCcw } from 'lucide-react';
 import { getModerationLogs } from '../../../api/admin/adminModerationApi';
 import { getAdminComplianceLogs } from '../../../api/admin/adminComplianceApi';
 import { Pagination } from '../../../components/pagination/Pagination';
-import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
+import { formatApiDateTimeLocalVi, formatApiDateTimeVietnamVi } from '../../../utils/apiDateTime';
 
 const PAGE_SIZE = 10;
+
+/** Lọc theo nhóm: thu hồi do quá hạn gồm cả mã DB cũ/mới. */
+const ACTION_FILTER_FORFEIT_DEADLINE = '__FORFEIT_DEADLINE__';
 
 const ACTION_OPTIONS = [
     { value: '', label: 'Tất cả hành động' },
     { value: 'APPROVED', label: 'Đã duyệt' },
     { value: 'REJECTED', label: 'Đã từ chối' },
+    { value: ACTION_FILTER_FORFEIT_DEADLINE, label: 'Thu hồi đơn (quá hạn)' },
+    { value: 'BAN_AUTH_UNCLM', label: 'Hủy nhận (tác giả BAN)' },
 ];
 
 const TARGET_OPTIONS = [
@@ -50,6 +55,7 @@ function formatDate(value) {
 
 function formatDateByLogType(value, logType) {
     if (logType === 'compliance') return formatApiDateTimeLocalVi(value);
+    if (logType === 'moderator') return formatApiDateTimeVietnamVi(value);
     return formatDate(value);
 }
 
@@ -64,7 +70,20 @@ function actionLabel(item) {
     const a = String(item?.action ?? '').toUpperCase();
     if (a === 'APPROVED') return 'Duyệt';
     if (a === 'REJECTED') return 'Từ chối';
+    if (a === 'AUTO_FORFEIT_DL' || a === 'AUTO_UNASSIGNED_DEADLINE') return 'Thu hồi đơn (quá hạn)';
+    if (a === 'BAN_AUTH_UNCLM') return 'Hủy nhận (tác giả BAN)';
     return item?.action || '—';
+}
+
+function moderatorActionCellStyle(action) {
+    const a = String(action ?? '').toUpperCase();
+    if (a === 'REJECTED') return { color: '#b91c1c', fontWeight: 600 };
+    if (a === 'APPROVED') return { color: '#065f46', fontWeight: 600 };
+    if (a === 'AUTO_FORFEIT_DL' || a === 'AUTO_UNASSIGNED_DEADLINE') {
+        return { color: '#c2410c', fontWeight: 600 };
+    }
+    if (a === 'BAN_AUTH_UNCLM') return { color: '#7c3aed', fontWeight: 600 };
+    return { color: '#475569', fontWeight: 600 };
 }
 
 function complianceSourceLabel(v) {
@@ -150,7 +169,12 @@ export function ModeratorLogsManagement() {
             const itemTarget = normalize(x.targetType);
             const itemTime = x.createdAt ? new Date(x.createdAt).getTime() : NaN;
 
-            if (action && itemAction !== action) return false;
+            if (action) {
+                if (action === normalize(ACTION_FILTER_FORFEIT_DEADLINE)) {
+                    const isForfeit = itemAction === 'auto_forfeit_dl' || itemAction === 'auto_unassigned_deadline';
+                    if (!isForfeit) return false;
+                } else if (itemAction !== action) return false;
+            }
             if (targetType && itemTarget !== targetType) return false;
             if (from != null && Number.isFinite(itemTime) && itemTime < from) return false;
             if (to != null && Number.isFinite(itemTime) && itemTime > to) return false;
@@ -308,7 +332,7 @@ export function ModeratorLogsManagement() {
                     <input
                         value={filters.search}
                         onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
-                        placeholder={logType === 'moderator' ? 'Tìm theo moderator, lý do, tiêu đề truyện/chương...' : 'Tìm theo xử lý vi phạm viên, nguồn, hành động...'}
+                        placeholder={logType === 'moderator' ? 'Tìm theo kiểm duyệt viên, lý do, tiêu đề truyện/chương...' : 'Tìm theo xử lý vi phạm viên, nguồn, hành động...'}
                         style={inputStyle}
                     />
                     {logType === 'moderator' && (
@@ -382,7 +406,7 @@ export function ModeratorLogsManagement() {
                                 {logType === 'moderator' ? (
                                     <tr className="bg-slate-50">
                                         <th style={th}>THỜI ĐIỂM</th>
-                                        <th style={th}>MODERATOR</th>
+                                        <th style={th}>KIỂM DUYỆT VIÊN</th>
                                         <th style={th}>ĐỐI TƯỢNG</th>
                                         <th style={th}>TIÊU ĐỀ</th>
                                         <th style={th}>HÀNH ĐỘNG</th>
@@ -407,7 +431,7 @@ export function ModeratorLogsManagement() {
                                             <td style={td}>{r.moderatorName || '—'}</td>
                                             <td style={td}>{targetLabel(r)}</td>
                                             <td style={td}>{r.targetTitle || '—'}</td>
-                                            <td style={{ padding: '0.75rem', color: String(r.action || '').toUpperCase() === 'REJECTED' ? '#b91c1c' : '#065f46', fontWeight: 600 }}>
+                                            <td style={{ padding: '0.75rem', ...moderatorActionCellStyle(r.action) }}>
                                                 {actionLabel(r)}
                                             </td>
                                             <td style={{ padding: '0.75rem', color: '#475569', maxWidth: 420 }}>

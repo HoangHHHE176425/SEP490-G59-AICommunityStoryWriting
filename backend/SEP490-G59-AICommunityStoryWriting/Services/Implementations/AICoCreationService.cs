@@ -119,6 +119,10 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         if (story.author_id != authorUserId)
             throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được sử dụng tính năng đồng sáng tác.");
 
+        var allChaptersOrdered = _chapterRepository.GetByStoryId(request.StoryId).OrderBy(c => c.order_index).ToList();
+        var targetOrderForWarning = ResolveCoCreateTargetOrderIndex(request, allChaptersOrdered);
+        var contextWarning = ChapterAiContextWarningHelper.GetWarningIfApplicable(allChaptersOrdered, targetOrderForWarning);
+
         var rawIdea = request.AuthorIdea?.Trim();
         var hasAuthorIdea = !string.IsNullOrWhiteSpace(rawIdea);
         var effectiveIdea = hasAuthorIdea
@@ -150,21 +154,24 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             {
                 IdeaContradictionFeedback = ideaFeedback,
                 Outline = string.Empty,
+                SuggestedChapterTitle = null,
                 FinalContent = string.Empty,
                 Approved = false,
                 RevisionCount = 0,
                 ReviewFeedback = null,
-                AgentDurations = durations.Count > 0 ? durations : null
+                AgentDurations = durations.Count > 0 ? durations : null,
+                ContextWarning = contextWarning
             };
         }
 
-        var outlineForPrompt = FormatOutlineForPrompt(outlineJson);
+        var (suggestedTitle, outlineBody) = TryExtractOutlineAndSuggestedTitle(outlineJson);
+        var outlineForPrompt = FormatOutlineForPrompt(outlineBody);
 
         var (p2, m2, k2, u2) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentWriter);
         var clientWriter = AIClientHelper.CreateChatClient(p2, m2, k2, u2);
 
         var swWrite = Stopwatch.StartNew();
-        var draft = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, languageInstruction, cancellationToken);
+        var draft = await RunAgent2WriteAsync(clientWriter, contextBlock, outlineForPrompt, languageInstruction, suggestedTitle, cancellationToken);
         swWrite.Stop();
         draft = StripTrailingFeedbackFromDraft(draft);
         durations.Add(new AgentDuration { Step = "Write", DurationMs = swWrite.ElapsedMilliseconds });
@@ -196,6 +203,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
                 outlineForPrompt,
                 draft,
                 languageInstruction,
+                suggestedTitle,
                 cancellationToken);
             swExpand.Stop();
             draft = StripTrailingFeedbackFromDraft(draft);
@@ -239,6 +247,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         return new CoCreationResponse
         {
             Outline = outlineForPrompt,
+            SuggestedChapterTitle = suggestedTitle,
             FinalContent = draft,
             Approved = approved,
             RevisionCount = revisionCount,
@@ -247,8 +256,23 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             ChapterId = saved.ChapterId,
             AiGeneratedContentId = saved.Id,
             ChapterIndex = saved.ChapterIndex,
-            AgentDurations = durations.Count > 0 ? durations : null
+            AgentDurations = durations.Count > 0 ? durations : null,
+            ContextWarning = contextWarning
         };
+    }
+
+    private static int ResolveCoCreateTargetOrderIndex(CoCreationRequest request, List<chapters> allOrdered)
+    {
+        if (request.ChapterOrderIndex is int coIdx && coIdx >= 0)
+            return coIdx;
+        if (request.ChapterId.HasValue && request.ChapterId.Value != Guid.Empty)
+        {
+            var ch = allOrdered.FirstOrDefault(c => c.id == request.ChapterId.Value);
+            if (ch != null)
+                return ch.order_index;
+        }
+
+        return allOrdered.Count == 0 ? 0 : allOrdered.Max(c => c.order_index) + 1;
     }
 
     /// <summary>Chỉ lưu bản <see cref="ai_generated_content"/> (không tạo/cập nhật <see cref="chapters"/>).
@@ -370,22 +394,20 @@ Ngôn ngữ:
 
 ---
 
-Output Format (bắt buộc, không thêm gì khác):
+Output Format (bắt buộc):
 
-Scene Objective:
-(Mục đích của scene này)
+1) Khi CHẤP NHẬN (không từ chối vì mâu thuẫn):
+→ Trả về DUY NHẤT một JSON hợp lệ, không markdown, không ký tự ngoài JSON.
+Cấu trúc:
+{
+  "suggestedChapterTitle": "Một dòng tiêu đề gợi ý (ngắn, gợi tình tiết; không prefix kiểu \"Chương 1\" hay \"Chapter 1\")",
+  "outline": "Toàn bộ dàn ý: Scene Objective, Scene Outline (2–7 ý), Characters Involved, Potential Conflict, Expected Outcome — dùng \\n trong chuỗi JSON để xuống dòng giữa các mục."
+}
+Trường suggestedChapterTitle bắt buộc (chuỗi, có thể rỗng "" nếu không đặt được tiêu đề ngắn).
+Trường outline bắt buộc, nội dung đúng cấu trúc Scene như các mục Scene Objective / Scene Outline / … đã nêu phía trên.
 
-Scene Outline:
-1.
-2.
-3.
-
-Characters Involved:
-
-Potential Conflict:
-
-Expected Outcome:
-(Kết quả dự kiến của scene, 1–3 câu)
+2) Khi TỪ CHỐI (ideaContradiction):
+→ Chỉ trả về: { "ideaContradiction": true, "feedback": "Giải thích ngắn gọn bằng tiếng Việt." }
 
 """ + "\n\n" + ConstitutionalRules;
 
@@ -506,7 +528,7 @@ Quy tắc:
 
             var swS = Stopwatch.StartNew();
             var spell = await _chapterCheck.CheckSpellingOnlyAsync(
-                new CheckChapterRequest { Content = draft, StoryId = storyId },
+                new CheckChapterSpellingRequest { Content = draft, StoryId = storyId },
                 userId: null,
                 ct);
             swS.Stop();
@@ -540,7 +562,7 @@ Quy tắc:
 
         var swSf = Stopwatch.StartNew();
         var spellFinal = await _chapterCheck.CheckSpellingOnlyAsync(
-            new CheckChapterRequest { Content = draft, StoryId = storyId },
+            new CheckChapterSpellingRequest { Content = draft, StoryId = storyId },
             userId: null,
             ct);
         swSf.Stop();
@@ -565,7 +587,7 @@ Quy tắc:
     private async Task<string> RunAgent1OutlineAsync(ChatClient client, stories story, string contextBlock, string authorIdea, string languageInstruction, CancellationToken ct)
     {
         var storyInfo = $"Story Information:\nTitle: {story.title}\nSummary: {story.summary ?? ""}\n\nUser Idea:\n{authorIdea}";
-        var userPrompt = $"{storyInfo}\n\n---\n{DbContextLabel}\n\n{contextBlock}\n\n---\n{languageInstruction}\n\nNgữ cảnh trên là phần truyện ĐÃ XẢY RA. Chỉ sinh outline cho phần TIẾP THEO (sau điểm kết thúc hiện tại), không outline sự kiện đã xảy ra. Trả lời bằng tiếng Việt nếu truyện tiếng Việt. Sinh outline theo đúng format (Scene Objective, Scene Outline 2–7 ý, Characters Involved, Potential Conflict, Expected Outcome); chỉ output nội dung outline, không markdown hay giải thích thừa. Chỉ trả về JSON ideaContradiction khi có mâu thuẫn RÕ RÀNG (vd. nhân vật đã ghi là chết/mất tích trong Character Memory nhưng ý tưởng cho họ xuất hiện; sự kiện đã có trong Event Memory nhưng ý tưởng đảo ngược). Ý tưởng có thể đến từ gợi ý chương tiếp theo — nếu là hướng tiếp nối hợp lý thì hãy sinh outline.";
+        var userPrompt = $"{storyInfo}\n\n---\n{DbContextLabel}\n\n{contextBlock}\n\n---\n{languageInstruction}\n\nNgữ cảnh trên là phần truyện ĐÃ XẢY RA. Chỉ sinh outline cho phần TIẾP THEO (sau điểm kết thúc hiện tại). Trả lời bằng cùng ngôn ngữ truyện. Khi chấp nhận: trả về đúng một JSON có suggestedChapterTitle + outline theo system prompt. Chỉ trả JSON ideaContradiction khi mâu thuẫn RÕ RÀNG với context (Character/Event Memory).";
         var messages = new List<ChatMessage>
         {
             new SystemChatMessage(GetAgent1SystemPrompt()),
@@ -585,10 +607,14 @@ Quy tắc:
         string outline,
         string currentDraft,
         string languageInstruction,
+        string? suggestedChapterTitle,
         CancellationToken ct)
     {
+        var titleHint = string.IsNullOrWhiteSpace(suggestedChapterTitle)
+            ? ""
+            : $"\n\n(Tiêu đề chương gợi ý — chỉ tham khảo tone/nội dung; không in tiêu đề trong văn bản: «{suggestedChapterTitle}»)";
         var userPrompt =
-            $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý:\n{outline}\n\nBản nháp hiện tại:\n{currentDraft}\n\n" +
+            $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý:\n{outline}\n\nBản nháp hiện tại:\n{currentDraft}{titleHint}\n\n" +
             $"{languageInstruction}\n\n" +
             "Yêu cầu: giữ nguyên mạch truyện, sự kiện chính và tính nhất quán của bản nháp hiện tại; chỉ mở rộng thêm chi tiết hợp lý (miêu tả, nội tâm, đối thoại, chuyển cảnh) để bản đầy đủ trên 500 từ, ưu tiên khoảng 600–700 từ. " +
             "Không viết lại theo hướng khác, không thêm plot twist lớn. Trả về toàn bộ bản nháp hoàn chỉnh, chỉ nội dung truyện.";
@@ -690,6 +716,64 @@ Quy tắc:
             }
         }
         return null;
+    }
+
+    /// <summary>Trích tiêu đề gợi ý và phần outline từ JSON Agent 1; fallback toàn bộ chuỗi nếu không parse được (tương thích cũ).</summary>
+    private static (string? SuggestedTitle, string OutlineBody) TryExtractOutlineAndSuggestedTitle(string outlineRaw)
+    {
+        var raw = outlineRaw.Trim();
+        if (raw.Length == 0)
+            return (null, outlineRaw);
+
+        var toParse = raw;
+        if (toParse.StartsWith("```", StringComparison.Ordinal))
+        {
+            var start = toParse.IndexOf('\n') + 1;
+            var end = toParse.IndexOf("```", start, StringComparison.Ordinal);
+            if (end > start)
+                toParse = toParse[start..end].Trim();
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(toParse);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return (null, outlineRaw);
+
+            if (root.TryGetProperty("ideaContradiction", out var ic) && ic.ValueKind == JsonValueKind.True)
+                return (null, outlineRaw);
+
+            if (!root.TryGetProperty("outline", out var outlineEl) || outlineEl.ValueKind != JsonValueKind.String)
+                return (null, outlineRaw);
+
+            var outlineText = outlineEl.GetString()?.Trim() ?? "";
+            if (outlineText.Length == 0)
+                return (null, outlineRaw);
+
+            string? title = null;
+            if (root.TryGetProperty("suggestedChapterTitle", out var st) && st.ValueKind == JsonValueKind.String)
+                title = NormalizeSuggestedTitle(st.GetString());
+            else if (root.TryGetProperty("suggested_chapter_title", out var st2) && st2.ValueKind == JsonValueKind.String)
+                title = NormalizeSuggestedTitle(st2.GetString());
+
+            return (title, outlineText);
+        }
+        catch
+        {
+            return (null, outlineRaw);
+        }
+    }
+
+    private static string? NormalizeSuggestedTitle(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s))
+            return null;
+        var parts = s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var t = string.Join(' ', parts).Trim();
+        if (t.Length > 200)
+            t = t[..200].TrimEnd();
+        return t.Length == 0 ? null : t;
     }
 
     /// <summary>Chuẩn hóa outline để đưa vào Agent 2: nếu là format Story Analyzer (Scene Objective, Scene Outline, ...) thì trả về nguyên bản; nếu là JSON scenes thì format lại.</summary>
@@ -841,9 +925,18 @@ Chỉ trả về nội dung truyện (draft).
 → Chỉ nội dung mà người đọc nhìn thấy
 """ + "\n\n" + ConstitutionalRules;
 
-    private async Task<string> RunAgent2WriteAsync(ChatClient client, string contextBlock, string outline, string languageInstruction, CancellationToken ct)
+    private async Task<string> RunAgent2WriteAsync(
+        ChatClient client,
+        string contextBlock,
+        string outline,
+        string languageInstruction,
+        string? suggestedChapterTitle,
+        CancellationToken ct)
     {
-        var userPrompt = $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý cần viết:\n{outline}";
+        var titleHint = string.IsNullOrWhiteSpace(suggestedChapterTitle)
+            ? ""
+            : $"\n\n(Tiêu đề chương gợi ý — chỉ tham khảo tone/nội dung; không được in tiêu đề hay dòng meta trong văn bản truyện: «{suggestedChapterTitle}»)";
+        var userPrompt = $"{DbContextLabel}\n\n{contextBlock}\n\n---\n{Agent2Checklist}\n---\nDàn ý cần viết:\n{outline}{titleHint}";
         userPrompt += $"\n\n{languageInstruction}\n\nViết bằng tiếng Việt nếu truyện tiếng Việt. Độ dài: tối thiểu 500 từ, mục tiêu 600–700 từ (tối đa khoảng 750 từ). Chỉ output nội dung chương (văn bản truyện), không markdown hay giải thích.";
 
         var messages = new List<ChatMessage>

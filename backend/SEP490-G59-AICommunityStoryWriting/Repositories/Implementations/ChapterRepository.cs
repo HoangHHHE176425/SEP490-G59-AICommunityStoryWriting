@@ -16,6 +16,17 @@ namespace Repositories
                 .Where(c => c.story_id == storyId)
                 .ToList();
 
+        public IReadOnlyList<chapters> GetPublishedByStoryId(Guid storyId)
+            => ChapterDAO.GetAll()
+                // EF Core chỉ translate được biểu thức dạng "c.status == 'PUBLISHED'" (không translate được helper method C#).
+                // Dùng ToUpperInvariant để so sánh case-insensitive.
+                .Where(c =>
+                    c.story_id == storyId
+                    && c.status != null
+                    && c.status.ToUpper() == "PUBLISHED")
+                .OrderBy(c => c.order_index)
+                .ToList();
+
         public chapters? GetByStoryIdAndOrderIndex(Guid storyId, int orderIndex)
             => ChapterDAO.GetByStoryIdAndOrderIndex(storyId, orderIndex);
 

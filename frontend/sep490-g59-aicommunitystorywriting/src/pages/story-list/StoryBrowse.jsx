@@ -23,6 +23,15 @@ import {
 } from '../../utils/storyBrowsePresetPool';
 import { browseUi as browsePageUi } from '../../components/story-list/storyBrowseUi';
 
+/** Query `usesAi` → giá trị sidebar Đồng sáng tác AI. */
+function parseUsesAiParam(raw) {
+    if (raw == null || String(raw).trim() === '') return 'all';
+    const s = String(raw).trim().toLowerCase();
+    if (s === 'true' || s === '1') return 'uses_ai';
+    if (s === 'false' || s === '0') return 'no_ai';
+    return 'all';
+}
+
 function useMediaQuery(query) {
     const [matches, setMatches] = useState(() =>
         typeof window !== 'undefined' ? window.matchMedia(query).matches : false
@@ -64,6 +73,17 @@ export function StoryBrowse() {
     const [selectedStatus, setSelectedStatus] = useState('all');
     const [selectedAgeRating, setSelectedAgeRating] = useState('all');
     const [selectedChapterScale, setSelectedChapterScale] = useState('all');
+    const [selectedAiUsage, setSelectedAiUsage] = useState(() =>
+        parseUsesAiParam(
+            typeof window !== 'undefined'
+                ? new URLSearchParams(window.location.search).get('usesAi')
+                : null
+        )
+    );
+    const usesAiParam = searchParams.get('usesAi');
+    useEffect(() => {
+        setSelectedAiUsage(parseUsesAiParam(usesAiParam));
+    }, [usesAiParam]);
 
     const [categories, setCategories] = useState([]);
     const [stories, setStories] = useState([]);
@@ -79,8 +99,9 @@ export function StoryBrowse() {
             selectedStatus === 'all' &&
             selectedAgeRating === 'all' &&
             selectedChapterScale === 'all' &&
+            selectedAiUsage === 'all' &&
             !debouncedSearch,
-        [selectedCategoryIds, selectedStatus, selectedAgeRating, selectedChapterScale, debouncedSearch]
+        [selectedCategoryIds, selectedStatus, selectedAgeRating, selectedChapterScale, selectedAiUsage, debouncedSearch]
     );
 
     const useClientPool = filtersDefault && isPoolBasedPreset(presetFromUrl);
@@ -149,6 +170,9 @@ export function StoryBrowse() {
                     params.maxTotalChapters = 99;
                 } else if (selectedChapterScale === '100plus') params.minTotalChapters = 100;
 
+                if (selectedAiUsage === 'uses_ai') params.usesAi = true;
+                else if (selectedAiUsage === 'no_ai') params.usesAi = false;
+
                 if (presetFromUrl === STORY_BROWSE_PRESET.AUTHOR_RANKING_VIEWS) {
                     params.sortBy = 'total_views';
                     params.sortOrder = 'desc';
@@ -201,6 +225,7 @@ export function StoryBrowse() {
         selectedStatus,
         selectedAgeRating,
         selectedChapterScale,
+        selectedAiUsage,
         presetFromUrl,
     ]);
 
@@ -244,11 +269,13 @@ export function StoryBrowse() {
         setSelectedStatus('all');
         setSelectedAgeRating('all');
         setSelectedChapterScale('all');
+        setSelectedAiUsage('all');
         setSearchQuery('');
         setCurrentPage(1);
         const next = new URLSearchParams(searchParams);
         next.delete('search');
         next.delete('preset');
+        next.delete('usesAi');
         setSearchParams(next, { replace: true });
     };
 
@@ -257,7 +284,8 @@ export function StoryBrowse() {
         selectedCategoryIds.length +
         (selectedStatus !== 'all' ? 1 : 0) +
         (selectedAgeRating !== 'all' ? 1 : 0) +
-        (selectedChapterScale !== 'all' ? 1 : 0);
+        (selectedChapterScale !== 'all' ? 1 : 0) +
+        (selectedAiUsage !== 'all' ? 1 : 0);
 
     const handleSearchChange = (value) => {
         setSearchQuery(value);
@@ -336,6 +364,18 @@ export function StoryBrowse() {
         setCurrentPage(1);
     };
 
+    const handleAiUsageChange = (value) => {
+        const next = new URLSearchParams(searchParams);
+        const p = parseBrowsePreset(next.get('preset'));
+        if (p && isPoolBasedPreset(p)) next.delete('preset');
+        if (value === 'uses_ai') next.set('usesAi', 'true');
+        else if (value === 'no_ai') next.set('usesAi', 'false');
+        else next.delete('usesAi');
+        setSelectedAiUsage(value);
+        setCurrentPage(1);
+        setSearchParams(next, { replace: true });
+    };
+
     return (
         <div
             className="storybrowse-compact"
@@ -371,6 +411,8 @@ export function StoryBrowse() {
                             setSelectedAgeRating={handleAgeRatingChange}
                             selectedChapterScale={selectedChapterScale}
                             setSelectedChapterScale={handleChapterScaleChange}
+                            selectedAiUsage={selectedAiUsage}
+                            setSelectedAiUsage={handleAiUsageChange}
                             activeFiltersCount={activeFiltersCount}
                             clearAllFilters={clearAllFilters}
                         />

@@ -131,8 +131,11 @@ public class StoryMemoryEngine : IStoryMemoryEngine
     {
         var list = _eventRepo.GetByStoryId(storyId);
         if (list.Count == 0) return string.Empty;
-        var chapterOrders = _chapterRepository.GetByStoryId(storyId).ToDictionary(c => c.id, c => c.order_index);
+        var publishedChapters = _chapterRepository.GetPublishedByStoryId(storyId).ToList();
+        var chapterOrders = publishedChapters.ToDictionary(c => c.id, c => c.order_index);
+        var publishedIds = chapterOrders.Keys.ToHashSet();
         var sorted = list
+            .Where(e => e.chapter_id == null || (e.chapter_id is Guid ecid && publishedIds.Contains(ecid)))
             .OrderBy(e =>
             {
                 if (e.chapter_id is Guid cid && chapterOrders.TryGetValue(cid, out var ord)) return ord;
@@ -141,6 +144,7 @@ public class StoryMemoryEngine : IStoryMemoryEngine
             .ThenBy(e => e.order_index)
             .ThenBy(e => e.created_at ?? DateTime.MinValue)
             .ToList();
+        if (sorted.Count == 0) return string.Empty;
         var lines = sorted.Select((e, i) => $"{i + 1}. {e.description}");
         return "## Event Memory (Timeline)\n" + string.Join("\n", lines);
     }

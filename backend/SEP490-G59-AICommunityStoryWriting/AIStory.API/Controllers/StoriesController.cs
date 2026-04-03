@@ -230,6 +230,17 @@ namespace AIStory.API.Controllers
             }
         }
 
+        /// <summary>
+        /// Model binder gán <c>bool</c> thiếu trên query thành <c>false</c>; mặc định ẩn truyện tác giả BANNED trên list công khai.
+        /// Gọi API có thể truyền <c>excludeBannedAuthors=false</c> (ADMIN/COMPLIANCE khi cần).
+        /// </summary>
+        private static void ApplyDefaultExcludeBannedAuthorsFromQuery(HttpRequest request, StoryQueryDto query)
+        {
+            if (request.Query.Keys.Any(k => string.Equals(k, "excludeBannedAuthors", StringComparison.OrdinalIgnoreCase)))
+                return;
+            query.ExcludeBannedAuthors = true;
+        }
+
         /// <summary>Báo cáo vi phạm truyện (cần đăng nhập).</summary>
         [HttpPost("{id:guid}/reports")]
         public async Task<IActionResult> ReportStory(Guid id, [FromBody] CreateStoryReportRequestDto request)
@@ -268,6 +279,8 @@ namespace AIStory.API.Controllers
         {
             try
             {
+                MergeStoryListQueryFromRequest(Request, query);
+                ApplyDefaultExcludeBannedAuthorsFromQuery(Request, query);
                 if (User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE"))
                     query.IncludeComplianceHiddenInLists = true;
                 var result = _storyService.GetAll(query);
@@ -730,6 +743,7 @@ namespace AIStory.API.Controllers
             try
             {
                 MergeStoryListQueryFromRequest(Request, query);
+                ApplyDefaultExcludeBannedAuthorsFromQuery(Request, query);
                 var uid = GetCurrentUserId();
                 if (uid == authorId || User.IsInRole("ADMIN") || User.IsInRole("COMPLIANCE"))
                     query.IncludeComplianceHiddenInLists = true;

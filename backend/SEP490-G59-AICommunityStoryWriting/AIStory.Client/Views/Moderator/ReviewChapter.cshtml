@@ -36,6 +36,7 @@
                             <div class="col-md-6">
                                 <span><strong>Ngày tạo:</strong> <span id="chapterCreatedAt"></span></span>
                                 <span class="ms-3"><strong>Loại:</strong> <span id="chapterAccessType"></span></span>
+                                <span class="ms-3" id="myReviewDeadlineWrap" style="display:none;"><strong>Hạn duyệt của tôi:</strong> <span id="myReviewDeadlineAt"></span></span>
                                 <span id="chapterCoinSpan" class="ms-2"></span>
                             </div>
                         </div>
@@ -249,6 +250,8 @@
                 var self = await ApiService.moderatorGetReviewAssignmentSelf('CHAPTER', chapterId);
                 var btn = document.getElementById('btnEscalateChapter');
                 var hint = document.getElementById('chapterAssignmentHint');
+                var myWrap = document.getElementById('myReviewDeadlineWrap');
+                var myDl = document.getElementById('myReviewDeadlineAt');
                 var escalationLocked = !!(self.isAssignedToMe && self.hasPendingEscalation);
                 var mustClaimFirst = !self.isAssignedToMe;
                 var btnApprove = document.getElementById('btnApproveChapter');
@@ -259,6 +262,10 @@
                     btn.style.display = escalationLocked ? 'none' : '';
                     hint.style.display = 'block';
                     var dl = self.reviewDeadlineAt ? Utils.formatDate(self.reviewDeadlineAt) : '—';
+                    if (myWrap && myDl) {
+                        myWrap.style.display = '';
+                        myDl.textContent = dl;
+                    }
                     if (escalationLocked) {
                         hint.textContent = 'Đơn báo cáo đang chờ admin xử lý — bạn không thể duyệt hoặc từ chối cho đến khi admin quyết định.';
                         hint.classList.add('text-warning', 'fw-semibold');
@@ -274,6 +281,8 @@
                     hint.style.display = 'block';
                     hint.classList.remove('text-warning', 'fw-semibold');
                     hint.textContent = 'Bạn chưa nhận duyệt mục này — dùng Nhận duyệt trên danh sách chờ trước khi duyệt hoặc từ chối.';
+                    if (myWrap) myWrap.style.display = 'none';
+                    if (myDl) myDl.textContent = '';
                 }
                 if (btnApprove) btnApprove.disabled = mustClaimFirst || escalationLocked;
                 if (btnReject) btnReject.disabled = mustClaimFirst || escalationLocked;

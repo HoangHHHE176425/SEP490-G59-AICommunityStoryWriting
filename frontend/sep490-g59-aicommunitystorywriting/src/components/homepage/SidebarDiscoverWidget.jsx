@@ -28,9 +28,9 @@ export function SidebarDiscoverWidget() {
       accent: '#13EC5B',
     },
     {
-      to: '/home#ai-assisted-stories',
+      to: '/story-list?usesAi=true',
       title: 'Truyện AI đồng sáng tác',
-      desc: 'Cuộn tới mục HOT trên trang chủ',
+      desc: 'Danh sách truyện có chương đồng sáng tác với AI',
       icon: Sparkles,
       accent: '#FB2C36',
     },
@@ -52,7 +52,7 @@ export function SidebarDiscoverWidget() {
           const Icon = item.icon;
           return (
             <Link
-              key={item.to}
+              key={item.title}
               to={item.to}
               className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 hover:border-[#13EC5B]/60 hover:bg-gray-50/80 transition-all group"
             >

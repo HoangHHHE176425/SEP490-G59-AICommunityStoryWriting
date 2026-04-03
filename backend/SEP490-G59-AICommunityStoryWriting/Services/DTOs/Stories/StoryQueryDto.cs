@@ -33,7 +33,13 @@ namespace Services.DTOs.Stories
         /// <summary>Tối đa total_chapters.</summary>
         public int? MaxTotalChapters { get; set; }
 
+        /// <summary>Khi true: chỉ truyện có ít nhất một chương PUBLISHED với mức đóng góp AI &gt; 0. Khi false: ngược lại.</summary>
+        public bool? UsesAi { get; set; }
+
         /// <summary>Khi false (mặc định): loại truyện bị compliance ẩn khỏi danh sách công khai.</summary>
         public bool IncludeComplianceHiddenInLists { get; set; }
+
+        /// <summary>Khi true: loại truyện có tác giả <c>users.status = BANNED</c> (hàng đợi nhận duyệt moderator).</summary>
+        public bool ExcludeBannedAuthors { get; set; }
     }
 }

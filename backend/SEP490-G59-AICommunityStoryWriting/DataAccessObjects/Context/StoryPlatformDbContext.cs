@@ -129,7 +129,7 @@ public partial class StoryPlatformDbContext : DbContext
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer(
-                "Server= localhost;uid=sa;password=a123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                "Server= TRUONG\\HIHITRUONGNE;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                     maxRetryCount: 5,
                     maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -665,6 +665,8 @@ public partial class StoryPlatformDbContext : DbContext
             entity.HasKey(e => e.id).HasName("PK__report_e__3213E83F960D5BAA");
 
             entity.Property(e => e.id).HasDefaultValueSql("(newid())");
+            entity.Property(e => e.compliance_verified_at_utc).HasColumnType("datetime2");
+            entity.Property(e => e.compliance_verified_by_user_id);
 
             entity.HasOne(d => d.report).WithMany(p => p.report_evidences)
                 .HasForeignKey(d => d.report_id)
@@ -678,6 +680,8 @@ public partial class StoryPlatformDbContext : DbContext
             entity.Property(e => e.reason_category).HasMaxLength(50);
             entity.Property(e => e.description).HasMaxLength(4000);
             entity.Property(e => e.created_at).HasDefaultValueSql("(sysutcdatetime())");
+            entity.Property(e => e.compliance_verified_at_utc).HasColumnType("datetime2");
+            entity.Property(e => e.compliance_verified_by_user_id);
 
             entity.HasOne<stories>().WithMany()
                 .HasForeignKey(e => e.story_id)

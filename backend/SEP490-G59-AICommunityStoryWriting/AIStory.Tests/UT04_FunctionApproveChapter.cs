@@ -1,4 +1,4 @@
-﻿using AIStory.API.Controllers;
+using AIStory.API.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,6 +54,8 @@ namespace AIStory.Tests
             var storyServiceMock = new Mock<IStoryService>(MockBehavior.Loose);
             var chapterServiceMock = new Mock<IChapterService>(MockBehavior.Loose);
             var scopeFactoryMock = new Mock<IServiceScopeFactory>(MockBehavior.Loose);
+            var forfeitMock = new Mock<IReviewDeadlineForfeitureService>(MockBehavior.Loose);
+            forfeitMock.Setup(f => f.ProcessOverdueClaims()).Returns(0);
 
             return new ModerationService(
                 storyRepoMock.Object,
@@ -62,6 +64,7 @@ namespace AIStory.Tests
                 storyServiceMock.Object,
                 chapterServiceMock.Object,
                 scopeFactoryMock.Object,
+                forfeitMock.Object,
                 NullLogger<ModerationService>.Instance);
         }
 
