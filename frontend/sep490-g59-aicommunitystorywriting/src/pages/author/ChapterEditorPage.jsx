@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Sparkles, Settings, X, Save, ArrowLeft, Lock, Unlock, Coins, Copy, Check } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useToast } from '../../components/author/story-editor/Toast';
@@ -52,6 +52,34 @@ function extractOutlineJson(raw) {
         }
     }
     return s;
+}
+
+// Copy helper for AI suggestion cards (no toast; caller shows inline feedback).
+async function copyTextToClipboard(text) {
+    const s = typeof text === 'string' ? text : '';
+    if (!s) return false;
+    try {
+        if (navigator?.clipboard?.writeText) {
+            await navigator.clipboard.writeText(s);
+            return true;
+        }
+    } catch {
+        // fallback below
+    }
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = s;
+        ta.setAttribute('readonly', 'true');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+    } catch {
+        return false;
+    }
 }
 
 /** Kiểm tra có phải dàn ý ví dụ mẫu (Holmes, Tới hiện trường...) thì không hiển thị */
@@ -223,6 +251,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         fontSize: 16,
         fontFamily: 'Arial, sans-serif',
         backgroundColor: '#ffffff',
+        isBold: false,
+        isItalic: false,
     });
 
     const [isSaving, setIsSaving] = useState(false);
@@ -232,8 +262,22 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     const [suggestLoading, setSuggestLoading] = useState(false);
     const [suggestions, setSuggestions] = useState([]);
     const [suggestionsCache, setSuggestionsCache] = useState([]);
+    const [suggestWarning, setSuggestWarning] = useState(null);
+    const [suggestWarningCache, setSuggestWarningCache] = useState(null);
     const [suggestError, setSuggestError] = useState(null);
     const [aiUsageLimit, setAiUsageLimit] = useState(null);
+    const [copiedSuggestionIndex, setCopiedSuggestionIndex] = useState(null);
+    const copySuggestionFeedbackRef = useRef(null);
+
+    useEffect(() => {
+        if (!showSuggestPopup) {
+            setCopiedSuggestionIndex(null);
+            if (copySuggestionFeedbackRef.current) {
+                clearTimeout(copySuggestionFeedbackRef.current);
+                copySuggestionFeedbackRef.current = null;
+            }
+        }
+    }, [showSuggestPopup]);
 
     const loadAiUsageLimit = async () => {
         try {
@@ -282,6 +326,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     const [coCreateIdea, setCoCreateIdea] = useState('');
     const [coCreateLoading, setCoCreateLoading] = useState(false);
     const [coCreateResult, setCoCreateResult] = useState(null);
+    const [coCreateContextWarning, setCoCreateContextWarning] = useState(null);
     const [manualSpellingCheckLoading, setManualSpellingCheckLoading] = useState(false);
 
     const isNewChapter = !chapter;
@@ -534,6 +579,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         setSuggestLoading(true);
         setSuggestions([]);
         setSuggestError(null);
+        setSuggestWarning(null);
         setShowSuggestPopup(true);
         try {
             // Gọi index-rag nền (không chờ). Gợi ý chạy ngay; BE dùng RAG nếu đã index, không thì dùng Story Context.
@@ -558,7 +604,11 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             setSuggestions(normalized);
             setSuggestionsCache(normalized);
             const ctxWarn = pickAiContextWarning(data);
-            if (ctxWarn) showToast(ctxWarn, 'warning', 12000);
+            const draftContextWarning = ctxWarn
+                ? 'Lưu ý: Chương liền trước hiện vẫn ở trạng thái bản nháp. AI có thể chưa bám sát đầy đủ mạch mới nhất, bạn nên dùng gợi ý này để tham khảo và chỉnh sửa thêm.'
+                : null;
+            setSuggestWarning(draftContextWarning);
+            setSuggestWarningCache(draftContextWarning);
             // Cập nhật số lượt còn lại sau khi gọi AI thành công
             loadAiUsageLimit();
         } catch (err) {
@@ -587,6 +637,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         }
         setSuggestError(null);
         setSuggestLoading(false);
+        setSuggestWarning(suggestWarningCache);
         setSuggestions(suggestionsCache);
         setShowSuggestPopup(true);
     };
@@ -618,6 +669,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         const storyId = story?.id ?? story?.Id;
         if (!storyId) return;
         const idea = useCoCreatePrompt ? (coCreateIdea || '').trim() : '';
+        setCoCreateContextWarning(null);
         setCoCreateLoading(true);
         try {
             const chapterOrderIndex = (Number(chapterData.number) || 1) - 1;
@@ -628,7 +680,11 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             // Đồng bộ lại với BE (không chặn UI).
             loadAiUsageLimit();
             const ctxWarnCo = pickAiContextWarning(data);
-            if (ctxWarnCo) showToast(ctxWarnCo, 'warning', 12000);
+            setCoCreateContextWarning(
+                ctxWarnCo
+                    ? 'Lưu ý: Chương liền trước hiện vẫn ở trạng thái bản nháp. Nội dung AI có thể chưa bám sát hoàn toàn mạch mới nhất, bạn nên rà soát và chỉnh sửa lại trước khi lưu.'
+                    : null
+            );
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);
@@ -646,9 +702,22 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     const handleCoCreateApply = () => {
         const raw = coCreateResult?.finalContent ?? coCreateResult?.FinalContent ?? '';
         const content = contentOnlyForChapter(raw) || raw.trim();
+        const suggestedTitle = (coCreateResult?.suggestedChapterTitle ?? coCreateResult?.SuggestedChapterTitle ?? '')
+            .toString()
+            .trim();
         if (content) {
-            setChapterData(prev => ({ ...prev, content, isAiClean: true }));
-            showToast('Đã áp dụng nội dung. Bạn có thể chỉnh sửa và nhấn Lưu / Xuất bản.', 'success');
+            setChapterData((prev) => ({
+                ...prev,
+                content,
+                isAiClean: true,
+                ...(suggestedTitle ? { title: suggestedTitle } : {}),
+            }));
+            showToast(
+                suggestedTitle
+                    ? 'Đã áp dụng tên chương và nội dung. Bạn có thể chỉnh sửa và nhấn Lưu / Xuất bản.'
+                    : 'Đã áp dụng nội dung. Bạn có thể chỉnh sửa và nhấn Lưu / Xuất bản.',
+                'success'
+            );
         } else {
             showToast('AI chưa trả về nội dung chương. Vui lòng thử lại với định hướng chi tiết hơn.', 'error');
             return;
@@ -1444,10 +1513,15 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                     >
                         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
                             <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>
-                                Gợi ý chương tiếp theo
+                                AI gợi ý ý tưởng
                             </h3>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
+                            {!suggestLoading && suggestWarning ? (
+                                <div style={{ marginBottom: '0.75rem', padding: '12px 14px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                                    {suggestWarning}
+                                </div>
+                            ) : null}
                             {suggestLoading ? (
                                 <p style={{ margin: 0, color: '#6b7280', textAlign: 'center' }}>Đang tải gợi ý...</p>
                             ) : suggestError ? (
@@ -1462,6 +1536,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         const title = item?.title ?? item?.Title ?? '';
                                         const summary = item?.summary ?? item?.Summary ?? '';
                                         const direction = item?.direction ?? item?.Direction ?? '';
+                                        const copyPayload = [title, summary, direction].filter(Boolean).join('\n');
                                         return (
                                             <div
                                                 key={index}
@@ -1470,10 +1545,47 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                     backgroundColor: '#f9fafb',
                                                     borderRadius: '8px',
                                                     border: '1px solid #e5e7eb',
+                                                    position: 'relative',
                                                 }}
                                             >
-                                                <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827', marginBottom: '0.5rem' }}>
-                                                    {title || `Gợi ý ${index + 1}`}
+                                                <button
+                                                    type="button"
+                                                    onClick={async () => {
+                                                        const ok = await copyTextToClipboard(copyPayload);
+                                                        if (!ok) return;
+                                                        if (copySuggestionFeedbackRef.current) {
+                                                            clearTimeout(copySuggestionFeedbackRef.current);
+                                                        }
+                                                        setCopiedSuggestionIndex(index);
+                                                        copySuggestionFeedbackRef.current = setTimeout(() => {
+                                                            setCopiedSuggestionIndex(null);
+                                                            copySuggestionFeedbackRef.current = null;
+                                                        }, 2000);
+                                                    }}
+                                                    title={copiedSuggestionIndex === index ? 'Đã copy' : 'Copy nhanh'}
+                                                    className={`absolute top-2 right-2 p-1 rounded-lg transition-colors duration-200 ${
+                                                        copiedSuggestionIndex === index
+                                                            ? 'bg-emerald-100 text-emerald-700'
+                                                            : 'text-slate-600 hover:bg-slate-200'
+                                                    }`}
+                                                >
+                                                    {copiedSuggestionIndex === index ? (
+                                                        <Check size={16} strokeWidth={2.5} />
+                                                    ) : (
+                                                        <Copy size={16} />
+                                                    )}
+                                                </button>
+                                                <div style={{ marginBottom: '0.5rem', paddingRight: '1.75rem' }}>
+                                                    {title ? (
+                                                        <>
+                                                            <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.25rem' }}>
+                                                                Tên chương gợi ý
+                                                            </div>
+                                                            <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827' }}>{title}</div>
+                                                        </>
+                                                    ) : (
+                                                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827' }}>{`Gợi ý ${index + 1}`}</div>
+                                                    )}
                                                 </div>
                                                 {summary && (
                                                     <div style={{ fontSize: '0.8125rem', color: '#4b5563', marginBottom: '0.5rem' }}>
@@ -1677,6 +1789,11 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                 </div>
                             ) : (
                                 <>
+                                    {coCreateContextWarning ? (
+                                        <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                                            {coCreateContextWarning}
+                                        </div>
+                                    ) : null}
                                     {((coCreateResult.outline ?? coCreateResult.Outline) || '').trim() && (
                                         <div style={{ marginBottom: '1rem' }}>
                                             <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Dàn ý</div>
@@ -1693,6 +1810,27 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                             </div>
                                         </div>
                                     )}
+                                    {((coCreateResult.suggestedChapterTitle ?? coCreateResult.SuggestedChapterTitle) || '').toString().trim() ? (
+                                        <div style={{ marginBottom: '1rem' }}>
+                                            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Tên chương gợi ý</div>
+                                            <div
+                                                style={{
+                                                    fontSize: '0.875rem',
+                                                    fontWeight: 600,
+                                                    color: '#111827',
+                                                    padding: '0.75rem',
+                                                    border: '1px solid #bbf7d0',
+                                                    borderRadius: '8px',
+                                                    backgroundColor: '#f0fdf4',
+                                                }}
+                                            >
+                                                {(coCreateResult.suggestedChapterTitle ?? coCreateResult.SuggestedChapterTitle ?? '').toString().trim()}
+                                            </div>
+                                            <p style={{ margin: '0.5rem 0 0', fontSize: '0.75rem', color: '#6b7280' }}>
+                                                Khi bạn đồng ý sử dụng, tên này sẽ được điền vào ô Tên chương.
+                                            </p>
+                                        </div>
+                                    ) : null}
                                     <div>
                                         <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Nội dung chương</div>
                                         {(() => {
@@ -1725,7 +1863,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
                                 <button
                                     type="button"
-                                    onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); }}
+                                    onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); setCoCreateContextWarning(null); }}
                                     style={{
                                         padding: '0.5rem 1.25rem',
                                         fontSize: '0.875rem',
@@ -1743,7 +1881,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                 <>
                                     <button
                                         type="button"
-                                        onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); }}
+                                        onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); setCoCreateContextWarning(null); }}
                                         style={{
                                             padding: '0.5rem 1rem',
                                             fontSize: '0.875rem',
@@ -1863,10 +2001,10 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             {/* Khi tạo/sửa version: không hiển thị Số version, Chương gốc, Chế độ sáng tác. Chỉ hiển thị khi tạo/sửa chương thường. */}
                             {!isVersionMode && (
                                 <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
-                                    <div>
-                                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                            Số chương <span style={{ color: '#ef4444' }}>*</span>
-                                        </label>
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                                Chương số <span style={{ color: '#ef4444' }}>*</span>
+                                            </label>
                                         <input
                                             type="number"
                                             value={chapterData.number}
@@ -1916,13 +2054,13 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                 </div>
                             )}
 
-                            {/* Khi tạo/sửa version: hiển thị Số chương (read-only) + Tiêu đề chương gốc, rồi Số phiên bản + Tiêu đề phiên bản */}
+                            {/* Khi tạo/sửa version: hiển thị Chương số (read-only) + Tiêu đề chương gốc, rồi Số phiên bản + Tiêu đề phiên bản */}
                             {isVersionMode && (
                                 <>
                                     <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                         <div>
                                             <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                                Số chương
+                                                Chương số
                                             </label>
                                             <input
                                                 type="text"
@@ -2300,7 +2438,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             </div>
                             {readOnly && (
                                 <div style={{ padding: '0.75rem 1rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8125rem', color: '#64748b' }}>
-                                    Cỡ chữ: {editorSettings.fontSize}px · Font: {fontFamilies.find(f => f.value === editorSettings.fontFamily)?.name ?? editorSettings.fontFamily} · Nền: {backgroundColors.find(b => b.value === editorSettings.backgroundColor)?.name ?? editorSettings.backgroundColor}
+                                    Cỡ chữ: {editorSettings.fontSize}px · Font: {fontFamilies.find(f => f.value === editorSettings.fontFamily)?.name ?? editorSettings.fontFamily} · Nền: {backgroundColors.find(b => b.value === editorSettings.backgroundColor)?.name ?? editorSettings.backgroundColor} · Kiểu: {editorSettings.isBold ? 'Đậm' : 'Thường'}{editorSettings.isItalic ? ' + Nghiêng' : ''}
                                 </div>
                             )}
 
@@ -2325,7 +2463,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         </button>
                                     </div>
 
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem' }}>
                                         {/* Font Size */}
                                         <div>
                                             <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
@@ -2399,6 +2537,50 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                 ))}
                                             </div>
                                         </div>
+
+                                        {/* Font Style */}
+                                        <div>
+                                            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                                Kiểu chữ
+                                            </label>
+                                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setEditorSettings({ ...editorSettings, isBold: !editorSettings.isBold })}
+                                                    title="In đậm"
+                                                    style={{
+                                                        minWidth: '44px',
+                                                        height: '40px',
+                                                        border: editorSettings.isBold ? '3px solid #13ec5b' : '1px solid #e5e7eb',
+                                                        borderRadius: '8px',
+                                                        backgroundColor: editorSettings.isBold ? '#f0fdf4' : '#ffffff',
+                                                        color: '#111827',
+                                                        fontWeight: 700,
+                                                        cursor: 'pointer',
+                                                    }}
+                                                >
+                                                    B
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setEditorSettings({ ...editorSettings, isItalic: !editorSettings.isItalic })}
+                                                    title="In nghiêng"
+                                                    style={{
+                                                        minWidth: '44px',
+                                                        height: '40px',
+                                                        border: editorSettings.isItalic ? '3px solid #13ec5b' : '1px solid #e5e7eb',
+                                                        borderRadius: '8px',
+                                                        backgroundColor: editorSettings.isItalic ? '#f0fdf4' : '#ffffff',
+                                                        color: '#111827',
+                                                        fontStyle: 'italic',
+                                                        fontWeight: 600,
+                                                        cursor: 'pointer',
+                                                    }}
+                                                >
+                                                    I
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -2423,6 +2605,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         borderRadius: '8px',
                                         fontSize: `${editorSettings.fontSize}px`,
                                         fontFamily: editorSettings.fontFamily,
+                                        fontWeight: editorSettings.isBold ? 700 : 400,
+                                        fontStyle: editorSettings.isItalic ? 'italic' : 'normal',
                                         outline: 'none',
                                         cursor: readOnly ? 'default' : undefined,
                                         resize: 'vertical',

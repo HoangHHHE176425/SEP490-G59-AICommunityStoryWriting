@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Sparkles, Settings, X, Lock, Unlock, Coins } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Sparkles, Settings, X, Lock, Unlock, Coins, Copy, Check } from 'lucide-react';
 import { useToast } from './Toast';
 import { indexRag, suggestNextChapter, coCreate, getAiUsageLimit, pickAiContextWarning } from '../../../api/ai/aiApi';
 import { translateCoCreateOutlineLabels } from '../../../utils/coCreateOutlineLabelsVi';
@@ -37,6 +37,34 @@ function extractOutlineJson(raw) {
         }
     }
     return s;
+}
+
+// Copy helper for AI suggestion cards (no toast; caller shows inline feedback).
+async function copyTextToClipboard(text) {
+    const s = typeof text === 'string' ? text : '';
+    if (!s) return false;
+    try {
+        if (navigator?.clipboard?.writeText) {
+            await navigator.clipboard.writeText(s);
+            return true;
+        }
+    } catch {
+        // fallback below
+    }
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = s;
+        ta.setAttribute('readonly', 'true');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return ok;
+    } catch {
+        return false;
+    }
 }
 
 function isExampleOutline(scenes) {
@@ -106,22 +134,34 @@ const NO_STORY_MESSAGE = 'Tính năng AI chỉ khả dụng sau khi tạo truy�
 const AI_DISABLED_BEFORE_STORY_SAVED =
     'Bạn phải hoàn tất tạo truyện (lưu nháp hoặc gửi duyệt) trước. Sau đó mở truyện → Thêm/Sửa chương để dùng gợi ý AI.';
 
-export function ChapterEditor({ chapter, onChange, story }) {
+export function ChapterEditor({
+    chapter,
+    onChange,
+    story,
+    onSpellcheckSupport = null,
+    spellcheckLoading = false,
+}) {
     const { showToast, ToastContainer } = useToast();
     const [showSettings, setShowSettings] = useState(false);
     const [editorSettings, setEditorSettings] = useState({
         fontSize: 16,
         fontFamily: 'Arial, sans-serif',
         backgroundColor: '#ffffff',
+        isBold: false,
+        isItalic: false,
     });
     const [showSuggestPopup, setShowSuggestPopup] = useState(false);
     const [suggestLoading, setSuggestLoading] = useState(false);
     const [suggestions, setSuggestions] = useState([]);
+    const [suggestWarning, setSuggestWarning] = useState(null);
+    const [copiedSuggestionIndex, setCopiedSuggestionIndex] = useState(null);
+    const copySuggestionFeedbackRef = useRef(null);
     const [showCoCreateIdeaPopup, setShowCoCreateIdeaPopup] = useState(false);
     const [showCoCreateResultPopup, setShowCoCreateResultPopup] = useState(false);
     const [coCreateIdea, setCoCreateIdea] = useState('');
     const [coCreateLoading, setCoCreateLoading] = useState(false);
     const [coCreateResult, setCoCreateResult] = useState(null);
+    const [coCreateContextWarning, setCoCreateContextWarning] = useState(null);
     const [aiUsageLimit, setAiUsageLimit] = useState(null);
 
     const storyId = story?.id ?? story?.Id ?? null;
@@ -138,6 +178,11 @@ export function ChapterEditor({ chapter, onChange, story }) {
     const chapterIdForAi = isGuid(chapterIdRaw) ? String(chapterIdRaw) : draftChapterIdForAi;
     /** Bước 2 tạo truyện mới: chưa có storyId → không gọi API AI; hiển thị nút giống màn chương nhưng khóa. */
     const aiLocked = !storyId;
+
+    // Backend: chương PAID chỉ hợp lệ khi story.total_views >= 500.
+    // Tuy nhiên khi chương đã là PAID sẵn thì BE không chặn theo rule “chuyển từ FREE sang PAID”.
+    const storyTotalViews = Number(story?.totalViews ?? story?.TotalViews ?? 0) || 0;
+    const canEnablePaidMode = storyTotalViews >= 500;
 
     const loadAiUsageLimit = async () => {
         try {
@@ -182,6 +227,16 @@ export function ChapterEditor({ chapter, onChange, story }) {
         if (storyId) loadAiUsageLimit();
     }, [storyId]);
 
+    useEffect(() => {
+        if (!showSuggestPopup) {
+            setCopiedSuggestionIndex(null);
+            if (copySuggestionFeedbackRef.current) {
+                clearTimeout(copySuggestionFeedbackRef.current);
+                copySuggestionFeedbackRef.current = null;
+            }
+        }
+    }, [showSuggestPopup]);
+
     const fontFamilies = [
         { name: 'Arial', value: 'Arial, sans-serif' },
         { name: 'Times New Roman', value: 'Times New Roman, serif' },
@@ -203,6 +258,7 @@ export function ChapterEditor({ chapter, onChange, story }) {
         }
         if (type === 'paragraph') {
             setSuggestions([]);
+            setSuggestWarning(null);
             setShowSuggestPopup(true);
             setSuggestLoading(true);
             try {
@@ -211,7 +267,11 @@ export function ChapterEditor({ chapter, onChange, story }) {
                 const list = data?.suggestions ?? data?.Suggestions ?? [];
                 setSuggestions(Array.isArray(list) ? list : []);
                 const ctxWarn = pickAiContextWarning(data);
-                if (ctxWarn) showToast(ctxWarn, 'warning', 12000);
+                setSuggestWarning(
+                    ctxWarn
+                        ? 'Lưu ý: Chương liền trước hiện vẫn ở trạng thái bản nháp. AI có thể chưa bám sát đầy đủ mạch mới nhất, bạn nên dùng gợi ý này để tham khảo và chỉnh sửa thêm.'
+                        : null
+                );
                 loadAiUsageLimit();
             } catch (err) {
                 const status = err?.response?.status;
@@ -219,6 +279,7 @@ export function ChapterEditor({ chapter, onChange, story }) {
                 if (status === 429) showToast('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.', 'error');
                 else if (status === 403) showToast(msg || 'Chỉ tác giả mới được sử dụng tính năng này.', 'error');
                 else showToast(msg, 'error');
+                setSuggestWarning(null);
                 setSuggestions([]);
             } finally {
                 setSuggestLoading(false);
@@ -241,6 +302,7 @@ export function ChapterEditor({ chapter, onChange, story }) {
             showToast('Vui lòng nhập ý tưởng của bạn.', 'error');
             return;
         }
+        setCoCreateContextWarning(null);
         setCoCreateLoading(true);
         try {
             const chapterOrderIndex = (Number(chapter?.number) || 1) - 1;
@@ -248,7 +310,11 @@ export function ChapterEditor({ chapter, onChange, story }) {
             // Trừ ngay trên UI để người dùng thấy số lượt giảm tức thì.
             decrementCoCreateUsageOptimistic();
             const ctxWarnCo = pickAiContextWarning(data);
-            if (ctxWarnCo) showToast(ctxWarnCo, 'warning', 12000);
+            setCoCreateContextWarning(
+                ctxWarnCo
+                    ? 'Lưu ý: Chương liền trước hiện vẫn ở trạng thái bản nháp. Nội dung AI có thể chưa bám sát hoàn toàn mạch mới nhất, bạn nên rà soát và chỉnh sửa lại trước khi lưu.'
+                    : null
+            );
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);
@@ -267,10 +333,24 @@ export function ChapterEditor({ chapter, onChange, story }) {
 
     const handleCoCreateApply = () => {
         const raw = coCreateResult?.finalContent ?? coCreateResult?.FinalContent ?? '';
-        const content = contentOnlyForChapter(raw);
+        const content = contentOnlyForChapter(raw) || raw.trim();
+        const suggestedTitle = (coCreateResult?.suggestedChapterTitle ?? coCreateResult?.SuggestedChapterTitle ?? '')
+            .toString()
+            .trim();
         if (content) {
             onChange('content', content);
-            showToast('Đã áp dụng nội dung. Bạn có thể chỉnh sửa và nhấn Tiếp theo khi xong.', 'success');
+            if (suggestedTitle) {
+                onChange('title', suggestedTitle);
+            }
+            showToast(
+                suggestedTitle
+                    ? 'Đã áp dụng tên chương và nội dung. Bạn có thể chỉnh sửa và nhấn Tiếp theo khi xong.'
+                    : 'Đã áp dụng nội dung. Bạn có thể chỉnh sửa và nhấn Tiếp theo khi xong.',
+                'success'
+            );
+        } else {
+            showToast('AI chưa trả về nội dung chương. Vui lòng thử lại với định hướng chi tiết hơn.', 'error');
+            return;
         }
         setShowCoCreateResultPopup(false);
         setCoCreateResult(null);
@@ -309,10 +389,15 @@ export function ChapterEditor({ chapter, onChange, story }) {
                     >
                         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
                             <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>
-                                Gợi ý chương tiếp theo
+                                AI gợi ý ý tưởng
                             </h3>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
+                            {!suggestLoading && suggestWarning ? (
+                                <div style={{ marginBottom: '0.75rem', padding: '12px 14px', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                                    {suggestWarning}
+                                </div>
+                            ) : null}
                             {!storyId ? (
                                 <p style={{ margin: 0, color: '#6b7280', lineHeight: 1.6 }}>{NO_STORY_MESSAGE}</p>
                             ) : suggestLoading ? (
@@ -325,6 +410,7 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                         const title = item?.title ?? item?.Title ?? '';
                                         const summary = item?.summary ?? item?.Summary ?? '';
                                         const direction = item?.direction ?? item?.Direction ?? '';
+                                        const copyPayload = [title, summary, direction].filter(Boolean).join('\n');
                                         return (
                                             <div
                                                 key={index}
@@ -333,10 +419,47 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                                     backgroundColor: '#f9fafb',
                                                     borderRadius: '8px',
                                                     border: '1px solid #e5e7eb',
+                                                    position: 'relative',
                                                 }}
                                             >
-                                                <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827', marginBottom: '0.5rem' }}>
-                                                    {title || `Gợi ý ${index + 1}`}
+                                                <button
+                                                    type="button"
+                                                    onClick={async () => {
+                                                        const ok = await copyTextToClipboard(copyPayload);
+                                                        if (!ok) return;
+                                                        if (copySuggestionFeedbackRef.current) {
+                                                            clearTimeout(copySuggestionFeedbackRef.current);
+                                                        }
+                                                        setCopiedSuggestionIndex(index);
+                                                        copySuggestionFeedbackRef.current = setTimeout(() => {
+                                                            setCopiedSuggestionIndex(null);
+                                                            copySuggestionFeedbackRef.current = null;
+                                                        }, 2000);
+                                                    }}
+                                                    title={copiedSuggestionIndex === index ? 'Đã copy' : 'Copy nhanh'}
+                                                    className={`absolute top-2 right-2 p-1 rounded-lg transition-colors duration-200 ${
+                                                        copiedSuggestionIndex === index
+                                                            ? 'bg-emerald-100 text-emerald-700'
+                                                            : 'text-slate-600 hover:bg-slate-200'
+                                                    }`}
+                                                >
+                                                    {copiedSuggestionIndex === index ? (
+                                                        <Check size={16} strokeWidth={2.5} />
+                                                    ) : (
+                                                        <Copy size={16} />
+                                                    )}
+                                                </button>
+                                                <div style={{ marginBottom: '0.5rem', paddingRight: '1.75rem' }}>
+                                                    {title ? (
+                                                        <>
+                                                            <div style={{ fontSize: '0.6875rem', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.25rem' }}>
+                                                                Tên chương gợi ý
+                                                            </div>
+                                                            <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827' }}>{title}</div>
+                                                        </>
+                                                    ) : (
+                                                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#111827' }}>{`Gợi ý ${index + 1}`}</div>
+                                                    )}
                                                 </div>
                                                 {summary && <div style={{ fontSize: '0.8125rem', color: '#4b5563', marginBottom: '0.5rem' }}>{summary}</div>}
                                                 {direction && <div style={{ fontSize: '0.8125rem', color: '#6b7280', whiteSpace: 'pre-wrap' }}>{direction}</div>}
@@ -499,6 +622,11 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                 </div>
                             ) : (
                                 <>
+                                    {coCreateContextWarning ? (
+                                        <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                                            {coCreateContextWarning}
+                                        </div>
+                                    ) : null}
                                     {((coCreateResult.outline ?? coCreateResult.Outline) || '').trim() && (
                                         <div style={{ marginBottom: '1rem' }}>
                                             <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Dàn ý</div>
@@ -515,6 +643,27 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                             </div>
                                         </div>
                                     )}
+                                    {((coCreateResult.suggestedChapterTitle ?? coCreateResult.SuggestedChapterTitle) || '').toString().trim() ? (
+                                        <div style={{ marginBottom: '1rem' }}>
+                                            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Tên chương gợi ý</div>
+                                            <div
+                                                style={{
+                                                    fontSize: '0.875rem',
+                                                    fontWeight: 600,
+                                                    color: '#111827',
+                                                    padding: '0.75rem',
+                                                    border: '1px solid #bbf7d0',
+                                                    borderRadius: '8px',
+                                                    backgroundColor: '#f0fdf4',
+                                                }}
+                                            >
+                                                {(coCreateResult.suggestedChapterTitle ?? coCreateResult.SuggestedChapterTitle ?? '').toString().trim()}
+                                            </div>
+                                            <p style={{ margin: '0.5rem 0 0', fontSize: '0.75rem', color: '#6b7280' }}>
+                                                Khi bạn đồng ý sử dụng, tên này sẽ được điền vào ô Tên chương.
+                                            </p>
+                                        </div>
+                                    ) : null}
                                     <div>
                                         <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Nội dung chương</div>
                                         <div
@@ -540,7 +689,7 @@ export function ChapterEditor({ chapter, onChange, story }) {
                             {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
                                 <button
                                     type="button"
-                                    onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); }}
+                                    onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); setCoCreateContextWarning(null); }}
                                     style={{ padding: '0.5rem 1.25rem', fontSize: '0.875rem', fontWeight: 600, color: '#ffffff', backgroundColor: '#13ec5b', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
                                 >
                                     Đóng
@@ -549,7 +698,7 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                 <>
                                     <button
                                         type="button"
-                                        onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); }}
+                                        onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); setCoCreateContextWarning(null); }}
                                         style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', backgroundColor: '#f3f4f6', border: 'none', borderRadius: '8px', cursor: 'pointer' }}
                                     >
                                         Đóng
@@ -638,7 +787,15 @@ export function ChapterEditor({ chapter, onChange, story }) {
 
                             <button
                                 type="button"
-                                onClick={() => onChange('accessType', 'paid')}
+                                onClick={() => {
+                                    const paidBlocked = !canEnablePaidMode && chapter.accessType !== 'paid';
+                                    if (paidBlocked) return;
+                                    onChange('accessType', 'paid');
+                                }}
+                                disabled={!canEnablePaidMode && chapter.accessType !== 'paid'}
+                                title={!canEnablePaidMode && chapter.accessType !== 'paid'
+                                    ? 'Truyện cần tối thiểu 500 lượt xem mới được bật chế độ trả phí cho chương.'
+                                    : undefined}
                                 style={{
                                     display: 'flex',
                                     alignItems: 'center',
@@ -647,7 +804,8 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                     border: `2px solid ${chapter.accessType === 'paid' ? '#f59e0b' : '#e5e7eb'}`,
                                     borderRadius: '8px',
                                     backgroundColor: chapter.accessType === 'paid' ? '#fffbeb' : '#ffffff',
-                                    cursor: 'pointer',
+                                    cursor: (!canEnablePaidMode && chapter.accessType !== 'paid') ? 'not-allowed' : 'pointer',
+                                    opacity: (!canEnablePaidMode && chapter.accessType !== 'paid') ? 0.6 : 1,
                                     transition: 'all 0.2s',
                                     textAlign: 'left',
                                 }}
@@ -766,6 +924,15 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
                                             AI gợi ý chương
                                         </button>
+                                        <button
+                                            type="button"
+                                            onClick={onSpellcheckSupport ?? undefined}
+                                            disabled={!onSpellcheckSupport || spellcheckLoading}
+                                            className="flex items-center gap-2 rounded-full border-0 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 transition-all hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            <Sparkles style={{ width: '14px', height: '14px' }} />
+                                            {spellcheckLoading ? 'Đang kiểm tra...' : 'Hỗ trợ kiểm tra chính tả'}
+                                        </button>
                                     </>
                                 ) : (
                                     <>
@@ -790,6 +957,15 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                                     ? ` (${aiUsageLimit.coCreate?.remaining ?? 0}/${aiUsageLimit.coCreate?.limitPerDay ?? 0})`
                                                     : ' (—/—)')
                                                 : ''}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={onSpellcheckSupport ?? undefined}
+                                            disabled={!onSpellcheckSupport || spellcheckLoading}
+                                            className="flex items-center gap-2 rounded-full border-0 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 transition-all hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            <Sparkles style={{ width: '14px', height: '14px' }} />
+                                            {spellcheckLoading ? 'Đang kiểm tra...' : 'Hỗ trợ kiểm tra chính tả'}
                                         </button>
                                     </>
                                 )}
@@ -840,7 +1016,7 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                 </button>
                             </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
                                 {/* Font Size */}
                                 <div>
                                     <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
@@ -907,6 +1083,50 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                         ))}
                                     </div>
                                 </div>
+
+                                {/* Font Style */}
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                        Kiểu chữ
+                                    </label>
+                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <button
+                                            type="button"
+                                            onClick={() => setEditorSettings({ ...editorSettings, isBold: !editorSettings.isBold })}
+                                            title="In đậm"
+                                            style={{
+                                                minWidth: '40px',
+                                                height: '32px',
+                                                border: editorSettings.isBold ? '2px solid #13ec5b' : '1px solid #e5e7eb',
+                                                borderRadius: '6px',
+                                                backgroundColor: editorSettings.isBold ? '#f0fdf4' : '#ffffff',
+                                                color: '#111827',
+                                                fontWeight: 700,
+                                                cursor: 'pointer',
+                                            }}
+                                        >
+                                            B
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setEditorSettings({ ...editorSettings, isItalic: !editorSettings.isItalic })}
+                                            title="In nghiêng"
+                                            style={{
+                                                minWidth: '40px',
+                                                height: '32px',
+                                                border: editorSettings.isItalic ? '2px solid #13ec5b' : '1px solid #e5e7eb',
+                                                borderRadius: '6px',
+                                                backgroundColor: editorSettings.isItalic ? '#f0fdf4' : '#ffffff',
+                                                color: '#111827',
+                                                fontStyle: 'italic',
+                                                fontWeight: 600,
+                                                cursor: 'pointer',
+                                            }}
+                                        >
+                                            I
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -929,6 +1149,8 @@ export function ChapterEditor({ chapter, onChange, story }) {
                                 borderRadius: '4px',
                                 fontSize: `${editorSettings.fontSize}px`,
                                 fontFamily: editorSettings.fontFamily,
+                                fontWeight: editorSettings.isBold ? 700 : 400,
+                                fontStyle: editorSettings.isItalic ? 'italic' : 'normal',
                                 outline: 'none',
                                 resize: 'vertical',
                                 lineHeight: '1.8'

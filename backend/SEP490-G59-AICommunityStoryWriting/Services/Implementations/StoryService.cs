@@ -103,7 +103,9 @@ namespace Services.Implementations
                 throw new ArgumentException($"Invalid story progress status. Must be one of: {string.Join(", ", validProgressStatuses)}");
             }
 
-            // UTCID20: chưa chặn HIATUS khi tạo truyện DRAFT — bug mở; UT01 UTCID20 fail cho đến khi có rule.
+            // Truyện mới (Create) bắt buộc tiến độ «Đang ra» — không cho COMPLETED/HIATUS lúc khởi tạo.
+            if (progressStatus != "ONGOING")
+                throw new InvalidOperationException("Truyện mới chỉ được tạo với trạng thái tiến độ Đang ra.");
 
             var story = new stories
             {

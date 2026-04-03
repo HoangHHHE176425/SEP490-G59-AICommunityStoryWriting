@@ -1588,84 +1588,84 @@ export default function ViolationManagement() {
             <div>
                 <div style={scrollWrapStyle}>
                     <table className="w-full border-collapse table-fixed">
-                <thead><tr className="bg-slate-50">
-                    <th style={th}>Ưu tiên</th>
-                    <th style={th}>Truyện</th>
-                    <th style={th}>Tác giả</th>
-                    <th style={th}>Số người báo cáo</th>
-                    <th style={th}>Thao tác</th>
-                </tr></thead>
-                <tbody>
-                    {rows.length === 0 && (
-                        <tr>
-                            <td colSpan={5} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
-                        </tr>
-                    )}
-                    {rows.map((r) => (
-                        <tr key={r.storyId} className="border-t border-slate-200 hover:bg-slate-50/70">
-                            {(() => {
-                                const hasPendingReleaseRequest = !!pendingReleaseByStory[r.storyId];
-                                return (
-                                    <>
-                                        <td style={td}>{(r.priorityScore ?? 0).toFixed?.(1) ?? r.priorityScore}</td>
-                                        <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
-                                        <td style={td}>{r.authorDisplayName || '—'}</td>
-                                        <td style={td}>
-                                            {(() => {
-                                                const contributors = Array.isArray(r.contributors) ? r.contributors : [];
-                                                if (contributors.length === 0) return r.reportCount ?? 0;
-                                                const unique = new Set(
-                                                    contributors.map((c) => String(c?.userId ?? c?.UserId ?? c?.userEmail ?? c?.UserEmail ?? c?.userName ?? c?.UserName ?? Math.random())),
-                                                );
-                                                return unique.size;
-                                            })()}
-                                        </td>
-                                        <td style={{ ...td, minWidth: 260 }}>
-                                            <div style={{ display: 'inline-flex', gap: 6, position: 'relative', flexWrap: 'nowrap' }}>
-                                                <button
-                                                    type="button"
-                                                    style={btn}
-                                                    onClick={() => handleStoryRowActionSelect(r, 'detail', hasPendingReleaseRequest)}
-                                                >
-                                                    Chi tiết
-                                                </button>
-                                                <details>
-                                                    <summary style={btn}>Tác vụ</summary>
-                                                    <div
-                                                        style={{
-                                                            position: 'absolute',
-                                                            top: 'calc(100% + 6px)',
-                                                            right: 0,
-                                                            minWidth: 260,
-                                                            backgroundColor: '#fff',
-                                                            border: '1px solid #dbe2ea',
-                                                            borderRadius: 10,
-                                                            boxShadow: '0 8px 20px rgba(15, 23, 42, 0.12)',
-                                                            padding: 6,
-                                                            zIndex: 30,
-                                                        }}
-                                                    >
-                                                        <button type="button" style={menuBtn} disabled={!r.authorId} onClick={() => handleStoryRowActionSelect(r, 'author-history', hasPendingReleaseRequest)}>Lịch sử vi phạm tác giả</button>
-                                                        <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'release-request', hasPendingReleaseRequest)}>Trả đơn về hàng đợi</button>
-                                                        {isAdmin && <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'admin-release', hasPendingReleaseRequest)}>Quản trị viên gỡ khóa đơn</button>}
-                                                        <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-flag', hasPendingReleaseRequest)}>{r.complianceFlagged ? 'Bỏ gắn cờ vi phạm' : 'Gắn cờ vi phạm'}</button>
-                                                        <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-comments', hasPendingReleaseRequest)}>{r.commentsDisabled ? 'Mở lại bình luận' : 'Khóa bình luận'}</button>
-                                                        <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-hidden', hasPendingReleaseRequest)}>{r.complianceHidden ? 'Hiển thị lại truyện' : 'Ẩn truyện khỏi người dùng thường'}</button>
-                                                        <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'request-ban', hasPendingReleaseRequest)}>Yêu cầu chặn / tạm đình chỉ tài khoản</button>
-                                                        <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'resolve-all', hasPendingReleaseRequest)}>Xử lý toàn bộ phiếu báo cáo</button>
+                        <thead><tr className="bg-slate-50">
+                            <th style={th}>Ưu tiên</th>
+                            <th style={th}>Truyện</th>
+                            <th style={th}>Tác giả</th>
+                            <th style={th}>Số người báo cáo</th>
+                            <th style={th}>Thao tác</th>
+                        </tr></thead>
+                        <tbody>
+                            {rows.length === 0 && (
+                                <tr>
+                                    <td colSpan={5} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                                </tr>
+                            )}
+                            {rows.map((r) => (
+                                <tr key={r.storyId} className="border-t border-slate-200 hover:bg-slate-50/70">
+                                    {(() => {
+                                        const hasPendingReleaseRequest = !!pendingReleaseByStory[r.storyId];
+                                        return (
+                                            <>
+                                                <td style={td}>{(r.priorityScore ?? 0).toFixed?.(1) ?? r.priorityScore}</td>
+                                                <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
+                                                <td style={td}>{r.authorDisplayName || '—'}</td>
+                                                <td style={td}>
+                                                    {(() => {
+                                                        const contributors = Array.isArray(r.contributors) ? r.contributors : [];
+                                                        if (contributors.length === 0) return r.reportCount ?? 0;
+                                                        const unique = new Set(
+                                                            contributors.map((c) => String(c?.userId ?? c?.UserId ?? c?.userEmail ?? c?.UserEmail ?? c?.userName ?? c?.UserName ?? Math.random())),
+                                                        );
+                                                        return unique.size;
+                                                    })()}
+                                                </td>
+                                                <td style={{ ...td, minWidth: 260 }}>
+                                                    <div style={{ display: 'inline-flex', gap: 6, position: 'relative', flexWrap: 'nowrap' }}>
+                                                        <button
+                                                            type="button"
+                                                            style={btn}
+                                                            onClick={() => handleStoryRowActionSelect(r, 'detail', hasPendingReleaseRequest)}
+                                                        >
+                                                            Chi tiết
+                                                        </button>
+                                                        <details>
+                                                            <summary style={btn}>Tác vụ</summary>
+                                                            <div
+                                                                style={{
+                                                                    position: 'absolute',
+                                                                    top: 'calc(100% + 6px)',
+                                                                    right: 0,
+                                                                    minWidth: 260,
+                                                                    backgroundColor: '#fff',
+                                                                    border: '1px solid #dbe2ea',
+                                                                    borderRadius: 10,
+                                                                    boxShadow: '0 8px 20px rgba(15, 23, 42, 0.12)',
+                                                                    padding: 6,
+                                                                    zIndex: 30,
+                                                                }}
+                                                            >
+                                                                <button type="button" style={menuBtn} disabled={!r.authorId} onClick={() => handleStoryRowActionSelect(r, 'author-history', hasPendingReleaseRequest)}>Lịch sử vi phạm tác giả</button>
+                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'release-request', hasPendingReleaseRequest)}>Trả đơn về hàng đợi</button>
+                                                                {isAdmin && <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'admin-release', hasPendingReleaseRequest)}>Quản trị viên gỡ khóa đơn</button>}
+                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-flag', hasPendingReleaseRequest)}>{r.complianceFlagged ? 'Bỏ gắn cờ vi phạm' : 'Gắn cờ vi phạm'}</button>
+                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-comments', hasPendingReleaseRequest)}>{r.commentsDisabled ? 'Mở lại bình luận' : 'Khóa bình luận'}</button>
+                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-hidden', hasPendingReleaseRequest)}>{r.complianceHidden ? 'Hiển thị lại truyện' : 'Ẩn truyện khỏi người dùng thường'}</button>
+                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'request-ban', hasPendingReleaseRequest)}>Yêu cầu chặn / tạm đình chỉ tài khoản</button>
+                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'resolve-all', hasPendingReleaseRequest)}>Xử lý toàn bộ phiếu báo cáo</button>
+                                                            </div>
+                                                        </details>
                                                     </div>
-                                                </details>
-                                            </div>
-                                            {hasPendingReleaseRequest ? (
-                                                <div className="text-xs text-amber-700 mt-1">Đang chờ quản trị viên xử lý đơn hủy nhận duyệt.</div>
-                                            ) : null}
-                                        </td>
-                                    </>
-                                );
-                            })()}
-                        </tr>
-                    ))}
-                </tbody>
+                                                    {hasPendingReleaseRequest ? (
+                                                        <div className="text-xs text-amber-700 mt-1">Đang chờ quản trị viên xử lý đơn hủy nhận duyệt.</div>
+                                                    ) : null}
+                                                </td>
+                                            </>
+                                        );
+                                    })()}
+                                </tr>
+                            ))}
+                        </tbody>
                     </table>
                 </div>
                 {_totalCount > 0 && (
@@ -1689,81 +1689,81 @@ export default function ViolationManagement() {
             <div>
                 <div style={scrollWrapStyle}>
                     <table className="w-full border-collapse table-fixed">
-                <thead><tr className="bg-slate-50">
-                    <th style={th}>Ưu tiên</th>
-                    <th style={th}>Truyện</th>
-                    <th style={th}>Người bình luận</th>
-                    <th style={th}>Người báo</th>
-                    <th style={th}>Mã phiếu</th>
-                    <th style={th}>Khóa đơn</th>
-                    <th style={th}>Cảnh báo</th>
-                    <th style={th}>Thao tác</th>
-                </tr></thead>
-                <tbody>
-                    {rows.length === 0 && (
-                        <tr>
-                            <td colSpan={8} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
-                        </tr>
-                    )}
-                    {rows.map((r) => (
-                        <tr key={r.commentId} className="border-t border-slate-200 hover:bg-slate-50/70">
-                            {(() => {
-                                const hasPending = !!r.hasPendingAdminActionRequest;
-                                const reporters = Array.isArray(r.reporterDisplayNames) ? r.reporterDisplayNames : [];
-                                const reporterLabel = reporters.length === 0 ? '—' : reporters.length > 1 ? `${reporters[0]} +${reporters.length - 1}` : reporters[0];
-                                return (
-                                    <>
-                                        <td style={td}>{Number(r.priorityScore ?? 0).toFixed(1)}</td>
-                                        <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
-                                        <td style={td}>{r.commentUserDisplayName || '—'}</td>
-                                        <td style={td}>{reporterLabel}</td>
-                                        <td style={td}><div style={{ fontWeight: 600 }}>{r.reportId}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.commentId}</div></td>
-                                        <td style={td}>{r.isComplianceLocked ? `Đã khóa — ${r.complianceClaimedByDisplayName || '—'}` : 'Chưa khóa'}</td>
-                                        <td style={td}>
-                                            <div className="text-xs text-slate-700 max-w-[200px]">{r.adminOrModeratorReplyWarningVi || '—'}</div>
-                                        </td>
-                                        <td style={{ ...td, minWidth: 260 }}>
-                                            <div style={{ display: 'inline-flex', gap: 6, position: 'relative', flexWrap: 'nowrap' }}>
-                                                <button
-                                                    type="button"
-                                                    style={hasPending ? { ...btn, opacity: 0.45, cursor: 'not-allowed' } : btn}
-                                                    onClick={() => handleCommentRowActionSelect(r, 'detail', hasPending)}
-                                                    disabled={hasPending}
-                                                >
-                                                    Chi tiết
-                                                </button>
-                                                <details>
-                                                    <summary style={btn}>Tác vụ</summary>
-                                                    <div
-                                                        style={{
-                                                            position: 'absolute',
-                                                            top: 'calc(100% + 6px)',
-                                                            right: 0,
-                                                            minWidth: 260,
-                                                            backgroundColor: '#fff',
-                                                            border: '1px solid #dbe2ea',
-                                                            borderRadius: 10,
-                                                            boxShadow: '0 8px 20px rgba(15, 23, 42, 0.12)',
-                                                            padding: 6,
-                                                            zIndex: 30,
-                                                        }}
-                                                    >
-                                                        <button type="button" style={menuBtn} disabled={!r.commentUserId || hasPending} onClick={() => handleCommentRowActionSelect(r, 'account-history', hasPending)}>Lịch sử vi phạm tài khoản</button>
-                                                        {isAdmin && <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'admin-release', hasPending)}>Quản trị viên gỡ khóa bình luận</button>}
-                                                        <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'hide-thread', hasPending)}>{r.isCommentThreadHidden ? 'Chuỗi bình luận đã ẩn' : 'Ẩn chuỗi bình luận'}</button>
-                                                        <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'request-ban', hasPending)}>Yêu cầu chặn / tạm đình chỉ tài khoản</button>
-                                                        <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'resolve-all', hasPending)}>Xử lý toàn bộ phiếu báo cáo</button>
+                        <thead><tr className="bg-slate-50">
+                            <th style={th}>Ưu tiên</th>
+                            <th style={th}>Truyện</th>
+                            <th style={th}>Người bình luận</th>
+                            <th style={th}>Người báo</th>
+                            <th style={th}>Mã phiếu</th>
+                            <th style={th}>Khóa đơn</th>
+                            <th style={th}>Cảnh báo</th>
+                            <th style={th}>Thao tác</th>
+                        </tr></thead>
+                        <tbody>
+                            {rows.length === 0 && (
+                                <tr>
+                                    <td colSpan={8} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                                </tr>
+                            )}
+                            {rows.map((r) => (
+                                <tr key={r.commentId} className="border-t border-slate-200 hover:bg-slate-50/70">
+                                    {(() => {
+                                        const hasPending = !!r.hasPendingAdminActionRequest;
+                                        const reporters = Array.isArray(r.reporterDisplayNames) ? r.reporterDisplayNames : [];
+                                        const reporterLabel = reporters.length === 0 ? '—' : reporters.length > 1 ? `${reporters[0]} +${reporters.length - 1}` : reporters[0];
+                                        return (
+                                            <>
+                                                <td style={td}>{Number(r.priorityScore ?? 0).toFixed(1)}</td>
+                                                <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
+                                                <td style={td}>{r.commentUserDisplayName || '—'}</td>
+                                                <td style={td}>{reporterLabel}</td>
+                                                <td style={td}><div style={{ fontWeight: 600 }}>{r.reportId}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.commentId}</div></td>
+                                                <td style={td}>{r.isComplianceLocked ? `Đã khóa — ${r.complianceClaimedByDisplayName || '—'}` : 'Chưa khóa'}</td>
+                                                <td style={td}>
+                                                    <div className="text-xs text-slate-700 max-w-[200px]">{r.adminOrModeratorReplyWarningVi || '—'}</div>
+                                                </td>
+                                                <td style={{ ...td, minWidth: 260 }}>
+                                                    <div style={{ display: 'inline-flex', gap: 6, position: 'relative', flexWrap: 'nowrap' }}>
+                                                        <button
+                                                            type="button"
+                                                            style={hasPending ? { ...btn, opacity: 0.45, cursor: 'not-allowed' } : btn}
+                                                            onClick={() => handleCommentRowActionSelect(r, 'detail', hasPending)}
+                                                            disabled={hasPending}
+                                                        >
+                                                            Chi tiết
+                                                        </button>
+                                                        <details>
+                                                            <summary style={btn}>Tác vụ</summary>
+                                                            <div
+                                                                style={{
+                                                                    position: 'absolute',
+                                                                    top: 'calc(100% + 6px)',
+                                                                    right: 0,
+                                                                    minWidth: 260,
+                                                                    backgroundColor: '#fff',
+                                                                    border: '1px solid #dbe2ea',
+                                                                    borderRadius: 10,
+                                                                    boxShadow: '0 8px 20px rgba(15, 23, 42, 0.12)',
+                                                                    padding: 6,
+                                                                    zIndex: 30,
+                                                                }}
+                                                            >
+                                                                <button type="button" style={menuBtn} disabled={!r.commentUserId || hasPending} onClick={() => handleCommentRowActionSelect(r, 'account-history', hasPending)}>Lịch sử vi phạm tài khoản</button>
+                                                                {isAdmin && <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'admin-release', hasPending)}>Quản trị viên gỡ khóa bình luận</button>}
+                                                                <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'hide-thread', hasPending)}>{r.isCommentThreadHidden ? 'Chuỗi bình luận đã ẩn' : 'Ẩn chuỗi bình luận'}</button>
+                                                                <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'request-ban', hasPending)}>Yêu cầu chặn / tạm đình chỉ tài khoản</button>
+                                                                <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'resolve-all', hasPending)}>Xử lý toàn bộ phiếu báo cáo</button>
+                                                            </div>
+                                                        </details>
                                                     </div>
-                                                </details>
-                                            </div>
-                                            {hasPending ? <div className="text-xs text-amber-700 mt-1">Đang chờ quản trị viên xử lý yêu cầu liên quan tài khoản.</div> : null}
-                                        </td>
-                                    </>
-                                );
-                            })()}
-                        </tr>
-                    ))}
-                </tbody>
+                                                    {hasPending ? <div className="text-xs text-amber-700 mt-1">Đang chờ quản trị viên xử lý yêu cầu liên quan tài khoản.</div> : null}
+                                                </td>
+                                            </>
+                                        );
+                                    })()}
+                                </tr>
+                            ))}
+                        </tbody>
                     </table>
                 </div>
                 {_totalCount > 0 && (
@@ -1810,44 +1810,44 @@ export default function ViolationManagement() {
             <div>
                 <div className="overflow-x-auto">
                     <table className="w-full border-collapse">
-                <thead><tr className="bg-slate-50">
-                    <th style={th}>Thời điểm</th>
-                    <th style={th}>Nguồn</th>
-                    <th style={th}>Hành động</th>
-                    <th style={th}>Trạng thái</th>
-                    <th style={th}>Đối tượng</th>
-                    <th style={th}>Nội dung</th>
-                </tr></thead>
-                <tbody>
-                    {rows.length === 0 && (
-                        <tr>
-                            <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Chưa có lịch sử xử lý vi phạm.</td>
-                        </tr>
-                    )}
-                    {rows.map((r) => (
-                        <tr key={r.rowId || r.reportId || r.id} className="border-t border-slate-200 hover:bg-slate-50/70">
-                            <td style={td}>{formatDate(r.createdAtUtc || r.resolvedAtUtc)}</td>
-                            <td style={td}>{complianceHistorySourceVi(r.source)}</td>
-                            <td style={td}>{complianceHistoryActionVi(r.action, r.source)}</td>
-                            <td style={td}><ComplianceHistoryStatusPill item={r} /></td>
-                            <td style={td}>
-                                {String(r.targetType || '').toUpperCase() === 'STORY' ? (
-                                    <>
-                                        <div style={{ fontWeight: 600 }}>Đối tượng: Truyện</div>
-                                        <div style={{ color: '#64748b', fontSize: 12 }}>
-                                            {historyTargetStoryMetaMap[r.targetId]?.title || '—'}
-                                        </div>
-                                    </>
-                                ) : String(r.targetType || '').toUpperCase() === 'COMMENT' ? (
-                                    <div style={{ fontWeight: 600 }}>Đối tượng: Bình luận</div>
-                                ) : (
-                                    <div style={{ fontWeight: 600 }}>{r.targetType || '—'}</div>
-                                )}
-                            </td>
-                            <td style={td}>{complianceHistoryMessageVi(r)}</td>
-                        </tr>
-                    ))}
-                </tbody>
+                        <thead><tr className="bg-slate-50">
+                            <th style={th}>Thời điểm</th>
+                            <th style={th}>Nguồn</th>
+                            <th style={th}>Hành động</th>
+                            <th style={th}>Trạng thái</th>
+                            <th style={th}>Đối tượng</th>
+                            <th style={th}>Nội dung</th>
+                        </tr></thead>
+                        <tbody>
+                            {rows.length === 0 && (
+                                <tr>
+                                    <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Chưa có lịch sử xử lý vi phạm.</td>
+                                </tr>
+                            )}
+                            {rows.map((r) => (
+                                <tr key={r.rowId || r.reportId || r.id} className="border-t border-slate-200 hover:bg-slate-50/70">
+                                    <td style={td}>{formatDate(r.createdAtUtc || r.resolvedAtUtc)}</td>
+                                    <td style={td}>{complianceHistorySourceVi(r.source)}</td>
+                                    <td style={td}>{complianceHistoryActionVi(r.action, r.source)}</td>
+                                    <td style={td}><ComplianceHistoryStatusPill item={r} /></td>
+                                    <td style={td}>
+                                        {String(r.targetType || '').toUpperCase() === 'STORY' ? (
+                                            <>
+                                                <div style={{ fontWeight: 600 }}>Đối tượng: Truyện</div>
+                                                <div style={{ color: '#64748b', fontSize: 12 }}>
+                                                    {historyTargetStoryMetaMap[r.targetId]?.title || '—'}
+                                                </div>
+                                            </>
+                                        ) : String(r.targetType || '').toUpperCase() === 'COMMENT' ? (
+                                            <div style={{ fontWeight: 600 }}>Đối tượng: Bình luận</div>
+                                        ) : (
+                                            <div style={{ fontWeight: 600 }}>{r.targetType || '—'}</div>
+                                        )}
+                                    </td>
+                                    <td style={td}>{complianceHistoryMessageVi(r)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
                     </table>
                 </div>
                 {_totalCount > 0 && totalPages > 1 && (
@@ -2786,8 +2786,8 @@ export default function ViolationManagement() {
                                 <button
                                     type="button"
                                     className={`px-3 py-2 text-sm font-semibold rounded-t-md border-b-2 -mb-px transition-colors ${myRequestsTab === 'cancel_claim'
-                                            ? 'border-sky-600 text-sky-800 bg-sky-50/80'
-                                            : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                                        ? 'border-sky-600 text-sky-800 bg-sky-50/80'
+                                        : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                                         }`}
                                     onClick={() => setMyRequestsTab('cancel_claim')}
                                 >
@@ -2796,8 +2796,8 @@ export default function ViolationManagement() {
                                 <button
                                     type="button"
                                     className={`px-3 py-2 text-sm font-semibold rounded-t-md border-b-2 -mb-px transition-colors ${myRequestsTab === 'ban_suspend'
-                                            ? 'border-sky-600 text-sky-800 bg-sky-50/80'
-                                            : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                                        ? 'border-sky-600 text-sky-800 bg-sky-50/80'
+                                        : 'border-transparent text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                                         }`}
                                     onClick={() => setMyRequestsTab('ban_suspend')}
                                 >

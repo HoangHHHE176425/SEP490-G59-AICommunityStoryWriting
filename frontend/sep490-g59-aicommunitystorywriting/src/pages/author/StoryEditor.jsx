@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { X } from 'lucide-react';
 import { StoryInfoForm } from '../../components/author/story-editor/StoryInfoForm';
 import { ChapterList } from '../../components/author/story-editor/ChapterList';
 import { ChapterEditor } from '../../components/author/story-editor/ChapterEditor';
@@ -7,6 +8,7 @@ import { useToast } from '../../components/author/story-editor/Toast';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
 import { useAuth } from '../../contexts/AuthContext';
+import { checkBannedWords, checkChapterSpelling } from '../../api/ai/aiApi';
 
 // Helper function to count words
 const countWords = (text) => {
@@ -20,6 +22,8 @@ export function StoryEditor({ story, onSave, onCancel }) {
     const [currentStep, setCurrentStep] = useState(1);
     const [saving, setSaving] = useState(false);
     const { showToast, ToastContainer } = useToast();
+    const storyTotalViews = Number(story?.totalViews ?? story?.TotalViews ?? 0) || 0;
+    const canEnablePaidMode = storyTotalViews >= 500;
 
     const [formData, setFormData] = useState({
         title: '',
@@ -45,6 +49,17 @@ export function StoryEditor({ story, onSave, onCancel }) {
         { number: 4, title: 'Hoàn Thành' },
     ];
 
+    const [completionType, setCompletionType] = useState('publish'); // 'draft' | 'publish'
+
+    const [manualSpellingCheckLoading, setManualSpellingCheckLoading] = useState(false);
+    const [chapterCheckModal, setChapterCheckModal] = useState({
+        open: false,
+        loading: false,
+        mode: null, // 'spelling-support' | 'banned'
+        data: null,
+        error: null,
+    });
+
     useEffect(() => {
         const name = user?.displayName ?? user?.DisplayName ?? user?.fullName ?? user?.FullName ?? user?.nickname ?? user?.Nickname ?? '';
         if (story) {
@@ -63,13 +78,14 @@ export function StoryEditor({ story, onSave, onCancel }) {
                 cover: story.cover || '',
             });
         } else {
-            setFormData(prev => ({ ...prev, author: name }));
+            setFormData((prev) => ({ ...prev, author: name, status: 'Đang ra' }));
         }
     }, [story, user]);
 
     const minChapters = 1;
 
     const handleFormDataChange = (field, value) => {
+        if (!story && field === 'status' && value !== 'Đang ra') return;
         setFormData({ ...formData, [field]: value });
     };
 
@@ -134,6 +150,10 @@ export function StoryEditor({ story, onSave, onCancel }) {
             showToast('Vui lòng nhập mô tả truyện', 'error');
             return false;
         }
+        if (!story && formData.status !== 'Đang ra') {
+            showToast('Truyện mới bắt buộc ở trạng thái Đang ra.', 'error');
+            return false;
+        }
         return true;
     };
 
@@ -158,12 +178,187 @@ export function StoryEditor({ story, onSave, onCancel }) {
             showToast(`Có ${chaptersWithInsufficientWords.length} chương chưa đủ 500 từ`, 'error');
             return false;
         }
+
+        // Validate chế độ sáng tác (Public / Paid) giống màn tạo/chỉnh sửa chương
+        const isNewStory = !story;
+        for (const ch of chapters) {
+            if (!ch) continue;
+            if (ch.accessType === 'paid') {
+                // Create story: backend chỉ cho phép PAID khi story.total_views >= 500.
+                // Edit story: nếu chương đã là PAID sẵn thì BE không chặn theo rule “chuyển từ FREE sang PAID”.
+                if (isNewStory && !canEnablePaidMode) {
+                    showToast('Truyện cần tối thiểu 500 lượt xem mới được bật chế độ trả phí cho chương.', 'error');
+                    return false;
+                }
+                if (!ch.price || Number(ch.price) <= 0) {
+                    showToast('Vui lòng nhập giá cho chương trả phí', 'error');
+                    return false;
+                }
+            }
+        }
+
         return true;
     };
 
-    const handleNextStep = () => {
+    const findIssuePosition = (contentRaw, needleRaw) => {
+        const needle = (needleRaw ?? '').toString().trim();
+        const content = (contentRaw ?? '').toString();
+        if (!needle || !content) return null;
+
+        const lowerNeedle = needle.toLowerCase();
+        const lines = content.split(/\r?\n/);
+
+        const lineIndex = lines.findIndex((ln) => ln.toLowerCase().includes(lowerNeedle));
+        const lineNo = lineIndex >= 0 ? lineIndex + 1 : null;
+
+        const paragraphs = content.split(/\r?\n\s*\r?\n/);
+        const paraIndex = paragraphs.findIndex((p) => p.toLowerCase().includes(lowerNeedle));
+        const paraNo = paraIndex >= 0 ? paraIndex + 1 : null;
+
+        const idx = content.toLowerCase().indexOf(lowerNeedle);
+        const charOffset = idx >= 0 ? idx + 1 : null;
+
+        if (lineNo == null && paraNo == null && charOffset == null) return null;
+        return { lineNo, paraNo, charOffset };
+    };
+
+    const summaryImpliesSpellingIssue = (summaryText) => {
+        const s = String(summaryText ?? '').trim().toLowerCase();
+        if (!s) return false;
+        return /ph[aá]t hi[eệ]n.*l[ỗo]i ch[ií]nh t[ảa]/i.test(s)
+            || /l[ỗo]i ch[ií]nh t[ảa]/i.test(s)
+            || /d[ấa]u c[âa]u/i.test(s);
+    };
+
+    const buildSpellingSummary = (rawSummary, spellingIssues) => {
+        const count = Array.isArray(spellingIssues) ? spellingIssues.length : 0;
+        if (count > 0) return `Phát hiện ${count} lỗi chính tả.`;
+        const s = String(rawSummary ?? '').trim();
+        if (!s) return 'Không phát hiện lỗi chính tả.';
+        if (/t[ừu]\s*c[ấa]m|ch[ií]nh\s*s[áa]ch/i.test(s)) return 'Không phát hiện lỗi chính tả.';
+        return s;
+    };
+
+    const policyTypeVi = (typeRaw) => {
+        const t = String(typeRaw ?? '').trim().toUpperCase();
+        if (t === 'BANNEDWORD') return 'Từ cấm';
+        return typeRaw || '—';
+    };
+
+    const buildBannedWordsSummary = (rawSummary, policyViolations, hasInappropriateContent) => {
+        const count = Array.isArray(policyViolations) ? policyViolations.length : 0;
+        if (count > 0) return `Phát hiện ${count} vi phạm từ cấm/chính sách.`;
+        if (hasInappropriateContent) return 'Nội dung có dấu hiệu không phù hợp theo chính sách nền tảng.';
+        const s = String(rawSummary ?? '').trim();
+        if (!s) return 'Không phát hiện vi phạm từ cấm/chính sách.';
+        if (/ch[ií]nh t[ảa]/i.test(s)) return 'Không phát hiện vi phạm từ cấm/chính sách.';
+        return s;
+    };
+
+    const handleManualSpellingCheck = async () => {
+        const ch = chapters[currentChapterIndex];
+        if (!ch) return;
+        if (!String(ch.content ?? '').trim()) {
+            setChapterCheckModal({
+                open: true,
+                loading: false,
+                mode: 'spelling-support',
+                data: null,
+                error: 'Vui lòng nhập nội dung chương trước khi kiểm tra.',
+            });
+            return;
+        }
+
+        setManualSpellingCheckLoading(true);
+        try {
+            setChapterCheckModal({ open: true, loading: true, mode: 'spelling-support', data: null, error: null });
+            const res = await checkChapterSpelling({
+                content: ch.content,
+                storyId: story?.id ?? story?.Id ?? null,
+                chapterTitle: ch.title ?? null,
+            });
+
+            const spellingIssues = res?.spellingIssues ?? res?.SpellingIssues ?? [];
+            const normalizedSummary = buildSpellingSummary(res?.summary ?? res?.Summary ?? null, spellingIssues);
+
+            setChapterCheckModal({
+                open: true,
+                loading: false,
+                mode: 'spelling-support',
+                error: null,
+                data: {
+                    passed: spellingIssues.length === 0 && !summaryImpliesSpellingIssue(normalizedSummary),
+                    summary: normalizedSummary,
+                    spellingIssues,
+                    contentForPosition: ch.content,
+                },
+            });
+        } catch (err) {
+            const msg = err?.response?.data?.message ?? err?.response?.data?.detail ?? err?.message ?? 'Không thể kiểm tra chính tả.';
+            setChapterCheckModal({ open: true, loading: false, mode: 'spelling-support', data: null, error: msg });
+        } finally {
+            setManualSpellingCheckLoading(false);
+        }
+    };
+
+    const checkBannedWordsBeforeStep3 = async () => {
+        // Kiểm tra toàn bộ chapters để đảm bảo “không vi phạm từ cấm” mới cho qua bước 3.
+        for (let i = 0; i < chapters.length; i++) {
+            const ch = chapters[i];
+            if (!ch) continue;
+
+            const content = String(ch.content ?? '').trim();
+            if (!content) continue; // validateStep2 sẽ chặn nên nhánh này chủ yếu để guard.
+
+            try {
+                const res = await checkBannedWords({
+                    content,
+                    storyId: story?.id ?? story?.Id ?? null,
+                    chapterTitle: ch.title ?? null,
+                });
+
+                const policyViolations = res?.policyViolations ?? res?.PolicyViolations ?? [];
+                const passed = Boolean(res?.passed ?? res?.Passed)
+                    && Array.isArray(policyViolations) && policyViolations.length === 0
+                    && !(res?.hasInappropriateContent ?? res?.HasInappropriateContent);
+
+                if (!passed) {
+                    const hasInappropriateContent = Boolean(res?.hasInappropriateContent ?? res?.HasInappropriateContent);
+                    const summary = buildBannedWordsSummary(res?.summary ?? res?.Summary ?? null, policyViolations, hasInappropriateContent);
+
+                    setChapterCheckModal({
+                        open: true,
+                        loading: false,
+                        mode: 'banned',
+                        error: null,
+                        data: {
+                            passed,
+                            summary,
+                            hasInappropriateContent,
+                            policyViolations,
+                            contentForPosition: content,
+                        },
+                    });
+                    return false;
+                }
+            } catch (err) {
+                const msg = err?.response?.data?.message ?? err?.response?.data?.detail ?? err?.message ?? 'Không thể kiểm tra từ cấm/chính sách.';
+                setChapterCheckModal({ open: true, loading: false, mode: 'banned', data: null, error: msg });
+                return false;
+            }
+        }
+        return true;
+    };
+
+    const handleNextStep = async () => {
         if (currentStep === 1 && !validateStep1()) return;
         if (currentStep === 2 && !validateStep2()) return;
+
+        // Bước 2 -> Bước 3: kiểm tra từ cấm
+        if (currentStep === 2) {
+            const ok = await checkBannedWordsBeforeStep3();
+            if (!ok) return;
+        }
 
         if (currentStep < 4) {
             setCurrentStep(currentStep + 1);
@@ -199,7 +394,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
             categoryIds,
             isDraft,
             status: isDraft ? 'DRAFT' : 'PENDING_REVIEW',
-            storyProgressStatus: formData.status,
+            storyProgressStatus: !story ? 'Đang ra' : formData.status,
             chaptersData: chapters.map((ch, i) => ({
                 title: ch.title,
                 content: ch.content || '',
@@ -217,7 +412,8 @@ export function StoryEditor({ story, onSave, onCancel }) {
         try {
             await onSave(storyData);
             showToast(isDraft ? 'Đã lưu bản nháp' : 'Đăng truyện thành công! Đang chờ duyệt.', 'success');
-            if (!isDraft) setCurrentStep(4);
+            setCompletionType(isDraft ? 'draft' : 'publish');
+            setCurrentStep(4);
         } catch (err) {
             showToast(err?.message || 'Có lỗi xảy ra', 'error');
         } finally {
@@ -246,6 +442,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                             formData={formData}
                             onChange={handleFormDataChange}
                             onImageUpload={handleImageUpload}
+                            lockStoryProgressStatus={!story}
                         />
                     )}
 
@@ -264,6 +461,8 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                 chapter={chapters[currentChapterIndex]}
                                 onChange={handleChapterChange}
                                 story={story}
+                                onSpellcheckSupport={handleManualSpellingCheck}
+                                spellcheckLoading={manualSpellingCheckLoading}
                             />
                         </div>
                     )}
@@ -311,6 +510,19 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                     <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
                                         <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Giới hạn độ tuổi:</div>
                                         <div style={{ fontSize: '0.875rem', color: '#333333' }}>{formData.ageRating}</div>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
+                                        <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>Mô tả truyện:</div>
+                                        <div
+                                            style={{
+                                                fontSize: '0.875rem',
+                                                color: '#333333',
+                                                whiteSpace: 'pre-wrap',
+                                                lineHeight: 1.5,
+                                            }}
+                                        >
+                                            {formData.note ? formData.note : '—'}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -364,7 +576,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                         <div style={{ backgroundColor: '#ffffff', borderRadius: '8px', padding: '3rem', border: '1px solid #e0e0e0', textAlign: 'center' }}>
                             <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>🎉</div>
                             <h3 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#333333', marginBottom: '0.5rem' }}>
-                                Đăng truyện thành công!
+                                {completionType === 'draft' ? 'Đã lưu bản nháp!' : 'Đăng truyện thành công!'}
                             </h3>
                             <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '2rem' }}>
                                 Truyện "{formData.title}" đã được đăng tải với {chapters.length} chương
@@ -520,6 +732,136 @@ export function StoryEditor({ story, onSave, onCancel }) {
                     )}
                 </div>
             </div>
+            {chapterCheckModal.open && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/55 backdrop-blur-sm">
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-2xl w-full border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
+                            <h3 className="text-2xl font-bold text-slate-900 dark:text-white">
+                                {chapterCheckModal.mode === 'spelling-support'
+                                    ? 'Kết quả hỗ trợ kiểm tra chính tả'
+                                    : 'Kết quả kiểm tra từ cấm/chính sách'}
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={() => setChapterCheckModal((p) => ({ ...p, open: false }))}
+                                className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                            >
+                                <X className="w-6 h-6 text-slate-500 dark:text-slate-300" />
+                            </button>
+                        </div>
+
+                        <div className="px-6 py-5 overflow-y-auto">
+                            {chapterCheckModal.loading ? (
+                                <div className="p-6 text-center text-slate-500">Đang kiểm tra...</div>
+                            ) : chapterCheckModal.error ? (
+                                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-900/20 dark:text-red-300">
+                                    {chapterCheckModal.error}
+                                </div>
+                            ) : (
+                                <>
+                                    {chapterCheckModal.data?.summary && (
+                                        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                                            <div style={{ fontWeight: 800, marginBottom: '4px' }}>Tóm tắt</div>
+                                            <div style={{ whiteSpace: 'pre-wrap' }}>{chapterCheckModal.data.summary}</div>
+                                        </div>
+                                    )}
+
+                                    {chapterCheckModal.mode === 'banned' ? (
+                                        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                                            Bạn cần sửa toàn bộ vi phạm từ cấm/chính sách trước khi được chuyển sang bước 3.
+                                        </div>
+                                    ) : null}
+
+                                    {chapterCheckModal.mode === 'spelling-support' ? (
+                                        <div className="space-y-3">
+                                            {(chapterCheckModal.data?.spellingIssues ?? []).length === 0 ? (
+                                                <div className="text-sm text-slate-500">Không phát hiện lỗi chính tả.</div>
+                                            ) : (
+                                                (chapterCheckModal.data?.spellingIssues ?? []).map((it, idx) => {
+                                                    const word = it.wordOrPhrase ?? it.WordOrPhrase ?? '';
+                                                    const sug = it.suggestion ?? it.Suggestion ?? '';
+                                                    const contentForPosition = chapterCheckModal.data?.contentForPosition ?? '';
+                                                    const pos = findIssuePosition(contentForPosition, word);
+                                                    return (
+                                                        <div key={idx} className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                                                            <div className="text-sm text-slate-900 dark:text-slate-100">
+                                                                <span style={{ fontWeight: 900 }}>Từ/Cụm</span>: <span style={{ fontWeight: 900, color: '#b91c1c' }}>{word || '—'}</span>
+                                                            </div>
+                                                            <div className="text-sm text-slate-900 dark:text-slate-100 mt-2">
+                                                                <span style={{ fontWeight: 900 }}>Gợi ý</span>: <span style={{ fontWeight: 900, color: '#15803d' }}>{sug || '—'}</span>
+                                                            </div>
+                                                            {pos ? (
+                                                                <div className="text-xs text-slate-600 dark:text-slate-300 mt-2">
+                                                                    <span style={{ fontWeight: 800 }}>Vị trí</span>:
+                                                                    {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
+                                                                    {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
+                                                                    {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
+                                                                </div>
+                                                            ) : (
+                                                                <div className="text-xs text-slate-400 dark:text-slate-400 mt-2">Không xác định được vị trí trong nội dung hiện tại.</div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {(chapterCheckModal.data?.policyViolations ?? []).length === 0 ? (
+                                                <div className="text-sm text-slate-500">Không phát hiện vi phạm.</div>
+                                            ) : (
+                                                (chapterCheckModal.data?.policyViolations ?? []).map((it, idx) => {
+                                                    const type = it.type ?? it.Type ?? '';
+                                                    const desc = it.description ?? it.Description ?? '';
+                                                    const quote = it.quote ?? it.Quote ?? '';
+                                                    const contentForPosition = chapterCheckModal.data?.contentForPosition ?? '';
+                                                    const pos = findIssuePosition(contentForPosition, quote);
+                                                    return (
+                                                        <div
+                                                            key={idx}
+                                                            className="rounded-xl border border-red-200 bg-amber-50 p-3"
+                                                        >
+                                                            <div className="text-sm text-amber-900">
+                                                                <span style={{ fontWeight: 900 }}>Loại</span>: <span style={{ fontWeight: 900 }}>{policyTypeVi(type)}</span>
+                                                            </div>
+                                                            <div className="text-sm text-amber-900 mt-2" style={{ whiteSpace: 'pre-wrap' }}>
+                                                                {desc || '—'}
+                                                            </div>
+                                                            {quote ? (
+                                                                <div className="mt-2 text-xs text-amber-800 border border-amber-200 bg-amber-50 rounded-lg p-2" style={{ whiteSpace: 'pre-wrap' }}>
+                                                                    {quote}
+                                                                </div>
+                                                            ) : null}
+                                                            {pos ? (
+                                                                <div className="text-xs text-amber-800 mt-2">
+                                                                    <span style={{ fontWeight: 800 }}>Vị trí</span>:
+                                                                    {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
+                                                                    {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
+                                                                    {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
+                                                                </div>
+                                                            ) : null}
+                                                        </div>
+                                                    );
+                                                })
+                                            )}
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+
+                        <div className="border-t border-slate-200 dark:border-slate-700 px-6 py-4 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setChapterCheckModal((p) => ({ ...p, open: false }))}
+                                className="min-w-28 px-4 py-2.5 bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-sm font-semibold rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                            >
+                                Đóng
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             <Footer />
         </div>
     );

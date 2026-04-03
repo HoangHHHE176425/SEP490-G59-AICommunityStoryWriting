@@ -101,7 +101,7 @@ function parseCoCreateSseResponse(rawText) {
  * @param {string} storyId - ID truyện (Guid)
  * @param {string|null|undefined} authorIdea - Ý tưởng của tác giả (có thể null khi BE cho phép auto)
  * @param {{ chapterOrderIndex?: number, chapterId?: string }} [options] - order_index/chapterId chương đang soạn
- * @returns {Promise<{ ideaContradictionFeedback?: string, outline: string, finalContent: string, approved: boolean, revisionCount: number, reviewFeedback?: string }>}
+ * @returns {Promise<{ ideaContradictionFeedback?: string, outline: string, suggestedChapterTitle?: string, finalContent: string, approved: boolean, revisionCount: number, reviewFeedback?: string }>}
  */
 export async function coCreate(storyId, authorIdea, options = {}) {
     if (!storyId) throw new Error("StoryId là bắt buộc.");
