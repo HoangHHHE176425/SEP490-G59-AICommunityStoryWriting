@@ -356,7 +356,7 @@ export function PolicyContent() {
                                     <li><strong className="text-[#1A2332]">AI là công cụ hỗ trợ:</strong> Công nghệ AI (GPT-4, Gemini)
                                         được tích hợp để hỗ trợ sáng tạo nội dung, gợi ý ý tưởng, phát triển cốt truyện và cải thiện văn phong</li>
                                     <li><strong className="text-[#1A2332]">Không thay thế con người:</strong> AI không được thiết kế
-                                        để thay thế hoàn toàn sự sáng tạo của con người, mà chỉ là trợ lý thông minh</li>
+                                        để thay thế hoàn toàn sự sáng tạo của con người, mà chỉ là công cụ hỗ trợ</li>
                                     <li><strong className="text-[#1A2332]">Tính minh bạch:</strong> Nội dung được tạo với sự hỗ trợ của AI
                                         có thể được đánh dấu để độc giả nhận biết (tùy chọn)</li>
                                 </ul>
