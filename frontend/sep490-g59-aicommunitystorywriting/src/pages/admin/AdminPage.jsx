@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { AdminDashboard } from '../../components/admin/AdminDashboard';
+import { ComplianceDashboard } from '../../components/admin/ComplianceDashboard';
 import { CategoryManagement } from './category/CategoryManagement';
 import { PublicationManagement } from './publication/PublicationManagement';
 import { UserManagement } from './user/UserManagement';
@@ -19,13 +20,13 @@ export function AdminPage() {
     const hidePagesForAdmin = useMemo(() => new Set(['publication', 'stories', 'comments']), []);
     const allowedPages = useMemo(() => {
         if (roleUpper === 'MODERATOR') return new Set(['dashboard', 'publication']);
-        if (roleUpper === 'COMPLIANCE') return new Set(['violations']);
+        if (roleUpper === 'COMPLIANCE') return new Set(['dashboard', 'violations']);
         return null; // ADMIN: full
     }, [roleUpper]);
 
     const getDefaultPageByRole = () => {
         if (roleUpper === 'MODERATOR') return 'dashboard';
-        if (roleUpper === 'COMPLIANCE') return 'violations';
+        if (roleUpper === 'COMPLIANCE') return 'dashboard';
         return 'dashboard';
     };
 
@@ -53,6 +54,13 @@ export function AdminPage() {
     const renderPage = () => {
         switch (activePage) {
             case 'dashboard':
+                if (roleUpper === 'COMPLIANCE') {
+                    return (
+                        <ComplianceDashboard
+                            onNavigateToViolations={() => setActivePage('violations')}
+                        />
+                    );
+                }
                 return (
                     <AdminDashboard
                         onNavigatePublicationStatus={(status) => {
