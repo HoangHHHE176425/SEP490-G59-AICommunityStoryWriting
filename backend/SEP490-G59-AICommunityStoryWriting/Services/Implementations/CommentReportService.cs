@@ -637,6 +637,71 @@ public class CommentReportService : ICommentReportService
         return openReports.Count;
     }
 
+    public async Task<int> SetComplianceCommentReportEvidenceVerifiedAsync(
+        Guid commentId,
+        Guid actorUserId,
+        SetComplianceCommentReportEvidenceVerifiedRequestDto dto,
+        bool actorIsAdmin)
+    {
+        if (dto == null) throw new ArgumentException("Request is required.");
+
+        var toVerify = (dto.VerifyEvidenceIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct().ToList();
+        var toUnverify = (dto.UnverifyEvidenceIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct().ToList();
+        if (toVerify.Count == 0 && toUnverify.Count == 0)
+            return 0;
+        if (toVerify.Intersect(toUnverify).Any())
+            throw new ArgumentException("Không được trùng evidence giữa đánh dấu và gỡ đánh dấu.");
+
+        if (HasPendingAdminActionForCommentThread(commentId))
+            throw new InvalidOperationException("Đã gửi yêu cầu lên admin, không thể thao tác thêm trên comment report này.");
+
+        if (!actorIsAdmin && !ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, commentId, actorUserId))
+            throw new InvalidOperationException("Chỉ compliance đang nhận (lock) comment này mới được đánh dấu xác minh.");
+
+        var allIds = toVerify.Concat(toUnverify).Distinct().ToList();
+
+        await using var context = new StoryPlatformDbContext();
+        var rows = await context.report_evidences
+            .Include(e => e.report)
+            .Where(e => allIds.Contains(e.id))
+            .ToListAsync();
+
+        if (rows.Count != allIds.Count)
+            throw new InvalidOperationException("Một hoặc nhiều bản ghi evidence không tồn tại.");
+
+        foreach (var e in rows)
+        {
+            var r = e.report;
+            if (r == null
+                || !string.Equals((r.target_type ?? "").Trim(), CommentTargetType, StringComparison.OrdinalIgnoreCase)
+                || r.target_id != commentId)
+            {
+                throw new InvalidOperationException("Evidence không thuộc comment thread này.");
+            }
+        }
+
+        var now = DateTime.UtcNow;
+        var touched = 0;
+        foreach (var e in rows)
+        {
+            if (toVerify.Contains(e.id))
+            {
+                e.compliance_verified_at_utc = now;
+                e.compliance_verified_by_user_id = actorUserId;
+                touched++;
+            }
+            else if (toUnverify.Contains(e.id))
+            {
+                e.compliance_verified_at_utc = null;
+                e.compliance_verified_by_user_id = null;
+                touched++;
+            }
+        }
+
+        await context.SaveChangesAsync();
+        return touched;
+    }
+
     private async Task NotifyCommentReportersBulkResolvedAsync(IReadOnlyCollection<Guid> reporterIds, Guid commentId, string status)
     {
         if (reporterIds == null || reporterIds.Count == 0) return;
@@ -960,21 +1025,33 @@ public class CommentReportService : ICommentReportService
         var reportIdsForPage = reportRowsForEvidence.Select(x => x.ReportId).ToList();
         var reportIdToCommentId = reportRowsForEvidence.ToDictionary(x => x.ReportId, x => x.CommentId);
 
-        var evidenceForPage = new List<(Guid ReportId, string? EvidenceText)>();
-        if (reportIdsForPage.Count > 0)
-        {
-            evidenceForPage = await context.report_evidences.AsNoTracking()
-                .Where(e => e.report_id != null && reportIdsForPage.Contains(e.report_id.Value))
-                .Select(e => new ValueTuple<Guid, string?>(e.report_id!.Value, e.evidence_text))
-                .ToListAsync();
-        }
+        var evidenceForPage = await context.report_evidences.AsNoTracking()
+            .Where(e => e.report_id != null && reportIdsForPage.Contains(e.report_id.Value))
+            .Join(
+                context.reports.AsNoTracking(),
+                e => e.report_id!.Value,
+                r => r.id,
+                (e, r) => new { e, r })
+            .Where(x => ((x.r.target_type ?? "").ToUpper()) == CommentTargetType)
+            .Select(x => new
+            {
+                x.e.id,
+                ReportId = x.e.report_id!.Value,
+                x.e.evidence_text,
+                x.e.compliance_verified_at_utc,
+                CommentId = x.r.target_id,
+                x.r.reason_category,
+                x.r.description,
+                x.r.created_at
+            })
+            .ToListAsync();
 
         var reporterIdsByCommentId = new Dictionary<Guid, HashSet<Guid>>();
         var allReporterIds = new HashSet<Guid>();
         foreach (var ev in evidenceForPage)
         {
-            if (string.IsNullOrWhiteSpace(ev.EvidenceText)) continue;
-            if (!Guid.TryParse(ev.EvidenceText, out var reporterId)) continue;
+            if (string.IsNullOrWhiteSpace(ev.evidence_text)) continue;
+            if (!Guid.TryParse(ev.evidence_text, out var reporterId)) continue;
             if (!reportIdToCommentId.TryGetValue(ev.ReportId, out var cid)) continue;
 
             if (!reporterIdsByCommentId.TryGetValue(cid, out var set))
@@ -1026,30 +1103,40 @@ public class CommentReportService : ICommentReportService
             reporterNamesByCommentId[cid] = names;
         }
 
-        var reporterDetailsByCommentId = reportRowsForEvidence
+        var reporterDetailsByCommentId = evidenceForPage
+            .Where(x => commentIds.Contains(x.CommentId))
+            .Where(x => !string.IsNullOrWhiteSpace(x.evidence_text) && Guid.TryParse(x.evidence_text, out _))
             .GroupBy(x => x.CommentId)
             .ToDictionary(
                 g => g.Key,
                 g => (IReadOnlyList<ComplianceCommentReporterDetailDto>)g
-                    .OrderBy(x => x.CreatedAtUtc ?? nowUtc)
                     .Select(x =>
                     {
-                        var displayName = (x.ReporterId.HasValue && x.ReporterId.Value != Guid.Empty
-                            && reporterNameByUserId.TryGetValue(x.ReporterId.Value, out var nm)
+                        var reporterId = Guid.Parse(x.evidence_text!);
+                        var displayName = (reporterId != Guid.Empty
+                            && reporterNameByUserId.TryGetValue(reporterId, out var nm)
                             && !string.IsNullOrWhiteSpace(nm))
                             ? nm
-                            : (x.ReporterId?.ToString() ?? "Ẩn danh");
+                            : reporterId.ToString();
 
-                        var code = string.IsNullOrWhiteSpace(x.ReasonCode) ? "OTHER" : x.ReasonCode.Trim().ToUpperInvariant();
+                        var code = string.IsNullOrWhiteSpace(x.reason_category) ? "OTHER" : x.reason_category.Trim().ToUpperInvariant();
+                        if (!CommentReportReasonCatalog.TryGet(code, out _))
+                            code = "OTHER";
                         var label = CommentReportReasonCatalog.GetDominantReasonLabelVi(code);
                         return new ComplianceCommentReporterDetailDto
                         {
+                            EvidenceId = x.id,
+                            ReportId = x.ReportId,
+                            ReporterUserId = reporterId,
                             ReporterDisplayName = displayName,
-                            ReportedAtUtc = x.CreatedAtUtc.HasValue ? ApiDateTime.AsUtcForJson(x.CreatedAtUtc.Value) : null,
-                            Description = x.Description,
-                            ReasonLabelVi = label
+                            ReportedAtUtc = x.created_at.HasValue ? ApiDateTime.AsUtcForJson(x.created_at.Value) : null,
+                            Description = x.description,
+                            ReasonLabelVi = label,
+                            IsComplianceEvidenceVerified = x.compliance_verified_at_utc != null
                         };
                     })
+                    .OrderBy(x => x.ReportedAtUtc ?? DateTime.MinValue)
+                    .ThenBy(x => x.ReporterDisplayName, StringComparer.OrdinalIgnoreCase)
                     .ToList());
 
         var comments = await context.comments.AsNoTracking()
@@ -1180,6 +1267,7 @@ public class CommentReportService : ICommentReportService
                     ReportId = g.Representative.ReportId,
                     CommentId = g.CommentId,
                     StoryId = Guid.Empty,
+                    ChapterId = null,
                     CommentUserId = Guid.Empty,
                     CommentContent = null,
                     IsCommentThreadHidden = false,
@@ -1235,6 +1323,7 @@ public class CommentReportService : ICommentReportService
                 ReportId = g.Representative.ReportId,
                 CommentId = comment.id,
                 StoryId = storyId,
+                ChapterId = comment.chapter_id,
                 StoryTitle = storyTitle,
                 CommentUserId = commentUserId,
                 CommentUserDisplayName = displayName,

@@ -104,7 +104,7 @@ export async function updateUserStatus(userId, status) {
         await axiosInstance.post(`/admin/users/${userId}/unlock`);
         return { success: true };
     }
-    throw new Error('Status not supported by backend endpoint. Use ACTIVE or BANNED.');
+    throw new Error('Trạng thái không được hỗ trợ bởi endpoint backend. Hãy dùng ACTIVE hoặc BANNED.');
 }
 
 /**

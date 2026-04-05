@@ -1,4 +1,5 @@
 using BusinessObjects.Entities;
+using DataAccessObjects.DAOs;
 using DataAccessObjects.Queries;
 using Repositories.Interfaces;
 using Services.DTOs.Admin;
@@ -113,6 +114,8 @@ namespace Services.Implementations
             user.status = (status ?? "").Trim().ToUpperInvariant();
             user.updated_at = DateTime.UtcNow;
             await _userRepo.UpdateUser(user);
+            if (string.Equals(user.status, "BANNED", StringComparison.OrdinalIgnoreCase))
+                BannedAuthorModerationSweep.Run();
             return true;
         }
 

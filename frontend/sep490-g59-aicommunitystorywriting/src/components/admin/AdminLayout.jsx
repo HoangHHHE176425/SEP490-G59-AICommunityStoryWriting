@@ -54,7 +54,7 @@ const HIDE_MENU_IDS_FOR_ADMIN = new Set(['publication', 'stories', 'comments', '
 const ROLE_MENU_IDS = {
     ADMIN: null, // null = full menu
     MODERATOR: new Set(['dashboard', 'publication']),
-    COMPLIANCE: new Set(['violations']),
+    COMPLIANCE: new Set(['dashboard', 'violations']),
 };
 
 export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) {
@@ -430,7 +430,9 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                         const label =
                             item.id === 'dashboard' && roleUpper === 'MODERATOR'
                                 ? 'Tổng quan kiểm duyệt'
-                                : item.label;
+                                : item.id === 'dashboard' && roleUpper === 'COMPLIANCE'
+                                    ? 'Tổng quan xử lý vi phạm'
+                                    : item.label;
                         return (
                             <button
                                 key={item.id}
@@ -574,7 +576,9 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                             const label =
                                 item.id === 'dashboard' && roleUpper === 'MODERATOR'
                                     ? 'Tổng quan kiểm duyệt'
-                                    : item.label;
+                                    : item.id === 'dashboard' && roleUpper === 'COMPLIANCE'
+                                        ? 'Tổng quan xử lý vi phạm'
+                                        : item.label;
                             return (
                                 <button
                                     key={item.id}

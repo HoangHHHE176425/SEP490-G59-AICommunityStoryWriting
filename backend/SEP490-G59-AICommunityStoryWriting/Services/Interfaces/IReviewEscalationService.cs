@@ -1,4 +1,4 @@
-﻿using Services.DTOs.Admin;
+using Services.DTOs.Admin;
 using Services.DTOs.Moderation;
 
 namespace Services.Interfaces
@@ -20,7 +20,7 @@ namespace Services.Interfaces
         /// <summary>Log đầy đủ: lọc, tìm kiếm, phân trang.</summary>
         PagedResultDto<ReviewEscalationListItemDto> SearchEscalationLogForAdmin(ReviewEscalationLogQueryDto query);
 
-        (int critical, int high, int standard) CountPendingUrgencyBuckets();
+        (int critical, int standard) CountPendingUrgencyBuckets();
 
         void Resolve(Guid resolverId, Guid requestId, AdminResolveReviewEscalationDto dto);
     }

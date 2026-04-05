@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using DataAccessObjects.DAOs;
 using Services.DTOs.Account;
@@ -30,12 +30,13 @@ namespace AIStory.API.Controllers
             var userId = GetUserIdFromToken();
             var result = new MyLibraryResponseDto();
 
-            // 1. Truyện đang theo dõi (FOLLOW)
+            // 1. Truyện đang theo dõi (FOLLOW) — bỏ qua truyện tác giả đã BANNED
             var followedStoryIds = UserLibraryDAO.GetFollowedStoryIds(userId);
             foreach (var storyId in followedStoryIds)
             {
                 var story = StoryDAO.GetById(storyId);
                 if (story == null) continue;
+                if (story.author_id is Guid aid && UserDAO.IsAccountBanned(aid)) continue;
                 if (!string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase)) continue;
                 var authorName = story.author_id.HasValue ? NotificationDAO.GetUserDisplayName(story.author_id.Value) : null;
                 var publishedCount = ChapterDAO.GetPublishedCountByStoryId(storyId);
@@ -55,10 +56,11 @@ namespace AIStory.API.Controllers
                 });
             }
 
-            // 2. Tác giả đang theo dõi
+            // 2. Tác giả đang theo dõi — không liệt kê tác giả đã BANNED
             var followedAuthorIds = FollowDAO.GetFollowedAuthorIds(userId);
             foreach (var authorId in followedAuthorIds)
             {
+                if (UserDAO.IsAccountBanned(authorId)) continue;
                 var name = NotificationDAO.GetUserDisplayName(authorId);
                 result.FollowedAuthors.Add(new FollowedAuthorItemDto
                 {
@@ -67,13 +69,14 @@ namespace AIStory.API.Controllers
                 });
             }
 
-            // 3. Lịch sử đọc dở (READING)
+            // 3. Lịch sử đọc dở (READING) — bỏ mục thuộc truyện tác giả đã BANNED
             var readingEntries = UserLibraryDAO.GetReadingProgressEntries(userId);
             foreach (var (storyId, chapterId, lastReadAt) in readingEntries)
             {
                 var story = StoryDAO.GetById(storyId);
                 var chapter = ChapterDAO.GetById(chapterId);
                 if (story == null) continue;
+                if (story.author_id is Guid readAid && UserDAO.IsAccountBanned(readAid)) continue;
                 result.ReadingHistory.Add(new ReadingHistoryItemDto
                 {
                     StoryId = storyId,

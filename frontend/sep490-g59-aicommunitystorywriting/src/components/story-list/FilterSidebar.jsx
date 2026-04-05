@@ -47,6 +47,8 @@ export function FilterSidebar({
     setSelectedAgeRating,
     selectedChapterScale = 'all',
     setSelectedChapterScale,
+    selectedAiUsage = 'all',
+    setSelectedAiUsage,
     activeFiltersCount,
     clearAllFilters,
 }) {
@@ -268,6 +270,47 @@ export function FilterSidebar({
                                 }}
                             >
                                 {status.label}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+
+            <div
+                style={{
+                    paddingTop: '1rem',
+                    borderTop: `1px solid ${u.border}`,
+                    marginBottom: '1.25rem',
+                }}
+            >
+                <h4 style={{ ...sectionTitle }}>Đồng sáng tác AI</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+                    {[
+                        { value: 'all', label: 'Tất cả' },
+                        { value: 'uses_ai', label: 'Có sử dụng AI' },
+                        { value: 'no_ai', label: 'Không dùng AI' },
+                    ].map((opt) => {
+                        const active = selectedAiUsage === opt.value;
+                        return (
+                            <button
+                                key={opt.value}
+                                type="button"
+                                onClick={() => setSelectedAiUsage(opt.value)}
+                                style={filterButtonStyle(active)}
+                                onMouseEnter={(e) => {
+                                    if (!active) {
+                                        e.currentTarget.style.backgroundColor = u.surfaceMuted;
+                                        e.currentTarget.style.borderColor = u.borderStrong;
+                                    }
+                                }}
+                                onMouseLeave={(e) => {
+                                    if (!active) {
+                                        e.currentTarget.style.backgroundColor = 'transparent';
+                                        e.currentTarget.style.borderColor = u.border;
+                                    }
+                                }}
+                            >
+                                {opt.label}
                             </button>
                         );
                     })}

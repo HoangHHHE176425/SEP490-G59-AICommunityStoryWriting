@@ -103,7 +103,9 @@ namespace Services.Implementations
                 throw new ArgumentException($"Invalid story progress status. Must be one of: {string.Join(", ", validProgressStatuses)}");
             }
 
-            // UTCID20: chưa chặn HIATUS khi tạo truyện DRAFT — bug mở; UT01 UTCID20 fail cho đến khi có rule.
+            // Truyện mới (Create) bắt buộc tiến độ «Đang ra» — không cho COMPLETED/HIATUS lúc khởi tạo.
+            if (progressStatus != "ONGOING")
+                throw new InvalidOperationException("Truyện mới chỉ được tạo với trạng thái tiến độ Đang ra.");
 
             var story = new stories
             {
@@ -137,6 +139,14 @@ namespace Services.Implementations
 
             if (!query.IncludeComplianceHiddenInLists)
                 storiesQuery = storiesQuery.Where(s => !s.compliance_hidden);
+
+            if (query.ExcludeBannedAuthors)
+            {
+                storiesQuery = storiesQuery.Where(s =>
+                    s.author == null
+                    || s.author.status == null
+                    || s.author.status.ToUpper() != "BANNED");
+            }
 
             if (!string.IsNullOrWhiteSpace(query.Search))
             {
@@ -199,6 +209,26 @@ namespace Services.Implementations
             {
                 var max = query.MaxTotalChapters.Value;
                 storiesQuery = storiesQuery.Where(s => (s.total_chapters ?? 0) <= max);
+            }
+
+            if (query.UsesAi.HasValue)
+            {
+                if (query.UsesAi.Value)
+                {
+                    storiesQuery = storiesQuery.Where(s => s.chapters.Any(c =>
+                        c.status != null &&
+                        c.status.Trim().ToUpper() == "PUBLISHED" &&
+                        c.ai_contribution_ratio.HasValue &&
+                        c.ai_contribution_ratio.Value > 0));
+                }
+                else
+                {
+                    storiesQuery = storiesQuery.Where(s => !s.chapters.Any(c =>
+                        c.status != null &&
+                        c.status.Trim().ToUpper() == "PUBLISHED" &&
+                        c.ai_contribution_ratio.HasValue &&
+                        c.ai_contribution_ratio.Value > 0));
+                }
             }
 
             if (query.StatusIn != null && query.StatusIn.Count > 0)
@@ -331,7 +361,9 @@ namespace Services.Implementations
                 AgeRating = query.AgeRating,
                 MinTotalChapters = query.MinTotalChapters,
                 MaxTotalChapters = query.MaxTotalChapters,
+                UsesAi = query.UsesAi,
                 IncludeComplianceHiddenInLists = query.IncludeComplianceHiddenInLists,
+                ExcludeBannedAuthors = query.ExcludeBannedAuthors,
             };
 
             return GetAll(authorQuery);
@@ -790,6 +822,9 @@ namespace Services.Implementations
                 authorName = story.author_id.HasValue ? NotificationDAO.GetUserDisplayName(story.author_id.Value) : null;
                 authorAvatarUrl = story.author_id.HasValue ? UserProfileDAO.GetAvatarUrlForUser(story.author_id.Value) : null;
             }
+            string? authorAccountStatus = null;
+            if (includeComputedLookups && story.author_id.HasValue)
+                authorAccountStatus = UserDAO.GetAccountStatus(story.author_id.Value);
             return new StoryResponseDto
             {
                 Id = story.id,
@@ -800,6 +835,7 @@ namespace Services.Implementations
                 CategoryNames = categoryNames,
                 AuthorId = story.author_id,
                 AuthorName = authorName,
+                AuthorAccountStatus = authorAccountStatus,
                 AuthorAvatarUrl = authorAvatarUrl,
                 CoverImage = story.cover_image,
                 Status = story.status,

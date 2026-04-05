@@ -310,6 +310,23 @@
             </div>
         </div>
     </div>
+
+    <div class="modal fade" id="srModalStoryReportDetail" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-journal-text me-1"></i>Chi tiết report story</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="srStoryReportDetailBody">
+                    <div class="text-muted small">Đang tải…</div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 @section Scripts {
@@ -633,9 +650,13 @@
                             ? '<button type="button" class="btn btn-link btn-sm p-0" data-cr-open-comment-detail data-cid="' + crEscapeHtml(String(cid)) + '">Xem tất cả</button>'
                             : '';
 
+                        const reporterDetailsRaw = x.reporterDetails || x.ReporterDetails || [];
                         commentDetailByCid[cid] = {
                             reasonSummaryArr: reasonSummaryArr,
                             reportersArr: reportersArr,
+                            reporterDetails: reporterDetailsRaw,
+                            commentId: String(cid),
+                            canVerifyEvidence: !hasPendingAdmin && (isAdm || (locked && mine)),
                             warnText: warnText
                         };
 
@@ -797,61 +818,238 @@
                             if (m) {
                                 return { label: m[1].trim(), count: parseInt(m[2], 10) };
                             }
-                            return { label: txt, count: 1 };
+                            return { label: txt.trim(), count: 1 };
                         });
 
-                        function renderReasons(minCount) {
-                            const list = (reasonItems || []).filter(x => (x.count || 0) >= minCount);
+                        let selectedReasonLabel = null;
+                        let verifyFilter = 'all';
+
+                        function crRowVerified(row) {
+                            return row.isComplianceEvidenceVerified === true || row.IsComplianceEvidenceVerified === true;
+                        }
+                        function crRowReason(row) {
+                            return String(row.reasonLabelVi || row.ReasonLabelVi || '').trim();
+                        }
+                        function crFilterReporterRows(list) {
+                            return list.filter(function (row) {
+                                const r = crRowReason(row);
+                                if (selectedReasonLabel && r !== selectedReasonLabel) return false;
+                                const v = crRowVerified(row);
+                                if (verifyFilter === 'verified' && !v) return false;
+                                if (verifyFilter === 'unverified' && v) return false;
+                                return true;
+                            });
+                        }
+
+                        function renderReasons(reasonGt) {
+                            const list = (reasonItems || []).filter(function (x) {
+                                const c = x.count || 0;
+                                if (reasonGt < 0) return true;
+                                return c > reasonGt;
+                            });
                             if (!list.length)
                                 return '<div class="text-muted small mb-3">Không có lý do phù hợp.</div>';
                             return '<div class="d-flex flex-wrap gap-1 mb-3">' +
                                 list.map(function (x) {
-                                    return '<span class="badge bg-light text-dark border" title="Số người báo: ' + crEscapeHtml(String(x.count)) + '">' +
+                                    const enc = encodeURIComponent(x.label);
+                                    const active = selectedReasonLabel && selectedReasonLabel === x.label;
+                                    const cls = active
+                                        ? 'badge bg-primary text-white border border-primary cr-reason-badge-filter'
+                                        : 'badge bg-light text-dark border cr-reason-badge-filter';
+                                    return '<button type="button" class="' + cls + ' rounded-pill" data-cr-reason-lbl="' + enc + '" title="Lọc bảng theo lý do (bấm lại để bỏ lọc)">' +
                                         crEscapeHtml(String(x.label)) + ' (' + crEscapeHtml(String(x.count)) + ')' +
-                                        '</span>';
+                                        '</button>';
                                 }).join('') +
                                 '</div>';
                         }
 
-                        let minCount = 1;
+                        let reasonGt = -1;
                         const reasonsBlockHtml = (reasonItems && reasonItems.length)
                             ? (
-                                '<div class="mb-2 d-flex flex-wrap gap-2 align-items-center">' +
-                                '<span class="small text-muted">Lọc theo số lượng:</span>' +
-                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-min="1">Tất cả</button>' +
-                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-min="2">>= 2</button>' +
-                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-min="3">>= 3</button>' +
-                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-min="5">>= 5</button>' +
+                                '<div class="small text-muted mb-2">Bấm từng lý do để lọc bảng chi tiết (bấm lại để bỏ lọc).</div>' +
+                                '<div class="small text-muted mb-2">Lọc theo số lượng báo cáo: chỉ hiện lý do có tổng số báo <strong>lớn hơn</strong> ngưỡng đã chọn.</div>' +
+                                '<div class="mb-2 d-flex flex-wrap gap-1 align-items-center">' +
+                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-gt="-1">Tất cả</button>' +
+                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-gt="10">Lớn hơn 10</button>' +
+                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-gt="50">Lớn hơn 50</button>' +
+                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-gt="100">Lớn hơn 100</button>' +
+                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-reason-gt="1000">Lớn hơn 1000</button>' +
                                 '</div>' +
-                                '<div id="crCommentReasonFilterList">' + renderReasons(minCount) + '</div>'
+                                '<div id="crCommentReasonFilterList">' + renderReasons(reasonGt) + '</div>'
                               )
                             : '<div class="text-muted small mb-3">—</div>';
 
-                        const reportersListHtml = det.reportersArr && det.reportersArr.length
-                            ? '<ul class="list-group list-group-flush">' +
+                        const rdList = det.reporterDetails || [];
+                        let crSyncReporterDetailTable = function () {};
+                        let reportersBlockHtml;
+                        if (rdList.length) {
+                            const verifiedTotal = rdList.filter(crRowVerified).length;
+                            const headChk = det.canVerifyEvidence ? '<th style="width:2.5rem" title="Chọn để lưu xác minh">✓</th>' : '';
+                            const colCount = det.canVerifyEvidence ? 7 : 6;
+
+                            function crBuildReporterRowsHtml(rows) {
+                                if (!rows.length) {
+                                    return '<tr><td colspan="' + colCount + '" class="text-muted small text-center py-3">Không có request phù hợp bộ lọc.</td></tr>';
+                                }
+                                return rows.map(function (row) {
+                                    const eid = row.evidenceId || row.EvidenceId;
+                                    const rname = row.reporterDisplayName || row.ReporterDisplayName || '—';
+                                    const reason = row.reasonLabelVi || row.ReasonLabelVi || '—';
+                                    const desc = row.description || row.Description || '';
+                                    const rid = row.reportId || row.ReportId;
+                                    const ra = row.reportedAtUtc || row.ReportedAtUtc;
+                                    const verified = crRowVerified(row);
+                                    const chk = det.canVerifyEvidence
+                                        ? '<input type="checkbox" class="form-check-input cr-evidence-verify-chk" data-evidence-id="' + crEscapeHtml(String(eid)) + '" data-was-verified="' + (verified ? '1' : '0') + '" id="cr-ev-' + crEscapeHtml(String(eid)) + '"' + (verified ? ' checked' : '') + ' />'
+                                        : '';
+                                    const chkCell = det.canVerifyEvidence
+                                        ? '<td class="align-middle text-center">' + chk + '</td>'
+                                        : '';
+                                    return '<tr>' + chkCell +
+                                        '<td class="small">' + crEscapeHtml(String(rname)) + '</td>' +
+                                        '<td class="small">' + crEscapeHtml(String(reason)) + '</td>' +
+                                        '<td class="small text-nowrap">' + (ra ? crEscapeHtml(Utils.formatDateUtc(ra)) : '<span class="text-muted">—</span>') + '</td>' +
+                                        '<td class="small text-break">' + (desc ? crEscapeHtml(String(desc)) : '<span class="text-muted">—</span>') + '</td>' +
+                                        '<td class="small font-monospace text-muted">' + crEscapeHtml(String(rid).slice(0, 8)) + '…</td>' +
+                                        '<td class="small">' + (verified ? '<span class="badge bg-success">Đã xác minh</span>' : '<span class="text-muted">Chưa xác minh</span>') + '</td>' +
+                                        '</tr>';
+                                }).join('');
+                            }
+
+                            crSyncReporterDetailTable = function () {
+                                const tbody = document.getElementById('crCommentReporterTbody');
+                                const hintEl = document.getElementById('crDetailFilteredHint');
+                                if (!tbody) return;
+                                const filtered = crFilterReporterRows(rdList);
+                                if (hintEl) {
+                                    const hasExtra = selectedReasonLabel || verifyFilter !== 'all';
+                                    hintEl.textContent = hasExtra
+                                        ? 'Đang hiển thị ' + filtered.length + ' / ' + rdList.length + ' request'
+                                        : '';
+                                }
+                                tbody.innerHTML = crBuildReporterRowsHtml(filtered);
+                            };
+
+                            reportersBlockHtml =
+                                '<div id="crDetailReporterMeta" class="mb-2 d-flex flex-wrap gap-2 align-items-center">' +
+                                '<span class="small"><strong>Tổng request:</strong> ' + rdList.length + '</span>' +
+                                '<span class="small text-muted">|</span>' +
+                                '<span class="small text-success"><strong>Đã xác minh:</strong> ' + verifiedTotal + '</span>' +
+                                '<span class="small text-muted">|</span>' +
+                                '<span class="small"><strong>Chưa xác minh:</strong> ' + (rdList.length - verifiedTotal) + '</span>' +
+                                '<span class="small text-primary ms-1" id="crDetailFilteredHint"></span>' +
+                                '</div>' +
+                                '<div class="d-flex flex-wrap gap-1 align-items-center mb-2">' +
+                                '<span class="small text-muted me-1">Lọc trạng thái xác minh:</span>' +
+                                '<button type="button" class="btn btn-sm btn-outline-secondary cr-detail-vf active" data-vf="all">Tất cả</button>' +
+                                '<button type="button" class="btn btn-sm btn-outline-secondary cr-detail-vf" data-vf="unverified">Chưa xác minh</button>' +
+                                '<button type="button" class="btn btn-sm btn-outline-secondary cr-detail-vf" data-vf="verified">Đã xác minh</button>' +
+                                '</div>' +
+                                '<div class="table-responsive"><table class="table table-sm table-bordered align-middle mb-0">' +
+                                '<thead class="table-light"><tr>' + headChk +
+                                '<th>Người báo cáo</th><th>Lý do</th><th>Thời gian gửi (UTC)</th><th>Mô tả</th><th>Ticket</th><th>Trạng thái xác minh</th>' +
+                                '</tr></thead><tbody id="crCommentReporterTbody"></tbody></table></div>' +
+                                (det.canVerifyEvidence
+                                    ? '<div class="d-flex flex-wrap gap-2 align-items-center mt-2">' +
+                                      '<button type="button" class="btn btn-primary btn-sm" id="crBtnSaveEvidenceVerify">Lưu đánh dấu xác minh</button>' +
+                                      '<span class="small text-muted">Chọn các request đã xác minh, bấm Lưu. Bỏ chọn để gỡ đánh dấu đã lưu trước đó.</span>' +
+                                      '</div>'
+                                    : '<div class="small text-muted mt-2">Chỉ compliance đang lock (hoặc admin) mới chỉnh được đánh dấu xác minh.</div>');
+                        } else if (det.reportersArr && det.reportersArr.length) {
+                            reportersBlockHtml = '<ul class="list-group list-group-flush">' +
                               det.reportersArr.map(n =>
                                   '<li class="list-group-item small">' + crEscapeHtml(String(n)) + '</li>'
                               ).join('') +
-                              '</ul>'
-                            : '<div class="text-muted small">—</div>';
+                              '</ul>';
+                        } else {
+                            reportersBlockHtml = '<div class="text-muted small">—</div>';
+                        }
 
                         body.innerHTML =
                             '<div class="mb-2"><div class="small text-muted">Tất cả lý do report + số lượng</div></div>' +
                             reasonsBlockHtml +
-                            '<div class="mb-2"><div class="small text-muted">Tất cả người report</div></div>' +
-                            reportersListHtml +
+                            '<div class="mb-2 mt-3"><div class="small text-muted">Chi tiết từng request báo cáo (theo người report)</div></div>' +
+                            reportersBlockHtml +
                             (det.warnText ? '<div class="text-warning small mt-3">' + crEscapeHtml(String(det.warnText)) + '</div>' : '');
+
+                        crSyncReporterDetailTable();
+
+                        body.onclick = function (ev) {
+                            const t = ev.target;
+                            const badge = t.closest && t.closest('.cr-reason-badge-filter');
+                            if (badge && body.contains(badge)) {
+                                const enc = badge.getAttribute('data-cr-reason-lbl');
+                                let lbl = '';
+                                try { lbl = decodeURIComponent(enc || ''); } catch (eR) { lbl = ''; }
+                                lbl = String(lbl).trim();
+                                selectedReasonLabel = (selectedReasonLabel === lbl) ? null : lbl;
+                                const le = document.getElementById('crCommentReasonFilterList');
+                                if (le) le.innerHTML = renderReasons(reasonGt);
+                                crSyncReporterDetailTable();
+                                return;
+                            }
+                            const vf = t.closest && t.closest('.cr-detail-vf');
+                            if (vf && body.contains(vf)) {
+                                verifyFilter = vf.getAttribute('data-vf') || 'all';
+                                body.querySelectorAll('.cr-detail-vf').forEach(function (x) {
+                                    x.classList.toggle('active', (x.getAttribute('data-vf') || 'all') === verifyFilter);
+                                });
+                                crSyncReporterDetailTable();
+                            }
+                        };
 
                         // Wire filter buttons inside modal (reason count).
                         const modalEl = document.getElementById('crModalCommentReportDetail');
                         const listEl = document.getElementById('crCommentReasonFilterList');
                         if (modalEl && listEl) {
-                            modalEl.querySelectorAll('[data-cr-reason-min]').forEach(function (b) {
+                            modalEl.querySelectorAll('[data-cr-reason-gt]').forEach(function (b) {
                                 b.addEventListener('click', function () {
-                                    const mc = parseInt(b.getAttribute('data-cr-reason-min') || '1', 10);
-                                    minCount = Number.isFinite(mc) ? mc : 1;
-                                    listEl.innerHTML = renderReasons(minCount);
+                                    const mc = parseInt(b.getAttribute('data-cr-reason-gt') || '-1', 10);
+                                    reasonGt = Number.isFinite(mc) ? mc : -1;
+                                    const visible = (reasonItems || []).filter(function (x) {
+                                        const c = x.count || 0;
+                                        if (reasonGt < 0) return true;
+                                        return c > reasonGt;
+                                    });
+                                    if (selectedReasonLabel && !visible.some(function (x) { return x.label === selectedReasonLabel; }))
+                                        selectedReasonLabel = null;
+                                    listEl.innerHTML = renderReasons(reasonGt);
+                                    crSyncReporterDetailTable();
                                 });
+                            });
+                        }
+
+                        const saveEvidenceBtn = document.getElementById('crBtnSaveEvidenceVerify');
+                        if (saveEvidenceBtn && det.canVerifyEvidence && det.commentId) {
+                            saveEvidenceBtn.addEventListener('click', async function () {
+                                const verify = [];
+                                const unverify = [];
+                                body.querySelectorAll('.cr-evidence-verify-chk').forEach(function (chk) {
+                                    const id = chk.getAttribute('data-evidence-id');
+                                    if (!id) return;
+                                    const was = chk.getAttribute('data-was-verified') === '1';
+                                    const now = chk.checked;
+                                    if (now && !was) verify.push(id);
+                                    if (!now && was) unverify.push(id);
+                                });
+                                if (!verify.length && !unverify.length) {
+                                    Utils.showAlert('Không có thay đổi.', 'info');
+                                    return;
+                                }
+                                try {
+                                    await ApiService.complianceSetCommentReportEvidenceVerification(det.commentId, {
+                                        verifyEvidenceIds: verify,
+                                        unverifyEvidenceIds: unverify
+                                    });
+                                    Utils.showAlert('Đã lưu đánh dấu xác minh.', 'success');
+                                    if (modalEl) {
+                                        const inst = bootstrap.Modal.getInstance(modalEl);
+                                        if (inst) inst.hide();
+                                    }
+                                    crLoadCommentReports();
+                                } catch (e) {
+                                    Utils.showAlert(e.message || e, 'danger');
+                                }
                             });
                         }
 
@@ -919,6 +1117,7 @@
                 const isAdm = AuthHelper.isAdmin();
 
                 if (grouped) {
+                    const storyDetailBySid = {};
                     let html = '<table class="table table-sm table-hover align-middle"><thead class="table-light"><tr>' +
                         '<th>Ưu tiên</th><th>Sev</th><th>#BC</th><th>TW</th><th>Truyện</th><th>Tác giả</th><th>Vi phạm / mod</th><th>Người báo</th><th>Ticket</th><th>Lock</th><th class="text-end" style="min-width:7rem">Thao tác</th></tr></thead><tbody>';
                     if (!items.length) {
@@ -947,6 +1146,36 @@
                             const fOn = x.complianceFlagged === true || x.ComplianceFlagged === true;
                             const openIds = x.openReportIds || x.OpenReportIds || [];
                             const hasOpenTickets = openIds.length > 0;
+                            const reasonCountMap = {};
+                            (contribs || []).forEach(function (c) {
+                                const lab = c.reasonLabelVi || c.ReasonLabelVi || c.reasonCode || c.ReasonCode || '—';
+                                reasonCountMap[lab] = (reasonCountMap[lab] || 0) + 1;
+                            });
+                            const reasonSummaryArr = Object.keys(reasonCountMap).sort(function (a, b) { return a.localeCompare(b, 'vi'); }).map(function (k) {
+                                return k + ' (' + reasonCountMap[k] + ')';
+                            });
+                            const reporterDetails = (contribs || []).map(function (c) {
+                                return {
+                                    userId: c.userId || c.UserId,
+                                    reporterDisplayName: c.userEmail || c.UserEmail || '—',
+                                    reasonLabelVi: c.reasonLabelVi || c.ReasonLabelVi,
+                                    description: c.description || c.Description,
+                                    reportedAtUtc: c.reportedAtUtc || c.ReportedAtUtc,
+                                    detailNote: c.detailNote || c.DetailNote,
+                                    isComplianceContributorVerified: c.isComplianceContributorVerified === true || c.IsComplianceContributorVerified === true,
+                                    canMarkComplianceVerified: c.canMarkComplianceVerified !== false && c.CanMarkComplianceVerified !== false
+                                };
+                            });
+                            storyDetailBySid[sid] = {
+                                reasonSummaryArr: reasonSummaryArr,
+                                reporterDetails: reporterDetails,
+                                storyId: String(sid),
+                                storyTitle: title,
+                                canVerifyContributor: isAdm || (locked && mine)
+                            };
+                            const storyDetBtn = (reasonSummaryArr.length || reporterDetails.length)
+                                ? '<div class="mt-1"><button type="button" class="btn btn-link btn-sm p-0" data-sr-open-story-detail data-sid="' + crEscapeHtml(String(sid)) + '">Chi tiết report story</button></div>'
+                                : '';
                             let btns = '';
                             if (!locked) {
                                 btns += '<button type="button" class="btn btn-outline-primary btn-sm mb-1" data-cr-claim="' + crEscapeHtml(String(sid)) + '"><i class="bi bi-lock"></i> Nhận</button> ';
@@ -982,7 +1211,7 @@
                                 '<td><a href="/Home/Story/' + encodeURIComponent(sid) + '" target="_blank" rel="noopener" class="fw-medium">' + crEscapeHtml(title) + '</a><div class="small text-muted text-break">' + crEscapeHtml(String(sid)) + '</div></td>' +
                                 '<td class="small">' + crEscapeHtml(String(aname)) + (aidStr ? '<div class="text-muted small text-break">' + crEscapeHtml(aidStr) + '</div>' : '') + '</td>' +
                                 '<td class="small">' + badgeCell + '</td>' +
-                                '<td class="small">' + crFormatContributors(contribs) + '</td>' +
+                                '<td class="small">' + crFormatContributors(contribs) + storyDetBtn + '</td>' +
                                 '<td class="small">' + crEscapeHtml(sts) + '</td>' +
                                 '<td class="small">' + lockCell + '</td>' +
                                 '<td class="text-end"><div class="d-inline-flex flex-column align-items-end">' + btns + tools + '</div></td></tr>';
@@ -1035,6 +1264,250 @@
                                 Utils.showAlert((r && (r.message || r.Message)) || 'Đã cập nhật.', 'success');
                                 crLoad();
                             } catch (e) { Utils.showAlert(e.message || e, 'danger'); }
+                        });
+                    });
+
+                    host.querySelectorAll('[data-sr-open-story-detail]').forEach(function (btn) {
+                        btn.addEventListener('click', function () {
+                            const sid = btn.getAttribute('data-sid');
+                            const det = storyDetailBySid[sid];
+                            const body = document.getElementById('srStoryReportDetailBody');
+                            if (!body) return;
+                            if (!det) {
+                                body.innerHTML = '<div class="text-muted small">Không có dữ liệu.</div>';
+                                new bootstrap.Modal(document.getElementById('srModalStoryReportDetail')).show();
+                                return;
+                            }
+
+                            const reasonItems = (det.reasonSummaryArr || []).map(function (raw) {
+                                const txt = String(raw ?? '');
+                                const m = txt.match(/^(.*)\((\d+)\)\s*$/);
+                                if (m) return { label: m[1].trim(), count: parseInt(m[2], 10) };
+                                return { label: txt.trim(), count: 1 };
+                            });
+                            let selectedReasonLabel = null;
+                            let verifyFilter = 'all';
+                            let reasonGt = -1;
+
+                            function srRowVerified(row) {
+                                return row.isComplianceContributorVerified === true || row.IsComplianceContributorVerified === true;
+                            }
+                            function srRowReason(row) {
+                                return String(row.reasonLabelVi || row.ReasonLabelVi || '').trim();
+                            }
+                            function srCanMarkRow(row) {
+                                return row.canMarkComplianceVerified !== false && row.CanMarkComplianceVerified !== false;
+                            }
+                            function srFilterReporterRows(list) {
+                                return list.filter(function (row) {
+                                    const r = srRowReason(row);
+                                    if (selectedReasonLabel && r !== selectedReasonLabel) return false;
+                                    const v = srRowVerified(row);
+                                    if (verifyFilter === 'verified' && !v) return false;
+                                    if (verifyFilter === 'unverified' && v) return false;
+                                    return true;
+                                });
+                            }
+                            function renderSrReasons(gt) {
+                                const list = (reasonItems || []).filter(function (x) {
+                                    const c = x.count || 0;
+                                    if (gt < 0) return true;
+                                    return c > gt;
+                                });
+                                if (!list.length)
+                                    return '<div class="text-muted small mb-3">Không có lý do phù hợp.</div>';
+                                return '<div class="d-flex flex-wrap gap-1 mb-3">' +
+                                    list.map(function (x) {
+                                        const enc = encodeURIComponent(x.label);
+                                        const active = selectedReasonLabel && selectedReasonLabel === x.label;
+                                        const cls = active ? 'badge bg-primary text-white border border-primary sr-reason-badge-filter' : 'badge bg-light text-dark border sr-reason-badge-filter';
+                                        return '<button type="button" class="' + cls + ' rounded-pill" data-sr-reason-lbl="' + enc + '" title="Lọc bảng theo lý do (bấm lại để bỏ lọc)">' +
+                                            crEscapeHtml(String(x.label)) + ' (' + crEscapeHtml(String(x.count)) + ')</button>';
+                                    }).join('') +
+                                    '</div>';
+                            }
+                            const reasonsBlockHtml = (reasonItems && reasonItems.length)
+                                ? (
+                                    '<div class="small text-muted mb-2">Bấm từng lý do để lọc bảng chi tiết (bấm lại để bỏ lọc).</div>' +
+                                    '<div class="small text-muted mb-2">Lọc theo số lượng báo cáo: chỉ hiện lý do có tổng số báo <strong>lớn hơn</strong> ngưỡng đã chọn.</div>' +
+                                    '<div class="mb-2 d-flex flex-wrap gap-1 align-items-center">' +
+                                    '<button type="button" class="btn btn-outline-secondary btn-sm" data-sr-reason-gt="-1">Tất cả</button>' +
+                                    '<button type="button" class="btn btn-outline-secondary btn-sm" data-sr-reason-gt="10">Lớn hơn 10</button>' +
+                                    '<button type="button" class="btn btn-outline-secondary btn-sm" data-sr-reason-gt="50">Lớn hơn 50</button>' +
+                                    '<button type="button" class="btn btn-outline-secondary btn-sm" data-sr-reason-gt="100">Lớn hơn 100</button>' +
+                                    '<button type="button" class="btn btn-outline-secondary btn-sm" data-sr-reason-gt="1000">Lớn hơn 1000</button>' +
+                                    '</div>' +
+                                    '<div id="srStoryReasonFilterList">' + renderSrReasons(reasonGt) + '</div>'
+                                  )
+                                : '<div class="text-muted small mb-3">—</div>';
+
+                            const srList = det.reporterDetails || [];
+                            let srSyncStoryReporterTable = function () {};
+                            let reportersBlockHtml;
+                            if (srList.length) {
+                                const verifiedTotal = srList.filter(srRowVerified).length;
+                                const headChk = det.canVerifyContributor ? '<th style="width:2.5rem" title="Chọn để lưu xác minh">✓</th>' : '';
+                                const colCount = det.canVerifyContributor ? 7 : 6;
+                                function srBuildRows(rows) {
+                                    if (!rows.length)
+                                        return '<tr><td colspan="' + colCount + '" class="text-muted small text-center py-3">Không có request phù hợp bộ lọc.</td></tr>';
+                                    return rows.map(function (row) {
+                                        const uid = row.userId || row.UserId;
+                                        const rname = row.reporterDisplayName || row.ReporterDisplayName || '—';
+                                        const reason = row.reasonLabelVi || row.ReasonLabelVi || '—';
+                                        const desc = row.description || row.Description || '';
+                                        const ra = row.reportedAtUtc || row.ReportedAtUtc;
+                                        const verified = srRowVerified(row);
+                                        const note = row.detailNote || row.DetailNote;
+                                        const canMark = srCanMarkRow(row);
+                                        const chk = (det.canVerifyContributor && canMark)
+                                            ? '<input type="checkbox" class="form-check-input sr-contributor-verify-chk" data-contributor-user-id="' + crEscapeHtml(String(uid)) + '" data-was-verified="' + (verified ? '1' : '0') + '" id="sr-u-' + crEscapeHtml(String(uid)) + '"' + (verified ? ' checked' : '') + ' />'
+                                            : '';
+                                        const chkCell = det.canVerifyContributor
+                                            ? '<td class="align-middle text-center">' + (chk || '<span class="text-muted small">—</span>') + '</td>'
+                                            : '';
+                                        const mainRow = '<tr>' + chkCell +
+                                            '<td class="small">' + crEscapeHtml(String(rname)) + '</td>' +
+                                            '<td class="small">' + crEscapeHtml(String(reason)) + '</td>' +
+                                            '<td class="small text-nowrap">' + (ra ? crEscapeHtml(Utils.formatDateUtc(ra)) : '<span class="text-muted">—</span>') + '</td>' +
+                                            '<td class="small text-break">' + (desc ? crEscapeHtml(String(desc)) : '<span class="text-muted">—</span>') + '</td>' +
+                                            '<td class="small font-monospace text-muted">' + crEscapeHtml(String(uid).slice(0, 8)) + '…</td>' +
+                                            '<td class="small">' + (verified ? '<span class="badge bg-success">Đã xác minh</span>' : '<span class="text-muted">Chưa xác minh</span>') + '</td>' +
+                                            '</tr>';
+                                        const noteRow = note
+                                            ? '<tr><td colspan="' + colCount + '" class="small text-warning border-top-0 pt-0 pb-2">' + crEscapeHtml(String(note)) + '</td></tr>'
+                                            : '';
+                                        return mainRow + noteRow;
+                                    }).join('');
+                                }
+                                srSyncStoryReporterTable = function () {
+                                    const tbody = document.getElementById('srStoryReporterTbody');
+                                    const hintEl = document.getElementById('srDetailFilteredHint');
+                                    if (!tbody) return;
+                                    const filtered = srFilterReporterRows(srList);
+                                    if (hintEl) {
+                                        const hasExtra = selectedReasonLabel || verifyFilter !== 'all';
+                                        hintEl.textContent = hasExtra ? ('Đang hiển thị ' + filtered.length + ' / ' + srList.length + ' request') : '';
+                                    }
+                                    tbody.innerHTML = srBuildRows(filtered);
+                                };
+                                reportersBlockHtml =
+                                    '<div id="srDetailReporterMeta" class="mb-2 d-flex flex-wrap gap-2 align-items-center">' +
+                                    '<span class="small"><strong>Tổng request:</strong> ' + srList.length + '</span>' +
+                                    '<span class="small text-muted">|</span>' +
+                                    '<span class="small text-success"><strong>Đã xác minh:</strong> ' + verifiedTotal + '</span>' +
+                                    '<span class="small text-muted">|</span>' +
+                                    '<span class="small"><strong>Chưa xác minh:</strong> ' + (srList.length - verifiedTotal) + '</span>' +
+                                    '<span class="small text-primary ms-1" id="srDetailFilteredHint"></span>' +
+                                    '</div>' +
+                                    '<div class="d-flex flex-wrap gap-1 align-items-center mb-2">' +
+                                    '<span class="small text-muted me-1">Lọc trạng thái xác minh:</span>' +
+                                    '<button type="button" class="btn btn-sm btn-outline-secondary sr-detail-vf active" data-sr-vf="all">Tất cả</button>' +
+                                    '<button type="button" class="btn btn-sm btn-outline-secondary sr-detail-vf" data-sr-vf="unverified">Chưa xác minh</button>' +
+                                    '<button type="button" class="btn btn-sm btn-outline-secondary sr-detail-vf" data-sr-vf="verified">Đã xác minh</button>' +
+                                    '</div>' +
+                                    '<div class="table-responsive"><table class="table table-sm table-bordered align-middle mb-0">' +
+                                    '<thead class="table-light"><tr>' + headChk +
+                                    '<th>Người báo cáo</th><th>Lý do</th><th>Thời gian gửi (UTC)</th><th>Mô tả</th><th>User ID</th><th>Trạng thái xác minh</th>' +
+                                    '</tr></thead><tbody id="srStoryReporterTbody"></tbody></table></div>' +
+                                    (det.canVerifyContributor
+                                        ? '<div class="d-flex flex-wrap gap-2 align-items-center mt-2">' +
+                                          '<button type="button" class="btn btn-primary btn-sm" id="srBtnSaveContributorVerify">Lưu đánh dấu xác minh</button>' +
+                                          '<span class="small text-muted">Chọn các request đã xác minh, bấm Lưu. Bỏ chọn để gỡ đánh dấu đã lưu trước đó.</span>' +
+                                          '</div>'
+                                        : '<div class="small text-muted mt-2">Chỉ compliance đang lock (hoặc admin) mới chỉnh được đánh dấu xác minh.</div>');
+                            } else {
+                                reportersBlockHtml = '<div class="text-muted small">—</div>';
+                            }
+
+                            body.innerHTML =
+                                '<div class="mb-2 small"><strong>Truyện:</strong> <a href="/Home/Story/' + encodeURIComponent(det.storyId) + '" target="_blank" rel="noopener">' + crEscapeHtml(det.storyTitle || '') + '</a></div>' +
+                                '<div class="mb-2"><div class="small text-muted">Tất cả lý do report + số lượng</div></div>' +
+                                reasonsBlockHtml +
+                                '<div class="mb-2 mt-3"><div class="small text-muted">Chi tiết từng request báo cáo (theo người report)</div></div>' +
+                                reportersBlockHtml;
+
+                            srSyncStoryReporterTable();
+
+                            const modalSr = document.getElementById('srModalStoryReportDetail');
+                            body.onclick = function (ev) {
+                                const t = ev.target;
+                                const badge = t.closest && t.closest('.sr-reason-badge-filter');
+                                if (badge && body.contains(badge)) {
+                                    const enc = badge.getAttribute('data-sr-reason-lbl');
+                                    let lbl = '';
+                                    try { lbl = decodeURIComponent(enc || ''); } catch (eR) { lbl = ''; }
+                                    lbl = String(lbl).trim();
+                                    selectedReasonLabel = (selectedReasonLabel === lbl) ? null : lbl;
+                                    const le = document.getElementById('srStoryReasonFilterList');
+                                    if (le) le.innerHTML = renderSrReasons(reasonGt);
+                                    srSyncStoryReporterTable();
+                                    return;
+                                }
+                                const vf = t.closest && t.closest('.sr-detail-vf');
+                                if (vf && body.contains(vf)) {
+                                    verifyFilter = vf.getAttribute('data-sr-vf') || 'all';
+                                    body.querySelectorAll('.sr-detail-vf').forEach(function (x) {
+                                        x.classList.toggle('active', (x.getAttribute('data-sr-vf') || 'all') === verifyFilter);
+                                    });
+                                    srSyncStoryReporterTable();
+                                }
+                            };
+
+                            const listSr = document.getElementById('srStoryReasonFilterList');
+                            if (body && listSr) {
+                                body.querySelectorAll('[data-sr-reason-gt]').forEach(function (b) {
+                                    b.addEventListener('click', function () {
+                                        const mc = parseInt(b.getAttribute('data-sr-reason-gt') || '-1', 10);
+                                        reasonGt = Number.isFinite(mc) ? mc : -1;
+                                        const visible = (reasonItems || []).filter(function (x) {
+                                            const c = x.count || 0;
+                                            if (reasonGt < 0) return true;
+                                            return c > reasonGt;
+                                        });
+                                        if (selectedReasonLabel && !visible.some(function (x) { return x.label === selectedReasonLabel; }))
+                                            selectedReasonLabel = null;
+                                        listSr.innerHTML = renderSrReasons(reasonGt);
+                                        srSyncStoryReporterTable();
+                                    });
+                                });
+                            }
+
+                            const saveSrBtn = document.getElementById('srBtnSaveContributorVerify');
+                            if (saveSrBtn && det.canVerifyContributor && det.storyId) {
+                                saveSrBtn.addEventListener('click', async function () {
+                                    const verify = [];
+                                    const unverify = [];
+                                    body.querySelectorAll('.sr-contributor-verify-chk').forEach(function (chk) {
+                                        const id = chk.getAttribute('data-contributor-user-id');
+                                        if (!id) return;
+                                        const was = chk.getAttribute('data-was-verified') === '1';
+                                        const now = chk.checked;
+                                        if (now && !was) verify.push(id);
+                                        if (!now && was) unverify.push(id);
+                                    });
+                                    if (!verify.length && !unverify.length) {
+                                        Utils.showAlert('Không có thay đổi.', 'info');
+                                        return;
+                                    }
+                                    try {
+                                        await ApiService.complianceSetStoryContributorVerification(det.storyId, {
+                                            verifyUserIds: verify,
+                                            unverifyUserIds: unverify
+                                        });
+                                        Utils.showAlert('Đã lưu đánh dấu xác minh.', 'success');
+                                        if (modalSr) {
+                                            const inst = bootstrap.Modal.getInstance(modalSr);
+                                            if (inst) inst.hide();
+                                        }
+                                        crLoad();
+                                    } catch (e) {
+                                        Utils.showAlert(e.message || e, 'danger');
+                                    }
+                                });
+                            }
+
+                            new bootstrap.Modal(document.getElementById('srModalStoryReportDetail')).show();
                         });
                     });
                 } else {

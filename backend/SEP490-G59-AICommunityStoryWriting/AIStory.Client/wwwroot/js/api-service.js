@@ -1006,6 +1006,17 @@ class ApiService {
         });
     }
 
+    /** COMPLIANCE: đánh dấu / gỡ đánh dấu xác minh cho từng người báo truyện (story_report_contributors) */
+    static async complianceSetStoryContributorVerification(storyId, body = {}) {
+        return this.request(`/compliance/story-reports/stories/${encodeURIComponent(storyId)}/contributor-verification`, {
+            method: 'POST',
+            body: JSON.stringify({
+                verifyUserIds: body.verifyUserIds || body.VerifyUserIds || [],
+                unverifyUserIds: body.unverifyUserIds || body.UnverifyUserIds || []
+            })
+        });
+    }
+
     /** COMPLIANCE: đóng mọi report comment mở của comment thread */
     static async complianceResolveAllOpenCommentReports(commentId, body = {}) {
         // body: { status: 'RESOLVED'|'DISMISSED', HideComment: bool, IncludeReplies: bool }
@@ -1015,6 +1026,17 @@ class ApiService {
                 status: body.status || 'RESOLVED',
                 HideComment: body.HideComment ?? true,
                 IncludeReplies: body.IncludeReplies ?? true
+            })
+        });
+    }
+
+    /** COMPLIANCE: đánh dấu / gỡ đánh dấu xác minh cho từng report_evidences (request người báo cáo) */
+    static async complianceSetCommentReportEvidenceVerification(commentId, body = {}) {
+        return this.request(`/compliance/comment-reports/comments/${encodeURIComponent(commentId)}/evidence-verification`, {
+            method: 'POST',
+            body: JSON.stringify({
+                verifyEvidenceIds: body.verifyEvidenceIds || body.VerifyEvidenceIds || [],
+                unverifyEvidenceIds: body.unverifyEvidenceIds || body.UnverifyEvidenceIds || []
             })
         });
     }

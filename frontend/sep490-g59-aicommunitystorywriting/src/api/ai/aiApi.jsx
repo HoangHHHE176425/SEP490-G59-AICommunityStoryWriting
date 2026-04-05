@@ -82,7 +82,7 @@ function parseCoCreateSseResponse(rawText) {
         }
     }
     if (lastError) {
-        const msg = lastError.message ?? lastError.Message ?? "Lỗi đồng sáng tác với AI.";
+        const msg = lastError.message ?? lastError.Message ?? "Lỗi khi gọi AI hỗ trợ.";
         const err = new Error(typeof msg === "string" ? msg : JSON.stringify(lastError));
         err.response = { status: 400, data: lastError };
         throw err;
@@ -101,7 +101,7 @@ function parseCoCreateSseResponse(rawText) {
  * @param {string} storyId - ID truyện (Guid)
  * @param {string|null|undefined} authorIdea - Ý tưởng của tác giả (có thể null khi BE cho phép auto)
  * @param {{ chapterOrderIndex?: number, chapterId?: string }} [options] - order_index/chapterId chương đang soạn
- * @returns {Promise<{ ideaContradictionFeedback?: string, outline: string, finalContent: string, approved: boolean, revisionCount: number, reviewFeedback?: string }>}
+ * @returns {Promise<{ ideaContradictionFeedback?: string, outline: string, suggestedChapterTitle?: string, finalContent: string, approved: boolean, revisionCount: number, reviewFeedback?: string }>}
  */
 export async function coCreate(storyId, authorIdea, options = {}) {
     if (!storyId) throw new Error("StoryId là bắt buộc.");
@@ -218,12 +218,15 @@ export async function compareChapterPreview(payload) {
     }
 }
 
-/**
- * Check chapter content: chính tả + từ cấm/chính sách.
- * @param {Object} payload - { content: string, storyId?: string|null, chapterTitle?: string|null }
- * @returns {Promise<{ passed: boolean, spellingIssues: Array<{ wordOrPhrase, suggestion, context? }>, policyViolations: Array<{ type, description, quote? }>, hasInappropriateContent: boolean, summary?: string|null }>}
- */
+const authHeader = () => {
+    const token = localStorage.getItem("accessToken");
+    return token ? { Authorization: `Bearer ${token}` } : undefined;
+};
 
+/**
+ * Legacy: gộp chính tả + từ cấm (nếu BE còn route cũ).
+ * @param {Object} payload - { content: string, storyId?: string|null, chapterTitle?: string|null }
+ */
 export async function checkChapter(payload) {
     const content = (payload?.content ?? '').toString();
     if (!content.trim()) throw new Error("Content là bắt buộc.");
@@ -232,18 +235,17 @@ export async function checkChapter(payload) {
         storyId: payload?.storyId ?? null,
         chapterTitle: payload?.chapterTitle ?? null,
     };
-    const token = localStorage.getItem("accessToken");
     const response = await axiosInstance.post("ai/check-chapter", body, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        headers: authHeader(),
     });
     return response.data;
 }
 
 /**
- * Check từ cấm/chính sách (ưu tiên endpoint tách riêng; fallback check-chapter cũ).
+ * Kiểm tra chính tả (POST /api/ai/check-chapter-spelling).
  * @param {Object} payload - { content: string, storyId?: string|null, chapterTitle?: string|null }
  */
-export async function checkBannedWords(payload) {
+export async function checkChapterSpelling(payload) {
     const content = (payload?.content ?? "").toString();
     if (!content.trim()) throw new Error("Content là bắt buộc.");
     const body = {
@@ -251,15 +253,48 @@ export async function checkBannedWords(payload) {
         storyId: payload?.storyId ?? null,
         chapterTitle: payload?.chapterTitle ?? null,
     };
-    const token = localStorage.getItem("accessToken");
     try {
-        const response = await axiosInstance.post("ai/check-banned-words", body, {
-            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        const response = await axiosInstance.post("ai/check-chapter-spelling", body, {
+            headers: authHeader(),
         });
         return response.data;
     } catch (err) {
         if (err?.response?.status !== 404) throw err;
-        const legacy = await checkChapter(payload);
+        return checkChapter(payload);
+    }
+}
+
+/**
+ * Kiểm tra từ cấm / chính sách (POST /api/ai/check-chapter-banned-words).
+ * @param {Object} payload - { content: string, storyId?: string|null }
+ */
+export async function checkBannedWords(payload) {
+    const content = (payload?.content ?? "").toString();
+    if (!content.trim()) throw new Error("Content là bắt buộc.");
+    const body = {
+        content,
+        storyId: payload?.storyId ?? null,
+    };
+    try {
+        const response = await axiosInstance.post("ai/check-chapter-banned-words", body, {
+            headers: authHeader(),
+        });
+        return response.data;
+    } catch (err) {
+        if (err?.response?.status !== 404) throw err;
+    }
+    try {
+        const response = await axiosInstance.post("ai/check-banned-words", { ...body, chapterTitle: payload?.chapterTitle ?? null }, {
+            headers: authHeader(),
+        });
+        return response.data;
+    } catch (err2) {
+        if (err2?.response?.status !== 404) throw err2;
+        const legacy = await checkChapter({
+            content,
+            storyId: payload?.storyId ?? null,
+            chapterTitle: payload?.chapterTitle ?? null,
+        });
         const policyViolations = legacy?.policyViolations ?? legacy?.PolicyViolations ?? [];
         const hasInappropriateContent = Boolean(legacy?.hasInappropriateContent ?? legacy?.HasInappropriateContent);
         return {

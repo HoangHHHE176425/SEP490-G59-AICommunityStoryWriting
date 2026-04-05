@@ -64,7 +64,7 @@ export async function createChapter(data) {
 
 /**
  * Lấy danh sách chapters có phân trang và lọc.
- * @param {Object} params - { storyId?, page?, pageSize?, status?, accessType?, sortBy?, sortOrder?, includeChapterIds?: string[] }
+ * @param {Object} params - { storyId?, page?, pageSize?, status?, accessType?, sortBy?, sortOrder?, includeChapterIds?: string[], excludeBannedStoryAuthors?: boolean }
  * @returns {Promise} - PagedResultDto
  */
 export async function getChapters(params = {}) {
@@ -81,6 +81,9 @@ export async function getChapters(params = {}) {
         inc.forEach((id) => {
             if (id != null && String(id).trim() !== "") q.append("includeChapterIds", String(id).trim());
         });
+    }
+    if (params.excludeBannedStoryAuthors === false) {
+        q.append("excludeBannedStoryAuthors", "false");
     }
 
     const url = q.toString() ? `/chapters?${q}` : "/chapters";

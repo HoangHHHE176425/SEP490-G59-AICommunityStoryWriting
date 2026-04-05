@@ -1,4 +1,5 @@
 import axios from "axios";
+import { translateBackendMessage } from "../utils/translateBackendMessage";
 
 const apiUrl = import.meta.env.VITE_API_URL || "https://localhost:7117/api";
 
@@ -41,14 +42,40 @@ axiosInstance.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
+function translateAxiosErrorMessage(err) {
+    const originalMsg =
+        err?.response?.data?.message ??
+        err?.response?.data?.Message ??
+        err?.message;
+    const translated = translateBackendMessage(originalMsg);
+    if (translated && translated !== originalMsg) {
+        // Mutate in-place so callers using `err.response.data.message` get translated text.
+        if (err?.response?.data) {
+            if ('message' in err.response.data) err.response.data.message = translated;
+            if ('Message' in err.response.data) err.response.data.Message = translated;
+        }
+        err.message = translated;
+    }
+    return err;
+}
+
 axiosInstance.interceptors.response.use(
-    (response) => response,
+    (response) => {
+        // Một số API trả HTTP 200 nhưng success=false và message EN.
+        // Chỉ dịch khi rõ ràng là lỗi (success === false).
+        const data = response?.data;
+        if (data && data.success === false && typeof data.message === "string") {
+            const translated = translateBackendMessage(data.message);
+            response.data.message = translated;
+        }
+        return response;
+    },
     async (error) => {
         const originalRequest = error?.config;
         const status = error?.response?.status;
 
         if (!originalRequest || status !== 401) {
-            return Promise.reject(error);
+            return Promise.reject(translateAxiosErrorMessage(error));
         }
 
         // Chưa đăng nhập: không có accessToken → không gọi refresh (tránh lỗi "Missing refresh token" / vòng 401).
@@ -72,7 +99,7 @@ axiosInstance.interceptors.response.use(
             url.includes("/Auth/refresh");
 
         if (isAuthEndpoint) {
-            return Promise.reject(error);
+            return Promise.reject(translateAxiosErrorMessage(error));
         }
 
         originalRequest._retry = true;
@@ -82,7 +109,7 @@ axiosInstance.interceptors.response.use(
             const newToken = refreshRes?.data?.accessToken;
             if (!newToken) {
                 clearAccessToken();
-                return Promise.reject(error);
+                return Promise.reject(translateAxiosErrorMessage(error));
             }
 
             setAccessToken(newToken);
@@ -92,7 +119,7 @@ axiosInstance.interceptors.response.use(
             return axiosInstance(originalRequest);
         } catch (refreshErr) {
             clearAccessToken();
-            return Promise.reject(refreshErr);
+            return Promise.reject(translateAxiosErrorMessage(refreshErr));
         }
     }
 );

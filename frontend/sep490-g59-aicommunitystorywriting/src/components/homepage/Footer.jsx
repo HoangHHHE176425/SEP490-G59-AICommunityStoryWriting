@@ -35,7 +35,7 @@ export function Footer() {
                     <ul className="flex flex-col gap-3 text-sm text-slate-400">
                         <li className="flex items-center gap-2">
                             <Bot className="w-4 h-4 text-primary shrink-0" />
-                            <span>AI Sáng tạo thông minh</span>
+                            <span>AI hỗ trợ sáng tác</span>
                         </li>
                         <li className="flex items-center gap-2">
                             <Users className="w-4 h-4 text-primary shrink-0" />
@@ -65,9 +65,8 @@ export function Footer() {
                                 Chính sách bảo mật
                             </Link>
                         </li>
-                        <li><a className="hover:text-primary transition-colors" href="#">Câu hỏi thường gặp</a></li>
+                        <li><Link to="/faq" className="hover:text-primary transition-colors">Câu hỏi thường gặp</Link></li>
                         <li><Link to="/about-us" className="hover:text-primary transition-colors">Về chúng tôi</Link></li>
-                        <li><a className="hover:text-primary transition-colors" href="#">Liên hệ bản quyền</a></li>
                     </ul>
                 </div>
             </div>

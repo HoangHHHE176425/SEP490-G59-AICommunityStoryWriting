@@ -36,6 +36,22 @@ export function formatApiDateTimeLocalVi(value) {
     });
 }
 
+/** Luôn hiển thị theo giờ Việt Nam (UTC+7), không phụ thuộc múi giờ trình duyệt. */
+export function formatApiDateTimeVietnamVi(value) {
+    const d = parseApiDateTimeUtc(value);
+    if (!d) return '—';
+    return d.toLocaleString('vi-VN', {
+        timeZone: 'Asia/Ho_Chi_Minh',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    });
+}
+
 /** Giá trị cho input datetime-local (giờ local trình duyệt). */
 export function apiDateToDatetimeLocalValue(isoOrApi) {
     const d = parseApiDateTimeUtc(isoOrApi);
