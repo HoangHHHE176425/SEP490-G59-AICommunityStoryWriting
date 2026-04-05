@@ -35,7 +35,7 @@ export function Footer() {
                     <ul className="flex flex-col gap-3 text-sm text-slate-400">
                         <li className="flex items-center gap-2">
                             <Bot className="w-4 h-4 text-primary shrink-0" />
-                            <span>AI Sáng tạo thông minh</span>
+                            <span>AI hỗ trợ sáng tác</span>
                         </li>
                         <li className="flex items-center gap-2">
                             <Users className="w-4 h-4 text-primary shrink-0" />

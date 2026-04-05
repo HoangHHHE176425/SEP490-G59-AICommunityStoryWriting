@@ -82,7 +82,7 @@ function parseCoCreateSseResponse(rawText) {
         }
     }
     if (lastError) {
-        const msg = lastError.message ?? lastError.Message ?? "Lỗi đồng sáng tác với AI.";
+        const msg = lastError.message ?? lastError.Message ?? "Lỗi khi gọi AI hỗ trợ.";
         const err = new Error(typeof msg === "string" ? msg : JSON.stringify(lastError));
         err.response = { status: 400, data: lastError };
         throw err;
