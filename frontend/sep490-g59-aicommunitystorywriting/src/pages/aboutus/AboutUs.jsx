@@ -52,7 +52,7 @@ function HeroSection() {
           </h1>
 
           <p className="text-[#94A3B8] text-xl md:text-2xl mb-12 max-w-4xl mx-auto leading-relaxed">
-            CSW-AI là nền tảng viết truyện cộng đồng đầu tiên tại Việt Nam tích hợp công nghệ AI tiên tiến,
+            CSW-AI là nền tảng viết truyện cộng đồng đầu tiên tại Việt Nam tích hợp AI hỗ trợ tác giả,
             giúp tác giả và độc giả kết nối, sáng tạo và chia sẻ những câu chuyện đầy cảm hứng.
           </p>
 
@@ -99,7 +99,7 @@ function IntroSection() {
                 kỹ năng hoặc nguồn lực để biến ý tưởng thành tác phẩm hoàn chỉnh. CSW-AI ra đời để phá bỏ rào cản đó.
               </p>
               <p>
-                Với trợ lý AI thông minh, bạn có thể dễ dàng phát triển ý tưởng, xây dựng cốt truyện, tạo nhân vật
+                Với trợ lý AI hỗ trợ, bạn có thể dễ dàng phát triển ý tưởng, xây dựng cốt truyện, tạo nhân vật
                 sống động và hoàn thiện từng chương truyện một cách chuyên nghiệp - dù bạn là người mới bắt đầu hay
                 tác giả dày dặn kinh nghiệm.
               </p>
@@ -192,10 +192,10 @@ function WhyChooseUsSection() {
   const reasons = [
     {
       icon: Bot,
-      title: 'AI Thông Minh Nhất',
-      description: 'Công nghệ AI được đào tạo trên hàng triệu tác phẩm văn học, hiểu rõ văn phong Việt Nam và có khả năng hỗ trợ sáng tạo đa dạng thể loại.',
+      title: 'AI hỗ trợ sáng tác',
+      description: 'Công nghệ AI được huấn luyện trên dữ liệu văn học đa dạng, hỗ trợ gợi ý theo văn phong Việt Nam và nhiều thể loại.',
       color: 'from-[#13EC5B] to-[#11D350]',
-      features: ['Gợi ý cốt truyện logic', 'Tạo nhân vật sống động', 'Điều chỉnh văn phong', 'Kiểm tra lỗi chính tả']
+      features: ['Gợi ý cốt truyện logic', 'Gợi ý phát triển nhân vật', 'Gợi ý điều chỉnh văn phong', 'Gợi ý kiểm tra chính tả']
     },
     {
       icon: Users,
@@ -275,7 +275,7 @@ function FeaturesSection() {
     {
       icon: Bot,
       title: 'AI Hỗ Trợ Viết Truyện',
-      description: 'Trợ lý AI thông minh giúp bạn phát triển ý tưởng, gợi ý cốt truyện, xây dựng nhân vật và hoàn thiện từng chương.',
+      description: 'Trợ lý AI hỗ trợ bạn phát triển ý tưởng, gợi ý cốt truyện, xây dựng nhân vật và hoàn thiện từng chương.',
       details: ['Brainstorming tự động', 'Phân tích cấu trúc truyện', 'Gợi ý diễn biến hợp lý', 'Tối ưu văn phong']
     },
     {
@@ -449,7 +449,7 @@ function StatsSection() {
     { value: '50,000+', label: 'Truyện Đã Xuất Bản', description: 'Từ truyện ngắn đến tiểu thuyết dài kỳ', icon: BookOpen },
     { value: '10,000+', label: 'Tác Giả Hoạt Động', description: 'Cộng đồng sáng tạo không ngừng lớn mạnh', icon: Users },
     { value: '1,000,000+', label: 'Lượt Đọc Mỗi Tháng', description: 'Hàng triệu độc giả đam mê', icon: TrendingUp },
-    { value: '100,000+', label: 'Chương AI Hỗ Trợ', description: 'Công nghệ AI giúp tác giả sáng tạo', icon: Bot },
+    { value: '100,000+', label: 'Chương AI Hỗ Trợ', description: 'AI hỗ trợ tác giả trong quá trình viết', icon: Bot },
   ];
 
   return (
@@ -590,7 +590,7 @@ function TestimonialsSection() {
 
 function TeamSection() {
   const teams = [
-    { role: 'Đội Ngũ Kỹ Thuật', description: 'Phát triển và duy trì nền tảng với công nghệ AI tiên tiến nhất. Đội ngũ engineers giàu kinh nghiệm từ các tập đoàn công nghệ hàng đầu.', icon: Bot, members: '15+ kỹ sư' },
+    { role: 'Đội Ngũ Kỹ Thuật', description: 'Phát triển và duy trì nền tảng, tích hợp tính năng AI hỗ trợ tác giả an toàn và ổn định. Đội ngũ engineers giàu kinh nghiệm từ các tập đoàn công nghệ hàng đầu.', icon: Bot, members: '15+ kỹ sư' },
     { role: 'Đội Ngũ Nội Dung', description: 'Hỗ trợ tác giả, quản lý chất lượng nội dung và tổ chức các sự kiện văn học. Team biên tập viên chuyên nghiệp với nhiều năm kinh nghiệm.', icon: BookOpen, members: '20+ biên tập viên' },
     { role: 'Đội Ngũ Cộng Đồng', description: 'Kết nối và chăm sóc cộng đồng tác giả & độc giả 24/7. Luôn lắng nghe và giải đáp mọi thắc mắc nhanh chóng.', icon: Users, members: '10+ community managers' },
   ];

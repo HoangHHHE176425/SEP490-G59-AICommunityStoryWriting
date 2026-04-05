@@ -691,7 +691,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             setShowCoCreateResultPopup(true);
         } catch (err) {
             const status = err?.response?.status;
-            const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi đồng sáng tác với AI.';
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi AI hỗ trợ.';
             if (status === 429) showToast('Bạn đã gọi AI quá nhiều lần. Vui lòng thử lại sau.', 'error');
             else if (status === 403) showToast(msg || 'Chỉ tác giả của truyện mới được sử dụng.', 'error');
             else showToast(msg, 'error');
