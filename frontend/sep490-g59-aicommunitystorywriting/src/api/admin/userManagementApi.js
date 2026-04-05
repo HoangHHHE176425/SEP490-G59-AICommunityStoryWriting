@@ -136,3 +136,23 @@ export async function getModeratorCategories(userId) {
     const res = await axiosInstance.get(`/admin/users/${userId}/moderator-categories`);
     return { categoryIds: res.data?.categoryIds ?? res.data?.category_ids ?? [] };
 }
+
+/**
+ * Soft-delete user (backend: status DELETED, vô hiệu hóa đăng nhập).
+ * DELETE /api/admin/users/{id}
+ * @param {string} userId
+ * @returns {Promise<{ success: true } | { success: false, message: string }>}
+ */
+export async function deleteUser(userId) {
+    try {
+        await axiosInstance.delete(`/admin/users/${userId}`);
+        return { success: true };
+    } catch (err) {
+        const message =
+            err?.response?.data?.message ||
+            err?.response?.data?.title ||
+            err?.message ||
+            'Không thể xóa tài khoản.';
+        return { success: false, message: String(message) };
+    }
+}

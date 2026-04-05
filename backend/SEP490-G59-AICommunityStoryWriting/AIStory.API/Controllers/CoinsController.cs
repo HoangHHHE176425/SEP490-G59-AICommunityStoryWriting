@@ -7,6 +7,7 @@ using System.Security.Claims;
 using BusinessObjects;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace AIStory.API.Controllers
 {
@@ -31,6 +32,111 @@ namespace AIStory.API.Controllers
             if (userIdClaim == null || !Guid.TryParse(userIdClaim.Value, out var userId))
                 throw new Exception("Invalid Token or User ID format");
             return userId;
+        }
+
+        private const int BANK_ACCOUNT_NUMBER_MIN = 6;
+        private const int BANK_ACCOUNT_NUMBER_MAX = 19;
+        private const int BANK_ACCOUNT_HOLDER_MIN = 3;
+        private const int BANK_ACCOUNT_HOLDER_MAX = 100;
+        private const int BANK_BRANCH_MAX = 120;
+
+        private static string CollapseSpaces(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+            return Regex.Replace(input.Trim(), @"\s+", " ");
+        }
+
+        private static bool TryNormalizeAuthorBankAccountInput(
+            AuthorBankAccountUpsertRequest request,
+            out string bankName,
+            out string accountNumberDigits,
+            out string accountHolderUpper,
+            out string? branchName,
+            out string errorMessage)
+        {
+            bankName = string.Empty;
+            accountNumberDigits = string.Empty;
+            accountHolderUpper = string.Empty;
+            branchName = null;
+            errorMessage = string.Empty;
+
+            if (request == null)
+            {
+                errorMessage = "Payload không hợp lệ.";
+                return false;
+            }
+
+            bankName = (request.BankName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(bankName))
+            {
+                errorMessage = "Vui lòng chọn ngân hàng.";
+                return false;
+            }
+            if (bankName.Length > 100)
+            {
+                errorMessage = "Tên ngân hàng tối đa 100 ký tự.";
+                return false;
+            }
+
+            var accountRaw = (request.AccountNumber ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(accountRaw))
+            {
+                errorMessage = "Vui lòng nhập số tài khoản (chỉ chữ số).";
+                return false;
+            }
+            if (!Regex.IsMatch(accountRaw, @"^\d+$"))
+            {
+                errorMessage = "Số tài khoản chỉ được chứa chữ số.";
+                return false;
+            }
+            accountNumberDigits = accountRaw;
+            if (accountNumberDigits.Length < BANK_ACCOUNT_NUMBER_MIN || accountNumberDigits.Length > BANK_ACCOUNT_NUMBER_MAX)
+            {
+                errorMessage = $"Số tài khoản cần từ {BANK_ACCOUNT_NUMBER_MIN} đến {BANK_ACCOUNT_NUMBER_MAX} chữ số.";
+                return false;
+            }
+
+            var holderNorm = CollapseSpaces(request.AccountHolderName ?? string.Empty);
+            if (string.IsNullOrWhiteSpace(holderNorm))
+            {
+                errorMessage = "Vui lòng nhập tên chủ tài khoản.";
+                return false;
+            }
+            if (holderNorm.Length < BANK_ACCOUNT_HOLDER_MIN)
+            {
+                errorMessage = $"Tên chủ tài khoản tối thiểu {BANK_ACCOUNT_HOLDER_MIN} ký tự.";
+                return false;
+            }
+            if (holderNorm.Length > BANK_ACCOUNT_HOLDER_MAX)
+            {
+                errorMessage = $"Tên chủ tài khoản tối đa {BANK_ACCOUNT_HOLDER_MAX} ký tự.";
+                return false;
+            }
+            if (!Regex.IsMatch(holderNorm, @"^[\p{L}\s'.-]+$", RegexOptions.Compiled))
+            {
+                errorMessage = "Tên chủ tài khoản chỉ dùng chữ cái (có dấu), khoảng trắng và các ký tự . ' -";
+                return false;
+            }
+            accountHolderUpper = holderNorm.ToUpper(new CultureInfo("vi-VN"));
+
+            var branchTrim = (request.BranchName ?? string.Empty).Trim();
+            if (!string.IsNullOrEmpty(branchTrim))
+            {
+                if (branchTrim.Length > BANK_BRANCH_MAX)
+                {
+                    errorMessage = $"Chi nhánh tối đa {BANK_BRANCH_MAX} ký tự.";
+                    return false;
+                }
+                if (branchTrim.Length > 255)
+                {
+                    // safety vs DB constraint (StoryPlatformDbContext config)
+                    errorMessage = "Chi nhánh quá dài.";
+                    return false;
+                }
+                branchName = branchTrim;
+            }
+
+            return true;
         }
 
         /// <summary>Danh sách gói coin (active)</summary>
@@ -561,13 +667,15 @@ namespace AIStory.API.Controllers
         [Authorize]
         public async Task<IActionResult> UpsertAuthorBankAccount([FromBody] AuthorBankAccountUpsertRequest request, CancellationToken cancellationToken = default)
         {
-            if (request == null)
-                return BadRequest(new { message = "Payload không hợp lệ." });
-            if (string.IsNullOrWhiteSpace(request.BankName) ||
-                string.IsNullOrWhiteSpace(request.AccountNumber) ||
-                string.IsNullOrWhiteSpace(request.AccountHolderName))
+            if (!TryNormalizeAuthorBankAccountInput(
+                    request,
+                    out var bankName,
+                    out var accountNumberDigits,
+                    out var accountHolderUpper,
+                    out var branchName,
+                    out var errorMessage))
             {
-                return BadRequest(new { message = "Thiếu thông tin bank_name/account_number/account_holder_name." });
+                return BadRequest(new { message = errorMessage });
             }
 
             var userId = GetUserIdFromToken();
@@ -580,10 +688,10 @@ namespace AIStory.API.Controllers
                 acc = new BusinessObjects.Entities.author_bank_accounts
                 {
                     user_id = userId,
-                    bank_name = request.BankName.Trim(),
-                    account_number = request.AccountNumber.Trim(),
-                    account_holder_name = request.AccountHolderName.Trim(),
-                    branch_name = request.BranchName?.Trim(),
+                    bank_name = bankName,
+                    account_number = accountNumberDigits,
+                    account_holder_name = accountHolderUpper,
+                    branch_name = branchName,
                     is_verified = request.IsVerified,
                     updated_at = DateTime.UtcNow
                 };
@@ -591,10 +699,10 @@ namespace AIStory.API.Controllers
             }
             else
             {
-                acc.bank_name = request.BankName.Trim();
-                acc.account_number = request.AccountNumber.Trim();
-                acc.account_holder_name = request.AccountHolderName.Trim();
-                acc.branch_name = request.BranchName?.Trim();
+                acc.bank_name = bankName;
+                acc.account_number = accountNumberDigits;
+                acc.account_holder_name = accountHolderUpper;
+                acc.branch_name = branchName;
                 acc.is_verified = request.IsVerified;
                 acc.updated_at = DateTime.UtcNow;
             }
