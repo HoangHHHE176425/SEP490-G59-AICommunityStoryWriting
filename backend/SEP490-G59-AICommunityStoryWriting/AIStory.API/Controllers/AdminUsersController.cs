@@ -119,6 +119,23 @@ namespace AIStory.API.Controllers
         [HttpDelete("{id:guid}")]
         public async Task<IActionResult> Delete(Guid id)
         {
+            var currentUserId = GetCurrentUserId();
+            if (currentUserId.HasValue && currentUserId.Value == id)
+            {
+                return BadRequest(new { message = "Không thể xóa tài khoản đang đăng nhập." });
+            }
+
+            var existing = await _service.GetUserByIdAsync(id);
+            if (existing == null)
+            {
+                return NotFound(new { message = "User not found." });
+            }
+
+            if (string.Equals(existing.Role, "ADMIN", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { message = "Không thể xóa tài khoản quản trị viên." });
+            }
+
             var ok = await _service.DeleteAsync(id);
             return ok ? NoContent() : NotFound(new { message = "User not found." });
         }
