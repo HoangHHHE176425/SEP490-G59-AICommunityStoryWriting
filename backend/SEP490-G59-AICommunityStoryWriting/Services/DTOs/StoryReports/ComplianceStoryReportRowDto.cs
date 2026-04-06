@@ -35,4 +35,7 @@ public class ComplianceStoryReportRowDto
     public bool ComplianceHidden { get; set; }
     public bool ComplianceFlagged { get; set; }
     public string? ComplianceFlagNote { get; set; }
+
+    public bool HasPendingAdminActionRequest { get; set; }
+    public bool HasPendingLockReleaseRequest { get; set; }
 }

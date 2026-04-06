@@ -79,9 +79,10 @@ public class ComplianceCommentReportsController : ControllerBase
         var userId = GetCurrentUserId();
         if (!userId.HasValue) return Unauthorized(new { message = "Cần đăng nhập." });
         if (body == null) body = new SetCommentThreadHiddenRequestDto();
+        var actorIsAdmin = User.IsInRole("ADMIN");
         try
         {
-            await _commentReportService.SetCommentThreadHiddenAsync(commentId, userId.Value, body.Value, body.IncludeReplies);
+            await _commentReportService.SetCommentThreadHiddenAsync(commentId, userId.Value, body.Value, body.IncludeReplies, actorIsAdmin);
             return Ok(new { message = "Đã cập nhật trạng thái ẩn/hiện comment." });
         }
         catch (ArgumentException ex)
@@ -188,6 +189,28 @@ public class ComplianceCommentReportsController : ControllerBase
         catch (Exception ex)
         {
             return StatusCode(500, new { message = "Lỗi khi lưu đánh dấu xác minh.", error = ex.Message });
+        }
+    }
+
+    /// <summary>COMPLIANCE đang giữ lock: gửi yêu cầu admin gỡ lock (sau khi gửi, thread bị chặn thao tác tới khi admin xử lý).</summary>
+    [Authorize(Roles = "COMPLIANCE")]
+    [HttpPost("comments/{commentId:guid}/request-release")]
+    public async Task<IActionResult> RequestCommentLockRelease(Guid commentId, [FromBody] RequestComplianceLockReleaseDto? body)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue) return Unauthorized(new { message = "Cần đăng nhập." });
+        try
+        {
+            var id = await _commentReportService.RequestComplianceCommentLockReleaseAsync(commentId, userId.Value, body);
+            return Ok(new { message = "Đã gửi yêu cầu lên admin.", requestId = id });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "Lỗi khi gửi yêu cầu gỡ lock.", error = ex.Message });
         }
     }
 

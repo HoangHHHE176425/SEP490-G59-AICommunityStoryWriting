@@ -257,15 +257,15 @@ public class AdminComplianceStoryReportsController : ControllerBase
                 ResolvedAtUtc = x.resolved_at
             });
 
-        var lockQ = db.compliance_story_report_lock_requests.AsNoTracking()
+        var lockQ = db.compliance_report_lock_requests.AsNoTracking()
             .Select(x => new ComplianceLogItemDto
             {
                 Source = SrcLockRequest,
                 RowId = x.id,
                 ComplianceUserId = x.requester_id,
                 ComplianceUserName = null,
-                TargetType = "STORY",
-                TargetId = x.story_id,
+                TargetType = x.target_type,
+                TargetId = x.target_id,
                 Status = x.status,
                 Action = x.resolution_action,
                 Message = x.message,
@@ -384,7 +384,7 @@ public class AdminComplianceStoryReportsController : ControllerBase
             .Select(x => x.requester_id)
             .ToListAsync();
 
-        var lockReqRows = await db.compliance_story_report_lock_requests.AsNoTracking()
+        var lockReqRows = await db.compliance_report_lock_requests.AsNoTracking()
             .Where(x => !query.DateFrom.HasValue || x.created_at >= query.DateFrom.Value)
             .Where(x => !to.HasValue || x.created_at <= to.Value)
             .Select(x => x.requester_id)
