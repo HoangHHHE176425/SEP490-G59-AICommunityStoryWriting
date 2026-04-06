@@ -1089,6 +1089,13 @@ class ApiService {
         });
     }
 
+    static async complianceRequestCommentLockRelease(commentId, body) {
+        return this.request(`/compliance/comment-reports/comments/${encodeURIComponent(commentId)}/request-release`, {
+            method: 'POST',
+            body: JSON.stringify(body || {})
+        });
+    }
+
     static async complianceRequestAdminActionOnComment(commentId, body) {
         return this.request(`/compliance/comment-reports/comments/${encodeURIComponent(commentId)}/admin-action-requests`, {
             method: 'POST',

@@ -152,32 +152,41 @@
                     host.innerHTML = '<p class="p-3 text-muted mb-0">Không có yêu cầu PENDING.</p>';
                     return;
                 }
-                let html = '<table class="table table-sm table-hover mb-0 align-middle"><thead><tr><th>Tạo lúc</th><th>Truyện</th><th>Người gửi</th><th>Lời nhắn</th><th></th></tr></thead><tbody>';
+                let html = '<table class="table table-sm table-hover mb-0 align-middle"><thead><tr><th>Tạo lúc</th><th>Loại</th><th>Mục tiêu / Truyện</th><th>Người gửi</th><th>Lời nhắn</th><th></th></tr></thead><tbody>';
                 list.forEach(function (r) {
                     const id = r.id || r.Id;
                     const sid = r.storyId || r.StoryId;
                     const st = r.storyTitle || r.StoryTitle || '';
+                    const tt = (r.targetType || r.TargetType || 'STORY');
+                    const tid = r.targetId != null ? r.targetId : r.TargetId;
                     const rq = r.requesterId || r.RequesterId;
                     const em = r.requesterEmail || r.RequesterEmail || '';
                     const nm = r.requesterDisplayName || r.RequesterDisplayName || '';
                     const msg = r.message || r.Message || '—';
                     const ca = r.createdAtUtc || r.CreatedAtUtc;
+                    let targetCell = '<a href="/Home/Story/' + encodeURIComponent(sid) + '" target="_blank" rel="noopener">' + aclEsc(st || sid) + '</a><div class="text-muted"><code>' + aclEsc(String(sid)) + '</code></div>';
+                    if (String(tt).toUpperCase() === 'COMMENT' && tid) {
+                        targetCell = '<span class="badge bg-secondary">COMMENT</span> <code class="small">' + aclEsc(String(tid)) + '</code>' +
+                            (sid ? '<div class="mt-1"><a href="/Home/Story/' + encodeURIComponent(sid) + '" target="_blank" rel="noopener">Truyện: ' + aclEsc(st || sid) + '</a></div>' : '');
+                    }
                     html += '<tr>' +
                         '<td class="small">' + aclEsc(ca ? Utils.formatDate(ca) : '—') + '</td>' +
-                        '<td class="small"><a href="/Home/Story/' + encodeURIComponent(sid) + '" target="_blank" rel="noopener">' + aclEsc(st || sid) + '</a><div class="text-muted"><code>' + aclEsc(String(sid)) + '</code></div></td>' +
+                        '<td class="small"><code>' + aclEsc(String(tt)) + '</code></td>' +
+                        '<td class="small">' + targetCell + '</td>' +
                         '<td class="small">' + aclEsc(nm || em) + '<div class="text-muted">' + aclEsc(String(rq)) + '</div></td>' +
                         '<td class="small">' + aclEsc(msg) + '</td>' +
-                        '<td><button type="button" class="btn btn-sm btn-primary acl-open-resolve" data-req="' + aclEsc(String(id)) + '" data-story="' + aclEsc(String(sid)) + '" data-reqer="' + aclEsc(String(rq)) + '">Duyệt</button></td></tr>';
+                        '<td><button type="button" class="btn btn-sm btn-primary acl-open-resolve" data-req="' + aclEsc(String(id)) + '" data-story="' + aclEsc(String(sid)) + '" data-reqer="' + aclEsc(String(rq)) + '" data-tt="' + aclEsc(String(tt)) + '" data-tid="' + aclEsc(String(tid || '')) + '">Duyệt</button></td></tr>';
                 });
                 html += '</tbody></table>';
                 host.innerHTML = html;
                 host.querySelectorAll('.acl-open-resolve').forEach(function (btn) {
                     btn.addEventListener('click', function () {
                         document.getElementById('aclResolveRequestId').value = btn.getAttribute('data-req');
+                        document.getElementById('aclResolveModal').setAttribute('data-target-type', btn.getAttribute('data-tt') || 'STORY');
                         const tr = btn.closest('tr');
                         const cells = tr ? tr.querySelectorAll('td') : [];
-                        const sum = cells.length >= 3
-                            ? ('Truyện: ' + (cells[1].innerText || '').trim() + ' | Người gửi: ' + (cells[2].innerText || '').trim())
+                        const sum = cells.length >= 4
+                            ? ('Loại: ' + (cells[1].innerText || '').trim() + ' | Mục tiêu: ' + (cells[2].innerText || '').trim() + ' | Người gửi: ' + (cells[3].innerText || '').trim())
                             : '';
                         document.getElementById('aclResolveSummary').textContent = sum;
                         const rqer = btn.getAttribute('data-reqer');
@@ -236,9 +245,11 @@
                     const nid = document.getElementById('aclNewAssignee').value;
                     if (!nid) { Utils.showAlert('Chọn compliance nhận.', 'warning'); return; }
                     const iso = aclToIsoUtcFromLocal(document.getElementById('aclDeadline').value);
-                    if (!iso) { Utils.showAlert('Chọn hạn xử lý.', 'warning'); return; }
+                    const modalEl = document.getElementById('aclResolveModal');
+                    const tt = (modalEl && modalEl.getAttribute('data-target-type')) || 'STORY';
+                    if (String(tt).toUpperCase() !== 'COMMENT' && !iso) { Utils.showAlert('Chọn hạn xử lý.', 'warning'); return; }
                     body.newAssigneeId = nid;
-                    body.reviewDeadlineAtUtc = iso;
+                    if (iso) body.reviewDeadlineAtUtc = iso;
                 }
                 try {
                     await ApiService.adminResolveComplianceLockRequest(requestId, body);
