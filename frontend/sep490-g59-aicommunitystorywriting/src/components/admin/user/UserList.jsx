@@ -115,7 +115,7 @@ export function UserList({ users, onViewDetail, onBlock, onUnblock, loading }) {
                                             >
                                                 <Eye className="w-4 h-4" />
                                             </button>
-                                            {user.status === 'BANNED' ? (
+                                            {user.status === 'DELETED' ? null : user.status === 'BANNED' ? (
                                                 <button
                                                     type="button"
                                                     onClick={() => onUnblock?.(user)}
