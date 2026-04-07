@@ -70,12 +70,12 @@ public static class EscalationUrgencyHelper
     /// <summary>Compliance gửi đơn gỡ / giao lại lock báo cáo truyện.</summary>
     public static string TierForComplianceLockReleaseRequest() => High;
 
-    /// <summary>BAN_USER → CRITICAL; SUSPEND_AUTHOR_WRITING → HIGH.</summary>
+    /// <summary>Đơn xử lý tài khoản của compliance đều xếp CRITICAL (BAN/SUSPEND).</summary>
     public static string TierForComplianceAdminActionKind(string? requestKind)
     {
         var k = (requestKind ?? "").Trim().ToUpperInvariant();
         if (k == "BAN_USER") return Critical;
-        if (k == "SUSPEND_AUTHOR_WRITING") return High;
+        if (k == "SUSPEND_AUTHOR_WRITING") return Critical;
         return Standard;
     }
 }

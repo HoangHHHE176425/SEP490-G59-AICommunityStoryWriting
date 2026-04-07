@@ -213,6 +213,13 @@ function truncate(str, max) {
     return `${t.slice(0, max)}…`;
 }
 
+/** Ẩn tag nội bộ nguồn comment report trong message hiển thị cho admin. */
+function sanitizeComplianceReasonText(raw) {
+    const s = String(raw ?? '').trim();
+    if (!s) return '—';
+    return s.replace(/\[COMMENT_REPORT:[0-9a-fA-F-]{36}\]\s*/g, '').trim() || '—';
+}
+
 /** Đồng bộ BE: moderator dùng UrgencyTier (từ sender_urgency_tier); compliance lock/action dùng urgency_tier trên bảng tương ứng — chỉ CRITICAL | STANDARD. */
 function urgencyKeyFromRow(row) {
     const raw = String(
@@ -337,6 +344,7 @@ export function ReviewEscalationsManagement() {
     const [logResolvedTo, setLogResolvedTo] = useState('');
     const [logSortBy, setLogSortBy] = useState('created_at');
     const [logSortOrder, setLogSortOrder] = useState('desc');
+    const [showLogAdvancedFilters, setShowLogAdvancedFilters] = useState(false);
     const [historySearch, setHistorySearch] = useState('');
     const [historyStatus, setHistoryStatus] = useState('');
     const [historyRequestType, setHistoryRequestType] = useState('');
@@ -1795,30 +1803,57 @@ export function ReviewEscalationsManagement() {
                             <button type="button" onClick={closeComplianceResolve} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
                         </div>
                         <div style={{ padding: '1rem 1.25rem', display: 'grid', gap: 10 }}>
-                            <div style={{ fontSize: '0.875rem', color: T.slateDark, lineHeight: 1.5 }}>
-                                <p style={{ margin: '0 0 6px' }}>
+                            <div
+                                style={{
+                                    fontSize: '0.875rem',
+                                    color: T.slateDark,
+                                    lineHeight: 1.55,
+                                    display: 'grid',
+                                    gap: 8,
+                                    padding: '0.75rem 0.875rem',
+                                    border: `1px solid ${T.border}`,
+                                    borderRadius: 10,
+                                    background: '#f8fafc',
+                                }}
+                            >
+                                <div>
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Loại yêu cầu:</span>{' '}
                                     <strong>
                                         {complianceResolveRow.__reqType === 'ADMIN_ACTION'
                                             ? 'Yêu cầu xử lý tài khoản'
                                             : 'Yêu cầu trả đơn về hàng đợi'}
                                     </strong>
-                                    {' — STORY — '}
-                                    <strong>{complianceResolveRow.storyTitle ?? complianceResolveRow.story?.title ?? '—'}</strong>
-                                </p>
-                                <p style={{ margin: 0, color: T.slate }}>
-                                    Người gửi: {complianceResolveRow.requesterDisplayName ?? complianceResolveRow.requesterEmail ?? '—'}
+                                </div>
+                                <div>
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Người gửi:</span>{' '}
+                                    {complianceResolveRow.requesterDisplayName ?? complianceResolveRow.requesterEmail ?? '—'}
                                     {' · '}
-                                    Thời gian gửi: {formatApiDateTimeVietnamVi(
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Thời gian gửi:</span>{' '}
+                                    {formatApiDateTimeVietnamVi(
                                         complianceResolveRow.createdAtUtc ??
                                         complianceResolveRow.CreatedAtUtc ??
                                         complianceResolveRow.created_at ??
                                         complianceResolveRow.createdAt ??
                                         complianceResolveRow.CreatedAt
                                     )}
-                                </p>
-                                <p style={{ margin: '6px 0 0', color: T.slate }}>
-                                    Lý do: {complianceResolveRow.message || '—'}
-                                </p>
+                                </div>
+                                <div>
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Tài khoản mục tiêu:</span>{' '}
+                                    <strong style={{ color: T.slateDark }}>
+                                        {complianceResolveRow.targetUserDisplayName
+                                            ?? complianceResolveRow.TargetUserDisplayName
+                                            ?? '—'}
+                                    </strong>
+                                    {' · '}
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Email:</span>{' '}
+                                    {complianceResolveRow.targetUserEmail
+                                        ?? complianceResolveRow.TargetUserEmail
+                                        ?? '—'}
+                                </div>
+                                <div>
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Lý do:</span>{' '}
+                                    {sanitizeComplianceReasonText(complianceResolveRow.message ?? complianceResolveRow.Message)}
+                                </div>
                             </div>
                             {resolveApiError ? (
                                 <div role="alert" style={{ padding: '0.75rem 1rem', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2' }}>

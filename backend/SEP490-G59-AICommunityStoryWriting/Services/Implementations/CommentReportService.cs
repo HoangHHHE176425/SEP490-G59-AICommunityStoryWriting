@@ -456,6 +456,21 @@ public class CommentReportService : ICommentReportService
                 throw new ArgumentException("Thời hạn đình chỉ phải tối thiểu 1 ngày kể từ hiện tại.");
             dto.ProposedSuspendUntilUtc = until;
         }
+
+        if (UserDAO.IsAccountBanned(targetUserId))
+            throw new InvalidOperationException(
+                "Tài khoản này đã bị chặn; không thể gửi thêm yêu cầu chặn tài khoản hoặc tạm đình chỉ quyền viết.");
+
+        if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting && UserDAO.IsAuthorWritingSuspended(targetUserId))
+        {
+            var suspUntil = UserDAO.GetAuthorWritingSuspendedUntilUtc(targetUserId);
+            var label = suspUntil.HasValue
+                ? ApiDateTime.AsUtcForJson(suspUntil.Value).ToString("dd/MM/yyyy HH:mm") + " UTC"
+                : "—";
+            throw new InvalidOperationException(
+                $"Người dùng đang bị tạm đình chỉ quyền viết (đến {label}); không thể gửi đơn đình chỉ mới cho đến khi hết hạn.");
+        }
+
         var sourceTag = ComplianceAdminActionRequestDAO.FormatCommentReportSourceTag(commentId);
         var enrichedMessage = string.IsNullOrWhiteSpace(dto.Message)
             ? sourceTag
@@ -911,15 +926,6 @@ public class CommentReportService : ICommentReportService
             .ToListAsync();
 
         var term = !string.IsNullOrWhiteSpace(search) ? search.Trim() : null;
-        if (term != null)
-        {
-            openReports = openReports
-                .Where(r =>
-                    (r.ReasonCode ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
-                    || (r.Description ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
-                    || r.ReportId.ToString().Contains(term, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-        }
 
         // Hành vi cần giống story:
         // Khi COMPLIANCE resolve từng report (không bulk), vẫn giữ ticket hiển thị theo lock
@@ -962,18 +968,58 @@ public class CommentReportService : ICommentReportService
                 })
                 .ToListAsync();
 
-            if (term != null)
-            {
-                closedReportsForClaimed = closedReportsForClaimed
-                    .Where(r =>
-                        (r.ReasonCode ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
-                        || (r.Description ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
-                        || r.ReportId.ToString().Contains(term, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-            }
-
             if (closedReportsForClaimed.Count > 0)
                 openReports.AddRange(closedReportsForClaimed);
+        }
+
+        if (term != null)
+        {
+            var searchCommentIds = openReports.Select(x => x.CommentId).Distinct().ToList();
+            if (searchCommentIds.Count > 0)
+            {
+                var commentSearchRows = await context.comments.AsNoTracking()
+                    .Include(c => c.userNavigation)
+                        .ThenInclude(u => u!.user_profiles)
+                    .Where(c => searchCommentIds.Contains(c.id))
+                    .Select(c => new
+                    {
+                        c.id,
+                        c.story_id,
+                        Nick = c.userNavigation != null && c.userNavigation.user_profiles != null
+                            ? c.userNavigation.user_profiles.nickname
+                            : null,
+                        Email = c.userNavigation != null ? c.userNavigation.email : null
+                    })
+                    .ToListAsync();
+
+                var storyIdsForSearch = commentSearchRows
+                    .Select(x => x.story_id ?? Guid.Empty)
+                    .Where(x => x != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                var storyTitleById = await context.stories.AsNoTracking()
+                    .Where(s => storyIdsForSearch.Contains(s.id))
+                    .ToDictionaryAsync(s => s.id, s => s.title ?? string.Empty);
+
+                var matchedCommentIds = commentSearchRows
+                    .Where(x =>
+                    {
+                        var displayName = string.IsNullOrWhiteSpace(x.Nick) ? x.Email : x.Nick;
+                        var storyTitle = x.story_id.HasValue && storyTitleById.TryGetValue(x.story_id.Value, out var t)
+                            ? t
+                            : string.Empty;
+                        return (!string.IsNullOrWhiteSpace(storyTitle)
+                                && storyTitle.Contains(term, StringComparison.OrdinalIgnoreCase))
+                            || (!string.IsNullOrWhiteSpace(displayName)
+                                && displayName.Contains(term, StringComparison.OrdinalIgnoreCase));
+                    })
+                    .Select(x => x.id)
+                    .ToHashSet();
+
+                openReports = openReports
+                    .Where(x => matchedCommentIds.Contains(x.CommentId))
+                    .ToList();
+            }
         }
 
         var groups = openReports
@@ -1456,6 +1502,8 @@ public class CommentReportService : ICommentReportService
             };
         }).ToList();
 
+        EnrichCommentUserModeration(rows);
+
         return new PagedComplianceCommentReportsDto
         {
             Page = page,
@@ -1463,6 +1511,19 @@ public class CommentReportService : ICommentReportService
             TotalCount = total,
             Rows = rows
         };
+    }
+
+    private static void EnrichCommentUserModeration(IReadOnlyList<ComplianceCommentReportRowDto> rows)
+    {
+        var ids = rows.Where(x => x.CommentUserId != Guid.Empty).Select(x => x.CommentUserId).Distinct().ToList();
+        if (ids.Count == 0) return;
+        var snap = UserDAO.GetUsersModerationSnapshot(ids);
+        foreach (var row in rows)
+        {
+            if (row.CommentUserId == Guid.Empty || !snap.TryGetValue(row.CommentUserId, out var m)) continue;
+            row.CommentUserAccountStatus = m.Status;
+            row.CommentUserWritingSuspendedUntilUtc = ApiDateTime.AsUtcForJson(m.AuthorWritingSuspendedUntil);
+        }
     }
 
     private static HashSet<string> ParseStatuses(string? csv)

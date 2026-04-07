@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.StoryReports;
+namespace Services.DTOs.StoryReports;
 
 public class ComplianceStoryReportQueueItemDto
 {
@@ -33,6 +33,10 @@ public class ComplianceStoryReportQueueItemDto
 
     public Guid? AuthorId { get; set; }
     public string? AuthorDisplayName { get; set; }
+    /// <summary>users.status tác giả (ACTIVE, BANNED, …).</summary>
+    public string? AuthorAccountStatus { get; set; }
+    /// <summary>Đình chỉ quyền viết đến mốc này (UTC), nếu có.</summary>
+    public DateTime? AuthorWritingSuspendedUntilUtc { get; set; }
 
     public bool CommentsDisabled { get; set; }
     public bool ComplianceHidden { get; set; }

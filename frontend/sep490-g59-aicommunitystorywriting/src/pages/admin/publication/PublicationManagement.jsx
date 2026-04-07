@@ -436,6 +436,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
     const [claimDeadlineChoice, setClaimDeadlineChoice] = useState('7'); // '7' | '14' | 'custom'
     const [claimCustomDeadline, setClaimCustomDeadline] = useState('');
     const [claimCommitted, setClaimCommitted] = useState(false);
+    const [claimDeadlineError, setClaimDeadlineError] = useState('');
     const [modalClaimBusy, setModalClaimBusy] = useState(false);
     const [policyModalOpen, setPolicyModalOpen] = useState(false);
     const [policyLoading, setPolicyLoading] = useState(false);
@@ -1120,6 +1121,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
             setClaimDeadlineChoice('7');
             setClaimCustomDeadline('');
             setClaimCommitted(false);
+            setClaimDeadlineError('');
         }
     }, [claimConfirmTarget]);
 
@@ -1129,6 +1131,18 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
             return iso || reviewDeadlineAfterDaysUtc(7);
         }
         return reviewDeadlineAfterDaysUtc(claimDeadlineChoice === '14' ? 14 : 7);
+    };
+    const validateClaimDeadline = () => {
+        if (claimDeadlineChoice !== 'custom') return '';
+        const iso = localDateTimeInputToIsoUtc(claimCustomDeadline);
+        if (!iso) return 'Vui lòng chọn ngày giờ hạn duyệt hợp lệ.';
+        const deadlineMs = Date.parse(iso);
+        if (!Number.isFinite(deadlineMs)) return 'Vui lòng chọn ngày giờ hạn duyệt hợp lệ.';
+        const minDistanceMs = 24 * 60 * 60 * 1000;
+        if (deadlineMs - Date.now() < minDistanceMs) {
+            return 'Hạn hoàn thành phải cách thời điểm hiện tại ít nhất 24 giờ.';
+        }
+        return '';
     };
 
     const filteredPublications = (filterStatus === 'pending' || filterStatus === 'rejected' || filterStatus === 'approved')
@@ -1238,10 +1252,12 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
             alert('Vui lòng xác nhận cam kết hoàn thành duyệt trong hạn đã chọn.');
             return;
         }
-        if (claimDeadlineChoice === 'custom' && !localDateTimeInputToIsoUtc(claimCustomDeadline)) {
-            alert('Vui lòng chọn ngày giờ hạn duyệt hợp lệ.');
+        const deadlineValidationError = validateClaimDeadline();
+        if (deadlineValidationError) {
+            setClaimDeadlineError(deadlineValidationError);
             return;
         }
+        setClaimDeadlineError('');
         const reviewDeadlineAt = getClaimReviewDeadlineIso();
         const { type, id, storyId, chapterIds, isStoryUnclaimed } = claimConfirmTarget;
         setModalClaimBusy(true);
@@ -1813,7 +1829,10 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                 <button
                                     key={opt.v}
                                     type="button"
-                                    onClick={() => setClaimDeadlineChoice(opt.v)}
+                                    onClick={() => {
+                                        setClaimDeadlineChoice(opt.v);
+                                        if (claimDeadlineError) setClaimDeadlineError('');
+                                    }}
                                     style={{
                                         padding: '0.4rem 0.75rem',
                                         fontSize: '0.8125rem',
@@ -1833,16 +1852,27 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                             <input
                                 type="datetime-local"
                                 value={claimCustomDeadline}
-                                onChange={(e) => setClaimCustomDeadline(e.target.value)}
+                                onChange={(e) => {
+                                    setClaimCustomDeadline(e.target.value);
+                                    if (claimDeadlineError) setClaimDeadlineError('');
+                                }}
                                 style={{
                                     width: '100%',
                                     marginBottom: '0.75rem',
                                     padding: '0.5rem',
                                     borderRadius: '8px',
-                                    border: '1px solid #cbd5e1',
+                                    border: claimDeadlineError ? '1px solid #ef4444' : '1px solid #cbd5e1',
                                     fontSize: '0.875rem',
                                 }}
                             />
+                        )}
+                        {claimDeadlineError && (
+                            <p
+                                role="alert"
+                                style={{ margin: '0 0 0.75rem', fontSize: '0.75rem', fontWeight: 600, color: '#b91c1c' }}
+                            >
+                                {claimDeadlineError}
+                            </p>
                         )}
                         <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8125rem', color: '#334155', marginBottom: '1rem', cursor: 'pointer' }}>
                             <input

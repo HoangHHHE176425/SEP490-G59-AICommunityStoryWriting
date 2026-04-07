@@ -151,6 +151,11 @@ export async function requestComplianceCommentAdminAction(commentId, body) {
     return res.data;
 }
 
+export async function requestComplianceCommentRelease(commentId, body) {
+    const res = await axiosInstance.post(`/compliance/comment-reports/comments/${commentId}/request-release`, body);
+    return res.data;
+}
+
 export async function adminReleaseComplianceCommentClaim(commentId) {
     const res = await axiosInstance.post(`/admin/compliance-comment-reports/comments/${commentId}/release-claim`);
     return res.data;
