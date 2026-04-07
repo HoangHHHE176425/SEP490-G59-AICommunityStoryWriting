@@ -58,7 +58,7 @@ public class SpellingIssue
 
     public string Suggestion { get; set; } = null!;
 
-    /// <summary>Đoạn ngữ cảnh chứa lỗi (tùy chọn).</summary>
+    /// <summary>Câu hoặc dòng trích từ nội dung chương, chứa từ/cụm sai (ưu tiên hiển thị thay cho tọa độ).</summary>
 
     public string? Context { get; set; }
 
