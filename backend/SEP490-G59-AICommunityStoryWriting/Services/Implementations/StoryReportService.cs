@@ -239,10 +239,20 @@ public class StoryReportService : IStoryReportService
             var term = query.Search.Trim();
             var storyIds = all.Select(r => r.target_id).Distinct().ToList();
             var stories = StoryReportDAO.GetStoriesByIds(storyIds);
+            var authorIds = stories.Values
+                .Where(s => s.author_id.HasValue)
+                .Select(s => s.author_id!.Value)
+                .Distinct()
+                .ToList();
+            var authorNameById = UserDAO.GetDisplayNamesByIds(authorIds);
             var matchedIds = stories.Values
                 .Where(s =>
                     (s.title ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
-                    || (s.slug ?? "").Contains(term, StringComparison.OrdinalIgnoreCase))
+                    || (s.slug ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
+                    || (s.author_id.HasValue
+                        && authorNameById.TryGetValue(s.author_id.Value, out var authorName)
+                        && !string.IsNullOrWhiteSpace(authorName)
+                        && authorName.Contains(term, StringComparison.OrdinalIgnoreCase)))
                 .Select(s => s.id)
                 .ToHashSet();
             all = all.Where(r => matchedIds.Contains(r.target_id)).ToList();
@@ -343,6 +353,7 @@ public class StoryReportService : IStoryReportService
                 q.HasPendingLockReleaseRequest = pendingLockStories.Contains(q.StoryId);
                 q.HasPendingAdminActionRequest = pendingAdminStories.Contains(q.StoryId);
             }
+            EnrichAuthorModerationForQueueItems(slice);
 
             return Task.FromResult(new PagedComplianceStoryReportsDto
             {
@@ -448,6 +459,7 @@ public class StoryReportService : IStoryReportService
             row.HasPendingLockReleaseRequest = pendingLockFlat.Contains(row.StoryId);
             row.HasPendingAdminActionRequest = pendingAdminFlat.Contains(row.StoryId);
         }
+        EnrichAuthorModerationForStoryRows(sliceR);
 
         return Task.FromResult(new PagedComplianceStoryReportsDto
         {
@@ -801,6 +813,32 @@ public class StoryReportService : IStoryReportService
         dto.ComplianceFlagNote = s.compliance_flag_note;
     }
 
+    private static void EnrichAuthorModerationForQueueItems(IReadOnlyList<ComplianceStoryReportQueueItemDto> items)
+    {
+        var ids = items.Where(x => x.AuthorId.HasValue).Select(x => x.AuthorId!.Value).Distinct().ToList();
+        if (ids.Count == 0) return;
+        var snap = UserDAO.GetUsersModerationSnapshot(ids);
+        foreach (var q in items)
+        {
+            if (!q.AuthorId.HasValue || !snap.TryGetValue(q.AuthorId.Value, out var m)) continue;
+            q.AuthorAccountStatus = m.Status;
+            q.AuthorWritingSuspendedUntilUtc = ApiDateTime.AsUtcForJson(m.AuthorWritingSuspendedUntil);
+        }
+    }
+
+    private static void EnrichAuthorModerationForStoryRows(IReadOnlyList<ComplianceStoryReportRowDto> rows)
+    {
+        var ids = rows.Where(x => x.AuthorId.HasValue).Select(x => x.AuthorId!.Value).Distinct().ToList();
+        if (ids.Count == 0) return;
+        var snap = UserDAO.GetUsersModerationSnapshot(ids);
+        foreach (var row in rows)
+        {
+            if (!row.AuthorId.HasValue || !snap.TryGetValue(row.AuthorId.Value, out var m)) continue;
+            row.AuthorAccountStatus = m.Status;
+            row.AuthorWritingSuspendedUntilUtc = ApiDateTime.AsUtcForJson(m.AuthorWritingSuspendedUntil);
+        }
+    }
+
     private static void EnsureComplianceStoryActPermission(Guid storyId, Guid userId, bool actorIsAdmin)
     {
         if (actorIsAdmin) return;
@@ -923,6 +961,20 @@ public class StoryReportService : IStoryReportService
             if (until < DateTime.UtcNow.AddDays(1))
                 throw new ArgumentException("Thời hạn đình chỉ phải tối thiểu 1 ngày kể từ hiện tại.");
             dto.ProposedSuspendUntilUtc = until;
+        }
+
+        if (UserDAO.IsAccountBanned(target))
+            throw new InvalidOperationException(
+                "Tài khoản này đã bị chặn; không thể gửi thêm yêu cầu chặn tài khoản hoặc tạm đình chỉ quyền viết.");
+
+        if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting && UserDAO.IsAuthorWritingSuspended(target))
+        {
+            var suspUntil = UserDAO.GetAuthorWritingSuspendedUntilUtc(target);
+            var label = suspUntil.HasValue
+                ? ApiDateTime.AsUtcForJson(suspUntil.Value).ToString("dd/MM/yyyy HH:mm") + " UTC"
+                : "—";
+            throw new InvalidOperationException(
+                $"Tác giả đang bị tạm đình chỉ quyền viết (đến {label}); không thể gửi đơn đình chỉ mới cho đến khi hết hạn.");
         }
 
         var id = ComplianceAdminActionRequestDAO.CreatePending(
@@ -1049,6 +1101,11 @@ public class StoryReportService : IStoryReportService
         }
 
         var createdUtc = x.created_at.Kind == DateTimeKind.Utc ? x.created_at : x.created_at.ToUniversalTime();
+        var reqKind = (x.request_kind ?? string.Empty).Trim().ToUpperInvariant();
+        var storedTier = string.Equals(reqKind, ComplianceAdminActionRequestDAO.KindBanUser, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(reqKind, ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting, StringComparison.OrdinalIgnoreCase)
+                ? EscalationUrgencyHelper.Critical
+                : x.urgency_tier;
         return new ComplianceAdminActionRequestListItemDto
         {
             Id = x.id,
@@ -1066,7 +1123,7 @@ public class StoryReportService : IStoryReportService
             CreatedAtUtc = x.created_at,
             UrgencyTier = EscalationUrgencyHelper.ToDisplayTier(EscalationUrgencyHelper.Merge(
                 EscalationUrgencyHelper.ComputeFromRequestAge(createdUtc, DateTime.UtcNow),
-                x.urgency_tier)),
+                storedTier)),
             ResolvedAtUtc = x.resolved_at,
             ResolutionNote = x.resolution_note,
             ResolutionAction = x.resolution_action
@@ -1192,8 +1249,6 @@ public class StoryReportService : IStoryReportService
             throw new InvalidOperationException("Bạn phải đang nhận (lock) truyện của báo cáo này mới đánh dấu hoàn thành.");
 
         EnsureNotBlockedByPendingStoryLockRelease(r.target_id, actorIsAdmin);
-        if (!actorIsAdmin && ComplianceAdminActionRequestDAO.HasPendingStoryComplianceAdminAction(r.target_id))
-            throw new InvalidOperationException("Đang có yêu cầu gửi admin chờ xử lý, không thể đóng ticket báo cáo truyện này.");
 
         r.status = st;
         r.resolved_at = DateTime.UtcNow;

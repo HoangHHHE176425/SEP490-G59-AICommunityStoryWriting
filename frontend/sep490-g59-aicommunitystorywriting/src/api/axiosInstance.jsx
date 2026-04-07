@@ -50,9 +50,10 @@ function translateAxiosErrorMessage(err) {
     const translated = translateBackendMessage(originalMsg);
     if (translated && translated !== originalMsg) {
         // Mutate in-place so callers using `err.response.data.message` get translated text.
-        if (err?.response?.data) {
-            if ('message' in err.response.data) err.response.data.message = translated;
-            if ('Message' in err.response.data) err.response.data.Message = translated;
+        const data = err?.response?.data;
+        if (data && typeof data === "object" && !Array.isArray(data)) {
+            if ("message" in data) data.message = translated;
+            if ("Message" in data) data.Message = translated;
         }
         err.message = translated;
     }

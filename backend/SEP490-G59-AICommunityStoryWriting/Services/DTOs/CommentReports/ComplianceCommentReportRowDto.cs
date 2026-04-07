@@ -13,6 +13,8 @@ public class ComplianceCommentReportRowDto
     public string? StoryTitle { get; set; }
 
     public Guid CommentUserId { get; set; }
+    public string? CommentUserAccountStatus { get; set; }
+    public DateTime? CommentUserWritingSuspendedUntilUtc { get; set; }
     public string? CommentUserDisplayName { get; set; }
     public string? CommentUserEmail { get; set; }
     public string? CommentContent { get; set; }
