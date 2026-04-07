@@ -142,7 +142,8 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
             await logout();
         } finally {
             setIsMobileSidebarOpen(false);
-            navigate('/admin/login');
+            const logoutPath = roleUpper === 'ADMIN' ? '/admin/login' : '/staff/login';
+            navigate(logoutPath);
         }
     };
 
