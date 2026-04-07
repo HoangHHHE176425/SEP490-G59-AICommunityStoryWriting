@@ -54,6 +54,9 @@ public class ComplianceCommentReportRowDto
     // Khi COMPLIANCE đã gửi đơn lên ADMIN (requestKind BAN_USER/SUSPEND_AUTHOR_WRITING) đang PENDING,
     // thì không cho phép COMPLIANCE thao tác tiếp trên các ticket comment report liên quan.
     public bool HasPendingAdminActionRequest { get; set; }
+
+    /// <summary>Đã gửi yêu cầu admin gỡ lock — chặn mọi thao tác compliance trên thread này.</summary>
+    public bool HasPendingLockReleaseRequest { get; set; }
 }
 
 public class ComplianceCommentReporterDetailDto

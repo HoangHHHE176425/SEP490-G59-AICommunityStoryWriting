@@ -38,4 +38,10 @@ public class ComplianceStoryReportQueueItemDto
     public bool ComplianceHidden { get; set; }
     public bool ComplianceFlagged { get; set; }
     public string? ComplianceFlagNote { get; set; }
+
+    /// <summary>Đơn BAN/SUSPEND gửi admin từ luồng báo cáo truyện đang chờ — chỉ chặn đóng ticket, không khóa mọi thao tác.</summary>
+    public bool HasPendingAdminActionRequest { get; set; }
+
+    /// <summary>Đã gửi yêu cầu admin gỡ lock truyện — chặn mọi thao tác compliance trên truyện này.</summary>
+    public bool HasPendingLockReleaseRequest { get; set; }
 }

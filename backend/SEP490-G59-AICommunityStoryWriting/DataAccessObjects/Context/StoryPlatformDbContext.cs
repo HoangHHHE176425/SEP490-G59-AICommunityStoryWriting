@@ -80,7 +80,7 @@ public partial class StoryPlatformDbContext : DbContext
 
     public virtual DbSet<story_report_contributors> story_report_contributors { get; set; }
 
-    public virtual DbSet<compliance_story_report_lock_requests> compliance_story_report_lock_requests { get; set; }
+    public virtual DbSet<compliance_report_lock_requests> compliance_report_lock_requests { get; set; }
 
     public virtual DbSet<compliance_admin_action_requests> compliance_admin_action_requests { get; set; }
 
@@ -129,7 +129,7 @@ public partial class StoryPlatformDbContext : DbContext
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer(
-                "Server= localhost;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+                "Server= localhost;uid=sa;password=a123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                     maxRetryCount: 5,
                     maxRetryDelay: TimeSpan.FromSeconds(30),
@@ -694,31 +694,27 @@ public partial class StoryPlatformDbContext : DbContext
                 .HasConstraintName("FK_story_report_contributors_user");
         });
 
-        modelBuilder.Entity<compliance_story_report_lock_requests>(entity =>
+        modelBuilder.Entity<compliance_report_lock_requests>(entity =>
         {
-            entity.HasKey(e => e.id).HasName("PK_compliance_story_report_lock_requests");
+            entity.ToTable("compliance_report_lock_requests");
+            entity.HasKey(e => e.id).HasName("PK_compliance_report_lock_requests");
 
+            entity.Property(e => e.target_type).HasMaxLength(30);
             entity.Property(e => e.message).HasMaxLength(2000);
             entity.Property(e => e.status).HasMaxLength(20);
             entity.Property(e => e.resolution_note).HasMaxLength(2000);
             entity.Property(e => e.resolution_action).HasMaxLength(30);
             entity.Property(e => e.created_at).HasDefaultValueSql("(sysutcdatetime())");
-            entity.Property(e => e.urgency_tier).HasMaxLength(20).HasDefaultValue("STANDARD");
-
-            entity.HasOne(d => d.story).WithMany()
-                .HasForeignKey(d => d.story_id)
-                .OnDelete(DeleteBehavior.Cascade)
-                .HasConstraintName("FK_csr_lock_req_story");
 
             entity.HasOne(d => d.requester).WithMany()
                 .HasForeignKey(d => d.requester_id)
                 .OnDelete(DeleteBehavior.Restrict)
-                .HasConstraintName("FK_csr_lock_req_requester");
+                .HasConstraintName("FK_crlr_requester");
 
             entity.HasOne(d => d.resolved_byNavigation).WithMany()
                 .HasForeignKey(d => d.resolved_by_id)
                 .OnDelete(DeleteBehavior.Restrict)
-                .HasConstraintName("FK_csr_lock_req_resolver");
+                .HasConstraintName("FK_crlr_resolver");
         });
 
         modelBuilder.Entity<compliance_admin_action_requests>(entity =>
