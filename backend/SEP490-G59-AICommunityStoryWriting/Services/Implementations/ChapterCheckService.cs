@@ -185,10 +185,7 @@ public class ChapterCheckService : IChapterCheckService
 
     private static string NormalizeContentForCheck(string raw)
     {
-        var content = raw.Trim();
-        if (content.Length > 50000)
-            content = content[..50000] + "\n[... nội dung bị cắt bớt ...]";
-        return content;
+        return ChapterContentNormalizer.NormalizeForAi(raw, 50000);
     }
 
     private async Task<List<PolicyViolationItem>> CollectPolicyViolationsAsync(

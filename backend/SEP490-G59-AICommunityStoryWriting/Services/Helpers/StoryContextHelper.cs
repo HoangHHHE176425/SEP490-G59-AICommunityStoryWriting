@@ -19,9 +19,7 @@ public static class StoryContextHelper
         foreach (var ch in lastChapters)
         {
             var title = ch.title ?? $"Chương {ch.order_index}";
-            var content = ch.content ?? "";
-            if (content.Length > maxCharsPerChapter)
-                content = content.Substring(0, maxCharsPerChapter) + "...";
+            var content = ChapterContentNormalizer.NormalizeForAi(ch.content, maxCharsPerChapter);
             lines.Add($"[Chương {ch.order_index}: {title}]\n{content.Trim()}");
         }
 
