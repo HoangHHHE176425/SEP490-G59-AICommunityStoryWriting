@@ -13,6 +13,57 @@ public static class ComplianceAdminActionRequestDAO
     public const string KindBanUser = "BAN_USER";
     public const string KindSuspendAuthorWriting = "SUSPEND_AUTHOR_WRITING";
 
+    /// <summary>Tiền tố trong message khi compliance gửi đơn từ báo cáo comment (gắn đúng thread).</summary>
+    public const string CommentReportMessageTagPrefix = "[COMMENT_REPORT:";
+
+    public static string FormatCommentReportSourceTag(Guid commentId) =>
+        $"{CommentReportMessageTagPrefix}{commentId}]";
+
+    /// <summary>Chỉ đơn có tag comment mới khiến thread đó bị chặn đóng ticket — không lan theo cả story + user.</summary>
+    public static bool HasPendingCommentReportAdminAction(Guid commentId)
+    {
+        using var context = new StoryPlatformDbContext();
+        var marker = FormatCommentReportSourceTag(commentId);
+        return context.compliance_admin_action_requests.AsNoTracking()
+            .Any(x => x.status == StatusPending
+                && x.request_kind != null
+                && (x.request_kind.ToUpper() == KindBanUser || x.request_kind.ToUpper() == KindSuspendAuthorWriting)
+                && x.message != null
+                && x.message.Contains(marker));
+    }
+
+    /// <summary>Đơn BAN/SUSPEND chờ admin từ luồng báo cáo truyện (message không có tag thread comment).</summary>
+    public static bool HasPendingStoryComplianceAdminAction(Guid storyId)
+    {
+        using var context = new StoryPlatformDbContext();
+        var commentTag = CommentReportMessageTagPrefix;
+        return context.compliance_admin_action_requests.AsNoTracking()
+            .Any(x => x.story_id == storyId
+                && x.status == StatusPending
+                && x.request_kind != null
+                && (x.request_kind.ToUpper() == KindBanUser || x.request_kind.ToUpper() == KindSuspendAuthorWriting)
+                && (x.message == null || !x.message.Contains(commentTag)));
+    }
+
+    /// <summary>Batch: story_id có đơn admin story-compliance đang PENDING.</summary>
+    public static HashSet<Guid> ListStoryIdsWithPendingStoryComplianceAdminAction(IReadOnlyCollection<Guid> storyIds)
+    {
+        if (storyIds == null || storyIds.Count == 0) return new HashSet<Guid>();
+        var ids = storyIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (ids.Count == 0) return new HashSet<Guid>();
+        var commentTag = CommentReportMessageTagPrefix;
+        using var context = new StoryPlatformDbContext();
+        return context.compliance_admin_action_requests.AsNoTracking()
+            .Where(x => ids.Contains(x.story_id)
+                && x.status == StatusPending
+                && x.request_kind != null
+                && (x.request_kind.ToUpper() == KindBanUser || x.request_kind.ToUpper() == KindSuspendAuthorWriting)
+                && (x.message == null || !x.message.Contains(commentTag)))
+            .Select(x => x.story_id)
+            .Distinct()
+            .ToHashSet();
+    }
+
     public static bool HasPendingForStoryAndKind(Guid storyId, string kind, Guid targetUserId)
     {
         using var context = new StoryPlatformDbContext();
