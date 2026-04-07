@@ -51,9 +51,9 @@ public class ChapterMemoryAnalysisService : IChapterMemoryAnalysisService
         var maxChars = _configuration.GetValue("AI:ChapterMemoryAnalysisMaxInputChars", 14000);
         if (maxChars < 2000) maxChars = 14000;
 
-        var content = chapterContent.Trim();
-        if (content.Length > maxChars)
-            content = content[..maxChars] + "\n[... nội dung bị cắt cho phân tích ...]";
+        var content = ChapterContentNormalizer.NormalizeForAi(chapterContent, maxChars);
+        if (string.IsNullOrWhiteSpace(content))
+            return;
 
         var story = _storyRepository.GetById(storyId);
         var storyTitle = story?.title ?? "";

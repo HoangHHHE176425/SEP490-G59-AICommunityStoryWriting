@@ -101,7 +101,7 @@ public class StoryRagService : IStoryRagService
         var orderedItems = new List<(string text, Guid chapterId)>();
         foreach (var ch in toIndex)
         {
-            var content = ch.content ?? "";
+            var content = ChapterContentNormalizer.NormalizeForAi(ch.content, 0);
             foreach (var block in SplitIntoChunks(content))
             {
                 if (string.IsNullOrWhiteSpace(block)) continue;

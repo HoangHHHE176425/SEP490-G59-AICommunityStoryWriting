@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.EntityFrameworkCore;
@@ -27,22 +28,28 @@ public class CommentReportService : ICommentReportService
         _notificationHubNotifier = notificationHubNotifier;
     }
 
-    private bool HasPendingAdminActionForCommentThread(Guid commentId)
-    {
-        var comment = CommentDAO.GetById(commentId);
-        if (comment == null) return false;
-        var storyId = comment.story_id ?? Guid.Empty;
-        var targetUserId = comment.user_id ?? Guid.Empty;
-        if (storyId == Guid.Empty || targetUserId == Guid.Empty) return false;
+    private static readonly Regex CommentReportAdminMessageTagRegex = new(
+        @"\[COMMENT_REPORT:([0-9a-fA-F-]{36})\]",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        return ComplianceAdminActionRequestDAO.HasPendingForStoryAndKind(
-                   storyId,
-                   ComplianceAdminActionRequestDAO.KindBanUser,
-                   targetUserId)
-               || ComplianceAdminActionRequestDAO.HasPendingForStoryAndKind(
-                   storyId,
-                   ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting,
-                   targetUserId);
+    private static void AddCommentIdsFromComplianceAdminMessage(string? message, HashSet<Guid> sink)
+    {
+        if (string.IsNullOrEmpty(message)) return;
+        foreach (Match m in CommentReportAdminMessageTagRegex.Matches(message))
+        {
+            if (Guid.TryParse(m.Groups[1].Value, out var id) && id != Guid.Empty)
+                sink.Add(id);
+        }
+    }
+
+    private static bool HasPendingAdminActionForCommentThread(Guid commentId) =>
+        ComplianceAdminActionRequestDAO.HasPendingCommentReportAdminAction(commentId);
+
+    private static void EnsureNotBlockedByPendingCommentLockRelease(Guid commentId, bool actorIsAdmin)
+    {
+        if (actorIsAdmin) return;
+        if (ComplianceReportLockRequestDAO.HasPendingForTarget(ComplianceReportLockRequestDAO.TargetTypeComment, commentId))
+            throw new InvalidOperationException("Đã gửi yêu cầu admin gỡ lock; tạm không thể thao tác thêm cho thread comment này.");
     }
 
     public IReadOnlyList<StoryReportReasonOptionDto> GetReasonOptions()
@@ -207,8 +214,7 @@ public class CommentReportService : ICommentReportService
         if ((r.target_type ?? "").Trim().ToUpperInvariant() != CommentTargetType)
             throw new InvalidOperationException("Invalid report target.");
 
-        if (HasPendingAdminActionForCommentThread(r.target_id))
-            throw new InvalidOperationException("Đã gửi yêu cầu lên admin, không thể thao tác thêm trên comment report này.");
+        EnsureNotBlockedByPendingCommentLockRelease(r.target_id, actorIsAdmin);
 
         if (!actorIsAdmin && !ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, r.target_id, complianceUserId))
             throw new InvalidOperationException("Chỉ compliance đang nhận (lock) comment này mới đánh dấu hoàn thành.");
@@ -226,7 +232,8 @@ public class CommentReportService : ICommentReportService
                 r.target_id,
                 complianceUserId,
                 hidden: true,
-                includeReplies: includeReplies);
+                includeReplies: includeReplies,
+                actorIsAdmin: actorIsAdmin);
         }
 
         return true;
@@ -244,8 +251,11 @@ public class CommentReportService : ICommentReportService
         Guid commentId,
         Guid actorUserId,
         bool hidden,
-        bool includeReplies)
+        bool includeReplies,
+        bool actorIsAdmin = false)
     {
+        EnsureNotBlockedByPendingCommentLockRelease(commentId, actorIsAdmin);
+
         var comment = CommentDAO.GetById(commentId) ?? throw new InvalidOperationException("Comment not found.");
         var scopeStoryId = comment.story_id ?? throw new InvalidOperationException("Comment has no story_id.");
         var scopeChapterId = comment.chapter_id;
@@ -426,6 +436,8 @@ public class CommentReportService : ICommentReportService
         if (!actorIsAdmin && !ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, commentId, requesterId))
             throw new InvalidOperationException("Chỉ compliance đang nhận (lock) comment này mới được gửi yêu cầu admin.");
 
+        EnsureNotBlockedByPendingCommentLockRelease(commentId, actorIsAdmin);
+
         var targetUserId = dto.TargetUserId ?? comment.user_id.Value;
         var kind = dto.RequestKind.Trim().ToUpperInvariant();
         if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting)
@@ -444,7 +456,22 @@ public class CommentReportService : ICommentReportService
                 throw new ArgumentException("Thời hạn đình chỉ phải tối thiểu 1 ngày kể từ hiện tại.");
             dto.ProposedSuspendUntilUtc = until;
         }
-        var sourceTag = $"[COMMENT_REPORT:{commentId}]";
+
+        if (UserDAO.IsAccountBanned(targetUserId))
+            throw new InvalidOperationException(
+                "Tài khoản này đã bị chặn; không thể gửi thêm yêu cầu chặn tài khoản hoặc tạm đình chỉ quyền viết.");
+
+        if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting && UserDAO.IsAuthorWritingSuspended(targetUserId))
+        {
+            var suspUntil = UserDAO.GetAuthorWritingSuspendedUntilUtc(targetUserId);
+            var label = suspUntil.HasValue
+                ? ApiDateTime.AsUtcForJson(suspUntil.Value).ToString("dd/MM/yyyy HH:mm") + " UTC"
+                : "—";
+            throw new InvalidOperationException(
+                $"Người dùng đang bị tạm đình chỉ quyền viết (đến {label}); không thể gửi đơn đình chỉ mới cho đến khi hết hạn.");
+        }
+
+        var sourceTag = ComplianceAdminActionRequestDAO.FormatCommentReportSourceTag(commentId);
         var enrichedMessage = string.IsNullOrWhiteSpace(dto.Message)
             ? sourceTag
             : $"{sourceTag} {dto.Message.Trim()}";
@@ -463,6 +490,83 @@ public class CommentReportService : ICommentReportService
 
         await Task.Yield();
         return id;
+    }
+
+    public async Task<Guid> RequestComplianceCommentLockReleaseAsync(
+        Guid commentId,
+        Guid requesterId,
+        RequestComplianceLockReleaseDto? dto)
+    {
+        if (!ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, commentId, requesterId))
+            throw new InvalidOperationException("Bạn không phải người đang giữ lock comment thread này.");
+
+        var comment = CommentDAO.GetById(commentId) ?? throw new InvalidOperationException("Comment not found.");
+        var storyId = comment.story_id ?? throw new InvalidOperationException("Comment has no story_id.");
+
+        var msg = dto?.Message;
+        var id = ComplianceReportLockRequestDAO.CreatePending(
+            ComplianceReportLockRequestDAO.TargetTypeComment,
+            commentId,
+            requesterId,
+            msg);
+        await NotifyAdminsComplianceCommentLockReleaseRequestedAsync(storyId, commentId, requesterId, msg);
+        return id;
+    }
+
+    private async Task NotifyAdminsComplianceCommentLockReleaseRequestedAsync(
+        Guid storyId,
+        Guid commentId,
+        Guid requesterId,
+        string? reason)
+    {
+        try
+        {
+            await using var db = new StoryPlatformDbContext();
+            var adminIds = await db.users.AsNoTracking()
+                .Where(u => (u.role ?? "").ToUpper() == "ADMIN" && (u.status ?? "").ToUpper() == "ACTIVE")
+                .Select(u => u.id)
+                .Distinct()
+                .ToListAsync();
+            if (adminIds.Count == 0) return;
+
+            var requesterName = NotificationDAO.GetUserDisplayName(requesterId);
+            var note = string.IsNullOrWhiteSpace(reason) ? string.Empty : $" Lý do: {reason.Trim()}";
+            var content =
+                $"Xử lý vi phạm viên {requesterName} vừa gửi yêu cầu gỡ lock báo cáo bình luận (comment {commentId}).{note}";
+
+            foreach (var adminId in adminIds)
+            {
+                var n = new notifications
+                {
+                    id = Guid.NewGuid(),
+                    user_id = adminId,
+                    type = "COMPLIANCE_COMMENT_LOCK_RELEASE_REQUEST",
+                    title = "Yêu cầu gỡ lock báo cáo comment",
+                    content = content,
+                    link_url = $"/story/{storyId}",
+                    is_read = false,
+                    created_at = DateTime.UtcNow
+                };
+                NotificationDAO.Add(n);
+                if (_notificationHubNotifier != null)
+                {
+                    await _notificationHubNotifier.NotifyUserAsync(adminId, new NotificationDto
+                    {
+                        Id = n.id,
+                        Type = n.type,
+                        Title = n.title,
+                        Content = n.content,
+                        LinkUrl = n.link_url,
+                        IsRead = false,
+                        CreatedAt = n.created_at
+                    });
+                }
+            }
+        }
+        catch
+        {
+            // best effort
+        }
     }
 
     private async Task NotifyAdminsComplianceAdminActionRequestedAsync(Guid storyId, Guid requesterId, string kind, string? reason)
@@ -522,8 +626,7 @@ public class CommentReportService : ICommentReportService
         Guid commentId,
         Guid complianceUserId)
     {
-        if (HasPendingAdminActionForCommentThread(commentId))
-            throw new InvalidOperationException("Đã gửi yêu cầu lên admin, không thể thao tác thêm trên comment report này.");
+        EnsureNotBlockedByPendingCommentLockRelease(commentId, actorIsAdmin: false);
 
         var openCount = CountOpenCommentReports(commentId);
         if (openCount == 0)
@@ -546,9 +649,6 @@ public class CommentReportService : ICommentReportService
         Guid commentId,
         Guid adminUserId)
     {
-        if (HasPendingAdminActionForCommentThread(commentId))
-            throw new InvalidOperationException("Đã gửi yêu cầu lên admin, không thể thao tác thêm trên comment report này.");
-
         var cur = ReviewAssignmentDAO.GetActiveAssignment(ComplianceTargetType, commentId);
         if (cur == null)
             throw new InvalidOperationException("Comment report không đang bị lock compliance.");
@@ -569,8 +669,10 @@ public class CommentReportService : ICommentReportService
 
         await using var context = new StoryPlatformDbContext();
 
-        if (HasPendingAdminActionForCommentThread(commentId))
-            throw new InvalidOperationException("Đã gửi yêu cầu lên admin, không thể thao tác thêm trên comment report này.");
+        EnsureNotBlockedByPendingCommentLockRelease(commentId, actorIsAdmin);
+
+        if (!actorIsAdmin && HasPendingAdminActionForCommentThread(commentId))
+            throw new InvalidOperationException("Đang có yêu cầu gửi admin chờ xử lý, không thể đóng ticket comment thread này.");
 
         // Enforce lock: chỉ compliance đang nhận mới được đóng loạt.
         if (!actorIsAdmin && !ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, commentId, complianceUserId))
@@ -590,7 +692,7 @@ public class CommentReportService : ICommentReportService
         {
             // Ẩn thread một lần; các report sẽ được mark RESOLVED.
             // SetCommentThreadHiddenAsync dùng scope story/chapter nên không phụ thuộc từng report.
-            await SetCommentThreadHiddenAsync(commentId, complianceUserId, hidden: true, includeReplies);
+            await SetCommentThreadHiddenAsync(commentId, complianceUserId, hidden: true, includeReplies, actorIsAdmin);
         }
 
         if (openReports.Count > 0)
@@ -652,8 +754,7 @@ public class CommentReportService : ICommentReportService
         if (toVerify.Intersect(toUnverify).Any())
             throw new ArgumentException("Không được trùng evidence giữa đánh dấu và gỡ đánh dấu.");
 
-        if (HasPendingAdminActionForCommentThread(commentId))
-            throw new InvalidOperationException("Đã gửi yêu cầu lên admin, không thể thao tác thêm trên comment report này.");
+        EnsureNotBlockedByPendingCommentLockRelease(commentId, actorIsAdmin);
 
         if (!actorIsAdmin && !ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, commentId, actorUserId))
             throw new InvalidOperationException("Chỉ compliance đang nhận (lock) comment này mới được đánh dấu xác minh.");
@@ -825,15 +926,6 @@ public class CommentReportService : ICommentReportService
             .ToListAsync();
 
         var term = !string.IsNullOrWhiteSpace(search) ? search.Trim() : null;
-        if (term != null)
-        {
-            openReports = openReports
-                .Where(r =>
-                    (r.ReasonCode ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
-                    || (r.Description ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
-                    || r.ReportId.ToString().Contains(term, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-        }
 
         // Hành vi cần giống story:
         // Khi COMPLIANCE resolve từng report (không bulk), vẫn giữ ticket hiển thị theo lock
@@ -876,18 +968,58 @@ public class CommentReportService : ICommentReportService
                 })
                 .ToListAsync();
 
-            if (term != null)
-            {
-                closedReportsForClaimed = closedReportsForClaimed
-                    .Where(r =>
-                        (r.ReasonCode ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
-                        || (r.Description ?? "").Contains(term, StringComparison.OrdinalIgnoreCase)
-                        || r.ReportId.ToString().Contains(term, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-            }
-
             if (closedReportsForClaimed.Count > 0)
                 openReports.AddRange(closedReportsForClaimed);
+        }
+
+        if (term != null)
+        {
+            var searchCommentIds = openReports.Select(x => x.CommentId).Distinct().ToList();
+            if (searchCommentIds.Count > 0)
+            {
+                var commentSearchRows = await context.comments.AsNoTracking()
+                    .Include(c => c.userNavigation)
+                        .ThenInclude(u => u!.user_profiles)
+                    .Where(c => searchCommentIds.Contains(c.id))
+                    .Select(c => new
+                    {
+                        c.id,
+                        c.story_id,
+                        Nick = c.userNavigation != null && c.userNavigation.user_profiles != null
+                            ? c.userNavigation.user_profiles.nickname
+                            : null,
+                        Email = c.userNavigation != null ? c.userNavigation.email : null
+                    })
+                    .ToListAsync();
+
+                var storyIdsForSearch = commentSearchRows
+                    .Select(x => x.story_id ?? Guid.Empty)
+                    .Where(x => x != Guid.Empty)
+                    .Distinct()
+                    .ToList();
+                var storyTitleById = await context.stories.AsNoTracking()
+                    .Where(s => storyIdsForSearch.Contains(s.id))
+                    .ToDictionaryAsync(s => s.id, s => s.title ?? string.Empty);
+
+                var matchedCommentIds = commentSearchRows
+                    .Where(x =>
+                    {
+                        var displayName = string.IsNullOrWhiteSpace(x.Nick) ? x.Email : x.Nick;
+                        var storyTitle = x.story_id.HasValue && storyTitleById.TryGetValue(x.story_id.Value, out var t)
+                            ? t
+                            : string.Empty;
+                        return (!string.IsNullOrWhiteSpace(storyTitle)
+                                && storyTitle.Contains(term, StringComparison.OrdinalIgnoreCase))
+                            || (!string.IsNullOrWhiteSpace(displayName)
+                                && displayName.Contains(term, StringComparison.OrdinalIgnoreCase));
+                    })
+                    .Select(x => x.id)
+                    .ToHashSet();
+
+                openReports = openReports
+                    .Where(x => matchedCommentIds.Contains(x.CommentId))
+                    .ToList();
+            }
         }
 
         var groups = openReports
@@ -1145,10 +1277,9 @@ public class CommentReportService : ICommentReportService
             .Where(c => commentIds.Contains(c.id))
             .ToListAsync();
 
-        // Nếu compliance đã gửi đơn lên admin (PENDING) với BAN_USER / SUSPEND_AUTHOR_WRITING
-        // cho (storyId + targetUserId) liên quan comment thread này,
-        // thì comment report thread đó sẽ không cho phép thao tác tiếp trong UI.
-        var pendingAdminKeySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Đơn từ comment report có tag [COMMENT_REPORT:commentId] — chỉ thread đó hiển thị pending,
+        // không lan sang mọi báo cáo comment khác cùng truyện / cùng user.
+        var commentIdsWithPendingCommentAdminAction = new HashSet<Guid>();
         {
             var storyIdsForPending = comments
                 .Select(c => c.story_id ?? Guid.Empty)
@@ -1156,33 +1287,41 @@ public class CommentReportService : ICommentReportService
                 .Distinct()
                 .ToList();
 
-            var targetUserIdsForPending = comments
-                .Select(c => c.user_id ?? Guid.Empty)
-                .Where(id => id != Guid.Empty)
-                .Distinct()
-                .ToList();
-
-            if (storyIdsForPending.Count > 0 && targetUserIdsForPending.Count > 0)
+            if (storyIdsForPending.Count > 0)
             {
                 var pendingRows = await context.compliance_admin_action_requests.AsNoTracking()
                     .Where(x =>
                         (x.status ?? "").Trim().ToUpper() == ComplianceAdminActionRequestDAO.StatusPending
                         && storyIdsForPending.Contains(x.story_id)
-                        && targetUserIdsForPending.Contains(x.target_user_id)
+                        && x.message != null
+                        && x.message.Contains(ComplianceAdminActionRequestDAO.CommentReportMessageTagPrefix)
                         && x.request_kind != null
                         && (
                             x.request_kind.Trim().ToUpper() == ComplianceAdminActionRequestDAO.KindBanUser
                             || x.request_kind.Trim().ToUpper() == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting
                         ))
-                    .Select(x => new { x.story_id, x.target_user_id })
-                    .Distinct()
+                    .Select(x => x.message)
                     .ToListAsync();
 
-                foreach (var row in pendingRows)
-                {
-                    pendingAdminKeySet.Add(row.story_id + "|" + row.target_user_id);
-                }
+                foreach (var msg in pendingRows)
+                    AddCommentIdsFromComplianceAdminMessage(msg, commentIdsWithPendingCommentAdminAction);
             }
+        }
+
+        var commentIdsWithPendingLockRelease = new HashSet<Guid>();
+        if (commentIds.Count > 0)
+        {
+            var lockPend = ComplianceReportLockRequestDAO.StatusPending;
+            var lockTt = ComplianceReportLockRequestDAO.TargetTypeComment;
+            var lockTargets = await context.compliance_report_lock_requests.AsNoTracking()
+                .Where(x =>
+                    (x.status ?? "").Trim().ToUpper() == lockPend
+                    && x.target_type == lockTt
+                    && commentIds.Contains(x.target_id))
+                .Select(x => x.target_id)
+                .ToListAsync();
+            foreach (var lid in lockTargets)
+                commentIdsWithPendingLockRelease.Add(lid);
         }
 
         // Cảnh báo: nếu thread chứa reply của ADMIN/MODERATOR thì compliance khác sẽ được cảnh báo.
@@ -1297,7 +1436,8 @@ public class CommentReportService : ICommentReportService
                         .Select(kv => CommentReportReasonCatalog.GetDominantReasonLabelVi(kv.Key) + " (" + kv.Value + ")")
                         .ToList()
                     ,
-                    HasPendingAdminActionRequest = false
+                    HasPendingAdminActionRequest = false,
+                    HasPendingLockReleaseRequest = false
                 };
             }
 
@@ -1357,9 +1497,12 @@ public class CommentReportService : ICommentReportService
                     .ToList(),
                 HasAdminOrModeratorReplyInThread = warningByCommentId.TryGetValue(comment.id, out var w) && w.HasStaff,
                 AdminOrModeratorReplyWarningVi = warningByCommentId.TryGetValue(comment.id, out var w2) ? w2.Note : null,
-                HasPendingAdminActionRequest = pendingAdminKeySet.Contains(storyId + "|" + commentUserId)
+                HasPendingAdminActionRequest = commentIdsWithPendingCommentAdminAction.Contains(comment.id),
+                HasPendingLockReleaseRequest = commentIdsWithPendingLockRelease.Contains(comment.id)
             };
         }).ToList();
+
+        EnrichCommentUserModeration(rows);
 
         return new PagedComplianceCommentReportsDto
         {
@@ -1368,6 +1511,19 @@ public class CommentReportService : ICommentReportService
             TotalCount = total,
             Rows = rows
         };
+    }
+
+    private static void EnrichCommentUserModeration(IReadOnlyList<ComplianceCommentReportRowDto> rows)
+    {
+        var ids = rows.Where(x => x.CommentUserId != Guid.Empty).Select(x => x.CommentUserId).Distinct().ToList();
+        if (ids.Count == 0) return;
+        var snap = UserDAO.GetUsersModerationSnapshot(ids);
+        foreach (var row in rows)
+        {
+            if (row.CommentUserId == Guid.Empty || !snap.TryGetValue(row.CommentUserId, out var m)) continue;
+            row.CommentUserAccountStatus = m.Status;
+            row.CommentUserWritingSuspendedUntilUtc = ApiDateTime.AsUtcForJson(m.AuthorWritingSuspendedUntil);
+        }
     }
 
     private static HashSet<string> ParseStatuses(string? csv)

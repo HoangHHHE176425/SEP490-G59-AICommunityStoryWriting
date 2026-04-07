@@ -3,6 +3,14 @@ namespace Services.DTOs.StoryReports;
 public class ComplianceLockRequestListItemDto
 {
     public Guid Id { get; set; }
+
+    /// <summary>STORY | COMMENT | …</summary>
+    public string TargetType { get; set; } = "STORY";
+
+    /// <summary>story_id hoặc comment_id tùy <see cref="TargetType"/>.</summary>
+    public Guid TargetId { get; set; }
+
+    /// <summary>Truyện liên quan (với COMMENT = truyện chứa comment).</summary>
     public Guid StoryId { get; set; }
     public string? StoryTitle { get; set; }
     public Guid RequesterId { get; set; }

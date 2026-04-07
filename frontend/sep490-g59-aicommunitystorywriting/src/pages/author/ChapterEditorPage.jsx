@@ -1205,12 +1205,14 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         return s;
     };
 
+    /** Khớp ý backend SummaryIndicatesSpellingIssue: tránh báo nhầm khi tóm tắt là «Không phát hiện lỗi chính tả» (vẫn chứa cụm «lỗi chính tả»). */
     const summaryImpliesSpellingIssue = (summaryText) => {
         const s = String(summaryText ?? '').trim().toLowerCase();
         if (!s) return false;
-        return /ph[aá]t hi[eệ]n.*l[ỗo]i ch[ií]nh t[ảa]/i.test(s)
-            || /l[ỗo]i ch[ií]nh t[ảa]/i.test(s)
-            || /d[ấa]u c[âa]u/i.test(s);
+        if (s.includes('không phát hiện')) return false;
+        if (/không\s+có\s+lỗi\s+chính\s+tả/i.test(s)) return false;
+        if (/không\s+còn\s+lỗi\s+chính\s+tả/i.test(s)) return false;
+        return s.includes('lỗi chính tả') || s.includes('dấu câu');
     };
 
     const chapterCheckDialogTitle = chapterCheckModal.mode === 'spelling-support'
@@ -1302,7 +1304,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                     {(chapterCheckModal.data?.spellingIssues ?? []).length === 0 ? (
                                                         summaryImpliesSpellingIssue(chapterCheckModal.data?.summary) ? (
                                                             <div style={{ color: '#9a3412', fontSize: '0.875rem', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', borderRadius: '10px', padding: '10px 12px' }}>
-                                                                Hệ thống phát hiện lỗi chính tả nhưng AI chưa trả về vị trí chi tiết. Bạn vui lòng rà lại nội dung theo phần “Tóm tắt”.
+                                                                Phần tóm tắt cho biết có thể còn lỗi chính tả, nhưng không trích được câu/dòng cụ thể từ nội dung. Hãy đọc tóm tắt và rà lại bài.
                                                             </div>
                                                         ) : (
                                                             <div style={{ color: '#64748b', fontSize: '0.875rem' }}>Không phát hiện lỗi chính tả.</div>
@@ -1312,6 +1314,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                             {(chapterCheckModal.data?.spellingIssues ?? []).map((it, idx) => {
                                                                 const word = it.wordOrPhrase ?? it.WordOrPhrase ?? '';
                                                                 const sug = it.suggestion ?? it.Suggestion ?? '';
+                                                                const ctx = it.context ?? it.Context ?? '';
                                                                 const pos = findIssuePosition(word);
                                                                 return (
                                                                     <div key={idx} style={{ padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
@@ -1321,7 +1324,23 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                                         <div style={{ fontSize: '0.875rem', color: '#0f172a', marginTop: '4px' }}>
                                                                             <span style={{ fontWeight: 800 }}>Gợi ý</span>: <span style={{ color: '#15803d', fontWeight: 800 }}>{sug || '—'}</span>
                                                                         </div>
-                                                                        {pos ? (
+                                                                        {String(ctx).trim() ? (
+                                                                            <div
+                                                                                style={{
+                                                                                    marginTop: '8px',
+                                                                                    fontSize: '0.8125rem',
+                                                                                    color: '#334155',
+                                                                                    backgroundColor: '#f8fafc',
+                                                                                    border: '1px solid #e2e8f0',
+                                                                                    borderRadius: '10px',
+                                                                                    padding: '8px 10px',
+                                                                                    whiteSpace: 'pre-wrap',
+                                                                                }}
+                                                                            >
+                                                                                <span style={{ fontWeight: 800 }}>Câu/dòng chứa lỗi</span>
+                                                                                <div style={{ marginTop: '4px' }}>{ctx}</div>
+                                                                            </div>
+                                                                        ) : pos ? (
                                                                             <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#475569' }}>
                                                                                 <span style={{ fontWeight: 800 }}>Vị trí</span>:
                                                                                 {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
@@ -1330,7 +1349,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                                             </div>
                                                                         ) : (
                                                                             <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#94a3b8' }}>
-                                                                                Không xác định được vị trí trong nội dung hiện tại.
+                                                                                Không có câu trích; không xác định được vị trí trong nội dung hiện tại.
                                                                             </div>
                                                                         )}
                                                                     </div>

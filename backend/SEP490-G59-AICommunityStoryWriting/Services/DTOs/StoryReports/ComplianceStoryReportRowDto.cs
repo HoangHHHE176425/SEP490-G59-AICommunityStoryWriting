@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.StoryReports;
+namespace Services.DTOs.StoryReports;
 
 public class ComplianceStoryReportRowDto
 {
@@ -31,8 +31,13 @@ public class ComplianceStoryReportRowDto
     public IReadOnlyList<StoryReportContributorDto> Contributors { get; set; } = Array.Empty<StoryReportContributorDto>();
 
     public Guid? AuthorId { get; set; }
+    public string? AuthorAccountStatus { get; set; }
+    public DateTime? AuthorWritingSuspendedUntilUtc { get; set; }
     public bool CommentsDisabled { get; set; }
     public bool ComplianceHidden { get; set; }
     public bool ComplianceFlagged { get; set; }
     public string? ComplianceFlagNote { get; set; }
+
+    public bool HasPendingAdminActionRequest { get; set; }
+    public bool HasPendingLockReleaseRequest { get; set; }
 }

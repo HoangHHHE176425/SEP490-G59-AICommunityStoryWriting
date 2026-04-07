@@ -100,19 +100,15 @@ export function Header() {
                 // Realtime toast: hiển thị popup khi có thông báo mới (vd: ủng hộ, duyệt truyện/chương)
                 const toastMsg = content || title || 'Bạn có thông báo mới';
                 const toastType = type === 'DONATION' || type === 'CHAPTER_UNLOCK' ? 'success' : 'info';
-                const onAuthorChapterList =
-                    isAuthor &&
-                    location.pathname.replace(/\/$/, '') === '/author' &&
-                    isAuthorChapterListActive();
                 const chapterModerationToastTypes = new Set([
                     'CHAPTER_APPROVED',
                     'CHAPTER_REJECTED',
                     'CHAPTER_VERSION_APPROVED',
                     'CHAPTER_VERSION_REJECTED',
                 ]);
+                // UX request: không hiển thị toast duyệt/từ chối chương vì dễ bị nháy lặp.
                 const skipChapterModerationToast =
-                    onAuthorChapterList &&
-                    (chapterModerationToastTypes.has(type) || /^CHAPTER_/.test(type));
+                    chapterModerationToastTypes.has(type) || /^CHAPTER_/.test(type);
                 if (!skipChapterModerationToast) {
                     showToastRef.current(toastMsg, toastType, 5000);
                 }
@@ -125,7 +121,7 @@ export function Header() {
         };
         window.addEventListener('app:notification', handler);
         return () => window.removeEventListener('app:notification', handler);
-    }, [isAuthenticated, fetchNotifications, isAuthor, location.pathname]);
+    }, [isAuthenticated, fetchNotifications]);
 
     const fetchWallet = useCallback(async () => {
         if (!isAuthenticated) {

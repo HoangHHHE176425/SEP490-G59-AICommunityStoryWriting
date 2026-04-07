@@ -224,12 +224,14 @@ export function StoryEditor({ story, onSave, onCancel }) {
         return { lineNo, paraNo, charOffset };
     };
 
+    /** Tránh báo nhầm khi tóm tắt «Không phát hiện lỗi chính tả» (vẫn chứa «lỗi chính tả»). Khớp ChapterEditorPage / BE. */
     const summaryImpliesSpellingIssue = (summaryText) => {
         const s = String(summaryText ?? '').trim().toLowerCase();
         if (!s) return false;
-        return /ph[aá]t hi[eệ]n.*l[ỗo]i ch[ií]nh t[ảa]/i.test(s)
-            || /l[ỗo]i ch[ií]nh t[ảa]/i.test(s)
-            || /d[ấa]u c[âa]u/i.test(s);
+        if (s.includes('không phát hiện')) return false;
+        if (/không\s+có\s+lỗi\s+chính\s+tả/i.test(s)) return false;
+        if (/không\s+còn\s+lỗi\s+chính\s+tả/i.test(s)) return false;
+        return s.includes('lỗi chính tả') || s.includes('dấu câu');
     };
 
     const buildSpellingSummary = (rawSummary, spellingIssues) => {
@@ -782,6 +784,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                 (chapterCheckModal.data?.spellingIssues ?? []).map((it, idx) => {
                                                     const word = it.wordOrPhrase ?? it.WordOrPhrase ?? '';
                                                     const sug = it.suggestion ?? it.Suggestion ?? '';
+                                                    const ctx = it.context ?? it.Context ?? '';
                                                     const contentForPosition = chapterCheckModal.data?.contentForPosition ?? '';
                                                     const pos = findIssuePosition(contentForPosition, word);
                                                     return (
@@ -792,7 +795,12 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                             <div className="text-sm text-slate-900 dark:text-slate-100 mt-2">
                                                                 <span style={{ fontWeight: 900 }}>Gợi ý</span>: <span style={{ fontWeight: 900, color: '#15803d' }}>{sug || '—'}</span>
                                                             </div>
-                                                            {pos ? (
+                                                            {String(ctx).trim() ? (
+                                                                <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100">
+                                                                    <span style={{ fontWeight: 800 }}>Câu/dòng chứa lỗi</span>
+                                                                    <div className="mt-1 whitespace-pre-wrap">{ctx}</div>
+                                                                </div>
+                                                            ) : pos ? (
                                                                 <div className="text-xs text-slate-600 dark:text-slate-300 mt-2">
                                                                     <span style={{ fontWeight: 800 }}>Vị trí</span>:
                                                                     {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
@@ -800,7 +808,9 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                                     {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
                                                                 </div>
                                                             ) : (
-                                                                <div className="text-xs text-slate-400 dark:text-slate-400 mt-2">Không xác định được vị trí trong nội dung hiện tại.</div>
+                                                                <div className="text-xs text-slate-400 dark:text-slate-400 mt-2">
+                                                                    Không có câu trích; không xác định được vị trí trong nội dung hiện tại.
+                                                                </div>
                                                             )}
                                                         </div>
                                                     );
