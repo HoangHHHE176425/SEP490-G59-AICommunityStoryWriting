@@ -1,13 +1,27 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
-/** Các role được dùng trang quản trị và đăng nhập tại /admin/login. Actor: ADMIN, MODERATOR, COMPLIANCE, USER, AUTHOR */
-const ADMIN_PANEL_ROLES = new Set(['ADMIN', 'MODERATOR', 'COMPLIANCE']);
-export function AdminProtectedRoute({ children }) {
-    const { user, loading, isAdmin, role } = useAuth();
+const ADMIN_ONLY_ROLES = new Set(['ADMIN']);
+const STAFF_ONLY_ROLES = new Set(['MODERATOR', 'COMPLIANCE']);
+
+/**
+ * Khu vực quản trị tách riêng:
+ * - admin: chỉ ADMIN, login /admin/login
+ * - staff: MODERATOR/COMPLIANCE, login /staff/login
+ */
+export function AdminProtectedRoute({ children, area = 'admin' }) {
+    const { user, loading, role } = useAuth();
     const location = useLocation();
     const roleUpper = (role ?? '').toString().toUpperCase();
-    const canAccessAdmin = isAdmin || ADMIN_PANEL_ROLES.has(roleUpper);
+    const isStaffArea = area === 'staff';
+    const loginPath = isStaffArea ? '/staff/login' : '/admin/login';
+    const oppositeHomePath = isStaffArea ? '/admin' : '/staff';
+    const canAccessOwnArea = isStaffArea
+        ? STAFF_ONLY_ROLES.has(roleUpper)
+        : ADMIN_ONLY_ROLES.has(roleUpper);
+    const canAccessOppositeArea = isStaffArea
+        ? ADMIN_ONLY_ROLES.has(roleUpper)
+        : STAFF_ONLY_ROLES.has(roleUpper);
 
     if (loading) {
         return (
@@ -18,10 +32,14 @@ export function AdminProtectedRoute({ children }) {
     }
 
     if (!user) {
-        return <Navigate to="/admin/login" state={{ from: location }} replace />;
+        return <Navigate to={loginPath} state={{ from: location }} replace />;
     }
 
-    if (!canAccessAdmin) {
+    if (canAccessOppositeArea) {
+        return <Navigate to={oppositeHomePath} replace />;
+    }
+
+    if (!canAccessOwnArea) {
         return <Navigate to="/home" replace />;
     }
 

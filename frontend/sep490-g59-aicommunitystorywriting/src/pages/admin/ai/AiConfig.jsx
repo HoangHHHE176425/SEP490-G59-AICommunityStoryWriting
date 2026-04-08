@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Brain, Sparkles } from 'lucide-react';
+import { Brain } from 'lucide-react';
 import {
     addAdminBannedWord,
     deleteAdminBannedWord,
@@ -9,14 +9,7 @@ import {
 } from '../../../api/admin/aiConfigApi';
 
 export function AiConfig() {
-    // Feature toggles for APIs
-    const [featureSuggestNext, setFeatureSuggestNext] = useState(true);
-    const [featureCoCreate, setFeatureCoCreate] = useState(true);
-    const [featureCheckConsistency, setFeatureCheckConsistency] = useState(true);
-    const [featureCheckChapter, setFeatureCheckChapter] = useState(true);
-    const [featureCompareChapter, setFeatureCompareChapter] = useState(true);
-
-    // Limits & banned words (mock only – chưa gọi API thật)
+    // Limits & banned words
     const [dailyLimit, setDailyLimit] = useState(3);
     const [bannedWordInput, setBannedWordInput] = useState('');
     const [bannedWords, setBannedWords] = useState([]);
@@ -87,127 +80,7 @@ export function AiConfig() {
             </div>
 
             <div className="space-y-5">
-                    {/* Các dịch vụ AI cho tác giả */}
-                    <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
-                        <div className="flex items-center gap-2 mb-1">
-                            <Sparkles className="w-4 h-4 text-primary" />
-                            <h2 className="text-sm font-semibold text-slate-900">
-                                Các dịch vụ AI cho tác giả
-                            </h2>
-                        </div>
-                        <p className="text-[11px] text-slate-500">
-                            Bật hoặc tắt từng tính năng. Tắt thì tác giả sẽ không dùng được tính năng đó trên trang viết truyện.
-                        </p>
-
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                            <button
-                                type="button"
-                                onClick={() => setFeatureSuggestNext((v) => !v)}
-                                className={`flex flex-col items-start gap-1 rounded-xl border px-3 py-3 text-left transition-all ${
-                                    featureSuggestNext
-                                        ? 'border-primary bg-primary/5 shadow-sm'
-                                        : 'border-slate-200 hover:border-primary/50'
-                                }`}
-                            >
-                                <span className="text-[11px] font-semibold text-slate-800">
-                                    Gợi ý viết tiếp
-                                </span>
-                                <p className="text-[11px] text-slate-500">
-                                    AI đề xuất các hướng phát triển tiếp theo dựa trên chương gần nhất và ý tưởng hiện tại.
-                                </p>
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => setFeatureCoCreate((v) => !v)}
-                                className={`flex flex-col items-start gap-1 rounded-xl border px-3 py-3 text-left transition-all ${
-                                    featureCoCreate
-                                        ? 'border-primary bg-primary/5 shadow-sm'
-                                        : 'border-slate-200 hover:border-primary/50'
-                                }`}
-                            >
-                                <span className="text-[11px] font-semibold text-slate-800">
-                                    Viết chung với AI (co-create)
-                                </span>
-                                <p className="text-[11px] text-slate-500">
-                                    AI hỗ trợ lên dàn ý → viết bản nháp → kiểm tra nhất quán theo ngữ cảnh truyện.
-                                </p>
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => setFeatureCheckConsistency((v) => !v)}
-                                className={`flex flex-col items-start gap-1 rounded-xl border px-3 py-3 text-left transition-all ${
-                                    featureCheckConsistency
-                                        ? 'border-primary bg-primary/5 shadow-sm'
-                                        : 'border-slate-200 hover:border-primary/50'
-                                }`}
-                            >
-                                <span className="text-[11px] font-semibold text-slate-800">
-                                    Kiểm tra mâu thuẫn nội dung
-                                </span>
-                                <p className="text-[11px] text-slate-500">
-                                    Phát hiện chi tiết bất hợp lý (timeline, trạng thái nhân vật, sự kiện) trong bản nháp chương.
-                                </p>
-                            </button>
-                        </div>
-
-                        <div className="mt-4 border-t border-slate-200 pt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                            <div className="space-y-2">
-                                <p className="text-[11px] font-semibold text-slate-700">
-                                    Khi tác giả lưu chương (hỗ trợ tự động)
-                                </p>
-                                <div className="grid grid-cols-1 gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setFeatureCheckChapter((v) => !v)}
-                                        className={`flex flex-col items-start gap-1 rounded-xl border px-3 py-3 text-left transition-all ${
-                                            featureCheckChapter
-                                                ? 'border-primary bg-primary/5 shadow-sm'
-                                                : 'border-slate-200 hover:border-primary/50'
-                                        }`}
-                                    >
-                                        <span className="text-[11px] font-semibold text-slate-800">
-                                            Kiểm tra chính tả và từ cấm
-                                        </span>
-                                        <p className="text-[11px] text-slate-500">
-                                            Rà soát lỗi cơ bản và cảnh báo nội dung có từ/cụm từ không phù hợp.
-                                        </p>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setFeatureCompareChapter((v) => !v)}
-                                        className={`flex flex-col items-start gap-1 rounded-xl border px-3 py-3 text-left transition-all ${
-                                            featureCompareChapter
-                                                ? 'border-primary bg-primary/5 shadow-sm'
-                                                : 'border-slate-200 hover:border-primary/50'
-                                        }`}
-                                    >
-                                        <span className="text-[11px] font-semibold text-slate-800">
-                                            Ước lượng tỷ lệ nội dung do AI viết
-                                        </span>
-                                        <p className="text-[11px] text-slate-500">
-                                            So sánh mức độ tương đồng giữa chương tác giả và bản AI đã sinh trước đó.
-                                        </p>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Quy trình viết chung với AI */}
-                        <div className="mt-4 border-t border-slate-200 pt-3 space-y-2 text-xs">
-                            <p className="text-[11px] font-semibold text-slate-700">
-                                Quy trình viết chung với AI (co-create)
-                            </p>
-                            <ol className="list-decimal list-inside space-y-1 text-[11px] text-slate-600">
-                                <li>Bước 1 – Lên ý tưởng: AI gợi ý dàn ý chương.</li>
-                                <li>Bước 2 – Viết: AI viết nháp theo dàn ý.</li>
-                                <li>Bước 3 – Kiểm tra: AI đọc lại và báo mâu thuẫn (nếu có).</li>
-                            </ol>
-                        </div>
-                    </section>
-
-                    {/* Giới hạn sử dụng AI & Danh sách từ cấm — đặt dưới Các dịch vụ AI cho tác giả */}
+                    {/* Giới hạn sử dụng AI & Danh sách từ cấm */}
                     <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
                         <div className="flex items-start justify-between gap-4">
                             <div>

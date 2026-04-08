@@ -129,6 +129,21 @@ export async function getAuthorActivity({ page = 1, pageSize = 50 } = {}) {
 }
 
 /**
+ * Lịch sử thu nhập tác giả từ người đọc mở khóa chương trả phí.
+ * @param {{ page?: number, pageSize?: number }} params
+ */
+export async function getAuthorUnlockChapterIncomeHistory({ page = 1, pageSize = 20 } = {}) {
+  try {
+    const res = await axiosInstance.get('/coins/author/unlock-chapter-income-history', {
+      params: { page, pageSize },
+    });
+    return { success: true, data: res.data };
+  } catch (err) {
+    return { success: false, message: getErrorMessage(err) };
+  }
+}
+
+/**
  * Tạo yêu cầu rút tiền (tác giả). Trừ coin từ ví khi tạo.
  * @param {{ amountCoins: number, bankInfo?: string }} payload
  */
