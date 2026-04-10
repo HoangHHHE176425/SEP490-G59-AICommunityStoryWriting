@@ -46,6 +46,9 @@ namespace Services.DTOs.Stories
         /// <summary>Có đơn báo cáo lên admin đang chờ xử lý — moderator đang nhận duyệt không được duyệt/từ chối đến khi admin xử lý.</summary>
         public bool HasPendingEscalation { get; set; }
 
+        /// <summary>Queue moderator: khi <see cref="IsClaimedByMe"/>, còn được gửi tối đa 1 đơn EXTEND_DEADLINE trong phiên nhận này.</summary>
+        public bool CanSubmitExtendDeadlineRequest { get; set; }
+
         /// <summary>Lý do từ chối (lịch sử từ chối; có thể có ngay cả khi story hiện đã PUBLISHED).</summary>
         public string? RejectionReason { get; set; }
         /// <summary>Thời điểm moderator từ chối (lịch sử từ chối).</summary>

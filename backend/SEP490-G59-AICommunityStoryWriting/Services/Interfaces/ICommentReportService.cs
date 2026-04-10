@@ -24,13 +24,27 @@ public interface ICommentReportService
         Guid commentId,
         Guid actorUserId,
         bool hidden,
-        bool includeReplies);
+        bool includeReplies,
+        bool actorIsAdmin = false);
 
     Task<Guid> RequestAdminActionAsync(
         Guid commentId,
         Guid requesterId,
         CreateComplianceAdminActionRequestDto dto,
         bool actorIsAdmin);
+
+    /// <summary>COMPLIANCE (hoặc ADMIN) đang lock thread: bật/tắt tạm khóa quyền viết, không qua đơn admin.</summary>
+    Task SetAuthorWritingSuspendedByComplianceAsync(
+        Guid commentId,
+        Guid actorUserId,
+        SetComplianceCommentAuthorWritingSuspendedRequestDto dto,
+        bool actorIsAdmin);
+
+    /// <summary>COMPLIANCE đang lock thread: gửi admin yêu cầu gỡ lock (sau khi gửi, thread bị chặn mọi thao tác tới khi admin xử lý).</summary>
+    Task<Guid> RequestComplianceCommentLockReleaseAsync(
+        Guid commentId,
+        Guid requesterId,
+        RequestComplianceLockReleaseDto? dto);
 
     Task<PagedComplianceCommentReportsDto> QueryComplianceOpenCommentReportsAsync(
         int page,

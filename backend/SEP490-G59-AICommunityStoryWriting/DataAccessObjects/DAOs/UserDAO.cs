@@ -2,7 +2,9 @@ using BusinessObjects;
 using BusinessObjects.Entities;
 using DataAccessObjects.Queries;
 using Microsoft.EntityFrameworkCore;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace DataAccessObjects.DAOs
 {
@@ -68,6 +70,21 @@ namespace DataAccessObjects.DAOs
                 context.auth_tokens.Remove(token);
                 await context.SaveChangesAsync();
             }
+        }
+
+        public async Task DeleteRefreshTokensByUserId(StoryPlatformDbContext context, Guid userId)
+        {
+            var tokens = await context.auth_tokens
+                .Where(t => t.user_id == userId)
+                .ToListAsync();
+
+            if (tokens.Count == 0)
+            {
+                return;
+            }
+
+            context.auth_tokens.RemoveRange(tokens);
+            await context.SaveChangesAsync();
         }
         public async Task<bool> IsNicknameExist(StoryPlatformDbContext context, string nickname, Guid currentUserId)
         {
@@ -289,6 +306,61 @@ namespace DataAccessObjects.DAOs
             return u?.status;
         }
 
+        /// <summary>Mốc đình chỉ quyền viết (UTC) — dùng cho thông báo lỗi / DTO.</summary>
+        public static DateTime? GetAuthorWritingSuspendedUntilUtc(Guid userId)
+        {
+            using var context = new StoryPlatformDbContext();
+            var u = context.users.AsNoTracking().FirstOrDefault(x => x.id == userId);
+            return u?.author_writing_suspended_until;
+        }
+
+        /// <summary>Batch: status + author_writing_suspended_until cho hàng đợi compliance.</summary>
+        public static Dictionary<Guid, (string? Status, DateTime? AuthorWritingSuspendedUntil)> GetUsersModerationSnapshot(
+            IReadOnlyCollection<Guid> userIds)
+        {
+            var result = new Dictionary<Guid, (string?, DateTime?)>();
+            if (userIds == null || userIds.Count == 0) return result;
+            var ids = userIds.Where(id => id != Guid.Empty).Distinct().ToList();
+            if (ids.Count == 0) return result;
+            using var context = new StoryPlatformDbContext();
+            var rows = context.users.AsNoTracking()
+                .Where(u => ids.Contains(u.id))
+                .Select(u => new { u.id, u.status, u.author_writing_suspended_until })
+                .ToList();
+            foreach (var r in rows)
+                result[r.id] = (r.status, r.author_writing_suspended_until);
+            return result;
+        }
+
+        /// <summary>Batch: display name ưu tiên nickname, fallback email.</summary>
+        public static Dictionary<Guid, string> GetDisplayNamesByIds(IReadOnlyCollection<Guid> userIds)
+        {
+            var result = new Dictionary<Guid, string>();
+            if (userIds == null || userIds.Count == 0) return result;
+            var ids = userIds.Where(id => id != Guid.Empty).Distinct().ToList();
+            if (ids.Count == 0) return result;
+
+            using var context = new StoryPlatformDbContext();
+            var rows = context.users.AsNoTracking()
+                .Include(u => u.user_profiles)
+                .Where(u => ids.Contains(u.id))
+                .Select(u => new
+                {
+                    u.id,
+                    Nick = u.user_profiles != null ? u.user_profiles.nickname : null,
+                    u.email
+                })
+                .ToList();
+
+            foreach (var r in rows)
+            {
+                var name = string.IsNullOrWhiteSpace(r.Nick) ? r.email : r.Nick;
+                if (!string.IsNullOrWhiteSpace(name))
+                    result[r.id] = name.Trim();
+            }
+            return result;
+        }
+
         public static void SetAuthorWritingSuspendedUntil(Guid userId, DateTime? untilUtc)
         {
             using var context = new StoryPlatformDbContext();
@@ -307,6 +379,17 @@ namespace DataAccessObjects.DAOs
             u.status = (status ?? "").Trim().ToUpperInvariant();
             u.updated_at = DateTime.UtcNow;
             context.SaveChanges();
+        }
+
+        /// <summary>Email đăng ký — dùng thông báo (ví dụ sau khi admin duyệt cấm tài khoản).</summary>
+        public static string? GetUserEmail(Guid userId)
+        {
+            if (userId == Guid.Empty) return null;
+            using var context = new StoryPlatformDbContext();
+            return context.users.AsNoTracking()
+                .Where(u => u.id == userId)
+                .Select(u => u.email)
+                .FirstOrDefault();
         }
     }
 }

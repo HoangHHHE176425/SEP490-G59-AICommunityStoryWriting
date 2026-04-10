@@ -180,6 +180,14 @@ namespace Services.Implementations
             }
 
             item.HasPendingEscalation = pendingEscalationStoryIds.Contains(item.Id);
+            item.CanSubmitExtendDeadlineRequest = false;
+            if (item.IsClaimedByMe && moderatorId.HasValue && claim.HasValue)
+            {
+                var extN = ReviewEscalationDAO.CountExtendDeadlineRequestsForSenderSince(
+                    ReviewAssignmentDAO.TargetTypeStory, item.Id, moderatorId.Value, claim.Value.AssignedAt);
+                item.CanSubmitExtendDeadlineRequest = extN < 1;
+            }
+
             var fallbackDeadline = ResolveReviewDeadlineUtc(pendingSince, claim);
             item.DeadlineAt = ApiDateTime.AsUtcForJson(fallbackDeadline);
             item.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);
@@ -479,6 +487,14 @@ namespace Services.Implementations
             var sid = item.StoryId;
             item.HasPendingEscalation = pendingEscalationChapterIds.Contains(item.Id)
                 || (sid.HasValue && pendingEscalationStoryIds.Contains(sid.Value));
+            item.CanSubmitExtendDeadlineRequest = false;
+            if (item.IsClaimedByMe && moderatorId.HasValue && claim.HasValue)
+            {
+                var extN = ReviewEscalationDAO.CountExtendDeadlineRequestsForSenderSince(
+                    ReviewAssignmentDAO.TargetTypeChapter, item.Id, moderatorId.Value, claim.Value.AssignedAt);
+                item.CanSubmitExtendDeadlineRequest = extN < 1;
+            }
+
             var fallbackDeadline = ResolveReviewDeadlineUtc(pendingSince, claim);
             item.DeadlineAt = ApiDateTime.AsUtcForJson(fallbackDeadline);
             item.TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, fallbackDeadline);

@@ -17,6 +17,7 @@ const countWords = (text) => {
     if (!plain) return 0;
     return plain.split(/\s+/).filter(word => word.length > 0).length;
 };
+const MIN_STORY_SUMMARY_WORDS = 50;
 
 export function StoryEditor({ story, onSave, onCancel }) {
     const { user } = useAuth();
@@ -36,6 +37,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
         tags: [],
         note: '',
         cover: '',
+        coverFile: null,
     });
 
     const [chapters, setChapters] = useState([
@@ -78,6 +80,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                 tags: [],
                 note: story.summary ?? story.note ?? '',
                 cover: story.cover || '',
+                coverFile: null,
             });
         } else {
             setFormData((prev) => ({ ...prev, author: name, status: 'Đang ra' }));
@@ -88,18 +91,31 @@ export function StoryEditor({ story, onSave, onCancel }) {
 
     const handleFormDataChange = (field, value) => {
         if (!story && field === 'status' && value !== 'Đang ra') return;
-        setFormData({ ...formData, [field]: value });
+        setFormData((prev) => ({ ...prev, [field]: value }));
     };
 
     const handleImageUpload = (e) => {
         const file = e.target.files?.[0];
         if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                handleFormDataChange('cover', reader.result);
-                showToast('Ảnh bìa đã được tải lên thành công!', 'success');
-            };
-            reader.readAsDataURL(file);
+            const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+            const lowerName = String(file.name || '').toLowerCase();
+            const ext = lowerName.slice(lowerName.lastIndexOf('.'));
+            if (!allowedExtensions.includes(ext)) {
+                showToast(`Ảnh bìa chỉ chấp nhận ${allowedExtensions.join(', ').toUpperCase()}`, 'error');
+                return;
+            }
+            if (file.size > 5 * 1024 * 1024) {
+                showToast('Kích thước ảnh bìa không được vượt quá 5MB', 'error');
+                return;
+            }
+            const previewUrl = URL.createObjectURL(file);
+            setFormData((prev) => {
+                if (prev.cover && String(prev.cover).startsWith('blob:')) {
+                    URL.revokeObjectURL(prev.cover);
+                }
+                return { ...prev, cover: previewUrl, coverFile: file };
+            });
+            showToast('Ảnh bìa đã được tải lên thành công!', 'success');
         }
     };
 
@@ -150,6 +166,11 @@ export function StoryEditor({ story, onSave, onCancel }) {
         }
         if (!formData.note || !String(formData.note).trim()) {
             showToast('Vui lòng nhập mô tả truyện', 'error');
+            return false;
+        }
+        const summaryWordCount = countWords(formData.note);
+        if (summaryWordCount < MIN_STORY_SUMMARY_WORDS) {
+            showToast(`Mô tả truyện cần tối thiểu ${MIN_STORY_SUMMARY_WORDS} từ (hiện có ${summaryWordCount} từ).`, 'error');
             return false;
         }
         if (!story && formData.status !== 'Đang ra') {
@@ -224,12 +245,14 @@ export function StoryEditor({ story, onSave, onCancel }) {
         return { lineNo, paraNo, charOffset };
     };
 
+    /** Tránh báo nhầm khi tóm tắt «Không phát hiện lỗi chính tả» (vẫn chứa «lỗi chính tả»). Khớp ChapterEditorPage / BE. */
     const summaryImpliesSpellingIssue = (summaryText) => {
         const s = String(summaryText ?? '').trim().toLowerCase();
         if (!s) return false;
-        return /ph[aá]t hi[eệ]n.*l[ỗo]i ch[ií]nh t[ảa]/i.test(s)
-            || /l[ỗo]i ch[ií]nh t[ảa]/i.test(s)
-            || /d[ấa]u c[âa]u/i.test(s);
+        if (s.includes('không phát hiện')) return false;
+        if (/không\s+có\s+lỗi\s+chính\s+tả/i.test(s)) return false;
+        if (/không\s+còn\s+lỗi\s+chính\s+tả/i.test(s)) return false;
+        return s.includes('lỗi chính tả') || s.includes('dấu câu');
     };
 
     const buildSpellingSummary = (rawSummary, spellingIssues) => {
@@ -782,8 +805,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                 (chapterCheckModal.data?.spellingIssues ?? []).map((it, idx) => {
                                                     const word = it.wordOrPhrase ?? it.WordOrPhrase ?? '';
                                                     const sug = it.suggestion ?? it.Suggestion ?? '';
-                                                    const contentForPosition = chapterCheckModal.data?.contentForPosition ?? '';
-                                                    const pos = findIssuePosition(contentForPosition, word);
+                                                    const ctx = it.context ?? it.Context ?? '';
                                                     return (
                                                         <div key={idx} className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
                                                             <div className="text-sm text-slate-900 dark:text-slate-100">
@@ -792,15 +814,15 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                             <div className="text-sm text-slate-900 dark:text-slate-100 mt-2">
                                                                 <span style={{ fontWeight: 900 }}>Gợi ý</span>: <span style={{ fontWeight: 900, color: '#15803d' }}>{sug || '—'}</span>
                                                             </div>
-                                                            {pos ? (
-                                                                <div className="text-xs text-slate-600 dark:text-slate-300 mt-2">
-                                                                    <span style={{ fontWeight: 800 }}>Vị trí</span>:
-                                                                    {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
-                                                                    {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
-                                                                    {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
+                                                            {String(ctx).trim() ? (
+                                                                <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-800 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100">
+                                                                    <span style={{ fontWeight: 800 }}>Câu/dòng chứa lỗi</span>
+                                                                    <div className="mt-1 whitespace-pre-wrap">{ctx}</div>
                                                                 </div>
                                                             ) : (
-                                                                <div className="text-xs text-slate-400 dark:text-slate-400 mt-2">Không xác định được vị trí trong nội dung hiện tại.</div>
+                                                                <div className="text-xs text-slate-400 dark:text-slate-400 mt-2">
+                                                                    Không có đoạn trích chứa từ sai cho mục này.
+                                                                </div>
                                                             )}
                                                         </div>
                                                     );
@@ -816,8 +838,6 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                     const type = it.type ?? it.Type ?? '';
                                                     const desc = it.description ?? it.Description ?? '';
                                                     const quote = it.quote ?? it.Quote ?? '';
-                                                    const contentForPosition = chapterCheckModal.data?.contentForPosition ?? '';
-                                                    const pos = findIssuePosition(contentForPosition, quote);
                                                     return (
                                                         <div
                                                             key={idx}
@@ -833,15 +853,11 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                                 <div className="mt-2 text-xs text-amber-800 border border-amber-200 bg-amber-50 rounded-lg p-2" style={{ whiteSpace: 'pre-wrap' }}>
                                                                     {quote}
                                                                 </div>
-                                                            ) : null}
-                                                            {pos ? (
+                                                            ) : (
                                                                 <div className="text-xs text-amber-800 mt-2">
-                                                                    <span style={{ fontWeight: 800 }}>Vị trí</span>:
-                                                                    {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
-                                                                    {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
-                                                                    {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
+                                                                    Không có đoạn trích chứa từ cấm cho mục này.
                                                                 </div>
-                                                            ) : null}
+                                                            )}
                                                         </div>
                                                     );
                                                 })

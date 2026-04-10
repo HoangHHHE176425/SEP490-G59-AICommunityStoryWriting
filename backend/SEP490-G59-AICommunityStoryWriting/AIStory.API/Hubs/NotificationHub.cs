@@ -9,4 +9,5 @@ namespace AIStory.API.Hubs;
 public class NotificationHub : Hub
 {
     public const string NewNotification = "NewNotification";
+    public const string SessionRevoked = "SessionRevoked";
 }

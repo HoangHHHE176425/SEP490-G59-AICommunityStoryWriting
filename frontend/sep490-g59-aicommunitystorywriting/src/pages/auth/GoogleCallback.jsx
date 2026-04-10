@@ -10,12 +10,19 @@ export default function GoogleCallback() {
     const { fetchProfile } = useAuth();
     const [searchParams] = useSearchParams();
     const accessToken = searchParams.get('accessToken');
+    const callbackError = searchParams.get('error');
     const returnUrl = useMemo(() => searchParams.get('returnUrl') || '/home', [searchParams]);
 
     const [error, setError] = useState('');
 
     useEffect(() => {
         const run = async () => {
+            if (callbackError) {
+                localStorage.removeItem('accessToken');
+                setError(callbackError);
+                return;
+            }
+
             if (!accessToken) {
                 setError('Không nhận được access token từ Google.');
                 return;
@@ -31,7 +38,7 @@ export default function GoogleCallback() {
         };
 
         run();
-    }, [accessToken, fetchProfile, navigate, returnUrl]);
+    }, [accessToken, callbackError, fetchProfile, navigate, returnUrl]);
 
     return (
         <div className="min-h-screen bg-background-light dark:bg-background-dark flex flex-col">

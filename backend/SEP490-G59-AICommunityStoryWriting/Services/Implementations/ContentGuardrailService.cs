@@ -23,22 +23,31 @@ public class ContentGuardrailService : IContentGuardrailService
         _bannedWordsRepository = bannedWordsRepository;
     }
 
-    public Task<GuardrailResult> CheckAsync(Guid storyId, string draftContent, CancellationToken cancellationToken = default) =>
-        CheckAgainstWordList(draftContent, GetBannedWords());
+    public async Task<GuardrailResult> CheckAsync(Guid storyId, string draftContent, CancellationToken cancellationToken = default)
+    {
+        var bannedWords = GetBannedWords();
+        var ruleResult = CheckAgainstWordList(draftContent, bannedWords);
+        return await Task.FromResult(ruleResult);
+    }
 
-    public Task<GuardrailResult> CheckCommentBannedWordsAsync(string content, CancellationToken cancellationToken = default) =>
-        CheckAgainstWordList(content, GetBannedWordsCommentOnly());
+    public async Task<GuardrailResult> CheckCommentBannedWordsAsync(string content, CancellationToken cancellationToken = default)
+    {
+        var bannedWords = GetBannedWordsCommentOnly();
+        var ruleResult = CheckAgainstWordList(content, bannedWords);
+        return await Task.FromResult(ruleResult);
+    }
 
-    private static Task<GuardrailResult> CheckAgainstWordList(string? draftContent, string[] bannedWords)
+    private static GuardrailResult CheckAgainstWordList(string? draftContent, string[] bannedWords)
     {
         var violations = new List<GuardrailViolation>();
         var draft = (draftContent ?? "").Trim();
         if (draft.Length == 0)
-            return Task.FromResult(new GuardrailResult { Passed = true, Violations = violations });
+            return new GuardrailResult { Passed = true, Violations = violations };
 
         // Chuẩn hóa unicode + chữ thường; GIỮ DẤU tiếng Việt để tránh false-positive
         // (vd: "cặc" không được match "các", "cách").
-        var draftNorm = NormalizeForMatch(draft);
+        var draftSource = draft.Normalize(NormalizationForm.FormC);
+        var draftNorm = NormalizeForMatch(draftSource);
 
         foreach (var word in bannedWords)
         {
@@ -50,16 +59,16 @@ public class ContentGuardrailService : IContentGuardrailService
                 violations.Add(new GuardrailViolation
                 {
                     Type = "BannedWord",
-                    Message = "Nội dung chứa từ không được phép.",
-                    Quote = w
+                    Message = $"Từ cấm: {w}",
+                    Quote = ExtractContextSnippet(draftSource, draftNorm, wNorm)
                 });
         }
 
-        return Task.FromResult(new GuardrailResult
+        return new GuardrailResult
         {
             Passed = violations.Count == 0,
             Violations = violations
-        });
+        };
     }
 
     /// <summary>Lấy danh sách từ cấm: ưu tiên DB (ai_sensitive_words, category BannedWord), không có thì dùng config.</summary>
@@ -119,5 +128,24 @@ public class ContentGuardrailService : IContentGuardrailService
         // \p{L}\p{N}: chữ/số Unicode, hỗ trợ tiếng Việt có dấu.
         var pattern = $@"(?<![\p{{L}}\p{{N}}_]){escaped}(?![\p{{L}}\p{{N}}_])";
         return Regex.IsMatch(textNormalized, pattern, RegexOptions.CultureInvariant);
+    }
+
+    private static string ExtractContextSnippet(string draftSource, string draftNormalized, string bannedWordNormalized, int contextChars = 24)
+    {
+        if (string.IsNullOrWhiteSpace(draftSource) || string.IsNullOrWhiteSpace(draftNormalized) || string.IsNullOrWhiteSpace(bannedWordNormalized))
+            return bannedWordNormalized;
+
+        var escaped = Regex.Escape(bannedWordNormalized);
+        var pattern = $@"(?<![\p{{L}}\p{{N}}_]){escaped}(?![\p{{L}}\p{{N}}_])";
+        var m = Regex.Match(draftNormalized, pattern, RegexOptions.CultureInvariant);
+        if (!m.Success)
+            return bannedWordNormalized;
+
+        var start = Math.Max(0, m.Index - contextChars);
+        var end = Math.Min(draftSource.Length, m.Index + m.Length + contextChars);
+        var snippet = draftSource[start..end].Trim();
+        if (start > 0) snippet = "..." + snippet;
+        if (end < draftSource.Length) snippet += "...";
+        return snippet;
     }
 }

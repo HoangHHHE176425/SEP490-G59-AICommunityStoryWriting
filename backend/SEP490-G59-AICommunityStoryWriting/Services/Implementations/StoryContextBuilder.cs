@@ -86,7 +86,7 @@ public class StoryContextBuilder : IStoryContextBuilder
         if (!string.IsNullOrWhiteSpace(chapterTitle))
             lines.Add($"## Chương cần kiểm tra: {chapterTitle}");
         lines.Add("## Bản nháp cần kiểm tra");
-        lines.Add(draftContent);
+        lines.Add(ChapterContentNormalizer.NormalizeForAi(draftContent, maxCharsPerChapter));
         return string.Join("\n\n", lines.Where(s => !string.IsNullOrWhiteSpace(s)));
     }
 

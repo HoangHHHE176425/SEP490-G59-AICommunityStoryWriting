@@ -3,7 +3,7 @@ import { RotateCcw } from 'lucide-react';
 import { getModerationLogs } from '../../../api/admin/adminModerationApi';
 import { getAdminComplianceLogs } from '../../../api/admin/adminComplianceApi';
 import { Pagination } from '../../../components/pagination/Pagination';
-import { formatApiDateTimeLocalVi, formatApiDateTimeVietnamVi } from '../../../utils/apiDateTime';
+import { formatLogTimestampVi } from '../../../utils/apiDateTime';
 
 const PAGE_SIZE = 10;
 
@@ -24,40 +24,7 @@ const TARGET_OPTIONS = [
     { value: 'CHAPTER', label: 'Chương' },
 ];
 
-const COMPLIANCE_ACTION_OPTIONS = [
-    { value: '', label: 'Tất cả hành động' },
-    { value: 'RESOLVED', label: 'Đã xử lý' },
-    { value: 'DISMISSED', label: 'Bỏ qua' },
-    { value: 'BAN_USER', label: 'Chặn tài khoản' },
-    { value: 'SUSPEND_AUTHOR_WRITING', label: 'Tạm đình chỉ quyền viết' },
-    { value: 'APPROVE_UNLOCK', label: 'Chấp nhận trả đơn về hàng đợi' },
-    { value: 'APPROVE_REASSIGN', label: 'Chấp nhận giao lại đơn' },
-    { value: 'REJECT', label: 'Từ chối' },
-    { value: 'COMMENTS_DISABLED', label: 'Khóa bình luận truyện' },
-    { value: 'COMMENTS_ENABLED', label: 'Mở lại bình luận truyện' },
-    { value: 'STORY_HIDDEN_COMPLIANCE', label: 'Ẩn truyện khỏi công khai' },
-    { value: 'STORY_UNHIDDEN_COMPLIANCE', label: 'Hiện lại truyện công khai' },
-    { value: 'COMMENT_HIDDEN', label: 'Ẩn chuỗi bình luận' },
-    { value: 'COMMENT_UNHIDDEN', label: 'Hiện lại chuỗi bình luận' },
-];
-
-function formatDate(value) {
-    if (!value) return '—';
-    const raw = String(value).trim().replace(' ', 'T');
-    const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
-    if (!m) {
-        const d = new Date(raw);
-        return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('vi-VN');
-    }
-    const [, y, mo, d, h, mi, s = '00'] = m;
-    return `${h}:${mi}:${s} ${d}/${mo}/${y}`;
-}
-
-function formatDateByLogType(value, logType) {
-    if (logType === 'compliance') return formatApiDateTimeLocalVi(value);
-    if (logType === 'moderator') return formatApiDateTimeVietnamVi(value);
-    return formatDate(value);
-}
+const BASE_COMPLIANCE_ACTION_OPTIONS = [{ value: '', label: 'Tất cả hành động' }];
 
 function targetLabel(item) {
     const t = String(item?.targetType ?? '').toUpperCase();
@@ -100,7 +67,9 @@ function complianceActionLabel(v) {
     if (s === 'RESOLVED') return 'Đã xử lý';
     if (s === 'DISMISSED') return 'Bỏ qua';
     if (s === 'BAN_USER') return 'Chặn tài khoản';
+    if (s === 'BAN') return 'Chặn tài khoản';
     if (s === 'SUSPEND_AUTHOR_WRITING') return 'Tạm đình chỉ quyền viết';
+    if (s === 'AUTHOR_WRITING_ENABLED') return 'Mở lại quyền viết tác giả';
     if (s === 'APPROVE_UNLOCK') return 'Chấp nhận trả đơn về hàng đợi';
     if (s === 'APPROVE_REASSIGN') return 'Chấp nhận giao lại đơn';
     if (s === 'REJECT') return 'Từ chối';
@@ -111,6 +80,12 @@ function complianceActionLabel(v) {
     if (s === 'COMMENT_HIDDEN') return 'Ẩn chuỗi bình luận';
     if (s === 'COMMENT_UNHIDDEN') return 'Hiện lại chuỗi bình luận';
     return v || '—';
+}
+
+function complianceActionKey(item) {
+    const action = String(item?.action ?? '').trim().toUpperCase();
+    if (action === 'BAN_USER' || action === 'BAN') return 'ACCOUNT_BAN';
+    return action;
 }
 
 function complianceStatusLabel(v) {
@@ -135,6 +110,7 @@ export function ModeratorLogsManagement() {
     const [currentPage, setCurrentPage] = useState(1);
     const [totalCount, setTotalCount] = useState(0);
     const [totalPages, setTotalPages] = useState(1);
+    const [complianceActionOptions, setComplianceActionOptions] = useState(BASE_COMPLIANCE_ACTION_OPTIONS);
 
     const [filters, setFilters] = useState({
         search: '',
@@ -165,7 +141,7 @@ export function ModeratorLogsManagement() {
         const to = activeFilters.dateTo ? new Date(`${activeFilters.dateTo}T23:59:59`).getTime() : null;
 
         return (Array.isArray(items) ? items : []).filter((x) => {
-            const itemAction = normalize(x.action);
+            const itemAction = normalize(logType === 'compliance' ? complianceActionKey(x) : x.action);
             const itemTarget = normalize(x.targetType);
             const itemTime = x.createdAt ? new Date(x.createdAt).getTime() : NaN;
 
@@ -187,6 +163,8 @@ export function ModeratorLogsManagement() {
                     x.message,
                     x.source,
                     x.targetTitle,
+                    x.targetLabel,
+                    x.ownerLabel,
                     x.action,
                     x.targetType,
                 ].map(normalize).join(' | ');
@@ -216,6 +194,10 @@ export function ModeratorLogsManagement() {
         action: x?.action ?? x?.Action ?? '',
         status: x?.status ?? x?.Status ?? '',
         message: x?.message ?? x?.Message ?? '',
+        targetType: x?.targetType ?? x?.TargetType ?? '',
+        targetId: x?.targetId ?? x?.TargetId ?? null,
+        targetLabel: x?.targetLabel ?? x?.TargetLabel ?? '',
+        ownerLabel: x?.ownerLabel ?? x?.OwnerLabel ?? '',
     });
 
     const computeFilteredPage = (sourceRows, page = 1, activeFilters = appliedFilters) => {
@@ -248,6 +230,23 @@ export function ModeratorLogsManagement() {
             }
 
             const normalizedRows = (logType === 'moderator' ? merged.map(toUiModeratorRow) : merged.map(toUiComplianceRow));
+            if (logType === 'compliance') {
+                const optMap = new Map();
+                normalizedRows.forEach((row) => {
+                    const key = complianceActionKey(row);
+                    if (!key) return;
+                    if (!optMap.has(key)) {
+                        const label = key === 'ACCOUNT_BAN'
+                            ? 'Chặn tài khoản'
+                            : complianceActionLabel(row.action || key);
+                        optMap.set(key, { value: key, label });
+                    }
+                });
+                const dynamicOptions = Array.from(optMap.values()).sort((a, b) => a.label.localeCompare(b.label, 'vi'));
+                setComplianceActionOptions([...BASE_COMPLIANCE_ACTION_OPTIONS, ...dynamicOptions]);
+            } else {
+                setComplianceActionOptions(BASE_COMPLIANCE_ACTION_OPTIONS);
+            }
             setAllRows(normalizedRows);
             computeFilteredPage(normalizedRows, 1, appliedFilters);
         } catch (e) {
@@ -289,46 +288,55 @@ export function ModeratorLogsManagement() {
     };
 
     return (
-        <div className="p-8 space-y-6">
+        <div className="p-5 space-y-4">
             <div>
-                <h1 className="text-2xl font-bold text-slate-900 mb-1">Nhật ký kiểm duyệt</h1>
-                <p className="text-sm text-slate-500">
+                <h1 className="text-xl font-bold text-slate-900 mb-1">Nhật ký kiểm duyệt</h1>
+                <p className="text-xs text-slate-500">
                     Theo dõi lịch sử hoạt động của kiểm duyệt viên và xử lý vi phạm viên theo thời gian thực.
                 </p>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-lg font-bold text-slate-900 m-0">
+            <div className="bg-white rounded-lg border border-slate-200 p-3">
+                <div className="flex items-center justify-between mb-2.5">
+                    <h2 className="text-base font-semibold text-slate-900 m-0">
                         {logType === 'moderator'
                             ? 'Nhật ký kiểm duyệt của kiểm duyệt viên'
                             : 'Nhật ký kiểm duyệt của xử lý vi phạm viên'}
                     </h2>
-                    <span className="text-sm text-slate-500">Tổng: {totalCount}</span>
+                    <span className="text-xs text-slate-500">Tổng: {totalCount}</span>
                 </div>
-                <div className="flex gap-2 flex-wrap mb-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap mb-2.5">
+                    <div className="flex gap-1.5 flex-wrap">
+                        <button
+                            type="button"
+                            onClick={() => setLogType('moderator')}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-semibold transition-colors ${logType === 'moderator'
+                                ? 'bg-primary/15 border-primary/40 text-emerald-700'
+                                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                                }`}
+                        >
+                            Nhật ký kiểm duyệt viên
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setLogType('compliance')}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-semibold transition-colors ${logType === 'compliance'
+                                ? 'bg-primary/15 border-primary/40 text-emerald-700'
+                                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                                }`}
+                        >
+                            Nhật ký xử lý vi phạm viên
+                        </button>
+                    </div>
                     <button
-                        type="button"
-                        onClick={() => setLogType('moderator')}
-                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${logType === 'moderator'
-                            ? 'bg-primary/15 border-primary/40 text-emerald-700'
-                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-                            }`}
+                        onClick={onResetFilters}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 text-xs font-medium hover:bg-slate-50"
                     >
-                        Nhật ký kiểm duyệt viên
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setLogType('compliance')}
-                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${logType === 'compliance'
-                            ? 'bg-primary/15 border-primary/40 text-emerald-700'
-                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-                            }`}
-                    >
-                        Nhật ký xử lý vi phạm viên
+                        <RotateCcw style={{ width: 14, height: 14 }} />
+                        Đặt lại
                     </button>
                 </div>
-                <div className={`grid grid-cols-1 ${logType === 'moderator' ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-3`}>
+                <div className={`grid grid-cols-1 ${logType === 'moderator' ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-2`}>
                     <input
                         value={filters.search}
                         onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
@@ -359,10 +367,10 @@ export function ModeratorLogsManagement() {
                             onChange={(e) => setFilters((p) => ({ ...p, action: e.target.value }))}
                             style={inputStyle}
                         >
-                            {COMPLIANCE_ACTION_OPTIONS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
+                            {complianceActionOptions.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
                         </select>
                     )}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                         <label style={{ fontSize: '0.75rem', color: '#64748b' }}>Từ ngày</label>
                         <input
                             type="date"
@@ -371,7 +379,7 @@ export function ModeratorLogsManagement() {
                             style={inputStyle}
                         />
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                         <label style={{ fontSize: '0.75rem', color: '#64748b' }}>Tới ngày</label>
                         <input
                             type="date"
@@ -381,18 +389,9 @@ export function ModeratorLogsManagement() {
                         />
                     </div>
                 </div>
-                <div className="mt-3 flex justify-end">
-                    <button
-                        onClick={onResetFilters}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"
-                    >
-                        <RotateCcw style={{ width: 14, height: 14 }} />
-                        Đặt lại
-                    </button>
-                </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
                 {loading ? (
                     <div className="p-8 text-center text-slate-500 text-sm">Đang tải log kiểm duyệt...</div>
                 ) : error ? (
@@ -418,6 +417,8 @@ export function ModeratorLogsManagement() {
                                         <th style={th}>XỬ LÝ VI PHẠM VIÊN</th>
                                         <th style={th}>NGUỒN</th>
                                         <th style={th}>HÀNH ĐỘNG</th>
+                                        <th style={th}>ĐỐI TƯỢNG</th>
+                                        <th style={th}>CHỦ NHÂN</th>
                                         <th style={th}>TRẠNG THÁI</th>
                                         <th style={th}>NỘI DUNG</th>
                                     </tr>
@@ -427,14 +428,14 @@ export function ModeratorLogsManagement() {
                                 {logType === 'moderator' ? (
                                     rows.map((r) => (
                                         <tr key={r.id ?? `${r.targetId}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
-                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDateByLogType(r.createdAt, logType)}</td>
+                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatLogTimestampVi(r.createdAt)}</td>
                                             <td style={td}>{r.moderatorName || '—'}</td>
                                             <td style={td}>{targetLabel(r)}</td>
                                             <td style={td}>{r.targetTitle || '—'}</td>
-                                            <td style={{ padding: '0.75rem', ...moderatorActionCellStyle(r.action) }}>
+                                            <td style={{ padding: '0.62rem', ...moderatorActionCellStyle(r.action) }}>
                                                 {actionLabel(r)}
                                             </td>
-                                            <td style={{ padding: '0.75rem', color: '#475569', maxWidth: 420 }}>
+                                            <td style={{ padding: '0.62rem', color: '#475569', maxWidth: 420 }}>
                                                 <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.rejectionReason || ''}>
                                                     {r.rejectionReason || '—'}
                                                 </div>
@@ -444,12 +445,14 @@ export function ModeratorLogsManagement() {
                                 ) : (
                                     rows.map((r) => (
                                         <tr key={r.id ?? `${r.source}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
-                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDateByLogType(r.createdAt, logType)}</td>
+                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatLogTimestampVi(r.createdAt)}</td>
                                             <td style={td}>{r.complianceUserName || '—'}</td>
                                             <td style={td}>{complianceSourceLabel(r.source)}</td>
                                             <td style={td}>{complianceActionLabel(r.action)}</td>
+                                            <td style={td}>{r.targetLabel || (r.targetId ? `${r.targetType || 'Đối tượng'}: ${r.targetId}` : '—')}</td>
+                                            <td style={td}>{r.ownerLabel || '—'}</td>
                                             <td style={td}>{complianceStatusLabel(r.status)}</td>
-                                            <td style={{ padding: '0.75rem', color: '#475569', maxWidth: 420 }}>
+                                            <td style={{ padding: '0.62rem', color: '#475569', maxWidth: 420 }}>
                                                 <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.message || ''}>
                                                     {r.message || '—'}
                                                 </div>
@@ -476,25 +479,25 @@ export function ModeratorLogsManagement() {
 
 const inputStyle = {
     border: '1px solid #e2e8f0',
-    borderRadius: '8px',
-    padding: '0.6rem 0.75rem',
-    fontSize: '0.875rem',
+    borderRadius: '7px',
+    padding: '0.48rem 0.65rem',
+    fontSize: '0.78rem',
     color: '#0f172a',
-    background: '#f8fafc',
+    background: '#ffffff',
 };
 
 const th = {
     textAlign: 'left',
-    padding: '0.75rem',
+    padding: '0.62rem',
     borderBottom: '1px solid #e2e8f0',
-    fontSize: '0.72rem',
+    fontSize: '0.68rem',
     letterSpacing: '0.02em',
     color: '#64748b',
     fontWeight: 700,
 };
 
 const td = {
-    padding: '0.75rem',
+    padding: '0.62rem',
     color: '#334155',
-    fontSize: '0.875rem',
+    fontSize: '0.8rem',
 };

@@ -37,8 +37,8 @@ const ALL_MENU_ITEMS = [
     { id: 'wallet-dashboard', label: 'Ví hệ thống', icon: Wallet },
     { id: 'categories', label: 'Quản lý thể loại', icon: Bookmark },
     { id: 'publication', label: 'Quản lý xuất bản', icon: CheckSquare },
-    { id: 'moderator-logs', label: 'Nhật ký kiểm duyệt', icon: FileText },
-    { id: 'review-escalations', label: 'Quản lý đơn', icon: Flag },
+    { id: 'moderator-logs', label: 'Quản lý nhật ký kiểm duyệt', icon: FileText },
+    { id: 'review-escalations', label: 'Quản lý đơn kiểm duyệt', icon: Flag },
     { id: 'stories', label: 'Quản lý truyện', icon: FileText },
     { id: 'violations', label: 'Quản lý vi phạm', icon: AlertTriangle },
     { id: 'users', label: 'Quản lý người dùng', icon: Users },
@@ -54,7 +54,7 @@ const HIDE_MENU_IDS_FOR_ADMIN = new Set(['publication', 'stories', 'comments', '
 const ROLE_MENU_IDS = {
     ADMIN: null, // null = full menu
     MODERATOR: new Set(['dashboard', 'publication']),
-    COMPLIANCE: new Set(['violations']),
+    COMPLIANCE: new Set(['dashboard', 'violations']),
 };
 
 export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) {
@@ -142,7 +142,8 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
             await logout();
         } finally {
             setIsMobileSidebarOpen(false);
-            navigate('/admin/login');
+            const logoutPath = roleUpper === 'ADMIN' ? '/admin/login' : '/staff/login';
+            navigate(logoutPath);
         }
     };
 
@@ -154,9 +155,9 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                 minHeight: '100vh',
                 backgroundColor: '#f8fafc',
                 // Admin theme tokens (đồng nhất màu chủ đạo)
-                '--admin-primary': '#13ec5b',
-                '--admin-primary-soft': 'rgba(19, 236, 91, 0.12)',
-                '--admin-primary-ink': '#166534',
+                '--admin-primary': '#10b981',
+                '--admin-primary-soft': 'rgba(16, 185, 129, 0.14)',
+                '--admin-primary-ink': '#047857',
                 '--admin-border': '#e2e8f0',
                 '--admin-surface': '#ffffff',
                 '--admin-muted': '#64748b',
@@ -430,7 +431,9 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                         const label =
                             item.id === 'dashboard' && roleUpper === 'MODERATOR'
                                 ? 'Tổng quan kiểm duyệt'
-                                : item.label;
+                                : item.id === 'dashboard' && roleUpper === 'COMPLIANCE'
+                                    ? 'Tổng quan xử lý vi phạm'
+                                    : item.label;
                         return (
                             <button
                                 key={item.id}
@@ -574,7 +577,9 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                             const label =
                                 item.id === 'dashboard' && roleUpper === 'MODERATOR'
                                     ? 'Tổng quan kiểm duyệt'
-                                    : item.label;
+                                    : item.id === 'dashboard' && roleUpper === 'COMPLIANCE'
+                                        ? 'Tổng quan xử lý vi phạm'
+                                        : item.label;
                             return (
                                 <button
                                     key={item.id}

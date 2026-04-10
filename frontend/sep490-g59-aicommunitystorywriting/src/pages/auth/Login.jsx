@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, BookOpen } from 'lucide-react';
@@ -18,6 +18,13 @@ export default function Login() {
     const [error, setError] = useState('');
     const [verifyPending, setVerifyPending] = useState(false);
     const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        const forcedLogoutMessage = location.state?.forcedLogoutMessage;
+        if (forcedLogoutMessage) {
+            setError(forcedLogoutMessage);
+        }
+    }, [location.state]);
 
     const redirect = (() => {
         const q = new URLSearchParams(location.search);

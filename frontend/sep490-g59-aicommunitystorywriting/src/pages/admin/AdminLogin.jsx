@@ -1,15 +1,29 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, ShieldCheck, ArrowLeft } from 'lucide-react';
 
 export function AdminLogin() {
     const navigate = useNavigate();
-    const { login } = useAuth();
+    const location = useLocation();
+    const { login, logout } = useAuth();
     const [formData, setFormData] = useState({ email: '', password: '' });
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
+    const isStaffLoginPage = location.pathname.startsWith('/staff');
+    const panelTitle = isStaffLoginPage ? 'Staff Panel' : 'Admin Panel';
+    const heading = isStaffLoginPage ? 'Đăng nhập staff' : 'Đăng nhập quản trị';
+    const description = isStaffLoginPage
+        ? 'Dành cho Kiểm duyệt (MODERATOR) và Compliance. Vui lòng đăng nhập bằng tài khoản staff đã được cấp.'
+        : 'Dành cho Quản trị viên (Admin). Vui lòng đăng nhập bằng tài khoản admin đã được cấp.';
+
+    useEffect(() => {
+        const forcedLogoutMessage = location.state?.forcedLogoutMessage;
+        if (forcedLogoutMessage) {
+            setError(forcedLogoutMessage);
+        }
+    }, [location.state]);
 
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -29,11 +43,31 @@ export function AdminLogin() {
             const result = await login(formData.email, formData.password);
             if (result.success) {
                 const roleUpper = (result?.user?.role ?? result?.user?.Role ?? '').toString().toUpperCase();
-                // Điều hướng chung /admin; AdminPage tự tách màn theo role.
-                if (roleUpper === 'ADMIN' || roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE') {
-                    navigate('/admin', { replace: true });
-                } else {
+                const isAdminRole = roleUpper === 'ADMIN';
+                const isStaffRole = roleUpper === 'MODERATOR' || roleUpper === 'COMPLIANCE';
+                const targetPanelPath =
+                    isAdminRole
+                        ? '/admin'
+                        : isStaffRole
+                            ? '/staff'
+                            : '/home';
+
+                if (targetPanelPath === '/home') {
                     navigate('/home', { replace: true });
+                } else {
+                    const expectedPanelPath = isStaffLoginPage ? '/staff' : '/admin';
+                    if (targetPanelPath !== expectedPanelPath) {
+                        await logout();
+                        setError(
+                            isStaffLoginPage
+                                ? 'Tài khoản này không thuộc staff. Vui lòng đăng nhập tại trang /admin/login.'
+                                : 'Tài khoản này không thuộc admin. Vui lòng đăng nhập tại trang /staff/login.'
+                        );
+                        return;
+                    }
+                    const fromPath = location.state?.from?.pathname;
+                    const canUseFrom = typeof fromPath === 'string' && fromPath.startsWith(expectedPanelPath);
+                    navigate(canUseFrom ? fromPath : targetPanelPath, { replace: true });
                 }
             } else {
                 setError(result.message || 'Đăng nhập thất bại. Kiểm tra lại email và mật khẩu.');
@@ -59,13 +93,13 @@ export function AdminLogin() {
                     <div className="w-12 h-12 rounded-xl bg-emerald-500/20 flex items-center justify-center">
                         <ShieldCheck className="w-6 h-6 text-emerald-400" />
                     </div>
-                    <span className="text-xl font-bold tracking-tight">Admin Panel</span>
+                    <span className="text-xl font-bold tracking-tight">{panelTitle}</span>
                 </div>
                 <h1 className="text-2xl xl:text-3xl font-bold text-white mb-3">
-                    Đăng nhập quản trị
+                    {heading}
                 </h1>
                 <p className="text-slate-400 text-sm max-w-sm">
-                    Dành cho Quản trị viên (Admin), Kiểm duyệt (MODERATOR) và Compliance. Sử dụng email và mật khẩu đã được cấp.
+                    {description}
                 </p>
             </div>
 
@@ -86,14 +120,16 @@ export function AdminLogin() {
                             <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
                                 <ShieldCheck className="w-5 h-5 text-primary" />
                             </div>
-                            <span className="font-semibold text-slate-900">Đăng nhập quản trị</span>
+                            <span className="font-semibold text-slate-900">{heading}</span>
                         </div>
 
                         <h2 className="text-xl font-bold text-slate-900 mb-1 lg:mb-2">
-                            Đăng nhập quản trị
+                            {heading}
                         </h2>
                         <p className="text-sm text-slate-500 mb-6">
-                            Nhập email và mật khẩu tài khoản quản trị.
+                            {isStaffLoginPage
+                                ? 'Nhập email và mật khẩu tài khoản staff.'
+                                : 'Nhập email và mật khẩu tài khoản admin.'}
                         </p>
 
                         {error && (
@@ -163,7 +199,7 @@ export function AdminLogin() {
                                 disabled={loading}
                                 className="w-full py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {loading ? 'Đang đăng nhập...' : 'Đăng nhập quản trị'}
+                                {loading ? 'Đang đăng nhập...' : heading}
                             </button>
                         </form>
 

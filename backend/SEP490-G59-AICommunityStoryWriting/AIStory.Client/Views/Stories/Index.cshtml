@@ -288,7 +288,7 @@
                     <div class="row g-0">
                         <div class="col-md-2">
                             ${story.coverImage ?
-                                `<img src="http://localhost:5000${story.coverImage}" class="img-fluid rounded-start" style="height: 150px; object-fit: cover; width: 100%;" alt="${story.title}">` :
+                                `<img src="${resolveMediaSrc(story.coverImage)}" class="img-fluid rounded-start" style="height: 150px; object-fit: cover; width: 100%;" alt="${story.title}">` :
                                 `<div class="bg-secondary d-flex align-items-center justify-content-center" style="height: 150px;">
                                     <i class="bi bi-image text-white" style="font-size: 3rem;"></i>
                                 </div>`
@@ -429,7 +429,7 @@
 
                 if (story.coverImage) {
                     document.getElementById('coverImagePreview').innerHTML =
-                        `<img src="http://localhost:5000${story.coverImage}" class="img-thumbnail" style="max-height: 200px;">
+                        `<img src="${resolveMediaSrc(story.coverImage)}" class="img-thumbnail" style="max-height: 200px;">
                          <p class="text-muted mt-2"><small>Ảnh hiện tại. Chọn ảnh mới để thay thế.</small></p>`;
                 } else {
                     document.getElementById('coverImagePreview').innerHTML = '';

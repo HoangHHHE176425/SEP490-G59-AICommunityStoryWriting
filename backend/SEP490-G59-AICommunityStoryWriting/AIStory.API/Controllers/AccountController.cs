@@ -1,3 +1,4 @@
+using AIStory.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Account;
@@ -13,10 +14,12 @@ namespace AIStory.API.Controllers
     public class AccountController : ControllerBase
     {
         private readonly IAccountService _accountService;
+        private readonly ICloudinaryImageService _cloudinaryImageService;
 
-        public AccountController(IAccountService accountService)
+        public AccountController(IAccountService accountService, ICloudinaryImageService cloudinaryImageService)
         {
             _accountService = accountService;
+            _cloudinaryImageService = cloudinaryImageService;
         }
 
         private Guid GetUserIdFromToken()
@@ -29,7 +32,7 @@ namespace AIStory.API.Controllers
             }
             return userId;
         }
-        [Authorize] 
+        [Authorize]
         [HttpDelete("delete")]
         public async Task<IActionResult> DeleteAccount()
         {
@@ -56,7 +59,7 @@ namespace AIStory.API.Controllers
 
             try
             {
-                Guid userId = GetUserIdFromToken(); 
+                Guid userId = GetUserIdFromToken();
                 await _accountService.ChangePasswordAsync(userId, request);
 
                 return Ok(new { message = "Đổi mật khẩu thành công!" });
@@ -188,32 +191,35 @@ namespace AIStory.API.Controllers
 
             try
             {
+                if (!_cloudinaryImageService.IsConfigured)
+                    return StatusCode(503, new { message = "Upload ảnh chưa được cấu hình (Cloudinary). Thêm Cloudinary:CloudName, ApiKey, ApiSecret trong cấu hình." });
+
                 Guid userId = GetUserIdFromToken();
+                var currentProfile = await _accountService.GetProfileAsync(userId);
 
-                var uploadsFolder = Path.Combine(
-                    Directory.GetCurrentDirectory(),
-                    "wwwroot",
-                    "uploads",
-                    "avatars"
-                );
-
-                if (!Directory.Exists(uploadsFolder))
-                    Directory.CreateDirectory(uploadsFolder);
-
-                var fileName = $"{userId}_{Guid.NewGuid()}{fileExtension}";
-                var filePath = Path.Combine(uploadsFolder, fileName);
-
-                using (var stream = new FileStream(filePath, FileMode.Create))
-                {
-                    await avatar.CopyToAsync(stream);
-                }
-
-                var avatarUrl = $"/uploads/avatars/{fileName}";
+                var avatarUrl = await _cloudinaryImageService.UploadImageAsync(
+                    avatar,
+                    "avatars",
+                    HttpContext.RequestAborted);
 
                 await _accountService.UpdateProfileAsync(userId, new UpdateProfileRequest
                 {
                     AvatarUrl = avatarUrl
                 });
+
+                var oldAvatarUrl = currentProfile?.AvatarUrl;
+                if (!string.IsNullOrWhiteSpace(oldAvatarUrl) &&
+                    !string.Equals(oldAvatarUrl, avatarUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        await _cloudinaryImageService.DeleteImageByUrlAsync(oldAvatarUrl, HttpContext.RequestAborted);
+                    }
+                    catch
+                    {
+                        // best effort cleanup: không fail request nếu xóa ảnh cũ thất bại
+                    }
+                }
 
                 return Ok(new { message = "Upload avatar thành công!", avatarUrl });
             }

@@ -5,7 +5,7 @@ import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories, getStoryById } from '../../../api/story/storyApi';
 import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, getRejectedChapterVersionsHistory, claimStory, claimChapter, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
 import { getProfileByUserId } from '../../../api/account/accountApi';
-import { reviewDeadlineAfterDaysUtc, localDateTimeInputToIsoUtc, worstTimeStatus, pickReviewDeadlineIso } from '../../../utils/moderatorReviewSla';
+import { reviewDeadlineAfterDaysUtc, worstTimeStatus, pickReviewDeadlineIso } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 import { getActivePolicy } from '../../../api/policy/policyApi';
@@ -432,9 +432,8 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
     const [rejectedCache, setRejectedCache] = useState({ items: [], total: 0, totalPages: 1 });
     const [approvedCacheLoading, setApprovedCacheLoading] = useState(false);
     const [rejectedCacheLoading, setRejectedCacheLoading] = useState(false);
-    /** Popup nhận duyệt: chọn hạn (7/14 ngày hoặc tùy chỉnh) + cam kết */
-    const [claimDeadlineChoice, setClaimDeadlineChoice] = useState('7'); // '7' | '14' | 'custom'
-    const [claimCustomDeadline, setClaimCustomDeadline] = useState('');
+    /** Popup nhận duyệt: chọn hạn 7 / 14 / 21 ngày + cam kết */
+    const [claimDeadlineChoice, setClaimDeadlineChoice] = useState('7'); // '7' | '14' | '21'
     const [claimCommitted, setClaimCommitted] = useState(false);
     const [modalClaimBusy, setModalClaimBusy] = useState(false);
     const [policyModalOpen, setPolicyModalOpen] = useState(false);
@@ -1118,17 +1117,13 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
     useEffect(() => {
         if (claimConfirmTarget) {
             setClaimDeadlineChoice('7');
-            setClaimCustomDeadline('');
             setClaimCommitted(false);
         }
     }, [claimConfirmTarget]);
 
     const getClaimReviewDeadlineIso = () => {
-        if (claimDeadlineChoice === 'custom') {
-            const iso = localDateTimeInputToIsoUtc(claimCustomDeadline);
-            return iso || reviewDeadlineAfterDaysUtc(7);
-        }
-        return reviewDeadlineAfterDaysUtc(claimDeadlineChoice === '14' ? 14 : 7);
+        const days = claimDeadlineChoice === '14' ? 14 : claimDeadlineChoice === '21' ? 21 : 7;
+        return reviewDeadlineAfterDaysUtc(days);
     };
 
     const filteredPublications = (filterStatus === 'pending' || filterStatus === 'rejected' || filterStatus === 'approved')
@@ -1236,10 +1231,6 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
         if (!claimConfirmTarget) return;
         if (!claimCommitted) {
             alert('Vui lòng xác nhận cam kết hoàn thành duyệt trong hạn đã chọn.');
-            return;
-        }
-        if (claimDeadlineChoice === 'custom' && !localDateTimeInputToIsoUtc(claimCustomDeadline)) {
-            alert('Vui lòng chọn ngày giờ hạn duyệt hợp lệ.');
             return;
         }
         const reviewDeadlineAt = getClaimReviewDeadlineIso();
@@ -1370,7 +1361,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                         padding: '0.5rem 1rem',
                         fontSize: '0.875rem',
                         fontWeight: 600,
-                        backgroundColor: '#0ea5e9',
+                        backgroundColor: 'var(--admin-primary, #10b981)',
                         color: '#ffffff',
                         border: 'none',
                         borderRadius: '8px',
@@ -1393,7 +1384,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                 fontSize: '0.75rem',
                                 fontWeight: 700,
                                 backgroundColor: '#ffffff',
-                                color: '#0ea5e9',
+                                color: 'var(--admin-primary, #10b981)',
                                 borderRadius: '9999px',
                             }}
                         >
@@ -1415,8 +1406,8 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                 flexWrap: 'wrap'
             }}>
                 {[
-                    { value: 'pending', label: 'Chờ duyệt', color: '#ffc107' },
-                    { value: 'approved', label: 'Đã duyệt', color: '#10b981' },
+                    { value: 'pending', label: 'Chờ duyệt', color: 'var(--admin-primary, #10b981)' },
+                    { value: 'approved', label: 'Đã duyệt', color: 'var(--admin-primary, #10b981)' },
                     { value: 'rejected', label: 'Từ chối', color: '#ef4444' }
                 ].map(tab => (
                     <button
@@ -1729,7 +1720,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                                                             padding: '0.5rem 0.875rem',
                                                                             fontSize: '0.8125rem',
                                                                             fontWeight: 600,
-                                                                            backgroundColor: item._blockedFromPriorDeadlineForfeit ? '#e2e8f0' : '#0ea5e9',
+                                                                            backgroundColor: item._blockedFromPriorDeadlineForfeit ? '#e2e8f0' : 'var(--admin-primary, #10b981)',
                                                                             color: item._blockedFromPriorDeadlineForfeit ? '#64748b' : '#fff',
                                                                             border: 'none',
                                                                             borderRadius: '8px',
@@ -1802,13 +1793,13 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                             <strong>&quot;{claimConfirmTarget.title}&quot;</strong>
                         </p>
                         <p style={{ margin: '0 0 0.75rem', fontSize: '0.8125rem', color: '#64748b' }}>
-                            Chọn <strong>hạn hoàn thành duyệt</strong> (UTC theo máy chủ). Hạn phải cách hiện tại ít nhất ~24 giờ theo quy định hệ thống.
+                            Chọn hạn hoàn thành duyệt
                         </p>
                         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
                             {[
                                 { v: '7', label: '7 ngày' },
                                 { v: '14', label: '14 ngày' },
-                                { v: 'custom', label: 'Tùy chỉnh' },
+                                { v: '21', label: '21 ngày' },
                             ].map((opt) => (
                                 <button
                                     key={opt.v}
@@ -1819,7 +1810,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                         fontSize: '0.8125rem',
                                         fontWeight: 600,
                                         borderRadius: '8px',
-                                        border: claimDeadlineChoice === opt.v ? '2px solid #0ea5e9' : '1px solid #e2e8f0',
+                                        border: claimDeadlineChoice === opt.v ? '2px solid var(--admin-primary, #10b981)' : '1px solid #e2e8f0',
                                         backgroundColor: claimDeadlineChoice === opt.v ? '#e0f2fe' : '#fff',
                                         color: '#0f172a',
                                         cursor: 'pointer',
@@ -1829,21 +1820,6 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                 </button>
                             ))}
                         </div>
-                        {claimDeadlineChoice === 'custom' && (
-                            <input
-                                type="datetime-local"
-                                value={claimCustomDeadline}
-                                onChange={(e) => setClaimCustomDeadline(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    marginBottom: '0.75rem',
-                                    padding: '0.5rem',
-                                    borderRadius: '8px',
-                                    border: '1px solid #cbd5e1',
-                                    fontSize: '0.875rem',
-                                }}
-                            />
-                        )}
                         <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8125rem', color: '#334155', marginBottom: '1rem', cursor: 'pointer' }}>
                             <input
                                 type="checkbox"
@@ -1871,7 +1847,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                     padding: '0.5rem 1rem',
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
-                                    backgroundColor: claimCommitted && !modalClaimBusy ? '#0ea5e9' : '#94a3b8',
+                                    backgroundColor: claimCommitted && !modalClaimBusy ? 'var(--admin-primary, #10b981)' : '#94a3b8',
                                     color: '#fff',
                                     border: 'none',
                                     borderRadius: '8px',
@@ -2040,7 +2016,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                     padding: '0.5rem 1rem',
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
-                                    backgroundColor: '#0ea5e9',
+                                    backgroundColor: 'var(--admin-primary, #10b981)',
                                     color: '#fff',
                                     border: 'none',
                                     borderRadius: '8px',

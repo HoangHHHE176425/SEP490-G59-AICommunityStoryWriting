@@ -1,8 +1,8 @@
+using AIStory.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Services.DTOs.Categories;
 using Services.Interfaces;
-using System.Security.Claims;
 
 namespace AIStory.API.Controllers
 {
@@ -12,10 +12,17 @@ namespace AIStory.API.Controllers
     public class CategoriesController : ControllerBase
     {
         private readonly ICategoryService _categoryService;
+        private readonly ICloudinaryImageService _cloudinaryImageService;
+        private readonly ILogger<CategoriesController> _logger;
 
-        public CategoriesController(ICategoryService categoryService)
+        public CategoriesController(
+            ICategoryService categoryService,
+            ICloudinaryImageService cloudinaryImageService,
+            ILogger<CategoriesController> logger)
         {
             _categoryService = categoryService;
+            _cloudinaryImageService = cloudinaryImageService;
+            _logger = logger;
         }
 
         /// <summary>Tạo thể loại mới (multipart: Name, Description, IsActive, IconImage) - Chỉ ADMIN</summary>
@@ -30,7 +37,25 @@ namespace AIStory.API.Controllers
 
                 if (request.IconImage != null && request.IconImage.Length > 0)
                 {
-                    iconUrl = await SaveIconFile(request.IconImage);
+                    if (!_cloudinaryImageService.IsConfigured)
+                        return StatusCode(503, new { message = "Upload ảnh chưa được cấu hình (Cloudinary). Thêm Cloudinary:CloudName, ApiKey, ApiSecret trong cấu hình." });
+                    try
+                    {
+                        ValidateIconFile(request.IconImage);
+                        iconUrl = await _cloudinaryImageService.UploadImageAsync(
+                            request.IconImage,
+                            "category-icons",
+                            HttpContext.RequestAborted);
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        return BadRequest(new { message = ex.Message });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Cloudinary upload category icon failed on create");
+                        return BadRequest(new { message = "Không upload được icon: " + ex.Message });
+                    }
                 }
 
                 var dto = new CreateCategoryRequestDto
@@ -124,12 +149,35 @@ namespace AIStory.API.Controllers
 
                 if (request.IconImage != null && request.IconImage.Length > 0)
                 {
-                    var existing = _categoryService.GetById(id);
-                    if (existing != null && !string.IsNullOrEmpty(existing.IconUrl))
+                    if (!_cloudinaryImageService.IsConfigured)
+                        return StatusCode(503, new { message = "Upload ảnh chưa được cấu hình (Cloudinary). Thêm Cloudinary:CloudName, ApiKey, ApiSecret trong cấu hình." });
+                    try
                     {
-                        DeleteIconFile(existing.IconUrl);
+                        ValidateIconFile(request.IconImage);
+                        var existing = _categoryService.GetById(id);
+                        if (existing != null && !string.IsNullOrEmpty(existing.IconUrl))
+                        {
+                            try
+                            {
+                                await _cloudinaryImageService.DeleteImageByUrlAsync(existing.IconUrl, HttpContext.RequestAborted);
+                            }
+                            catch { }
+                            TryDeleteLocalIconFile(existing.IconUrl);
+                        }
+                        iconUrl = await _cloudinaryImageService.UploadImageAsync(
+                            request.IconImage,
+                            "category-icons",
+                            HttpContext.RequestAborted);
                     }
-                    iconUrl = await SaveIconFile(request.IconImage);
+                    catch (ArgumentException ex)
+                    {
+                        return BadRequest(new { message = ex.Message });
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Cloudinary upload category icon failed on update");
+                        return BadRequest(new { message = "Không upload được icon: " + ex.Message });
+                    }
                 }
                 else
                 {
@@ -158,14 +206,19 @@ namespace AIStory.API.Controllers
         /// <summary>Xóa thể loại - Chỉ ADMIN</summary>
         [HttpDelete("{id:guid}")]
         [Authorize(Roles = "ADMIN")]
-        public IActionResult Delete(Guid id)
+        public async Task<IActionResult> Delete(Guid id)
         {
             try
             {
                 var existing = _categoryService.GetById(id);
                 if (existing != null && !string.IsNullOrEmpty(existing.IconUrl))
                 {
-                    DeleteIconFile(existing.IconUrl);
+                    try
+                    {
+                        await _cloudinaryImageService.DeleteImageByUrlAsync(existing.IconUrl, HttpContext.RequestAborted);
+                    }
+                    catch { }
+                    TryDeleteLocalIconFile(existing.IconUrl);
                 }
                 var deleted = _categoryService.Delete(id);
                 return deleted ? NoContent() : NotFound();
@@ -185,46 +238,24 @@ namespace AIStory.API.Controllers
             return toggled ? NoContent() : NotFound();
         }
 
-        private static async Task<string> SaveIconFile(IFormFile file)
+        private static void ValidateIconFile(IFormFile file)
         {
             var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg" };
-            var fileExtension = Path.GetExtension(file.FileName).ToLower();
+            var fileExtension = Path.GetExtension(file.FileName).ToLowerInvariant();
             if (!allowedExtensions.Contains(fileExtension))
-            {
                 throw new ArgumentException("Invalid file type. Allowed: jpg, jpeg, png, gif, webp, svg");
-            }
-            if (file.Length > 2 * 1024 * 1024) // 2MB for icons
-            {
+            if (file.Length > 2 * 1024 * 1024)
                 throw new ArgumentException("File size exceeds 2MB limit");
-            }
-
-            var uploadsFolder = Path.Combine(
-                Directory.GetCurrentDirectory(),
-                "wwwroot",
-                "uploads",
-                "icons"
-            );
-
-            if (!Directory.Exists(uploadsFolder))
-                Directory.CreateDirectory(uploadsFolder);
-
-            var fileName = $"{Guid.NewGuid()}{fileExtension}";
-            var filePath = Path.Combine(uploadsFolder, fileName);
-
-            using var stream = new FileStream(filePath, FileMode.Create);
-            await file.CopyToAsync(stream);
-
-            return $"/uploads/icons/{fileName}";
         }
 
-        private static void DeleteIconFile(string iconUrl)
+        /// <summary>Chỉ xóa file cục bộ cũ (uploads/icons/...); URL Cloudinary bỏ qua.</summary>
+        private static void TryDeleteLocalIconFile(string iconUrl)
         {
             if (string.IsNullOrEmpty(iconUrl)) return;
-            var filePath = Path.Combine(
-                Directory.GetCurrentDirectory(),
-                "wwwroot",
-                iconUrl.TrimStart('/')
-            );
+            var rel = iconUrl.TrimStart('/');
+            if (!rel.StartsWith("uploads/icons/", StringComparison.OrdinalIgnoreCase))
+                return;
+            var filePath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", rel);
             if (System.IO.File.Exists(filePath))
             {
                 try { System.IO.File.Delete(filePath); } catch { }

@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Services;
 using Services.DTOs.Admin;
 using Services.Interfaces;
+using Services.StoryReporting;
 
 namespace Services.Implementations;
 
@@ -31,7 +32,7 @@ public class AdminUnifiedEscalationService : IAdminUnifiedEscalationService
     public async Task<AdminUnifiedEscalationPendingResponseDto> GetPendingUnifiedAsync(string? urgencyTierFilter)
     {
         var mod = _reviewEscalation.ListPendingForAdmin(null);
-        var locks = await _storyReports.AdminListComplianceLockRequestsAsync(ComplianceStoryReportLockRequestDAO.StatusPending);
+        var locks = await _storyReports.AdminListComplianceLockRequestsAsync(ComplianceReportLockRequestDAO.StatusPending);
         var actions = await _storyReports.AdminListComplianceAdminActionRequestsAsync(ComplianceAdminActionRequestDAO.StatusPending);
 
         var items = new List<AdminUnifiedEscalationPendingItemDto>();
@@ -127,22 +128,24 @@ public class AdminUnifiedEscalationService : IAdminUnifiedEscalationService
             StoredUrgency = r.sender_urgency_tier ?? EscalationUrgencyHelper.Standard
         });
 
-        var lockQ = _db.compliance_story_report_lock_requests.AsNoTracking().Select(x => new LogUnionRow
+        var lockQ = _db.compliance_report_lock_requests.AsNoTracking().Select(x => new LogUnionRow
         {
             Src = SrcLock,
             Id = x.id,
             Status = x.status,
             FilterKind = "LOCK_RELEASE",
-            RowTargetType = ttStory,
-            RowTargetId = x.story_id,
-            Title = x.story != null ? x.story.title : null,
+            RowTargetType = x.target_type,
+            RowTargetId = x.target_id,
+            Title = x.target_type == ttStory
+                ? _db.stories.Where(s => s.id == x.target_id).Select(s => s.title).FirstOrDefault()
+                : null,
             Text = x.message,
             SenderId = x.requester_id,
             ResolverId = x.resolved_by_id,
             CreatedAt = x.created_at,
             ResolvedAt = x.resolved_at,
             ResolverNote = x.resolution_note,
-            StoredUrgency = x.urgency_tier
+            StoredUrgency = EscalationUrgencyHelper.TierForComplianceLockReleaseRequest()
         });
 
         var actQ = _db.compliance_admin_action_requests.AsNoTracking().Select(x => new LogUnionRow
@@ -226,6 +229,30 @@ public class AdminUnifiedEscalationService : IAdminUnifiedEscalationService
             r.RowTargetType = "COMMENT";
             r.RowTargetId = cid.Value;
             r.Title = null; // UI sẽ hiển thị theo targetId khi title null.
+        }
+
+        var lockCommentIdsForTitle = rawRows
+            .Where(r => string.Equals(r.Src, SrcLock, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(r.RowTargetType, ComplianceReportLockRequestDAO.TargetTypeComment, StringComparison.OrdinalIgnoreCase))
+            .Select(r => r.RowTargetId)
+            .Distinct()
+            .ToList();
+        if (lockCommentIdsForTitle.Count > 0)
+        {
+            var withStories = await (
+                from c in _db.comments.AsNoTracking()
+                join s in _db.stories.AsNoTracking() on c.story_id equals s.id
+                where lockCommentIdsForTitle.Contains(c.id)
+                select new { c.id, s.title }
+            ).ToListAsync();
+            var titleByCid = withStories.ToDictionary(x => x.id, x => x.title);
+            foreach (var r in rawRows)
+            {
+                if (!string.Equals(r.Src, SrcLock, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(r.RowTargetType, ComplianceReportLockRequestDAO.TargetTypeComment, StringComparison.OrdinalIgnoreCase)) continue;
+                if (titleByCid.TryGetValue(r.RowTargetId, out var t))
+                    r.Title = t;
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(query.TargetType))

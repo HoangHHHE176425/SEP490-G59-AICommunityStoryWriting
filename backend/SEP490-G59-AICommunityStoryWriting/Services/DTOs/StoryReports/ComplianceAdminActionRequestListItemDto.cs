@@ -30,7 +30,7 @@ public class CreateComplianceAdminActionRequestDto
 {
     public string RequestKind { get; set; } = "";
     public string? Message { get; set; }
-    /// <summary>Chỉ dùng khi kind = SUSPEND_AUTHOR_WRITING (UTC).</summary>
+    /// <summary>Chỉ còn ý nghĩa với đơn SUSPEND cũ do admin duyệt (UTC). Compliance không gửi SUSPEND qua endpoint này nữa.</summary>
     public DateTime? ProposedSuspendUntilUtc { get; set; }
     /// <summary>Tùy chọn: mặc định lấy author của truyện.</summary>
     public Guid? TargetUserId { get; set; }
@@ -42,8 +42,8 @@ public class AdminResolveComplianceAdminActionRequestDto
     public string Decision { get; set; } = "";
     /// <summary>Mã lý do báo cáo (catalog truyện); bắt buộc khi resolve (UTC: null/blank → từ chối).</summary>
     public string? ReasonCode { get; set; }
-    /// <summary>Ma trận: mô tả / ghi chú admin tối đa 200 ký tự.</summary>
-    [MaxLength(200)]
+    /// <summary>Ma trận: mô tả / ghi chú admin tối đa 2000 ký tự.</summary>
+    [MaxLength(2000)]
     public string? AdminNote { get; set; }
     /// <summary>Admin có thể chỉnh ngày kết thúc tạm khóa viết (UTC); nếu null với SUSPEND thì dùng đề xuất của compliance.</summary>
     public DateTime? SuspendUntilUtc { get; set; }

@@ -81,7 +81,15 @@ function isExampleOutline(scenes) {
 
 function formatOutlineForDisplay(outline) {
     if (!outline || !outline.trim()) return '';
-    const raw = outline.trim();
+    const normalizeOutlineText = (s) =>
+        (s || '')
+            .replace(/\\r\\n/g, '\n')
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, ' ')
+            .replace(/(^|\n)(\d+)\.(\S)/g, '$1$2. $3')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    const raw = normalizeOutlineText(outline.trim());
     const toParse = extractOutlineJson(raw);
     try {
         const parsed = JSON.parse(toParse);
@@ -323,7 +331,7 @@ export function ChapterEditor({
             loadAiUsageLimit();
         } catch (err) {
             const status = err?.response?.status;
-            const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi đồng sáng tác với AI.';
+            const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi AI hỗ trợ.';
             if (status === 429) showToast('Bạn đã gọi AI quá nhiều lần. Vui lòng thử lại sau.', 'error');
             else if (status === 403) showToast(msg || 'Chỉ tác giả mới được sử dụng.', 'error');
             else showToast(msg, 'error');
@@ -390,7 +398,7 @@ export function ChapterEditor({
                     >
                         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
                             <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>
-                                AI gợi ý ý tưởng
+                                AI gợi ý
                             </h3>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
@@ -438,11 +446,10 @@ export function ChapterEditor({
                                                         }, 2000);
                                                     }}
                                                     title={copiedSuggestionIndex === index ? 'Đã copy' : 'Copy nhanh'}
-                                                    className={`absolute top-2 right-2 p-1 rounded-lg transition-colors duration-200 ${
-                                                        copiedSuggestionIndex === index
+                                                    className={`absolute top-2 right-2 p-1 rounded-lg transition-colors duration-200 ${copiedSuggestionIndex === index
                                                             ? 'bg-emerald-100 text-emerald-700'
                                                             : 'text-slate-600 hover:bg-slate-200'
-                                                    }`}
+                                                        }`}
                                                 >
                                                     {copiedSuggestionIndex === index ? (
                                                         <Check size={16} strokeWidth={2.5} />
@@ -617,12 +624,23 @@ export function ChapterEditor({
                             <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>Nội dung AI đã tạo</h3>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
-                            {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
+                            {(() => {
+                                const ideaBlock = (coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ?? '').toString().trim();
+                                const hasContent = ((coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '').toString().trim().length > 0)
+                                    || (((coCreateResult.outline ?? coCreateResult.Outline) || '').toString().trim().length > 0);
+                                const hardStop = ideaBlock.length > 0 && !hasContent;
+                                return hardStop;
+                            })() ? (
                                 <div style={{ padding: '1rem', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b' }}>
                                     {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback}
                                 </div>
                             ) : (
                                 <>
+                                    {((coCreateResult.ideaConflictWarning ?? coCreateResult.IdeaConflictWarning ?? coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback) || '').toString().trim() ? (
+                                        <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                                            {coCreateResult.ideaConflictWarning ?? coCreateResult.IdeaConflictWarning ?? coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback}
+                                        </div>
+                                    ) : null}
                                     {coCreateContextWarning ? (
                                         <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
                                             {coCreateContextWarning}
@@ -634,6 +652,16 @@ export function ChapterEditor({
                                             <div style={{ fontSize: '0.875rem', color: '#374151', whiteSpace: 'pre-wrap' }}>
                                                 {formatOutlineForDisplay(coCreateResult.outline ?? coCreateResult.Outline)}
                                             </div>
+                                            {(() => {
+                                                const chars = coCreateResult.charactersInvolved ?? coCreateResult.CharactersInvolved ?? [];
+                                                if (!Array.isArray(chars) || chars.length === 0) return null;
+                                                return (
+                                                    <div style={{ marginTop: '0.75rem' }}>
+                                                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Nhân vật tham gia</div>
+                                                        <div style={{ fontSize: '0.875rem', color: '#374151' }}>{chars.join(', ')}</div>
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
                                     )}
                                     {(coCreateResult.reviewFeedback ?? coCreateResult.ReviewFeedback) && (
@@ -687,7 +715,12 @@ export function ChapterEditor({
                             )}
                         </div>
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                            {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
+                            {(() => {
+                                const ideaBlock = (coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ?? '').toString().trim();
+                                const hasContent = ((coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '').toString().trim().length > 0)
+                                    || (((coCreateResult.outline ?? coCreateResult.Outline) || '').toString().trim().length > 0);
+                                return ideaBlock.length > 0 && !hasContent;
+                            })() ? (
                                 <button
                                     type="button"
                                     onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); setCoCreateContextWarning(null); }}
@@ -914,7 +947,7 @@ export function ChapterEditor({
                                             className="flex cursor-not-allowed items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary/50 opacity-70"
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
-                                            AI gợi ý ý tưởng
+                                            AI gợi ý
                                         </button>
                                         <button
                                             type="button"
@@ -943,7 +976,7 @@ export function ChapterEditor({
                                             className="flex items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary transition-all hover:bg-primary/20"
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
-                                            AI gợi ý ý tưởng
+                                            AI gợi ý
                                             {aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                         </button>
                                         <button

@@ -100,20 +100,21 @@ export function Header() {
                 // Realtime toast: hiển thị popup khi có thông báo mới (vd: ủng hộ, duyệt truyện/chương)
                 const toastMsg = content || title || 'Bạn có thông báo mới';
                 const toastType = type === 'DONATION' || type === 'CHAPTER_UNLOCK' ? 'success' : 'info';
-                const onAuthorChapterList =
-                    isAuthor &&
-                    location.pathname.replace(/\/$/, '') === '/author' &&
-                    isAuthorChapterListActive();
                 const chapterModerationToastTypes = new Set([
                     'CHAPTER_APPROVED',
                     'CHAPTER_REJECTED',
                     'CHAPTER_VERSION_APPROVED',
                     'CHAPTER_VERSION_REJECTED',
                 ]);
+                // UX request: không hiển thị toast duyệt/từ chối chương vì dễ bị nháy lặp.
                 const skipChapterModerationToast =
-                    onAuthorChapterList &&
-                    (chapterModerationToastTypes.has(type) || /^CHAPTER_/.test(type));
-                if (!skipChapterModerationToast) {
+                    chapterModerationToastTypes.has(type) || /^CHAPTER_/.test(type);
+                // Trên /author (Truyện của tôi, danh sách chương, soạn thảo): đã cập nhật UI qua fetchProfile — không toast khi compliance bật/tắt quyền viết.
+                const skipComplianceAuthorWritingToast =
+                    type === 'COMPLIANCE_STORY_MODERATION_ACTION' && location.pathname === '/author';
+                // UX: màn tác giả tự đồng bộ dữ liệu bằng polling/state, nên tắt toàn bộ toast notification để tránh nhiễu.
+                const skipAllAuthorScreenToasts = location.pathname.startsWith('/author');
+                if (!skipChapterModerationToast && !skipComplianceAuthorWritingToast && !skipAllAuthorScreenToasts) {
                     showToastRef.current(toastMsg, toastType, 5000);
                 }
                 // Khi có ủng hộ hoặc độc giả mở khóa chương (thu nhập tác giả), cập nhật ví ngay
@@ -125,7 +126,7 @@ export function Header() {
         };
         window.addEventListener('app:notification', handler);
         return () => window.removeEventListener('app:notification', handler);
-    }, [isAuthenticated, fetchNotifications, isAuthor, location.pathname]);
+    }, [isAuthenticated, fetchNotifications, location.pathname]);
 
     const fetchWallet = useCallback(async () => {
         if (!isAuthenticated) {

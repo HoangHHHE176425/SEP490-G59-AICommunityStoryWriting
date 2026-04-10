@@ -575,6 +575,9 @@ namespace Services.Implementations
             if (story == null)
                 return false;
 
+            if (story.author_id is Guid aidUnpub && _userLookup.IsAuthorWritingSuspended(aidUnpub))
+                throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện (compliance/admin).");
+
             story.status = "DRAFT";
             story.updated_at = DateTime.Now;
             story.submitted_for_review_at = null;

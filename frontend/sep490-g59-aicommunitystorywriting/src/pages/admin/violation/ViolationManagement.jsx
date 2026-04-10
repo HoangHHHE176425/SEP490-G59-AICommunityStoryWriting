@@ -16,10 +16,12 @@ import {
     History,
     ClipboardList,
     ExternalLink,
+    Lock,
 } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { getStoryById } from '../../../api/story/storyApi';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
+import { formatLogTimestampVi } from '../../../utils/apiDateTime';
 import { getActivePolicy } from '../../../api/policy/policyApi';
 import { PolicyBody } from '../../../components/policy/PolicyBody';
 import {
@@ -32,10 +34,10 @@ import {
     getAdminComplianceOfficers,
     getComplianceCommentReports,
     getComplianceStoryReports,
-    getComplianceUserViolations,
     getMyComplianceAdminActionRequests,
     getMyComplianceActivityLogs,
     getMyComplianceLockRequests,
+    requestComplianceCommentRelease,
     requestComplianceStoryRelease,
     requestComplianceCommentAdminAction,
     requestComplianceStoryAdminAction,
@@ -43,6 +45,7 @@ import {
     resolveAllOpenComplianceCommentReports,
     resolveAllOpenComplianceStoryReports,
     setComplianceCommentThreadHidden,
+    setComplianceStoryAuthorWritingSuspended,
     setComplianceStoryCommentsDisabled,
     setComplianceStoryFlag,
     setComplianceStoryHidden,
@@ -57,7 +60,7 @@ import { useToast } from '../../../components/author/story-editor/Toast';
 const COMPLIANCE_FETCH_CHUNK_STORY = 100;
 const COMPLIANCE_FETCH_CHUNK_COMMENT = 200;
 /** Page size hiển thị theo phân trang (để UI có Next/Prev). */
-const REPORT_PAGE_SIZE = 20;
+const REPORT_PAGE_SIZE = 5;
 
 /** Gọi API phân trang lặp cho đến khi lấy hết bản ghi (hoặc hết maxPages). */
 async function fetchAllPagedItems(fetchPage, { chunkSize = 100, maxPages = 250 } = {}) {
@@ -166,6 +169,49 @@ function publicComplianceReportCommentPath(storyId, chapterId, commentId) {
     return publicStoryDetailPath(storyId);
 }
 
+/** author_writing_suspended_until: BE đặt +100 năm khi bật, null khi tắt. */
+function isAuthorWritingSuspendedActive(untilUtc) {
+    if (untilUtc == null || untilUtc === '') return false;
+    const t = new Date(untilUtc).getTime();
+    return Number.isFinite(t) && t > Date.now();
+}
+
+/** Đếm từ (khớp quy tắc backend: cụm ký tự không phải khoảng trắng). */
+function countWords(text) {
+    const t = String(text ?? '').trim();
+    if (!t) return 0;
+    return t.match(/\S+/g)?.length ?? 0;
+}
+
+const COMPLIANCE_BAN_REASON_MIN_WORDS = 50;
+
+/** Điều kiện trước khi đóng loạt DISMISSED — báo cáo truyện (snapshot lúc mở modal). */
+function getBulkDismissStoryBlockers(modal) {
+    if (!modal || modal.type !== 'story') return [];
+    const blockers = [];
+    if (modal.commentsDisabled) blockers.push('Bình luận truyện vẫn đang bị khóa (chưa mở lại).');
+    if (modal.complianceHidden) blockers.push('Truyện vẫn đang ẩn khỏi người dùng thường.');
+    if (isAuthorWritingSuspendedActive(modal.authorWritingSuspendedUntilUtc)) {
+        blockers.push('Tác giả vẫn đang bị tạm khóa quyền viết.');
+    }
+    return blockers;
+}
+
+/** Điều kiện trước khi đóng loạt DISMISSED — báo cáo bình luận. */
+function getBulkDismissCommentBlockers(modal) {
+    if (!modal || modal.type !== 'comment') return [];
+    const blockers = [];
+    if (modal.isCommentThreadHidden) {
+        blockers.push('Chuỗi bình luận đã bị ẩn (đã áp dụng biện pháp xử lý vi phạm).');
+    }
+    if (modal.storyCommentsDisabled) blockers.push('Bình luận truyện vẫn đang bị khóa (cấp truyện).');
+    if (modal.storyComplianceHidden) blockers.push('Truyện vẫn đang ẩn khỏi người dùng thường.');
+    if (isAuthorWritingSuspendedActive(modal.storyAuthorWritingSuspendedUntilUtc)) {
+        blockers.push('Tác giả truyện vẫn đang bị tạm khóa quyền viết.');
+    }
+    return blockers;
+}
+
 function formatDate(value) {
     if (!value) return '—';
     const raw = String(value).trim();
@@ -179,6 +225,14 @@ function formatDate(value) {
         timeZone: 'Asia/Ho_Chi_Minh',
         hour12: false,
     });
+}
+
+/** Hiển thị mốc ISO (UTC) theo giờ địa phương VN — dùng trong cảnh báo đình chỉ quyền viết. */
+function formatViLocalFromIso(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return String(iso);
+    return d.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Ho_Chi_Minh' });
 }
 
 function readPaged(data) {
@@ -243,6 +297,11 @@ function normalizeStoryQueueItem(x) {
         distinctReasonCodes: Array.isArray(distinctReasons) ? distinctReasons : [],
         contributors: Array.isArray(contributors) ? contributors : [],
         openReportIds: Array.isArray(openReportIds) ? openReportIds : [],
+        hasPendingLockReleaseRequest: coerceBool(pick(x, 'hasPendingLockReleaseRequest', 'HasPendingLockReleaseRequest')),
+        hasPendingAdminActionRequest: coerceBool(pick(x, 'hasPendingAdminActionRequest', 'HasPendingAdminActionRequest')),
+        hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
+        authorAccountStatus: pick(x, 'authorAccountStatus', 'AuthorAccountStatus') ?? null,
+        authorWritingSuspendedUntilUtc: pick(x, 'authorWritingSuspendedUntilUtc', 'AuthorWritingSuspendedUntilUtc') ?? null,
     };
 }
 
@@ -260,6 +319,11 @@ function normalizeStoryReportRow(x) {
         complianceFlagged: coerceBool(pick(x, 'complianceFlagged', 'ComplianceFlagged')),
         commentsDisabled: coerceBool(pick(x, 'commentsDisabled', 'CommentsDisabled')),
         complianceHidden: coerceBool(pick(x, 'complianceHidden', 'ComplianceHidden')),
+        hasPendingLockReleaseRequest: coerceBool(pick(x, 'hasPendingLockReleaseRequest', 'HasPendingLockReleaseRequest')),
+        hasPendingAdminActionRequest: coerceBool(pick(x, 'hasPendingAdminActionRequest', 'HasPendingAdminActionRequest')),
+        hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
+        authorAccountStatus: pick(x, 'authorAccountStatus', 'AuthorAccountStatus') ?? null,
+        authorWritingSuspendedUntilUtc: pick(x, 'authorWritingSuspendedUntilUtc', 'AuthorWritingSuspendedUntilUtc') ?? null,
     };
 }
 
@@ -286,6 +350,11 @@ function groupStoryRows(rawRows) {
             distinctReasonCodes: [],
             contributors: [],
             openReportIds: [],
+            hasPendingLockReleaseRequest: false,
+            hasPendingAdminActionRequest: false,
+            hasApprovedAdminBanRequest: false,
+            authorAccountStatus: null,
+            authorWritingSuspendedUntilUtc: null,
         };
         prev.reportCount += 1;
         prev.priorityScore = Math.max(prev.priorityScore, row.severityScore || 0);
@@ -298,6 +367,16 @@ function groupStoryRows(rawRows) {
         if (row.authorId) prev.authorId = row.authorId;
         // Cùng một truyện: mọi dòng có cùng snapshot DB; gán theo bản ghi cuối để tránh OR khiến cờ "ẩn" bị kẹt true.
         prev.complianceHidden = row.complianceHidden;
+        prev.hasPendingLockReleaseRequest = prev.hasPendingLockReleaseRequest || row.hasPendingLockReleaseRequest;
+        prev.hasPendingAdminActionRequest = prev.hasPendingAdminActionRequest || row.hasPendingAdminActionRequest;
+        prev.hasApprovedAdminBanRequest = prev.hasApprovedAdminBanRequest || row.hasApprovedAdminBanRequest;
+        if (String(row.authorAccountStatus || '').toUpperCase() === 'BANNED') prev.authorAccountStatus = 'BANNED';
+        else if (!prev.authorAccountStatus) prev.authorAccountStatus = row.authorAccountStatus;
+        {
+            const tPrev = prev.authorWritingSuspendedUntilUtc ? new Date(prev.authorWritingSuspendedUntilUtc).getTime() : 0;
+            const tRow = row.authorWritingSuspendedUntilUtc ? new Date(row.authorWritingSuspendedUntilUtc).getTime() : 0;
+            if (tRow > tPrev) prev.authorWritingSuspendedUntilUtc = row.authorWritingSuspendedUntilUtc;
+        }
         m.set(storyId, prev);
     }
     return Array.from(m.values());
@@ -326,8 +405,15 @@ function normalizeCommentQueueItem(x) {
         isComplianceClaimedByMe: coerceBool(pick(x, 'isComplianceClaimedByMe', 'IsComplianceClaimedByMe')),
         complianceClaimedByDisplayName: pick(x, 'complianceClaimedByDisplayName', 'ComplianceClaimedByDisplayName'),
         hasPendingAdminActionRequest: coerceBool(pick(x, 'hasPendingAdminActionRequest', 'HasPendingAdminActionRequest')),
+        hasPendingLockReleaseRequest: coerceBool(pick(x, 'hasPendingLockReleaseRequest', 'HasPendingLockReleaseRequest')),
         reporterDisplayNames: Array.isArray(pick(x, 'reporterDisplayNames', 'ReporterDisplayNames')) ? pick(x, 'reporterDisplayNames', 'ReporterDisplayNames') : [],
         reporterDetails: Array.isArray(pick(x, 'reporterDetails', 'ReporterDetails')) ? pick(x, 'reporterDetails', 'ReporterDetails') : [],
+        commentUserAccountStatus: pick(x, 'commentUserAccountStatus', 'CommentUserAccountStatus') ?? null,
+        commentUserWritingSuspendedUntilUtc: pick(x, 'commentUserWritingSuspendedUntilUtc', 'CommentUserWritingSuspendedUntilUtc') ?? null,
+        storyCommentsDisabled: coerceBool(pick(x, 'storyCommentsDisabled', 'StoryCommentsDisabled')),
+        storyComplianceHidden: coerceBool(pick(x, 'storyComplianceHidden', 'StoryComplianceHidden')),
+        storyAuthorWritingSuspendedUntilUtc: pick(x, 'storyAuthorWritingSuspendedUntilUtc', 'StoryAuthorWritingSuspendedUntilUtc') ?? null,
+        hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
     };
 }
 
@@ -457,6 +543,16 @@ function isEvidenceVerified(d) {
     return coerceBool(v);
 }
 
+function countVerifiedContributors(items) {
+    const arr = Array.isArray(items) ? items : [];
+    return arr.filter((x) => isContributorVerified(x)).length;
+}
+
+function countVerifiedEvidence(items) {
+    const arr = Array.isArray(items) ? items : [];
+    return arr.filter((x) => isEvidenceVerified(x)).length;
+}
+
 function getEvidenceId(d) {
     return d?.evidenceId ?? d?.EvidenceId ?? null;
 }
@@ -484,28 +580,6 @@ function penaltyTypeVi(p) {
         SUSPEND_AUTHOR_WRITING: 'Tạm đình chỉ quyền viết',
     };
     return map[u] || (p || '—');
-}
-
-/** Chuẩn hóa mô tả bản ghi cũ (DB) từng lưu cả từ tiếng Anh. */
-function violationReasonDisplayVi(text) {
-    const s = String(text ?? '').trim();
-    if (!s) return '—';
-    const legacy = [
-        [/Compliance\s+tắt\s+comment\s+truyện\.?/i, 'Đã tắt bình luận truyện (xử lý vi phạm).'],
-        [/Compliance\s+bật\s+lại\s+comment\s+truyện\.?/i, 'Đã bật lại bình luận truyện.'],
-        [/Compliance\s+ẩn\s+truyện\s+khỏi\s+công\s+khai\.?/i, 'Đã ẩn truyện khỏi danh sách công khai (xử lý vi phạm).'],
-        [/Compliance\s+hiện\s+lại\s+truyện\.?/i, 'Đã hiện lại truyện trên danh sách công khai.'],
-        [/Compliance\s+ẩn\s+comment\.?/i, 'Đã ẩn bình luận (xử lý vi phạm).'],
-        [/Compliance\s+hiện\s+lại\s+comment\.?/i, 'Đã hiện lại bình luận.'],
-    ];
-    let out = s;
-    for (const [re, vi] of legacy) {
-        if (re.test(out)) {
-            out = out.replace(re, vi);
-            break;
-        }
-    }
-    return out;
 }
 
 function complianceRequestStatusVi(s) {
@@ -706,14 +780,16 @@ export default function ViolationManagement() {
     const [releaseFormError, setReleaseFormError] = useState('');
     const [releasingStoryId, setReleasingStoryId] = useState(null);
     const [pendingReleaseByStory, setPendingReleaseByStory] = useState({});
+    const [commentReleaseConfirmTarget, setCommentReleaseConfirmTarget] = useState(null);
+    const [commentReleaseReason, setCommentReleaseReason] = useState('');
+    const [commentReleaseFormError, setCommentReleaseFormError] = useState('');
+    const [releasingCommentId, setReleasingCommentId] = useState(null);
+    const [pendingReleaseByComment, setPendingReleaseByComment] = useState({});
     const [storyActionConfirm, setStoryActionConfirm] = useState(null);
     const [storyActionBusy, setStoryActionBusy] = useState(false);
     const [bulkResolveModal, setBulkResolveModal] = useState(null);
     const [bulkResolveStatus, setBulkResolveStatus] = useState('RESOLVED');
     const [bulkResolveBusy, setBulkResolveBusy] = useState(false);
-    const [accountViolationModal, setAccountViolationModal] = useState(null);
-    const [accountViolationRows, setAccountViolationRows] = useState([]);
-    const [accountViolationLoading, setAccountViolationLoading] = useState(false);
     const [myRequestsModalOpen, setMyRequestsModalOpen] = useState(false);
     /** cancel_claim = hủy nhận đơn / gỡ lock; ban_suspend = chặn TK / đình chỉ viết */
     const [myRequestsTab, setMyRequestsTab] = useState('cancel_claim');
@@ -772,6 +848,7 @@ export default function ViolationManagement() {
 
     const loadData = useCallback(async (opts = {}) => {
         const afterClaim = opts.afterClaim === true;
+        const searchText = String(filters.search ?? '').trim().toLowerCase();
         setLoading(true);
         setError(null);
         try {
@@ -795,16 +872,32 @@ export default function ViolationManagement() {
                         return;
                     }
                 }
-                data = await getComplianceStoryReports({
-                    page: storyReportPage,
-                    pageSize: REPORT_PAGE_SIZE,
-                    groupByStory: true,
-                    sortBy: 'priority_desc',
-                    claimFilter: 'mine',
-                    statuses: reportStatusApiValue,
-                    search: filters.search || undefined,
-                    flaggedOnly: filters.flaggedOnly ? true : undefined,
-                });
+                if (searchText) {
+                    data = await fetchAllPagedItems(
+                        (pg, sz) => getComplianceStoryReports({
+                            page: pg,
+                            pageSize: sz,
+                            groupByStory: true,
+                            sortBy: 'priority_desc',
+                            claimFilter: 'mine',
+                            statuses: reportStatusApiValue,
+                            search: undefined,
+                            flaggedOnly: filters.flaggedOnly ? true : undefined,
+                        }),
+                        { chunkSize: COMPLIANCE_FETCH_CHUNK_STORY },
+                    );
+                } else {
+                    data = await getComplianceStoryReports({
+                        page: storyReportPage,
+                        pageSize: REPORT_PAGE_SIZE,
+                        groupByStory: true,
+                        sortBy: 'priority_desc',
+                        claimFilter: 'mine',
+                        statuses: reportStatusApiValue,
+                        search: undefined,
+                        flaggedOnly: filters.flaggedOnly ? true : undefined,
+                    });
+                }
             } else if (activeTab === 'comment-reports') {
                 if (!showClaimedCommentList && !afterClaim) {
                     const mineProbe = await getComplianceCommentReports({
@@ -823,21 +916,47 @@ export default function ViolationManagement() {
                         return;
                     }
                 }
-                data = await getComplianceCommentReports({
-                    page: commentReportPage,
-                    pageSize: REPORT_PAGE_SIZE,
-                    claimFilter: 'mine',
-                    status: reportStatusApiValue,
-                    search: filters.search || undefined,
-                });
+                if (searchText) {
+                    data = await fetchAllPagedItems(
+                        (pg, sz) => getComplianceCommentReports({
+                            page: pg,
+                            pageSize: sz,
+                            claimFilter: 'mine',
+                            status: reportStatusApiValue,
+                            search: undefined,
+                        }),
+                        { chunkSize: COMPLIANCE_FETCH_CHUNK_COMMENT },
+                    );
+                } else {
+                    data = await getComplianceCommentReports({
+                        page: commentReportPage,
+                        pageSize: REPORT_PAGE_SIZE,
+                        claimFilter: 'mine',
+                        status: reportStatusApiValue,
+                        search: undefined,
+                    });
+                }
             } else if (activeTab === 'compliance-history') {
-                data = await getMyComplianceActivityLogs({
-                    page: historyPage,
-                    pageSize: REPORT_PAGE_SIZE,
-                    search: filters.search || undefined,
-                    source: filters.historySource && filters.historySource !== 'ALL' ? filters.historySource : undefined,
-                    action: filters.historyAction && filters.historyAction !== 'ALL' ? filters.historyAction : undefined,
-                });
+                if (searchText) {
+                    data = await fetchAllPagedItems(
+                        (pg, sz) => getMyComplianceActivityLogs({
+                            page: pg,
+                            pageSize: sz,
+                            search: undefined,
+                            source: filters.historySource && filters.historySource !== 'ALL' ? filters.historySource : undefined,
+                            action: filters.historyAction && filters.historyAction !== 'ALL' ? filters.historyAction : undefined,
+                        }),
+                        { chunkSize: COMPLIANCE_FETCH_CHUNK_STORY },
+                    );
+                } else {
+                    data = await getMyComplianceActivityLogs({
+                        page: historyPage,
+                        pageSize: REPORT_PAGE_SIZE,
+                        search: undefined,
+                        source: filters.historySource && filters.historySource !== 'ALL' ? filters.historySource : undefined,
+                        action: filters.historyAction && filters.historyAction !== 'ALL' ? filters.historyAction : undefined,
+                    });
+                }
             } else if (activeTab === 'lock-requests') {
                 data = await getAdminComplianceLockRequests({ status: 'PENDING' });
             } else if (activeTab === 'compliance-logs') {
@@ -900,14 +1019,53 @@ export default function ViolationManagement() {
                     groupByStory: false,
                     claimFilter: 'mine',
                     statuses: reportStatusApiValue,
-                    search: filters.search || undefined,
+                    search: undefined,
                     sortBy: 'newest',
                 });
                 const raw = (mergedFb.items ?? []).map(normalizeStoryReportRow);
                 normalizedItems = groupStoryRows(raw);
             }
+            if (searchText) {
+                const q = searchText;
+                if (activeTab === 'story-reports') {
+                    const filtered = normalizedItems.filter((x) =>
+                        String(x.storyId ?? '').toLowerCase().includes(q)
+                        || String(x.storyTitle ?? '').toLowerCase().includes(q)
+                        || String(x.authorDisplayName ?? '').toLowerCase().includes(q));
+                    const from = (storyReportPage - 1) * REPORT_PAGE_SIZE;
+                    setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
+                    setTotalCount(filtered.length);
+                    return;
+                }
+                if (activeTab === 'comment-reports') {
+                    const filtered = normalizedItems.filter((x) =>
+                        String(x.commentId ?? x.reportId ?? '').toLowerCase().includes(q)
+                        || String(x.storyId ?? '').toLowerCase().includes(q)
+                        || String(x.storyTitle ?? '').toLowerCase().includes(q)
+                        || String(x.commentUserDisplayName ?? '').toLowerCase().includes(q));
+                    const from = (commentReportPage - 1) * REPORT_PAGE_SIZE;
+                    setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
+                    setTotalCount(filtered.length);
+                    return;
+                }
+                if (activeTab === 'compliance-history') {
+                    const filtered = normalizedItems.filter((x) =>
+                        String(x.source ?? '').toLowerCase().includes(q)
+                        || String(x.action ?? '').toLowerCase().includes(q)
+                        || String(x.status ?? '').toLowerCase().includes(q)
+                        || String(x.message ?? '').toLowerCase().includes(q)
+                        || String(x.targetType ?? '').toLowerCase().includes(q)
+                        || String(x.rowId ?? x.reportId ?? x.id ?? '').toLowerCase().includes(q)
+                        || String(x.targetId ?? '').toLowerCase().includes(q));
+                    const from = (historyPage - 1) * REPORT_PAGE_SIZE;
+                    setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
+                    setTotalCount(filtered.length);
+                    return;
+                }
+            }
             setRows(normalizedItems);
             setTotalCount(activeTab === 'lock-requests' ? (paged.items?.length ?? 0) : paged.totalCount);
+
         } catch (e) {
             setError(e?.response?.data?.message ?? e?.message ?? 'Không tải được dữ liệu vi phạm.');
             setRows([]);
@@ -957,6 +1115,7 @@ export default function ViolationManagement() {
     const isReportTab = activeTab === 'story-reports' || activeTab === 'comment-reports';
 
     useEffect(() => { loadData(); }, [activeTab, loadData]);
+
     useEffect(() => {
         if (activeTab !== 'compliance-history' || !Array.isArray(rows) || rows.length === 0) return;
         const storyIds = Array.from(new Set(
@@ -1052,29 +1211,6 @@ export default function ViolationManagement() {
             await loadData();
         } catch (e) {
             alert(e?.response?.data?.message ?? e?.message ?? 'Thao tác thất bại.');
-        }
-    };
-
-    const openAccountViolationHistory = async (row) => {
-        const userId = row?.authorId ?? row?.commentUserId;
-        if (!userId) {
-            setInfoModal({ title: 'Không thể tải lịch sử', message: 'Chưa có định danh người dùng trên dòng này.' });
-            return;
-        }
-        setAccountViolationModal({
-            userId,
-            displayName: row.authorDisplayName || row.commentUserDisplayName || 'Người dùng',
-        });
-        setAccountViolationLoading(true);
-        setAccountViolationRows([]);
-        try {
-            const data = await getComplianceUserViolations(userId, 80);
-            setAccountViolationRows(Array.isArray(data) ? data : []);
-        } catch (e) {
-            alert(e?.response?.data?.message ?? e?.message ?? 'Không tải được lịch sử vi phạm.');
-            setAccountViolationRows([]);
-        } finally {
-            setAccountViolationLoading(false);
         }
     };
 
@@ -1203,14 +1339,23 @@ export default function ViolationManagement() {
     const submitAdminAction = async () => {
         if (!actionModal) return;
         setAdminActionError('');
-        const isCommentTarget = actionModal.type === 'comment';
-        const requestKind = isCommentTarget ? 'BAN_USER' : adminActionForm.requestKind;
+        const dialogMode = actionModal.adminDialogMode ?? 'account';
+        const requestKind = dialogMode === 'writing' ? 'SUSPEND_AUTHOR_WRITING' : 'BAN_USER';
         const reason = (adminActionForm.message || '').trim();
         if (!reason) {
             setAdminActionError('Bắt buộc nhập lý do đề xuất.');
             return;
         }
-        if (!isCommentTarget && requestKind === 'SUSPEND_AUTHOR_WRITING') {
+        if (requestKind === 'BAN_USER') {
+            const wc = countWords(reason);
+            if (wc < COMPLIANCE_BAN_REASON_MIN_WORDS) {
+                setAdminActionError(
+                    `Lý do đề xuất cần tối thiểu ${COMPLIANCE_BAN_REASON_MIN_WORDS} từ (hiện có ${wc} từ).`,
+                );
+                return;
+            }
+        }
+        if (requestKind === 'SUSPEND_AUTHOR_WRITING') {
             if (!adminActionForm.proposedSuspendUntilUtc) {
                 setAdminActionError('Vui lòng chọn thời hạn đình chỉ.');
                 return;
@@ -1228,7 +1373,7 @@ export default function ViolationManagement() {
         const payload = {
             requestKind,
             message: reason,
-            proposedSuspendUntilUtc: !isCommentTarget && requestKind === 'SUSPEND_AUTHOR_WRITING' && adminActionForm.proposedSuspendUntilUtc
+            proposedSuspendUntilUtc: requestKind === 'SUSPEND_AUTHOR_WRITING' && adminActionForm.proposedSuspendUntilUtc
                 ? new Date(adminActionForm.proposedSuspendUntilUtc).toISOString()
                 : undefined,
         };
@@ -1283,6 +1428,41 @@ export default function ViolationManagement() {
         }
     };
 
+    const openCommentReleaseRequestModal = (row) => {
+        if (!row?.commentId) return;
+        setCommentReleaseReason('');
+        setCommentReleaseFormError('');
+        setCommentReleaseConfirmTarget({
+            commentId: row.commentId,
+            storyTitle: row.storyTitle || '',
+            reportCount: row.reportCount ?? 0,
+        });
+    };
+
+    const confirmCommentReleaseRequest = async () => {
+        const target = commentReleaseConfirmTarget;
+        if (!target?.commentId) return;
+        const reason = commentReleaseReason.trim();
+        if (reason.length < 10) {
+            setCommentReleaseFormError('Lý do cần ít nhất 10 ký tự.');
+            return;
+        }
+        setCommentReleaseFormError('');
+        setReleasingCommentId(target.commentId);
+        try {
+            await requestComplianceCommentRelease(target.commentId, { message: reason });
+            setPendingReleaseByComment((prev) => ({ ...prev, [target.commentId]: Date.now() }));
+            setCommentReleaseConfirmTarget(null);
+            setCommentReleaseReason('');
+            await loadData();
+            showToast('Đã gửi yêu cầu hủy nhận đơn bình luận cho quản trị viên.', 'success');
+        } catch (e) {
+            setCommentReleaseFormError(e?.response?.data?.message ?? e?.message ?? 'Không thể gửi yêu cầu.');
+        } finally {
+            setReleasingCommentId(null);
+        }
+    };
+
     const openStoryActionConfirm = (payload) => setStoryActionConfirm(payload);
 
     const submitStoryActionConfirm = async () => {
@@ -1302,8 +1482,37 @@ export default function ViolationManagement() {
         setBulkResolveModal(payload);
     };
 
+    useEffect(() => {
+        if (!bulkResolveModal?.hasApprovedAdminBanRequest) return;
+        setBulkResolveStatus('RESOLVED');
+    }, [bulkResolveModal]);
+
     const submitBulkResolve = async () => {
         if (!bulkResolveModal) return;
+        if (bulkResolveStatus === 'DISMISSED') {
+            if (coerceBool(bulkResolveModal.hasApprovedAdminBanRequest)) {
+                setInfoModal({
+                    title: 'Không thể chọn «Không xử lý được»',
+                    message:
+                        'Đã có yêu cầu chặn tài khoản được quản trị viên chấp nhận. Bắt buộc chọn «Đã xử lý thành công».',
+                });
+                return;
+            }
+            const blockers =
+                bulkResolveModal.type === 'story'
+                    ? getBulkDismissStoryBlockers(bulkResolveModal)
+                    : getBulkDismissCommentBlockers(bulkResolveModal);
+            if (blockers.length > 0) {
+                const commentDismissPrefix = bulkResolveModal.type === 'comment'
+                    ? 'Mục bình luận này đã có dấu hiệu đã xử lý vi phạm, nên không thể kết luận «không đủ bằng chứng».'
+                    : 'Vui lòng hoàn tác các tác vụ sau trước khi kết luận không đủ bằng chứng:';
+                setInfoModal({
+                    title: 'Không thể chọn «Không xử lý được»',
+                    message: `${commentDismissPrefix}\n\n• ${blockers.join('\n• ')}`,
+                });
+                return;
+            }
+        }
         setBulkResolveBusy(true);
         try {
             if (bulkResolveModal.type === 'story') {
@@ -1447,9 +1656,11 @@ export default function ViolationManagement() {
         }
     };
 
-    const handleStoryRowActionSelect = (row, action, hasPendingReleaseRequest) => {
+    const handleStoryRowActionSelect = (row, action, flags) => {
         if (!action) return;
         if (!row?.storyId) return;
+        const hasPendingReleaseRequest = !!flags?.hasPendingReleaseRequest;
+        const hasPendingAdminAction = !!flags?.hasPendingAdminAction;
         if (hasPendingReleaseRequest && action !== 'detail') {
             setInfoModal({
                 title: 'Không thể thao tác',
@@ -1460,13 +1671,6 @@ export default function ViolationManagement() {
         switch (action) {
             case 'detail':
                 openStoryTicketsModal(row);
-                break;
-            case 'author-history':
-                if (!row.authorId) {
-                    setInfoModal({ title: 'Thiếu thông tin', message: 'Chưa có mã định danh tác giả.' });
-                    return;
-                }
-                openAccountViolationHistory(row);
                 break;
             case 'release-request':
                 openReleaseRequestModal(row);
@@ -1509,13 +1713,50 @@ export default function ViolationManagement() {
             case 'request-ban':
                 setAdminActionForm({ requestKind: 'BAN_USER', message: '', proposedSuspendUntilUtc: '' });
                 setAdminActionError('');
-                setActionModal({ type: 'story', targetId: row.storyId });
+                setActionModal({
+                    type: 'story',
+                    targetId: row.storyId,
+                    adminDialogMode: 'account',
+                    authorAccountStatus: row.authorAccountStatus,
+                    authorWritingSuspendedUntilUtc: row.authorWritingSuspendedUntilUtc,
+                });
                 break;
+            case 'toggle-author-writing-suspended': {
+                const suspended = isAuthorWritingSuspendedActive(row.authorWritingSuspendedUntilUtc);
+                const banned = String(row.authorAccountStatus ?? '').toUpperCase() === 'BANNED';
+                if (banned) {
+                    setInfoModal({
+                        title: 'Không thể thao tác',
+                        message: 'Tài khoản tác giả đã bị chặn; không áp dụng tạm khóa quyền viết.',
+                    });
+                    return;
+                }
+                openStoryActionConfirm({
+                    title: suspended ? 'Xác nhận tắt tạm khóa viết' : 'Xác nhận bật tạm khóa viết',
+                    message: suspended
+                        ? 'Mở lại quyền viết cho tác giả (tạo/sửa truyện, chương, phiên bản và gửi duyệt)?'
+                        : 'Tạm khóa quyền viết của tác giả trực tiếp. Tác giả không thể thao tác truyện/chương/phiên bản và không gửi duyệt được.',
+                    run: () => actionWithReload(() => setComplianceStoryAuthorWritingSuspended(row.storyId, { value: !suspended })),
+                });
+                break;
+            }
             case 'resolve-all':
+                if (hasPendingAdminAction) {
+                    setInfoModal({
+                        title: 'Không thể xử lý hết phiếu',
+                        message:
+                            'Đang có yêu cầu chặn / tạm đình chỉ tài khoản chờ quản trị viên xử lý; tạm thời không thể dùng «Xử lý toàn bộ phiếu báo cáo».',
+                    });
+                    return;
+                }
                 openBulkResolveModal({
                     type: 'story',
                     targetId: row.storyId,
                     targetLabel: row.storyTitle || row.storyId,
+                    commentsDisabled: coerceBool(row.commentsDisabled),
+                    complianceHidden: coerceBool(row.complianceHidden),
+                    authorWritingSuspendedUntilUtc: row.authorWritingSuspendedUntilUtc ?? null,
+                    hasApprovedAdminBanRequest: coerceBool(row.hasApprovedAdminBanRequest),
                 });
                 break;
             default:
@@ -1523,13 +1764,32 @@ export default function ViolationManagement() {
         }
     };
 
-    const handleCommentRowActionSelect = (row, action, hasPending) => {
+    const handleCommentRowActionSelect = (row, action, flags) => {
         if (!action) return;
         if (!row?.commentId) return;
-        if (hasPending) {
+        const lockReleasePending = !!flags?.lockReleasePending;
+        const adminActionPending = !!flags?.adminActionPending;
+        if (lockReleasePending && action !== 'detail') {
             setInfoModal({
                 title: 'Không thể thao tác',
-                message: 'Đơn này đang chờ quản trị viên xử lý yêu cầu liên quan tài khoản.',
+                message: 'Đơn này đang chờ quản trị viên xử lý yêu cầu hủy nhận duyệt.',
+            });
+            return;
+        }
+        if (action === 'resolve-all' && (lockReleasePending || adminActionPending)) {
+            setInfoModal({
+                title: 'Không thể xử lý hết phiếu',
+                message: adminActionPending
+                    ? 'Đang có yêu cầu chặn / tạm đình chỉ tài khoản chờ quản trị viên xử lý; tạm thời không thể dùng «Xử lý toàn bộ phiếu báo cáo».'
+                    : 'Đơn này đang chờ quản trị viên xử lý yêu cầu hủy nhận duyệt.',
+            });
+            return;
+        }
+        if (action === 'request-ban' && adminActionPending) {
+            setInfoModal({
+                title: 'Không thể gửi yêu cầu',
+                message:
+                    'Đang có yêu cầu chặn tài khoản chờ quản trị viên xử lý; tạm thời không thể gửi thêm «Yêu cầu chặn tài khoản».',
             });
             return;
         }
@@ -1538,12 +1798,8 @@ export default function ViolationManagement() {
                 setSelectedComment(row);
                 setCommentEvidenceVerificationFilter('ALL');
                 break;
-            case 'account-history':
-                if (!row.commentUserId) {
-                    setInfoModal({ title: 'Thiếu thông tin', message: 'Chưa có mã định danh người bình luận.' });
-                    return;
-                }
-                openAccountViolationHistory(row);
+            case 'release-request':
+                openCommentReleaseRequestModal(row);
                 break;
             case 'admin-release':
                 if (!isAdmin) return;
@@ -1560,20 +1816,31 @@ export default function ViolationManagement() {
                 }
                 openStoryActionConfirm({
                     title: 'Xác nhận ẩn chuỗi bình luận',
-                    message: 'Ẩn toàn bộ chuỗi bình luận này (kèm phản hồi)?',
+                    message: 'Ẩn toàn bộ chuỗi bình luận này (kèm phản hồi)? Lưu ý: thao tác này không thể hoàn tác, bình luận sẽ bị ẩn vĩnh viễn.',
                     run: () => actionWithReload(() => setComplianceCommentThreadHidden(row.commentId, { value: true, includeReplies: true })),
                 });
                 break;
             case 'request-ban':
                 setAdminActionForm({ requestKind: 'BAN_USER', message: '', proposedSuspendUntilUtc: '' });
                 setAdminActionError('');
-                setActionModal({ type: 'comment', targetId: row.commentId });
+                setActionModal({
+                    type: 'comment',
+                    targetId: row.commentId,
+                    adminDialogMode: 'account',
+                    authorAccountStatus: row.commentUserAccountStatus,
+                    authorWritingSuspendedUntilUtc: row.commentUserWritingSuspendedUntilUtc,
+                });
                 break;
             case 'resolve-all':
                 openBulkResolveModal({
                     type: 'comment',
                     targetId: row.commentId,
-                    targetLabel: row.commentId,
+                    targetLabel: row.storyTitle ? `${row.storyTitle} — bình luận` : String(row.commentId),
+                    isCommentThreadHidden: coerceBool(row.isCommentThreadHidden),
+                    storyCommentsDisabled: coerceBool(row.storyCommentsDisabled),
+                    storyComplianceHidden: coerceBool(row.storyComplianceHidden),
+                    storyAuthorWritingSuspendedUntilUtc: row.storyAuthorWritingSuspendedUntilUtc ?? null,
+                    hasApprovedAdminBanRequest: coerceBool(row.hasApprovedAdminBanRequest),
                 });
                 break;
             default:
@@ -1583,31 +1850,42 @@ export default function ViolationManagement() {
 
     const renderStoryReports = () => {
         const totalPages = Math.max(1, Math.ceil(_totalCount / REPORT_PAGE_SIZE));
-        const scrollWrapStyle = rows.length > 5 ? { maxHeight: '52vh', overflowY: 'auto' } : undefined;
         return (
             <div>
-                <div style={scrollWrapStyle}>
+                <div className="w-full overflow-visible">
                     <table className="w-full border-collapse table-fixed">
-                        <thead><tr className="bg-slate-50">
-                            <th style={th}>Ưu tiên</th>
-                            <th style={th}>Truyện</th>
-                            <th style={th}>Tác giả</th>
-                            <th style={th}>Số người báo cáo</th>
-                            <th style={th}>Thao tác</th>
-                        </tr></thead>
+                        <thead>
+                            <tr className="bg-slate-50">
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Ưu tiên</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Mã đơn</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Truyện</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Tác giả</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Số người báo cáo</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Thao tác</th>
+                            </tr>
+                        </thead>
                         <tbody>
                             {rows.length === 0 && (
                                 <tr>
-                                    <td colSpan={5} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                                    <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
                             {rows.map((r) => (
-                                <tr key={r.storyId} className="border-t border-slate-200 hover:bg-slate-50/70">
+                                <tr
+                                    key={r.storyId}
+                                    className={`border-t border-slate-200 hover:bg-slate-50/70 ${r.complianceFlagged ? 'bg-amber-200/70 ring-1 ring-amber-300' : ''}`}
+                                    style={r.complianceFlagged ? { borderLeft: '4px solid #d97706' } : undefined}
+                                >
                                     {(() => {
-                                        const hasPendingReleaseRequest = !!pendingReleaseByStory[r.storyId];
+                                        const hasPendingReleaseRequest = !!pendingReleaseByStory[r.storyId] || !!r.hasPendingLockReleaseRequest;
+                                        const hasPendingAdminAction = !!r.hasPendingAdminActionRequest;
+                                        const authorWritingSuspended = isAuthorWritingSuspendedActive(r.authorWritingSuspendedUntilUtc);
+                                        const authorBannedForWriting = String(r.authorAccountStatus ?? '').toUpperCase() === 'BANNED';
+                                        const storyFlags = { hasPendingReleaseRequest, hasPendingAdminAction };
                                         return (
                                             <>
                                                 <td style={td}>{(r.priorityScore ?? 0).toFixed?.(1) ?? r.priorityScore}</td>
+                                                <td style={td}><span className="text-xs text-slate-700 break-all">{r.storyId || '—'}</span></td>
                                                 <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                                 <td style={td}>{r.authorDisplayName || '—'}</td>
                                                 <td style={td}>
@@ -1622,15 +1900,34 @@ export default function ViolationManagement() {
                                                 </td>
                                                 <td style={{ ...td, minWidth: 260 }}>
                                                     <div style={{ display: 'inline-flex', gap: 6, position: 'relative', flexWrap: 'nowrap' }}>
-                                                        <button
-                                                            type="button"
-                                                            style={btn}
-                                                            onClick={() => handleStoryRowActionSelect(r, 'detail', hasPendingReleaseRequest)}
-                                                        >
+                                                        <button type="button" style={btn} onClick={() => handleStoryRowActionSelect(r, 'detail', storyFlags)}>
                                                             Chi tiết
                                                         </button>
-                                                        <details>
-                                                            <summary style={btn}>Tác vụ</summary>
+                                                        <details style={hasPendingReleaseRequest ? { pointerEvents: 'none' } : undefined}>
+                                                            <summary
+                                                                style={{
+                                                                    ...btn,
+                                                                    ...(hasPendingReleaseRequest
+                                                                        ? {
+                                                                            borderColor: '#fcd34d',
+                                                                            background: '#fffbeb',
+                                                                            color: '#92400e',
+                                                                            cursor: 'not-allowed',
+                                                                        }
+                                                                        : {}),
+                                                                }}
+                                                                title={hasPendingReleaseRequest ? 'Đang chờ quản trị viên xử lý đơn hủy nhận duyệt — không thể dùng các tác vụ.' : undefined}
+                                                            >
+                                                                {hasPendingReleaseRequest ? (
+                                                                    <span className="inline-flex items-center gap-1.5" aria-label="Tác vụ tạm khóa, chờ quản trị viên">
+                                                                        <Lock size={14} className="shrink-0 text-amber-700" aria-hidden />
+                                                                        <span>Tác vụ</span>
+                                                                        <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950">Chờ QTV</span>
+                                                                    </span>
+                                                                ) : (
+                                                                    'Tác vụ'
+                                                                )}
+                                                            </summary>
                                                             <div
                                                                 style={{
                                                                     position: 'absolute',
@@ -1642,22 +1939,61 @@ export default function ViolationManagement() {
                                                                     borderRadius: 10,
                                                                     boxShadow: '0 8px 20px rgba(15, 23, 42, 0.12)',
                                                                     padding: 6,
-                                                                    zIndex: 30,
+                                                                    zIndex: 80,
                                                                 }}
                                                             >
-                                                                <button type="button" style={menuBtn} disabled={!r.authorId} onClick={() => handleStoryRowActionSelect(r, 'author-history', hasPendingReleaseRequest)}>Lịch sử vi phạm tác giả</button>
-                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'release-request', hasPendingReleaseRequest)}>Trả đơn về hàng đợi</button>
-                                                                {isAdmin && <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'admin-release', hasPendingReleaseRequest)}>Quản trị viên gỡ khóa đơn</button>}
-                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-flag', hasPendingReleaseRequest)}>{r.complianceFlagged ? 'Bỏ gắn cờ vi phạm' : 'Gắn cờ vi phạm'}</button>
-                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-comments', hasPendingReleaseRequest)}>{r.commentsDisabled ? 'Mở lại bình luận' : 'Khóa bình luận'}</button>
-                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-hidden', hasPendingReleaseRequest)}>{r.complianceHidden ? 'Hiển thị lại truyện' : 'Ẩn truyện khỏi người dùng thường'}</button>
-                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'request-ban', hasPendingReleaseRequest)}>Yêu cầu chặn / tạm đình chỉ tài khoản</button>
-                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'resolve-all', hasPendingReleaseRequest)}>Xử lý toàn bộ phiếu báo cáo</button>
+                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'release-request', storyFlags)}>Trả đơn về hàng đợi</button>
+                                                                {isAdmin && <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'admin-release', storyFlags)}>Quản trị viên gỡ khóa đơn</button>}
+                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-flag', storyFlags)}>{r.complianceFlagged ? 'Bỏ gắn cờ vi phạm' : 'Gắn cờ vi phạm'}</button>
+                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-comments', storyFlags)}>{r.commentsDisabled ? 'Mở lại bình luận' : 'Khóa bình luận'}</button>
+                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'toggle-hidden', storyFlags)}>{r.complianceHidden ? 'Hiển thị lại truyện' : 'Ẩn truyện khỏi người dùng thường'}</button>
+                                                                <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'request-ban', storyFlags)}>Yêu cầu chặn tài khoản</button>
+                                                                <button
+                                                                    type="button"
+                                                                    style={menuBtn}
+                                                                    disabled={hasPendingReleaseRequest || authorBannedForWriting}
+                                                                    title={authorBannedForWriting ? 'Tác giả đã bị chặn — không áp dụng tạm khóa viết.' : 'Áp dụng ngay lên tài khoản tác giả: chặn chỉnh sửa truyện/chương và gửi duyệt. Không tạo đơn lên quản trị viên.'}
+                                                                    onClick={() => handleStoryRowActionSelect(r, 'toggle-author-writing-suspended', storyFlags)}
+                                                                >
+                                                                    {authorWritingSuspended ? 'Mở lại quyền viết tác giả' : 'Tạm khóa quyền viết tác giả'}
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    style={{
+                                                                        ...menuBtn,
+                                                                        ...(hasPendingAdminAction && !hasPendingReleaseRequest
+                                                                            ? {
+                                                                                borderLeft: '3px solid #0ea5e9',
+                                                                                background: '#f0f9ff',
+                                                                                color: '#0c4a6e',
+                                                                                opacity: 0.85,
+                                                                            }
+                                                                            : {}),
+                                                                    }}
+                                                                    disabled={hasPendingReleaseRequest || hasPendingAdminAction}
+                                                                    title={hasPendingAdminAction && !hasPendingReleaseRequest ? 'Chờ quản trị viên xử lý yêu cầu chặn / đình chỉ — không thể xử lý hết phiếu lúc này.' : undefined}
+                                                                    onClick={() => handleStoryRowActionSelect(r, 'resolve-all', storyFlags)}
+                                                                >
+                                                                    {hasPendingAdminAction && !hasPendingReleaseRequest ? (
+                                                                        <span className="inline-flex items-center gap-1.5">
+                                                                            <Lock size={12} className="shrink-0" aria-hidden />
+                                                                            Xử lý toàn bộ phiếu báo cáo
+                                                                        </span>
+                                                                    ) : (
+                                                                        'Xử lý toàn bộ phiếu báo cáo'
+                                                                    )}
+                                                                </button>
                                                             </div>
                                                         </details>
                                                     </div>
                                                     {hasPendingReleaseRequest ? (
                                                         <div className="text-xs text-amber-700 mt-1">Đang chờ quản trị viên xử lý đơn hủy nhận duyệt.</div>
+                                                    ) : null}
+                                                    {hasPendingAdminAction && !hasPendingReleaseRequest ? (
+                                                        <div className="text-xs text-sky-900 mt-1 flex items-start gap-1.5 max-w-[280px]">
+                                                            <Lock size={12} className="shrink-0 mt-0.5 text-sky-700" aria-hidden />
+                                                            <span>Đang chờ QTV xử lý yêu cầu gửi admin — tạm khóa «Xử lý toàn bộ phiếu báo cáo».</span>
+                                                        </div>
                                                     ) : null}
                                                 </td>
                                             </>
@@ -1684,56 +2020,84 @@ export default function ViolationManagement() {
 
     const renderCommentReports = () => {
         const totalPages = Math.max(1, Math.ceil(_totalCount / REPORT_PAGE_SIZE));
-        const scrollWrapStyle = rows.length > 5 ? { maxHeight: '52vh', overflowY: 'auto' } : undefined;
         return (
             <div>
-                <div style={scrollWrapStyle}>
+                <div className="w-full overflow-visible">
                     <table className="w-full border-collapse table-fixed">
                         <thead><tr className="bg-slate-50">
                             <th style={th}>Ưu tiên</th>
+                            <th style={th}>Mã đơn</th>
                             <th style={th}>Truyện</th>
                             <th style={th}>Người bình luận</th>
-                            <th style={th}>Người báo</th>
-                            <th style={th}>Mã phiếu</th>
-                            <th style={th}>Khóa đơn</th>
-                            <th style={th}>Cảnh báo</th>
+                            <th style={th}>Số người báo cáo</th>
                             <th style={th}>Thao tác</th>
                         </tr></thead>
                         <tbody>
                             {rows.length === 0 && (
                                 <tr>
-                                    <td colSpan={8} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                                    <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
                             {rows.map((r) => (
                                 <tr key={r.commentId} className="border-t border-slate-200 hover:bg-slate-50/70">
                                     {(() => {
-                                        const hasPending = !!r.hasPendingAdminActionRequest;
+                                        const hasPendingAdmin = !!r.hasPendingAdminActionRequest;
+                                        const hasPendingLockRel = !!pendingReleaseByComment[r.commentId]
+                                            || !!r.hasPendingLockReleaseRequest;
+                                        const taskMenuLocked = hasPendingLockRel;
+                                        const bulkResolveBlocked = hasPendingAdmin || hasPendingLockRel;
+                                        const commentFlags = { lockReleasePending: hasPendingLockRel, adminActionPending: hasPendingAdmin };
+                                        const commentDetailBlocked = hasPendingLockRel;
                                         const reporters = Array.isArray(r.reporterDisplayNames) ? r.reporterDisplayNames : [];
-                                        const reporterLabel = reporters.length === 0 ? '—' : reporters.length > 1 ? `${reporters[0]} +${reporters.length - 1}` : reporters[0];
+                                        const reporterCount = reporters.length;
                                         return (
                                             <>
                                                 <td style={td}>{Number(r.priorityScore ?? 0).toFixed(1)}</td>
+                                                <td style={td}><span className="text-xs text-slate-700 break-all">{r.commentId || r.reportId || '—'}</span></td>
                                                 <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                                 <td style={td}>{r.commentUserDisplayName || '—'}</td>
-                                                <td style={td}>{reporterLabel}</td>
-                                                <td style={td}><div style={{ fontWeight: 600 }}>{r.reportId}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.commentId}</div></td>
-                                                <td style={td}>{r.isComplianceLocked ? `Đã khóa — ${r.complianceClaimedByDisplayName || '—'}` : 'Chưa khóa'}</td>
-                                                <td style={td}>
-                                                    <div className="text-xs text-slate-700 max-w-[200px]">{r.adminOrModeratorReplyWarningVi || '—'}</div>
-                                                </td>
+                                                <td style={td}>{reporterCount > 0 ? reporterCount : '—'}</td>
                                                 <td style={{ ...td, minWidth: 260 }}>
                                                     <div style={{ display: 'inline-flex', gap: 6, position: 'relative', flexWrap: 'nowrap' }}>
                                                         <button
                                                             type="button"
-                                                            style={hasPending ? { ...btn, opacity: 0.45, cursor: 'not-allowed' } : btn}
-                                                            onClick={() => handleCommentRowActionSelect(r, 'detail', hasPending)}
-                                                            disabled={hasPending}
+                                                            style={commentDetailBlocked ? { ...btn, opacity: 0.45, cursor: 'not-allowed' } : btn}
+                                                            onClick={() => handleCommentRowActionSelect(r, 'detail', commentFlags)}
+                                                            disabled={commentDetailBlocked}
                                                         >
                                                             Chi tiết
                                                         </button>
-                                                        <details>
-                                                            <summary style={btn}>Tác vụ</summary>
+                                                        <details style={taskMenuLocked ? { pointerEvents: 'none' } : undefined}>
+                                                            <summary
+                                                                style={{
+                                                                    ...btn,
+                                                                    ...(taskMenuLocked
+                                                                        ? {
+                                                                            borderColor: '#fcd34d',
+                                                                            background: '#fffbeb',
+                                                                            color: '#92400e',
+                                                                            cursor: 'not-allowed',
+                                                                        }
+                                                                        : {}),
+                                                                }}
+                                                                title={
+                                                                    taskMenuLocked
+                                                                        ? 'Đang chờ quản trị viên xử lý đơn hủy nhận duyệt — không thể dùng các tác vụ.'
+                                                                        : undefined
+                                                                }
+                                                            >
+                                                                {taskMenuLocked ? (
+                                                                    <span className="inline-flex items-center gap-1.5" aria-label="Tác vụ tạm khóa, chờ quản trị viên">
+                                                                        <Lock size={14} className="shrink-0 text-amber-700" aria-hidden />
+                                                                        <span>Tác vụ</span>
+                                                                        <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950">
+                                                                            Chờ QTV
+                                                                        </span>
+                                                                    </span>
+                                                                ) : (
+                                                                    'Tác vụ'
+                                                                )}
+                                                            </summary>
                                                             <div
                                                                 style={{
                                                                     position: 'absolute',
@@ -1745,18 +2109,86 @@ export default function ViolationManagement() {
                                                                     borderRadius: 10,
                                                                     boxShadow: '0 8px 20px rgba(15, 23, 42, 0.12)',
                                                                     padding: 6,
-                                                                    zIndex: 30,
+                                                                    zIndex: 80,
                                                                 }}
                                                             >
-                                                                <button type="button" style={menuBtn} disabled={!r.commentUserId || hasPending} onClick={() => handleCommentRowActionSelect(r, 'account-history', hasPending)}>Lịch sử vi phạm tài khoản</button>
-                                                                {isAdmin && <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'admin-release', hasPending)}>Quản trị viên gỡ khóa bình luận</button>}
-                                                                <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'hide-thread', hasPending)}>{r.isCommentThreadHidden ? 'Chuỗi bình luận đã ẩn' : 'Ẩn chuỗi bình luận'}</button>
-                                                                <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'request-ban', hasPending)}>Yêu cầu chặn / tạm đình chỉ tài khoản</button>
-                                                                <button type="button" style={menuBtn} disabled={hasPending} onClick={() => handleCommentRowActionSelect(r, 'resolve-all', hasPending)}>Xử lý toàn bộ phiếu báo cáo</button>
+                                                                <button type="button" style={menuBtn} disabled={taskMenuLocked} onClick={() => handleCommentRowActionSelect(r, 'release-request', commentFlags)}>Trả đơn về hàng đợi</button>
+                                                                {isAdmin && <button type="button" style={menuBtn} disabled={taskMenuLocked} onClick={() => handleCommentRowActionSelect(r, 'admin-release', commentFlags)}>Quản trị viên gỡ khóa bình luận</button>}
+                                                                <button type="button" style={menuBtn} disabled={taskMenuLocked} onClick={() => handleCommentRowActionSelect(r, 'hide-thread', commentFlags)}>{r.isCommentThreadHidden ? 'Chuỗi bình luận đã ẩn' : 'Ẩn chuỗi bình luận'}</button>
+                                                                <button
+                                                                    type="button"
+                                                                    style={{
+                                                                        ...menuBtn,
+                                                                        ...(hasPendingAdmin && !hasPendingLockRel
+                                                                            ? {
+                                                                                borderLeft: '3px solid #0ea5e9',
+                                                                                background: '#f0f9ff',
+                                                                                color: '#0c4a6e',
+                                                                                opacity: 0.85,
+                                                                            }
+                                                                            : {}),
+                                                                    }}
+                                                                    disabled={taskMenuLocked || (hasPendingAdmin && !hasPendingLockRel)}
+                                                                    title={
+                                                                        hasPendingAdmin && !hasPendingLockRel
+                                                                            ? 'Chờ quản trị viên xử lý yêu cầu chặn tài khoản — chưa thể gửi thêm yêu cầu này.'
+                                                                            : undefined
+                                                                    }
+                                                                    onClick={() => handleCommentRowActionSelect(r, 'request-ban', commentFlags)}
+                                                                >
+                                                                    {hasPendingAdmin && !hasPendingLockRel ? (
+                                                                        <span className="inline-flex items-center gap-1.5">
+                                                                            <Lock size={12} className="shrink-0" aria-hidden />
+                                                                            Yêu cầu chặn tài khoản
+                                                                        </span>
+                                                                    ) : (
+                                                                        'Yêu cầu chặn tài khoản'
+                                                                    )}
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    style={{
+                                                                        ...menuBtn,
+                                                                        ...(hasPendingAdmin && !hasPendingLockRel
+                                                                            ? {
+                                                                                borderLeft: '3px solid #0ea5e9',
+                                                                                background: '#f0f9ff',
+                                                                                color: '#0c4a6e',
+                                                                                opacity: 0.85,
+                                                                            }
+                                                                            : {}),
+                                                                    }}
+                                                                    disabled={bulkResolveBlocked}
+                                                                    title={
+                                                                        hasPendingAdmin && !hasPendingLockRel
+                                                                            ? 'Chờ quản trị viên xử lý yêu cầu chặn / đình chỉ — không thể xử lý hết phiếu lúc này.'
+                                                                            : undefined
+                                                                    }
+                                                                    onClick={() => handleCommentRowActionSelect(r, 'resolve-all', commentFlags)}
+                                                                >
+                                                                    {hasPendingAdmin && !hasPendingLockRel ? (
+                                                                        <span className="inline-flex items-center gap-1.5">
+                                                                            <Lock size={12} className="shrink-0" aria-hidden />
+                                                                            Xử lý toàn bộ phiếu báo cáo
+                                                                        </span>
+                                                                    ) : (
+                                                                        'Xử lý toàn bộ phiếu báo cáo'
+                                                                    )}
+                                                                </button>
                                                             </div>
                                                         </details>
                                                     </div>
-                                                    {hasPending ? <div className="text-xs text-amber-700 mt-1">Đang chờ quản trị viên xử lý yêu cầu liên quan tài khoản.</div> : null}
+                                                    {hasPendingLockRel ? (
+                                                        <div className="text-xs text-amber-700 mt-1">Đang chờ quản trị viên xử lý đơn hủy nhận duyệt.</div>
+                                                    ) : null}
+                                                    {hasPendingAdmin && !hasPendingLockRel ? (
+                                                        <div className="text-xs text-sky-900 mt-1 flex items-start gap-1.5 max-w-[280px]">
+                                                            <Lock size={12} className="shrink-0 mt-0.5 text-sky-700" aria-hidden />
+                                                            <span>
+                                                                Đang chờ QTV xử lý yêu cầu — tạm khóa «Xử lý toàn bộ phiếu báo cáo».
+                                                            </span>
+                                                        </div>
+                                                    ) : null}
                                                 </td>
                                             </>
                                         );
@@ -1811,6 +2243,7 @@ export default function ViolationManagement() {
                 <div className="overflow-x-auto">
                     <table className="w-full border-collapse">
                         <thead><tr className="bg-slate-50">
+                            <th style={th}>Mã đơn</th>
                             <th style={th}>Thời điểm</th>
                             <th style={th}>Nguồn</th>
                             <th style={th}>Hành động</th>
@@ -1821,11 +2254,12 @@ export default function ViolationManagement() {
                         <tbody>
                             {rows.length === 0 && (
                                 <tr>
-                                    <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Chưa có lịch sử xử lý vi phạm.</td>
+                                    <td colSpan={7} className="p-6 text-center text-sm text-slate-500">Chưa có lịch sử xử lý vi phạm.</td>
                                 </tr>
                             )}
                             {rows.map((r) => (
                                 <tr key={r.rowId || r.reportId || r.id} className="border-t border-slate-200 hover:bg-slate-50/70">
+                                    <td style={td}><span className="text-xs text-slate-700 break-all">{r.rowId || r.reportId || r.id || '—'}</span></td>
                                     <td style={td}>{formatDate(r.createdAtUtc || r.resolvedAtUtc)}</td>
                                     <td style={td}>{complianceHistorySourceVi(r.source)}</td>
                                     <td style={td}>{complianceHistoryActionVi(r.action, r.source)}</td>
@@ -1898,7 +2332,7 @@ export default function ViolationManagement() {
                                 <button
                                     type="button"
                                     onClick={loadClaimableStories}
-                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600"
                                 >
                                     {claimPickerLoading ? 'Đang tải...' : `Nhận duyệt đơn (${claimableStoryCount})`}
                                 </button>
@@ -1906,7 +2340,7 @@ export default function ViolationManagement() {
                                 <button
                                     type="button"
                                     onClick={loadClaimableComments}
-                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600"
                                 >
                                     {commentClaimPickerLoading ? 'Đang tải...' : `Nhận duyệt đơn (${claimableCommentCount})`}
                                 </button>
@@ -1917,7 +2351,7 @@ export default function ViolationManagement() {
                                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-800 text-sm font-semibold hover:bg-slate-50"
                             >
                                 <ClipboardList size={16} />
-                                Đơn đã gửi admin
+                                Đơn đã gửi quản trị viên
                             </button>
                         </div>
                     )}
@@ -1927,7 +2361,7 @@ export default function ViolationManagement() {
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
                                 className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${activeTab === tab.id
-                                    ? 'bg-primary/15 border-primary/40 text-primary'
+                                    ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
                                     : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                                     }`}
                             >
@@ -1941,7 +2375,7 @@ export default function ViolationManagement() {
                                 type="button"
                                 onClick={() => setAdminLogType('moderator')}
                                 className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${adminLogType === 'moderator'
-                                    ? 'bg-primary/15 border-primary/40 text-primary'
+                                    ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
                                     : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                                     }`}
                             >
@@ -1951,7 +2385,7 @@ export default function ViolationManagement() {
                                 type="button"
                                 onClick={() => setAdminLogType('compliance')}
                                 className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${adminLogType === 'compliance'
-                                    ? 'bg-primary/15 border-primary/40 text-primary'
+                                    ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
                                     : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                                     }`}
                             >
@@ -1961,7 +2395,7 @@ export default function ViolationManagement() {
                     )}
                     {isReportTab && (
                         <>
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-2">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
                                 <input
                                     value={filters.search}
                                     onChange={(e) => {
@@ -1970,26 +2404,16 @@ export default function ViolationManagement() {
                                         if (activeTab === 'story-reports') setStoryReportPage(1);
                                         if (activeTab === 'comment-reports') setCommentReportPage(1);
                                     }}
-                                    placeholder="Tìm theo mã, tên truyện, người báo cáo..."
+                                    placeholder={
+                                        activeTab === 'story-reports'
+                                            ? 'Tìm theo mã đơn, tên truyện, tác giả...'
+                                            : 'Tìm theo mã đơn, tên truyện, người bình luận...'
+                                    }
                                     style={input}
                                 />
-                                <select
-                                    value={filters.statusFilter}
-                                    onChange={(e) => {
-                                        const v = e.target.value;
-                                        setFilters((p) => ({ ...p, statusFilter: v }));
-                                        if (activeTab === 'story-reports') setStoryReportPage(1);
-                                        if (activeTab === 'comment-reports') setCommentReportPage(1);
-                                    }}
-                                    style={input}
-                                >
-                                    {REPORT_STATUS_FILTER_OPTIONS.map((opt) => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                    ))}
-                                </select>
                                 <button
                                     onClick={() => {
-                                        setFilters({ search: '', statusFilter: 'NEW', flaggedOnly: false });
+                                        setFilters((p) => ({ ...p, search: '', statusFilter: 'NEW', flaggedOnly: false }));
                                         setStoryReportPage(1);
                                         setCommentReportPage(1);
                                     }}
@@ -2022,7 +2446,7 @@ export default function ViolationManagement() {
                                     setFilters((p) => ({ ...p, search: v }));
                                     setHistoryPage(1);
                                 }}
-                                placeholder="Tìm theo đối tượng, nội dung..."
+                                placeholder="Tìm theo mã đơn, đối tượng, nội dung..."
                                 style={input}
                             />
                             <select
@@ -2064,8 +2488,8 @@ export default function ViolationManagement() {
                     )}
                 </div>
 
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm min-h-[62vh] flex flex-col">
-                    <div className="flex-1">
+                <div className="bg-white rounded-xl border border-slate-200 shadow-sm min-h-[62vh] flex flex-col overflow-visible">
+                    <div className="flex-1 overflow-visible">
                         {loading ? <div className="p-8 text-center text-slate-500 text-sm">Đang tải...</div> : error ? <div className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : (
                             activeTab === 'story-reports'
                                 ? (showClaimedStoryList
@@ -2079,7 +2503,7 @@ export default function ViolationManagement() {
                                         ? renderComplianceHistory()
                                         : activeTab === 'lock-requests' ? renderLockRequests()
                                             : activeTab === 'compliance-logs' ? (
-                                                <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-slate-50"><th style={th}>Thời điểm</th><th style={th}>Nhân viên kiểm duyệt</th><th style={th}>Nguồn</th><th style={th}>Hành động</th><th style={th}>Trạng thái</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-slate-200 hover:bg-slate-50/70"><td style={td}>{formatDate(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
+                                                <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-slate-50"><th style={th}>Thời điểm</th><th style={th}>Nhân viên kiểm duyệt</th><th style={th}>Nguồn</th><th style={th}>Hành động</th><th style={th}>Trạng thái</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-slate-200 hover:bg-slate-50/70"><td style={td}>{formatLogTimestampVi(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
                                             ) : (
                                                 <div className="p-8 text-center text-slate-500 text-sm">Không có dữ liệu hiển thị.</div>
                                             )
@@ -2147,6 +2571,16 @@ export default function ViolationManagement() {
                                             <option value="VERIFIED">Đã xác minh</option>
                                             <option value="UNVERIFIED">Chưa xác minh</option>
                                         </select>
+                                        {(() => {
+                                            const allContributors = collectContributors(selectedStory, storyTickets);
+                                            const total = allContributors.length;
+                                            const verified = countVerifiedContributors(allContributors);
+                                            return (
+                                                <span className="ml-auto text-xs font-semibold text-slate-600 text-right">
+                                                    Đã xác minh: {verified}/{total}
+                                                </span>
+                                            );
+                                        })()}
                                     </div>
                                     {(() => {
                                         let contributors = collectContributors(selectedStory, storyTickets);
@@ -2216,7 +2650,7 @@ export default function ViolationManagement() {
                                     type="button"
                                     onClick={() => setViolationPolicyTab('USER')}
                                     className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${violationPolicyTab === 'USER'
-                                        ? 'bg-primary/15 border-primary/40 text-primary'
+                                        ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
                                         : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                                         }`}
                                 >
@@ -2226,7 +2660,7 @@ export default function ViolationManagement() {
                                     type="button"
                                     onClick={() => setViolationPolicyTab('AUTHOR')}
                                     className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${violationPolicyTab === 'AUTHOR'
-                                        ? 'bg-primary/15 border-primary/40 text-primary'
+                                        ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
                                         : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                                         }`}
                                 >
@@ -2314,7 +2748,7 @@ export default function ViolationManagement() {
                                         </div>
                                         <button
                                             onClick={() => handleClaimStoryFromPicker(r)}
-                                            className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"
+                                            className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600"
                                         >
                                             Nhận
                                         </button>
@@ -2357,7 +2791,7 @@ export default function ViolationManagement() {
                                         <button
                                             type="button"
                                             onClick={() => handleClaimCommentFromPicker(r)}
-                                            className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 shrink-0"
+                                            className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600 shrink-0"
                                         >
                                             Nhận
                                         </button>
@@ -2421,6 +2855,16 @@ export default function ViolationManagement() {
                                     <option value="VERIFIED">Đã xác minh</option>
                                     <option value="UNVERIFIED">Chưa xác minh</option>
                                 </select>
+                                {(() => {
+                                    const allEvidence = Array.isArray(selectedComment.reporterDetails) ? selectedComment.reporterDetails : [];
+                                    const total = allEvidence.length;
+                                    const verified = countVerifiedEvidence(allEvidence);
+                                    return (
+                                        <span className="ml-auto text-xs font-semibold text-slate-600 text-right">
+                                            Đã xác minh: {verified}/{total}
+                                        </span>
+                                    );
+                                })()}
                             </div>
                             {Array.isArray(selectedComment.reporterDetails) && selectedComment.reporterDetails.length > 0 ? (
                                 <div className="grid gap-2">
@@ -2489,50 +2933,100 @@ export default function ViolationManagement() {
                 </Modal>
             )}
 
-            {actionModal?.type === 'story' || actionModal?.type === 'comment' ? (
-                <Modal title="Gửi yêu cầu xử lý lên quản trị viên" onClose={() => setActionModal(null)} maxWidth={620}>
-                    <div className="space-y-4">
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                            {actionModal?.type === 'comment'
-                                ? 'Đối với báo cáo bình luận, chỉ hỗ trợ gửi yêu cầu chặn tài khoản. Vui lòng mô tả rõ lý do để quản trị viên xem xét.'
-                                : 'Chọn hình thức xử lý phù hợp và mô tả rõ lý do để quản trị viên xem xét.'}
-                        </div>
-                        {actionModal?.type === 'comment' ? (
-                            <div className="text-sm text-slate-700">
-                                <span className="font-semibold">Hình thức xử lý:</span> Chặn tài khoản
+            {actionModal?.type === 'story' || actionModal?.type === 'comment' ? (() => {
+                const dm = actionModal.adminDialogMode ?? 'account';
+                const isComment = actionModal.type === 'comment';
+                const banned = String(actionModal.authorAccountStatus || '').toUpperCase() === 'BANNED';
+                const wEnd = actionModal.authorWritingSuspendedUntilUtc ? new Date(actionModal.authorWritingSuspendedUntilUtc) : null;
+                const writingActive = !!(wEnd && !Number.isNaN(wEnd.getTime()) && wEnd.getTime() > Date.now());
+                const submitBlocked = adminActionSubmitting || banned || (dm === 'writing' && writingActive);
+                const modalTitle = dm === 'writing'
+                    ? 'Gửi yêu cầu tạm đình chỉ quyền viết lên quản trị viên'
+                    : 'Gửi yêu cầu chặn tài khoản lên quản trị viên';
+                return (
+                    <Modal title={modalTitle} onClose={() => setActionModal(null)} maxWidth={620}>
+                        <div className="space-y-4">
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                                {dm === 'account' && isComment
+                                    ? 'Gửi yêu cầu chặn tài khoản người bình luận. Mô tả rõ lý do để quản trị viên xem xét.'
+                                    : null}
+                                {dm === 'account' && !isComment
+                                    ? 'Gửi yêu cầu chặn tài khoản tác giả truyện. Mô tả rõ lý do để quản trị viên xem xét.'
+                                    : null}
+                                {dm === 'writing' && isComment
+                                    ? 'Gửi yêu cầu tạm đình chỉ quyền viết của tài khoản liên quan bình luận. Chọn thời hạn tối thiểu 1 ngày từ hiện tại và nêu rõ lý do.'
+                                    : null}
+                                {dm === 'writing' && !isComment
+                                    ? 'Gửi yêu cầu tạm đình chỉ quyền viết của tác giả. Chọn thời hạn tối thiểu 1 ngày từ hiện tại và nêu rõ lý do.'
+                                    : null}
                             </div>
-                        ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <label className="text-sm font-semibold text-slate-700">
-                                    Hình thức xử lý
-                                    <select value={adminActionForm.requestKind} onChange={(e) => setAdminActionForm((p) => ({ ...p, requestKind: e.target.value }))} style={{ ...input, width: '100%', marginTop: 6 }}>
-                                        <option value="BAN_USER">Chặn tài khoản</option>
-                                        <option value="SUSPEND_AUTHOR_WRITING">Tạm đình chỉ quyền viết</option>
-                                    </select>
+                            {banned ? (
+                                <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                                    <strong className="font-semibold">Cảnh báo:</strong>{' '}
+                                    Tài khoản này đã bị chặn. Không thể gửi thêm yêu cầu chặn tài khoản hoặc tạm đình chỉ quyền viết.
+                                </div>
+                            ) : null}
+                            {!banned && dm === 'writing' && writingActive ? (
+                                <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-950">
+                                    <strong className="font-semibold">Cảnh báo:</strong>{' '}
+                                    Tài khoản đang bị tạm đình chỉ quyền viết đến{' '}
+                                    <strong>{formatViLocalFromIso(actionModal.authorWritingSuspendedUntilUtc)}</strong>
+                                    {' '}(giờ địa phương). Không thể gửi đơn đình chỉ quyền viết mới cho đến khi hết thời hạn.
+                                </div>
+                            ) : null}
+                            {dm === 'account' ? (
+                                <div className="text-sm text-slate-700">
+                                    <span className="font-semibold">Hình thức xử lý:</span> Chặn tài khoản
+                                </div>
+                            ) : (
+                                <label className="block text-sm font-semibold text-slate-700">
+                                    Thời hạn đình chỉ (tối thiểu 1 ngày từ hiện tại)
+                                    <input
+                                        type="datetime-local"
+                                        value={adminActionForm.proposedSuspendUntilUtc}
+                                        onChange={(e) => setAdminActionForm((p) => ({ ...p, proposedSuspendUntilUtc: e.target.value }))}
+                                        style={{ ...input, width: '100%', marginTop: 6 }}
+                                        disabled={submitBlocked && !adminActionSubmitting}
+                                    />
                                 </label>
-                                {adminActionForm.requestKind === 'SUSPEND_AUTHOR_WRITING' && (
-                                    <label className="text-sm font-semibold text-slate-700">
-                                        Thời hạn đình chỉ
-                                        <input type="datetime-local" value={adminActionForm.proposedSuspendUntilUtc} onChange={(e) => setAdminActionForm((p) => ({ ...p, proposedSuspendUntilUtc: e.target.value }))} style={{ ...input, width: '100%', marginTop: 6 }} />
-                                    </label>
-                                )}
+                            )}
+                            <label className="text-sm font-semibold text-slate-700">
+                                Lý do đề xuất
+                                <textarea
+                                    value={adminActionForm.message}
+                                    onChange={(e) => setAdminActionForm((p) => ({ ...p, message: e.target.value }))}
+                                    style={{ ...input, width: '100%', marginTop: 6, minHeight: 110, resize: 'vertical' }}
+                                    disabled={submitBlocked && !adminActionSubmitting}
+                                />
+                                {dm === 'account' ? (
+                                    <p
+                                        className={`text-xs mt-1.5 m-0 leading-relaxed whitespace-pre-line ${countWords(adminActionForm.message) < COMPLIANCE_BAN_REASON_MIN_WORDS
+                                            ? 'text-amber-700'
+                                            : 'text-slate-500'
+                                            }`}
+                                    >
+                                        {`${countWords(adminActionForm.message)} / ${COMPLIANCE_BAN_REASON_MIN_WORDS} từ (tối thiểu khi chặn tài khoản)
+Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức độ nghiêm trọng) để quản trị viên có cơ sở xem xét; nội dung quá ngắn hoặc chung chung có thể bị từ chối.`}
+                                    </p>
+                                ) : null}
+                            </label>
+                            {adminActionError ? (
+                                <div className="text-sm text-red-600">{adminActionError}</div>
+                            ) : null}
+                            <div className="flex justify-end">
+                                <button
+                                    type="button"
+                                    style={{ ...btn, background: '#0ea5e9', color: '#fff', borderColor: '#0ea5e9' }}
+                                    onClick={submitAdminAction}
+                                    disabled={submitBlocked}
+                                >
+                                    {adminActionSubmitting ? 'Đang gửi...' : 'Gửi yêu cầu'}
+                                </button>
                             </div>
-                        )}
-                        <label className="text-sm font-semibold text-slate-700">
-                            Lý do đề xuất
-                            <textarea value={adminActionForm.message} onChange={(e) => setAdminActionForm((p) => ({ ...p, message: e.target.value }))} placeholder="Mô tả ngắn gọn lý do đề xuất xử lý..." style={{ ...input, width: '100%', marginTop: 6, minHeight: 110, resize: 'vertical' }} />
-                        </label>
-                        {adminActionError ? (
-                            <div className="text-sm text-red-600">{adminActionError}</div>
-                        ) : null}
-                        <div className="flex justify-end">
-                            <button style={{ ...btn, background: '#0ea5e9', color: '#fff', borderColor: '#0ea5e9' }} onClick={submitAdminAction} disabled={adminActionSubmitting}>
-                                {adminActionSubmitting ? 'Đang gửi...' : 'Gửi yêu cầu'}
-                            </button>
                         </div>
-                    </div>
-                </Modal>
-            ) : null}
+                    </Modal>
+                );
+            })() : null}
 
             {actionModal?.type === 'lock' && (
                 <Modal title="Quản trị viên xử lý yêu cầu gỡ khóa đơn" onClose={() => setActionModal(null)}>
@@ -2617,6 +3111,59 @@ export default function ViolationManagement() {
                 </Modal>
             )}
 
+            {commentReleaseConfirmTarget && (
+                <Modal title="Trả đơn bình luận về hàng đợi?" maxWidth={520} onClose={() => {
+                    if (releasingCommentId) return;
+                    setCommentReleaseConfirmTarget(null);
+                    setCommentReleaseFormError('');
+                }}>
+                    <div style={{ display: 'grid', gap: 10 }}>
+                        <p className="text-sm text-slate-600 m-0">
+                            Yêu cầu này sẽ gửi lên quản trị viên. Sau khi được duyệt, đơn bình luận sẽ được trả về hàng đợi xử lý chung.
+                        </p>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                            <span className="text-slate-500">Comment:</span> <strong>{commentReleaseConfirmTarget.commentId}</strong>
+                            {commentReleaseConfirmTarget.storyTitle ? <> - {commentReleaseConfirmTarget.storyTitle}</> : null}
+                            {commentReleaseConfirmTarget.reportCount > 0 ? <> ({commentReleaseConfirmTarget.reportCount} báo cáo)</> : null}
+                        </div>
+                        <label className="text-sm font-semibold text-slate-700">
+                            Lý do gửi yêu cầu <span className="text-red-500">*</span> (tối thiểu 10 ký tự)
+                            <textarea
+                                value={commentReleaseReason}
+                                onChange={(e) => {
+                                    setCommentReleaseReason(e.target.value);
+                                    if (commentReleaseFormError) setCommentReleaseFormError('');
+                                }}
+                                rows={4}
+                                placeholder="Ví dụ: Tôi cần hủy nhận đơn comment này để chuyển người xử lý phù hợp hơn."
+                                disabled={!!releasingCommentId}
+                                style={{ ...input, width: '100%', marginTop: 6, minHeight: 96, resize: 'vertical' }}
+                            />
+                        </label>
+                        {commentReleaseFormError ? <div className="text-sm text-red-600">{commentReleaseFormError}</div> : null}
+                        <div className="flex justify-end gap-2">
+                            <button
+                                style={btn}
+                                disabled={!!releasingCommentId}
+                                onClick={() => {
+                                    setCommentReleaseConfirmTarget(null);
+                                    setCommentReleaseFormError('');
+                                }}
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                style={{ ...btn, background: releasingCommentId ? '#94a3b8' : '#dc2626', color: '#fff', borderColor: releasingCommentId ? '#94a3b8' : '#dc2626' }}
+                                disabled={!!releasingCommentId}
+                                onClick={confirmCommentReleaseRequest}
+                            >
+                                {releasingCommentId ? 'Đang gửi...' : 'Gửi đơn lên quản trị'}
+                            </button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
+
             {storyActionConfirm && (
                 <Modal
                     title={storyActionConfirm.title || 'Xác nhận thao tác'}
@@ -2666,6 +3213,14 @@ export default function ViolationManagement() {
                         <div className="text-sm text-slate-600">
                             <span className="font-semibold">Đối tượng:</span> {bulkResolveModal.targetLabel || '—'}
                         </div>
+                        {coerceBool(bulkResolveModal.hasApprovedAdminBanRequest) && (
+                            <div
+                                className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-3 py-2"
+                                role="status"
+                            >
+                                Đã có yêu cầu chặn tài khoản được quản trị viên chấp nhận — chỉ được chọn «Đã xử lý thành công».
+                            </div>
+                        )}
                         <div className="grid gap-2">
                             <label className="inline-flex items-start gap-2 text-sm text-slate-700">
                                 <input
@@ -2686,7 +3241,7 @@ export default function ViolationManagement() {
                                     name="bulkResolveStatus"
                                     checked={bulkResolveStatus === 'DISMISSED'}
                                     onChange={() => setBulkResolveStatus('DISMISSED')}
-                                    disabled={bulkResolveBusy}
+                                    disabled={bulkResolveBusy || coerceBool(bulkResolveModal.hasApprovedAdminBanRequest)}
                                 />
                                 <span>
                                     <span className="font-semibold">Không xử lý được (không đủ bằng chứng)</span>
@@ -2725,53 +3280,9 @@ export default function ViolationManagement() {
                 </Modal>
             )}
 
-            {accountViolationModal && (
-                <Modal
-                    title={`Lịch sử vi phạm — ${accountViolationModal.displayName}`}
-                    maxWidth={720}
-                    onClose={() => {
-                        setAccountViolationModal(null);
-                        setAccountViolationRows([]);
-                    }}
-                >
-                    {accountViolationLoading ? (
-                        <div className="text-sm text-slate-600">Đang tải...</div>
-                    ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full border-collapse text-sm">
-                                <thead>
-                                    <tr className="bg-slate-50">
-                                        <th style={th}>Thời điểm</th>
-                                        <th style={th}>Loại hình</th>
-                                        <th style={th}>Mô tả</th>
-                                        <th style={th}>Người thao tác</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {accountViolationRows.length === 0 ? (
-                                        <tr>
-                                            <td colSpan={4} className="p-4 text-center text-slate-500">Chưa có bản ghi nhật ký vi phạm cho tài khoản này.</td>
-                                        </tr>
-                                    ) : (
-                                        accountViolationRows.map((row) => (
-                                            <tr key={String(row.id ?? row.Id)} className="border-t border-slate-200">
-                                                <td style={td}>{formatDate(row.createdAtUtc ?? row.CreatedAtUtc)}</td>
-                                                <td style={td}>{penaltyTypeVi(row.penaltyType ?? row.PenaltyType)}</td>
-                                                <td style={td}>{violationReasonDisplayVi(row.reason ?? row.Reason)}</td>
-                                                <td style={td}>{row.complianceOfficerDisplayName ?? row.ComplianceOfficerDisplayName ?? '—'}</td>
-                                            </tr>
-                                        ))
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </Modal>
-            )}
-
             {myRequestsModalOpen && (
                 <Modal
-                    title="Đơn đã gửi lên quản trị viên"
+                    title="Đơn đã gửi quản trị viên"
                     maxWidth={1040}
                     onClose={() => {
                         setMyRequestsModalOpen(false);
@@ -2914,5 +3425,16 @@ const th = {
 const td = { padding: '0.75rem', color: '#334155', verticalAlign: 'top', fontSize: '0.875rem' };
 const input = { border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.6rem 0.75rem', fontSize: '0.875rem', color: '#0f172a', background: '#f8fafc' };
 const btn = { display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', borderRadius: 8, padding: '0.4rem 0.7rem', cursor: 'pointer', whiteSpace: 'nowrap' };
-const menuBtn = { display: 'block', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', color: '#334155', borderRadius: 8, padding: '0.5rem 0.6rem', cursor: 'pointer', fontSize: '0.84rem' };
+const menuBtn = {
+    display: 'block',
+    width: '100%',
+    textAlign: 'left',
+    border: 'none',
+    background: 'transparent',
+    color: '#334155',
+    borderRadius: 8,
+    padding: '0.5rem 0.6rem',
+    cursor: 'pointer',
+    fontSize: '0.84rem',
+};
 const _iconBtn = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34, border: '1px solid #dbe2ea', background: '#fff', color: '#64748b', borderRadius: 10, cursor: 'pointer' };

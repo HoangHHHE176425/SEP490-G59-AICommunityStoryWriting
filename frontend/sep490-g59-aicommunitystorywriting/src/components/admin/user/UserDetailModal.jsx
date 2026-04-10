@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, User, Mail, Shield, Calendar, LogIn, Ban, CheckCircle, Phone, FileText } from 'lucide-react';
+import { X, User, Mail, Shield, Calendar, LogIn, Ban, CheckCircle, Phone, FileText, Trash2 } from 'lucide-react';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 import { getUserDisplayName, updateUserRole } from '../../../api/admin/userManagementApi';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -20,25 +20,37 @@ function formatDate(value) {
     return new Date(value).toLocaleString('vi-VN');
 }
 
-export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignModerator }) {
+export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignModerator, onDeleteUser }) {
     const { user: currentUser } = useAuth();
     const [selectedRole, setSelectedRole] = useState('USER');
     const [savingRole, setSavingRole] = useState(false);
     const [roleError, setRoleError] = useState('');
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [deleteEmailInput, setDeleteEmailInput] = useState('');
+    const [deleteLoading, setDeleteLoading] = useState(false);
+    const [deleteError, setDeleteError] = useState('');
 
     useEffect(() => {
         if (user?.role) {
             setSelectedRole(String(user.role).toUpperCase());
         }
         setRoleError('');
+        setDeleteOpen(false);
+        setDeleteEmailInput('');
+        setDeleteError('');
     }, [user?.id, user?.role]);
 
     if (!user) return null;
 
     const isBanned = user.status === 'BANNED';
+    const isDeleted = String(user.status ?? '').toUpperCase() === 'DELETED';
+    const roleUpper = String(user?.role ?? '').toUpperCase();
     const roleDirty = user.role !== selectedRole;
     const isSelf = Boolean(currentUser?.id && user?.id && String(currentUser.id) === String(user.id));
-    const isSelfAdminRole = isSelf && String(user?.role ?? '').toUpperCase() === 'ADMIN';
+    const isSelfAdminRole = isSelf && roleUpper === 'ADMIN';
+    const isTargetAdmin = roleUpper === 'ADMIN';
+    const canDelete =
+        Boolean(onDeleteUser) && !isSelf && !isTargetAdmin && !isDeleted && Boolean(user.email);
 
     const handleSaveRole = async () => {
         if (isSelfAdminRole) {
@@ -59,6 +71,28 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
             setRoleError(msg);
         } finally {
             setSavingRole(false);
+        }
+    };
+
+    const handleConfirmDelete = async () => {
+        if (!onDeleteUser || !user?.email) return;
+        if (deleteEmailInput.trim() !== String(user.email).trim()) {
+            setDeleteError('Email không khớp. Nhập đúng email của tài khoản cần xóa.');
+            return;
+        }
+        setDeleteError('');
+        setDeleteLoading(true);
+        try {
+            const res = await onDeleteUser(user);
+            if (res?.success) {
+                onClose();
+            } else {
+                setDeleteError(res?.message || 'Không thể xóa tài khoản.');
+            }
+        } catch {
+            setDeleteError('Không thể xóa tài khoản.');
+        } finally {
+            setDeleteLoading(false);
         }
     };
 
@@ -191,6 +225,76 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                             </button>
                         </div>
                     </div>
+
+                    {canDelete ? (
+                        <div className="border-t border-red-200 bg-red-50/40 rounded-xl p-4 mt-4 space-y-3">
+                            <div className="flex items-center gap-2">
+                                <Trash2 className="w-4 h-4 text-red-600" />
+                                <h3 className="font-semibold text-red-900">Xóa tài khoản (soft delete)</h3>
+                            </div>
+                            <p className="text-sm text-slate-600">
+                                Tài khoản sẽ chuyển trạng thái <strong>Đã xóa</strong>, không đăng nhập được. Email sẽ bị thay bằng giá trị ẩn danh trên hệ thống. Hành động không hoàn tác qua giao diện này.
+                            </p>
+                            {!deleteOpen ? (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setDeleteOpen(true);
+                                        setDeleteEmailInput('');
+                                        setDeleteError('');
+                                    }}
+                                    className="px-4 py-2 border-2 border-red-300 text-red-700 rounded-lg font-semibold text-sm hover:bg-red-100 transition-colors"
+                                >
+                                    Xóa tài khoản…
+                                </button>
+                            ) : (
+                                <div className="space-y-2">
+                                    <p className="text-sm text-slate-700">
+                                        Nhập đúng email <span className="font-mono font-medium">{user.email}</span> để xác nhận.
+                                    </p>
+                                    <input
+                                        type="text"
+                                        value={deleteEmailInput}
+                                        onChange={(e) => {
+                                            setDeleteEmailInput(e.target.value);
+                                            setDeleteError('');
+                                        }}
+                                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500/30 focus:border-red-500"
+                                        placeholder="Email người dùng"
+                                        autoComplete="off"
+                                    />
+                                    {deleteError ? <p className="text-sm text-red-600">{deleteError}</p> : null}
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            disabled={deleteLoading || deleteEmailInput.trim() !== String(user.email).trim()}
+                                            onClick={handleConfirmDelete}
+                                            className="px-4 py-2 bg-red-600 text-white rounded-lg font-semibold text-sm hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {deleteLoading ? 'Đang xóa…' : 'Xác nhận xóa'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={deleteLoading}
+                                            onClick={() => {
+                                                setDeleteOpen(false);
+                                                setDeleteEmailInput('');
+                                                setDeleteError('');
+                                            }}
+                                            className="px-4 py-2 border border-slate-300 rounded-lg font-semibold text-sm text-slate-700 hover:bg-slate-50"
+                                        >
+                                            Hủy
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    ) : null}
+                    {onDeleteUser && !isDeleted && (isSelf || isTargetAdmin) ? (
+                        <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-4">
+                            {isSelf ? 'Không thể xóa tài khoản đang đăng nhập.' : 'Không thể xóa tài khoản quản trị viên.'}
+                        </p>
+                    ) : null}
                 </div>
                 <div className="p-4 border-t border-slate-200 flex gap-2">
                     <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 border border-slate-300 rounded-xl font-semibold text-slate-700 hover:bg-slate-50">
@@ -200,7 +304,7 @@ export function UserDetailModal({ user, onClose, onBlock, onUnblock, onAssignMod
                         <button type="button" onClick={() => { onUnblock?.(user); onClose(); }} className="flex-1 px-4 py-2.5 bg-emerald-500 text-white rounded-xl font-semibold hover:bg-emerald-600 flex items-center justify-center gap-2">
                             <CheckCircle className="w-4 h-4" /> Mở khóa
                         </button>
-                    ) : user.status !== 'DELETED' ? (
+                    ) : !isDeleted ? (
                         <button type="button" onClick={() => { onBlock?.(user); onClose(); }} className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-xl font-semibold hover:bg-red-600 flex items-center justify-center gap-2">
                             <Ban className="w-4 h-4" /> Khóa tài khoản
                         </button>

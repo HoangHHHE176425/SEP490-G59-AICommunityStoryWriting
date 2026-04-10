@@ -13,10 +13,10 @@ public interface IStoryReportService
     Task<bool> UpdateReportStatusAsync(Guid reportId, Guid actorId, string newStatus, bool actorIsAdmin);
 
     /// <summary>COMPLIANCE đang lock truyện: đánh dấu một báo cáo RESOLVED/DISMISSED.</summary>
-    Task<bool> ComplianceResolveReportAsync(Guid reportId, Guid complianceUserId, ComplianceResolveReportRequestDto? dto);
+    Task<bool> ComplianceResolveReportAsync(Guid reportId, Guid complianceUserId, ComplianceResolveReportRequestDto? dto, bool actorIsAdmin);
 
     /// <summary>COMPLIANCE đang lock: đóng mọi báo cáo NEW/IN_REVIEW của truyện.</summary>
-    Task<int> ComplianceResolveOpenReportsForStoryAsync(Guid storyId, Guid complianceUserId, ComplianceResolveReportRequestDto? dto);
+    Task<int> ComplianceResolveOpenReportsForStoryAsync(Guid storyId, Guid complianceUserId, ComplianceResolveReportRequestDto? dto, bool actorIsAdmin);
 
     /// <summary>Đánh dấu / gỡ đánh dấu xác minh cho từng người báo (story_report_contributors).</summary>
     Task<int> SetComplianceStoryContributorVerifiedAsync(
@@ -51,6 +51,9 @@ public interface IStoryReportService
     Task SetStoryCommentsDisabledAsync(Guid storyId, Guid actorId, bool disabled, bool actorIsAdmin);
 
     Task SetStoryComplianceHiddenAsync(Guid storyId, Guid actorId, bool hidden, bool actorIsAdmin);
+
+    /// <summary>COMPLIANCE (hoặc ADMIN): bật/tắt tạm khóa quyền viết của tác giả truyện, không qua đơn admin.</summary>
+    Task SetAuthorWritingSuspendedByComplianceAsync(Guid storyId, Guid actorId, bool suspended, bool actorIsAdmin);
 
     Task<Guid> RequestComplianceAdminActionAsync(Guid storyId, Guid requesterId, CreateComplianceAdminActionRequestDto dto, bool actorIsAdmin);
 

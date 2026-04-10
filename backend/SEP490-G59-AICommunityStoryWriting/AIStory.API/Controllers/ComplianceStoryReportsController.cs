@@ -105,14 +105,14 @@ public class ComplianceStoryReportsController : ControllerBase
                 CreatedAtUtc = x.created_at
             });
 
-        var lockQ = db.compliance_story_report_lock_requests.AsNoTracking()
+        var lockQ = db.compliance_report_lock_requests.AsNoTracking()
             .Where(x => x.requester_id == uid.Value)
             .Select(x => new ComplianceLogItemDto
             {
                 Source = SrcLockRequest,
                 RowId = x.id,
-                TargetType = "STORY",
-                TargetId = x.story_id,
+                TargetType = x.target_type,
+                TargetId = x.target_id,
                 Status = x.status,
                 Action = x.resolution_action,
                 Message = x.message,
@@ -201,7 +201,7 @@ public class ComplianceStoryReportsController : ControllerBase
             return Unauthorized();
         try
         {
-            await _storyReportService.ComplianceResolveReportAsync(reportId, uid.Value, body);
+            await _storyReportService.ComplianceResolveReportAsync(reportId, uid.Value, body, User.IsInRole("ADMIN"));
             return Ok(new { message = "Đã cập nhật trạng thái báo cáo." });
         }
         catch (ArgumentException ex)
@@ -264,7 +264,7 @@ public class ComplianceStoryReportsController : ControllerBase
             return Unauthorized();
         try
         {
-            var n = await _storyReportService.ComplianceResolveOpenReportsForStoryAsync(storyId, uid.Value, body);
+            var n = await _storyReportService.ComplianceResolveOpenReportsForStoryAsync(storyId, uid.Value, body, User.IsInRole("ADMIN"));
             return Ok(new { message = n > 0 ? $"Đã đóng {n} báo cáo." : "Không còn báo cáo mở.", closedCount = n });
         }
         catch (ArgumentException ex)
@@ -426,6 +426,25 @@ public class ComplianceStoryReportsController : ControllerBase
         try
         {
             await _storyReportService.SetStoryComplianceHiddenAsync(storyId, userId.Value, body?.Value ?? false, isAdmin);
+            return Ok(new { message = "Đã cập nhật." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>Bật/tắt tạm khóa quyền viết của tác giả truyện (compliance/admin, không qua đơn admin).</summary>
+    [HttpPost("stories/{storyId:guid}/author-writing-suspended")]
+    public async Task<IActionResult> SetAuthorWritingSuspended(Guid storyId, [FromBody] SetComplianceStoryBoolRequestDto? body)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue) return Unauthorized();
+        var isAdmin = User.IsInRole("ADMIN");
+        try
+        {
+            await _storyReportService.SetAuthorWritingSuspendedByComplianceAsync(
+                storyId, userId.Value, body?.Value ?? false, isAdmin);
             return Ok(new { message = "Đã cập nhật." });
         }
         catch (InvalidOperationException ex)

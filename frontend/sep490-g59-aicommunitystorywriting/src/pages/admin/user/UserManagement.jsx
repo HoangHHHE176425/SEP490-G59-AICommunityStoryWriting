@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { UserList } from '../../../components/admin/user/UserList';
 import { UserDetailModal } from '../../../components/admin/user/UserDetailModal';
 import { Pagination } from '../../../components/pagination/Pagination';
-import { getUsers, getStats, updateUserStatus } from '../../../api/admin/userManagementApi';
+import { getUsers, getStats, updateUserStatus, deleteUser } from '../../../api/admin/userManagementApi';
 import { Search } from 'lucide-react';
 
 const PAGE_SIZE = 10;
@@ -99,6 +99,15 @@ export function UserManagement() {
         } catch (err) {
             console.error(err);
         }
+    };
+
+    const handleDeleteUser = async (user) => {
+        const res = await deleteUser(user.id);
+        if (res.success) {
+            loadUsers(currentPage);
+            loadStats();
+        }
+        return res;
     };
 
     const getStatByFilter = () => {
@@ -218,6 +227,7 @@ export function UserManagement() {
                     onClose={handleCloseDetail}
                     onBlock={handleBlock}
                     onUnblock={handleUnblock}
+                    onDeleteUser={handleDeleteUser}
                     onAssignModerator={(newRole) => {
                         if (newRole) {
                             setSelectedUser((prev) => (prev ? { ...prev, role: newRole } : null));

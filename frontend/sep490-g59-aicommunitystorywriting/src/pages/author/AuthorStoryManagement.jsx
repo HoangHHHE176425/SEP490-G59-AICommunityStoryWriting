@@ -102,23 +102,10 @@ function mapStoryFromApi(item) {
     };
 }
 
-function formatSuspensionUntilVi(dateValue) {
-    if (!dateValue) return '';
-    const raw = String(dateValue).trim();
-    // Nếu backend trả datetime không kèm timezone (Kind=Unspecified), coi đó là UTC để tránh lệch giờ.
-    const normalized = /(Z|[+-]\d{2}:\d{2}|[+-]\d{4})$/i.test(raw) ? raw : `${raw}Z`;
-    const d = new Date(normalized);
-    if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleString('vi-VN', {
-        timeZone: 'Asia/Ho_Chi_Minh',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-    });
-}
+const AUTHOR_WRITING_SUSPENDED_BANNER =
+    'Tài khoản đang bị tạm đình chỉ quyền viết để điều tra vi phạm.';
+const AUTHOR_WRITING_SUSPENDED_TOOLTIP =
+    'Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm.';
 
 const BANK_ACCOUNT_NUMBER_MIN = 6;
 const BANK_ACCOUNT_NUMBER_MAX = 19;
@@ -216,9 +203,6 @@ export function AuthorStoryManagement({ onBack }) {
             : `${String(authorWritingSuspendedUntilRaw).trim()}Z`)
         : null;
     const isAuthorWritingSuspended = !!(authorWritingSuspendedUntilDate && !Number.isNaN(authorWritingSuspendedUntilDate.getTime()) && authorWritingSuspendedUntilDate.getTime() > Date.now());
-    const authorWritingSuspendedUntilLabel = isAuthorWritingSuspended
-        ? formatSuspensionUntilVi(authorWritingSuspendedUntilDate)
-        : '';
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
 
@@ -302,6 +286,13 @@ export function AuthorStoryManagement({ onBack }) {
     const [profileFollowersCount, setProfileFollowersCount] = useState(0);
     const [showBankModal, setShowBankModal] = useState(false);
     const [showHistoryModal, setShowHistoryModal] = useState(false);
+    const [historyModalTab, setHistoryModalTab] = useState('donate');
+    const [authorUnlockItems, setAuthorUnlockItems] = useState([]);
+    const [authorUnlockLoading, setAuthorUnlockLoading] = useState(false);
+    const [authorUnlockError, setAuthorUnlockError] = useState(null);
+    const [authorUnlockPage, setAuthorUnlockPage] = useState(1);
+    const [authorUnlockTotalCount, setAuthorUnlockTotalCount] = useState(0);
+    const AUTHOR_UNLOCK_PAGE_SIZE = 20;
     const [showFollowersModal, setShowFollowersModal] = useState(false);
     const [followersItems, setFollowersItems] = useState([]);
     const [followersLoading, setFollowersLoading] = useState(false);
@@ -587,6 +578,46 @@ export function AuthorStoryManagement({ onBack }) {
         };
     }, [activeView, authorId, showHistoryModal]);
 
+    const loadAuthorUnlockHistory = useCallback(async (page = 1) => {
+        if (!authorId) {
+            setAuthorUnlockItems([]);
+            setAuthorUnlockTotalCount(0);
+            setAuthorUnlockError(null);
+            return;
+        }
+        setAuthorUnlockLoading(true);
+        setAuthorUnlockError(null);
+        try {
+            const res = await coinApi.getAuthorUnlockChapterIncomeHistory({
+                page,
+                pageSize: AUTHOR_UNLOCK_PAGE_SIZE,
+            });
+            if (res?.success && res?.data) {
+                setAuthorUnlockItems(res.data.items ?? res.data.Items ?? []);
+                setAuthorUnlockTotalCount(Number(res.data.totalCount ?? res.data.TotalCount ?? 0));
+                setAuthorUnlockPage(Number(res.data.page ?? res.data.Page ?? page) || 1);
+            } else {
+                setAuthorUnlockItems([]);
+                setAuthorUnlockTotalCount(0);
+                if (!res?.success) {
+                    setAuthorUnlockError(res?.message ?? 'Không tải được lịch sử mở khóa chương.');
+                }
+            }
+        } catch {
+            setAuthorUnlockItems([]);
+            setAuthorUnlockTotalCount(0);
+            setAuthorUnlockError('Không tải được lịch sử mở khóa chương.');
+        } finally {
+            setAuthorUnlockLoading(false);
+        }
+    }, [authorId]);
+
+    useEffect(() => {
+        if (!showHistoryModal || !authorId) return;
+        setHistoryModalTab('donate');
+        loadAuthorUnlockHistory(1);
+    }, [showHistoryModal, authorId, loadAuthorUnlockHistory]);
+
     const handleCancelWithdraw = (withdrawId) => {
         if (!withdrawId) return;
         setCancelWithdrawConfirm({ open: true, withdrawId });
@@ -713,7 +744,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleCreateStory = () => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         setCurrentStory(null);
@@ -722,7 +753,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleEditStory = async (story) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         const statusLower = String(story?.status ?? '').toLowerCase();
@@ -757,7 +788,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleAddChapter = async (story) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         const storyId = story?.id ?? story?.Id;
@@ -793,7 +824,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleEditChapter = async (chapter) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         setViewChapterOnly(false);
@@ -858,7 +889,7 @@ export function AuthorStoryManagement({ onBack }) {
     /** Mở màn tạo version mới: form để trống, chỉ cần chapter id + số chương để hiển thị. */
     const handleAddVersion = (story, chapterFromList) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         const chapterId = chapterFromList?.id ?? chapterFromList?.Id;
@@ -887,7 +918,7 @@ export function AuthorStoryManagement({ onBack }) {
     /** Mở editor chỉnh sửa version đã có: load chi tiết version rồi mở ChapterEditorPage ở chế độ edit version. */
     const handleEditVersion = async (chapter, versionFromList) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         const chapterId = chapter?.id ?? chapter?.Id;
@@ -974,7 +1005,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleSaveChapter = async (chapterData) => {
         if (isAuthorWritingSuspended && !viewChapterOnly) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             throw new Error('AUTHOR_WRITING_SUSPENDED');
         }
         const storyId = currentStory?.id ?? currentStory?.Id;
@@ -1085,7 +1116,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleDeleteStory = (storyId) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         if (!storyId) return;
@@ -1118,7 +1149,7 @@ export function AuthorStoryManagement({ onBack }) {
             categoryIds: storyData.categoryIds || [],
             ageRating: storyData.ageRating,
             storyProgressStatus: 'Đang ra',
-            coverImage: storyData.cover,
+            coverImage: storyData.coverFile || storyData.cover,
         };
         const created = await createStory(payload);
         const storyId = created?.id ?? created?.Id;
@@ -1145,7 +1176,7 @@ export function AuthorStoryManagement({ onBack }) {
                 status: 'PENDING_REVIEW',
                 ageRating: storyData.ageRating,
                 storyProgressStatus: storyData.storyProgressStatus,
-                coverImage: storyData.cover,
+                coverImage: storyData.coverFile || storyData.cover,
             });
         }
 
@@ -1220,7 +1251,7 @@ export function AuthorStoryManagement({ onBack }) {
                 status: storyPublishStatus,
                 storyProgressStatus: infoData.status || infoData.publishStatus,
                 ageRating: infoData.ageRating,
-                coverImage: infoData.cover,
+                coverImage: infoData.coverFile || infoData.cover,
             });
 
             // Update FE state đúng field (không ghi đè `status` publication bằng progress status UI).
@@ -1300,7 +1331,6 @@ export function AuthorStoryManagement({ onBack }) {
                 <ChapterListManager
                     story={currentStory}
                     isAuthorWritingSuspended={isAuthorWritingSuspended}
-                    authorWritingSuspendedUntilLabel={authorWritingSuspendedUntilLabel}
                     onBack={() => {
                         setActiveView('stories');
                         setCurrentStory(null);
@@ -2028,9 +2058,9 @@ export function AuthorStoryManagement({ onBack }) {
                                                     fontSize: '0.75rem',
                                                     fontWeight: 600,
                                                 }}
-                                                title={`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`}
+                                                title={AUTHOR_WRITING_SUSPENDED_TOOLTIP}
                                             >
-                                                Tài khoản đang bị tạm đình chỉ quyền viết để điều tra vi phạm. Thời hạn: {authorWritingSuspendedUntilLabel || 'Đang cập nhật'}.
+                                                {AUTHOR_WRITING_SUSPENDED_BANNER}
                                             </div>
                                         )}
                                     </div>
@@ -2038,7 +2068,7 @@ export function AuthorStoryManagement({ onBack }) {
                                 <button
                                     onClick={handleCreateStory}
                                     disabled={isAuthorWritingSuspended}
-                                    title={isAuthorWritingSuspended ? `Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.` : 'Thêm truyện mới'}
+                                    title={isAuthorWritingSuspended ? AUTHOR_WRITING_SUSPENDED_TOOLTIP : 'Thêm truyện mới'}
                                     style={{
                                         display: 'flex',
                                         alignItems: 'center',
@@ -2341,7 +2371,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                         disabled={isAuthorWritingSuspended || story.status === 'pending_review'}
                                                         title={
                                                             isAuthorWritingSuspended
-                                                                ? `Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`
+                                                                ? AUTHOR_WRITING_SUSPENDED_TOOLTIP
                                                                 : story.status === 'pending_review'
                                                                     ? 'Truyện đang ở trạng thái chờ duyệt, không thể chỉnh sửa'
                                                                     : 'Chỉnh sửa truyện'
@@ -2382,7 +2412,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                     <button
                                                         onClick={() => !isAuthorWritingSuspended && story.status === 'draft' && handleDeleteStory(story.id)}
                                                         disabled={isAuthorWritingSuspended || story.status !== 'draft'}
-                                                        title={isAuthorWritingSuspended ? `Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.` : story.status === 'draft' ? 'Xóa truyện' : 'Chỉ được xóa truyện khi ở trạng thái Bản nháp'}
+                                                        title={isAuthorWritingSuspended ? AUTHOR_WRITING_SUSPENDED_TOOLTIP : story.status === 'draft' ? 'Xóa truyện' : 'Chỉ được xóa truyện khi ở trạng thái Bản nháp'}
                                                         style={{
                                                             display: 'flex',
                                                             alignItems: 'center',
@@ -3017,8 +3047,8 @@ export function AuthorStoryManagement({ onBack }) {
                                     <History style={{ width: '22px', height: '22px', color: '#ffffff' }} />
                                 </div>
                                 <div style={{ minWidth: 0 }}>
-                                    <h2 id="history-modal-title" style={{ fontSize: '1.125rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>Lịch sử donate &amp; rút tiền</h2>
-                                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.35rem 0 0 0' }}>Theo dõi donate nhận được và các yêu cầu rút tiền.</p>
+                                    <h2 id="history-modal-title" style={{ fontSize: '1.125rem', fontWeight: 700, color: '#0f172a', margin: 0 }}>Lịch sử donate, mở khóa &amp; rút tiền</h2>
+                                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.35rem 0 0 0' }}>Donate nhận được, lượt mở khóa chương trả phí của độc giả và các yêu cầu rút tiền.</p>
                                 </div>
                             </div>
                             <button
@@ -3043,6 +3073,56 @@ export function AuthorStoryManagement({ onBack }) {
                         </div>
 
                         <div style={{ padding: '1.25rem 1.5rem 1.5rem' }}>
+                            <div
+                                role="tablist"
+                                aria-label="Chọn loại lịch sử"
+                                style={{
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    gap: '0.5rem',
+                                    marginBottom: '1.25rem',
+                                }}
+                            >
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={historyModalTab === 'donate'}
+                                    onClick={() => setHistoryModalTab('donate')}
+                                    style={{
+                                        padding: '0.5rem 1rem',
+                                        borderRadius: '10px',
+                                        border: historyModalTab === 'donate' ? '1px solid #22c55e' : '1px solid #e2e8f0',
+                                        backgroundColor: historyModalTab === 'donate' ? '#f0fdf4' : '#ffffff',
+                                        color: historyModalTab === 'donate' ? '#166534' : '#64748b',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    Donate &amp; rút tiền
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={historyModalTab === 'unlock'}
+                                    onClick={() => setHistoryModalTab('unlock')}
+                                    style={{
+                                        padding: '0.5rem 1rem',
+                                        borderRadius: '10px',
+                                        border: historyModalTab === 'unlock' ? '1px solid #22c55e' : '1px solid #e2e8f0',
+                                        backgroundColor: historyModalTab === 'unlock' ? '#f0fdf4' : '#ffffff',
+                                        color: historyModalTab === 'unlock' ? '#166534' : '#64748b',
+                                        fontSize: '0.8125rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                    }}
+                                >
+                                    Mở khóa chương
+                                </button>
+                            </div>
+
+                            {historyModalTab === 'donate' && (
+                            <>
                             <div style={{
                                 backgroundColor: '#f0fdf4',
                                 borderRadius: '14px',
@@ -3171,6 +3251,106 @@ export function AuthorStoryManagement({ onBack }) {
                                     </tbody>
                                 </table>
                             </div>
+                            </>
+                            )}
+
+                            {historyModalTab === 'unlock' && (
+                            <>
+                            <div style={{
+                                backgroundColor: '#f0f9ff',
+                                borderRadius: '14px',
+                                padding: '1rem 1.15rem',
+                                border: '1px solid #bae6fd',
+                                marginBottom: '1.25rem',
+                            }}
+                            >
+                                <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#0369a1', marginBottom: '0.25rem' }}>Mở khóa chương trả phí</div>
+                                <div style={{ fontSize: '0.8125rem', color: '#0c4a6e', lineHeight: 1.5 }}>
+                                    Mỗi dòng là một lượt độc giả mở khóa chương. <b>Coin đã trả</b> là số coin người đọc bị trừ; <b>Phí NT</b> và <b>Thực nhận</b> theo ghi nhận hệ thống (thu nhập tác giả sau phí nền tảng).
+                                </div>
+                            </div>
+                            <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                    <thead>
+                                        <tr style={{ backgroundColor: '#f8fafc' }}>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỜI GIAN</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>TRUYỆN</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>CHƯƠNG</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>COIN ĐÃ TRẢ</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>PHÍ NT</th>
+                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỰC NHẬN</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {authorUnlockLoading ? (
+                                            <tr>
+                                                <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
+                                            </tr>
+                                        ) : authorUnlockError ? (
+                                            <tr>
+                                                <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorUnlockError}</td>
+                                            </tr>
+                                        ) : authorUnlockItems.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={6} style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: '#64748b' }}>Chưa có lượt mở khóa nào.</td>
+                                            </tr>
+                                        ) : (
+                                            authorUnlockItems.map((row, idx) => {
+                                                const unlockedAt = row.unlockedAt ?? row.UnlockedAt;
+                                                const timeStr = unlockedAt
+                                                    ? new Date(unlockedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                                    : '—';
+                                                const storyTitle = row.storyTitle ?? row.StoryTitle ?? '—';
+                                                const chapterTitle = row.chapterTitle ?? row.ChapterTitle ?? '—';
+                                                const coinsPaid = Number(row.coinsPaid ?? row.CoinsPaid ?? 0);
+                                                const platformFee = Math.round(Number(row.platformFee ?? row.PlatformFee ?? 0));
+                                                const netAmount = Math.round(Number(row.netAmount ?? row.NetAmount ?? 0));
+                                                const vndPaid = coinsPaid * COIN_RATE_VND;
+                                                const vndNet = netAmount * COIN_RATE_VND;
+                                                const rowKey = row.purchaseId ?? row.PurchaseId ?? idx;
+                                                return (
+                                                    <tr key={String(rowKey)} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{timeStr}</td>
+                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151', maxWidth: '200px' }}>
+                                                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={storyTitle}>{storyTitle}</div>
+                                                        </td>
+                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151', maxWidth: '180px' }}>
+                                                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={chapterTitle}>{chapterTitle}</div>
+                                                        </td>
+                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#0f766e' }}>
+                                                            <div>{coinsPaid.toLocaleString()} coin</div>
+                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndPaid)}</div>
+                                                        </td>
+                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', color: '#92400e' }}>
+                                                            {platformFee.toLocaleString()} coin
+                                                        </td>
+                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
+                                                            <div>
+                                                                +{netAmount.toLocaleString()} coin
+                                                            </div>
+                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndNet)}</div>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                            {!authorUnlockLoading && !authorUnlockError && authorUnlockTotalCount > AUTHOR_UNLOCK_PAGE_SIZE && (
+                                <div style={{ marginTop: '1rem' }}>
+                                    <Pagination
+                                        currentPage={authorUnlockPage}
+                                        totalPages={Math.max(1, Math.ceil(authorUnlockTotalCount / AUTHOR_UNLOCK_PAGE_SIZE))}
+                                        totalItems={authorUnlockTotalCount}
+                                        itemsPerPage={AUTHOR_UNLOCK_PAGE_SIZE}
+                                        onPageChange={(p) => loadAuthorUnlockHistory(p)}
+                                        itemLabel="lượt mở khóa"
+                                    />
+                                </div>
+                            )}
+                            </>
+                            )}
                         </div>
                     </div>
                 </div>

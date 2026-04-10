@@ -19,9 +19,15 @@ import { getChapters } from '../../../api/chapter/chapterApi';
 import { localDateTimeInputToIsoUtc } from '../../../utils/moderatorReviewSla';
 import { formatApiDateTimeVietnamVi } from '../../../utils/apiDateTime';
 
-/** Khi từ chối đơn escalation: ghi chú admin tối thiểu (ký tự, sau trim) — đồng bộ BE ReviewEscalationService. */
-const ADMIN_REJECT_NOTE_MIN_LENGTH = 10;
+/** Khi từ chối đơn escalation/compliance: ghi chú admin tối thiểu số từ. */
+const ADMIN_REJECT_NOTE_MIN_WORDS = 50;
 const ADMIN_REJECT_NOTE_MAX_LENGTH = 2000;
+
+function countWords(text) {
+    const t = String(text ?? '').trim();
+    if (!t) return 0;
+    return t.split(/\s+/).filter(Boolean).length;
+}
 
 /** Bỏ URL khỏi chuỗi lỗi (tránh hiện localhost trong UI). */
 function sanitizeApiErrorText(s) {
@@ -91,8 +97,8 @@ const T = {
 
 function pubTabStyle(active, activeBg) {
     return {
-        padding: '0.625rem 1.25rem',
-        fontSize: '0.875rem',
+        padding: '0.46rem 0.95rem',
+        fontSize: '0.78rem',
         fontWeight: 600,
         backgroundColor: active ? activeBg : 'transparent',
         color: active ? '#ffffff' : T.slate,
@@ -141,11 +147,18 @@ function targetTypeVi(row) {
 
 /** Nickname/email từ API — chuẩn hóa nhãn tiếng Việt khi hệ thống dùng từ tiếng Anh. */
 function senderDisplayNameVi(row) {
-    const raw = row?.senderName ?? row?.SenderName;
+    const raw = row?.senderName
+        ?? row?.SenderName
+        ?? row?.senderDisplayName
+        ?? row?.SenderDisplayName
+        ?? row?.requesterDisplayName
+        ?? row?.RequesterDisplayName
+        ?? row?.requesterEmail
+        ?? row?.RequesterEmail
+        ?? row?.senderEmail
+        ?? row?.SenderEmail;
     if (raw == null || String(raw).trim() === '') return '—';
-    const n = String(raw).trim();
-    if (/^moderator$/i.test(n)) return 'Kiểm duyệt viên';
-    return n;
+    return String(raw).trim();
 }
 
 function urgencyBadge(tier) {
@@ -211,6 +224,13 @@ function truncate(str, max) {
     const t = (str ?? '').toString();
     if (t.length <= max) return t;
     return `${t.slice(0, max)}…`;
+}
+
+/** Ẩn tag nội bộ nguồn comment report trong message hiển thị cho admin. */
+function sanitizeComplianceReasonText(raw) {
+    const s = String(raw ?? '').trim();
+    if (!s) return '—';
+    return s.replace(/\[COMMENT_REPORT:[0-9a-fA-F-]{36}\]\s*/g, '').trim() || '—';
 }
 
 /** Đồng bộ BE: moderator dùng UrgencyTier (từ sender_urgency_tier); compliance lock/action dùng urgency_tier trên bảng tương ứng — chỉ CRITICAL | STANDARD. */
@@ -281,10 +301,10 @@ const inputBase = {
     display: 'block',
     width: '100%',
     marginTop: 4,
-    padding: '0.5rem 0.625rem',
-    borderRadius: 8,
+    padding: '0.42rem 0.58rem',
+    borderRadius: 7,
     border: `1px solid ${T.border}`,
-    fontSize: '0.875rem',
+    fontSize: '0.78rem',
     color: T.title,
     background: T.card,
     boxSizing: 'border-box',
@@ -337,6 +357,7 @@ export function ReviewEscalationsManagement() {
     const [logResolvedTo, setLogResolvedTo] = useState('');
     const [logSortBy, setLogSortBy] = useState('created_at');
     const [logSortOrder, setLogSortOrder] = useState('desc');
+    const [showLogAdvancedFilters, setShowLogAdvancedFilters] = useState(false);
     const [historySearch, setHistorySearch] = useState('');
     const [historyStatus, setHistoryStatus] = useState('');
     const [historyRequestType, setHistoryRequestType] = useState('');
@@ -614,9 +635,10 @@ export function ReviewEscalationsManagement() {
     const submitReject = async () => {
         if (!resolveRow) return;
         const trimmed = adminNote.trim();
-        if (trimmed.length < ADMIN_REJECT_NOTE_MIN_LENGTH) {
+        const wc = countWords(trimmed);
+        if (wc < ADMIN_REJECT_NOTE_MIN_WORDS) {
             setAdminNoteRejectError(
-                `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự (đã bỏ khoảng trắng đầu/cuối).`,
+                `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_WORDS} từ (hiện tại: ${wc} từ).`,
             );
             return;
         }
@@ -665,9 +687,10 @@ export function ReviewEscalationsManagement() {
         const decision = decisionOverride ?? (reqType === 'ADMIN_ACTION' ? 'APPROVE' : 'APPROVE_UNLOCK');
         const trimmedNote = (complianceAdminNote || '').trim();
         if (decision === 'REJECT') {
-            if (trimmedNote.length < ADMIN_REJECT_NOTE_MIN_LENGTH) {
+            const wc = countWords(trimmedNote);
+            if (wc < ADMIN_REJECT_NOTE_MIN_WORDS) {
                 setComplianceAdminNoteRejectError(
-                    `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự (đã bỏ khoảng trắng đầu/cuối).`,
+                    `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_WORDS} từ (hiện tại: ${wc} từ).`,
                 );
                 return;
             }
@@ -741,11 +764,11 @@ export function ReviewEscalationsManagement() {
     const historyPageItems = historyItems.slice((safeHistoryPage - 1) * historyPageSize, safeHistoryPage * historyPageSize);
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.05rem' }}>
             {/* Header — cùng format Quản lý xuất bản / Category */}
             <div>
-                <h1 style={{ fontSize: '1.875rem', fontWeight: 700, color: T.title, margin: 0, marginBottom: '0.5rem' }}>Quản lý đơn</h1>
-                <p style={{ fontSize: '0.875rem', color: T.slate, margin: 0, maxWidth: '42rem', lineHeight: 1.55 }}>
+                <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: T.title, margin: 0, marginBottom: '0.35rem' }}>Quản lý đơn</h1>
+                <p style={{ fontSize: '0.8rem', color: T.slate, margin: 0, maxWidth: '38rem', lineHeight: 1.45 }}>
                     Quản lý đơn của kiểm duyệt viên và xử lý vi phạm viên, bao gồm đơn chờ xử lý, lịch sử đã xử lý và nhật ký tra cứu.
                 </p>
             </div>
@@ -754,11 +777,11 @@ export function ReviewEscalationsManagement() {
             <div
                 style={{
                     backgroundColor: T.card,
-                    borderRadius: '12px',
-                    padding: '1rem',
+                    borderRadius: '10px',
+                    padding: '0.75rem',
                     border: `1px solid ${T.border}`,
                     display: 'flex',
-                    gap: '0.5rem',
+                    gap: '0.4rem',
                     flexWrap: 'wrap',
                     alignItems: 'center',
                 }}
@@ -824,15 +847,15 @@ export function ReviewEscalationsManagement() {
             </div>
 
             {mainTab === 'orders' && (
-                <div style={{ backgroundColor: T.card, borderRadius: '12px', border: `1px solid ${T.border}`, overflow: 'hidden' }}>
-                    <div style={{ padding: '1.25rem 1.5rem' }}>
-                        <h2 style={{ margin: '0 0 1rem', fontSize: '1.125rem', fontWeight: 600, color: T.title }}>
+                <div style={{ backgroundColor: T.card, borderRadius: '10px', border: `1px solid ${T.border}`, overflow: 'hidden' }}>
+                    <div style={{ padding: '1rem 1.1rem' }}>
+                        <h2 style={{ margin: '0 0 0.8rem', fontSize: '1rem', fontWeight: 600, color: T.title }}>
                             {orderSourceTab === 'compliance'
                                 ? 'Đơn của xử lý vi phạm viên'
                                 : 'Đơn của kiểm duyệt viên'}
                         </h2>
 
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.9rem' }}>
                             <button
                                 type="button"
                                 style={pubTabStyle(listMode === 'pending', T.green)}
@@ -852,18 +875,18 @@ export function ReviewEscalationsManagement() {
                         </div>
 
                         {listMode === 'pending' && (
-                            <div style={{ marginBottom: '1.25rem' }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-                                    <div style={{ borderRadius: '12px', border: `1px solid ${T.critical.border}`, background: T.critical.bg, padding: '1rem' }}>
+                            <div style={{ marginBottom: '0.9rem' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.7rem', marginBottom: '0.7rem' }}>
+                                    <div style={{ borderRadius: '10px', border: `1px solid ${T.critical.border}`, background: T.critical.bg, padding: '0.75rem' }}>
                                         <p style={{ fontSize: '0.75rem', color: T.critical.fg, margin: 0, fontWeight: 600 }}>Nghiêm trọng</p>
-                                        <p style={{ fontSize: '1.5rem', fontWeight: 700, color: T.critical.fg, margin: '0.35rem 0 0' }}>{counts.critical}</p>
+                                        <p style={{ fontSize: '1.25rem', fontWeight: 700, color: T.critical.fg, margin: '0.25rem 0 0' }}>{counts.critical}</p>
                                     </div>
-                                    <div style={{ borderRadius: '12px', border: `1px solid ${T.standard.border}`, background: T.standard.bg, padding: '1rem' }}>
+                                    <div style={{ borderRadius: '10px', border: `1px solid ${T.standard.border}`, background: T.standard.bg, padding: '0.75rem' }}>
                                         <p style={{ fontSize: '0.75rem', color: T.standard.fg, margin: 0, fontWeight: 600 }}>Thông thường</p>
-                                        <p style={{ fontSize: '1.5rem', fontWeight: 700, color: T.standard.fg, margin: '0.35rem 0 0' }}>{counts.standard}</p>
+                                        <p style={{ fontSize: '1.25rem', fontWeight: 700, color: T.standard.fg, margin: '0.25rem 0 0' }}>{counts.standard}</p>
                                     </div>
                                 </div>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                                     {[
                                         { key: '', label: 'Tất cả', color: T.sky },
                                         { key: 'CRITICAL', label: 'Chỉ nghiêm trọng', color: '#ef4444' },
@@ -1693,10 +1716,8 @@ export function ReviewEscalationsManagement() {
 
                             {String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase().includes('EXTEND') && (
                                 <div style={{ marginBottom: 16 }}>
-                                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title, marginBottom: 6 }}>Hạn duyệt sau khi chấp nhận</div>
-                                    <div
-                                        aria-readonly="true"
-                                        style={{
+                                    {(() => {
+                                        const extendReadonlyBox = {
                                             padding: '0.5rem 0.75rem',
                                             borderRadius: 8,
                                             border: `1px solid ${T.border}`,
@@ -1704,18 +1725,41 @@ export function ReviewEscalationsManagement() {
                                             fontSize: '0.875rem',
                                             color: T.title,
                                             cursor: 'default',
-                                        }}
-                                    >
-                                        {formatApiDateTimeVietnamVi(resolveRow.proposedDeadlineAt ?? resolveRow.ProposedDeadlineAt)}
-                                    </div>
-                                    <p style={{ fontSize: '0.75rem', color: T.slate, margin: '6px 0 0' }}>Theo hạn kiểm duyệt viên đề xuất — không chỉnh sửa.</p>
+                                        };
+                                        const currentDl =
+                                            resolveRow.currentAssignmentDeadlineAt
+                                            ?? resolveRow.CurrentAssignmentDeadlineAt
+                                            ?? resolveRow.assignmentDeadlineAt
+                                            ?? resolveRow.AssignmentDeadlineAt
+                                            ?? resolveRow.reviewDeadlineAt
+                                            ?? resolveRow.ReviewDeadlineAt;
+                                        const currentDlText = formatApiDateTimeVietnamVi(currentDl);
+                                        return (
+                                            <>
+                                                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title, marginBottom: 6 }}>
+                                                    Hạn duyệt hiện tại của kiểm duyệt viên
+                                                </div>
+                                                <div aria-readonly="true" style={extendReadonlyBox}>
+                                                    {currentDlText && String(currentDlText).trim() !== '' ? currentDlText : '—'}
+                                                </div>
+                                                <p style={{ fontSize: '0.75rem', color: T.slate, margin: '6px 0 12px' }}>
+                                                    Theo hạn kiểm duyệt viên đang giữ — không chỉnh sửa.
+                                                </p>
+                                                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title, marginBottom: 6 }}>Hạn duyệt sau khi chấp nhận</div>
+                                                <div aria-readonly="true" style={extendReadonlyBox}>
+                                                    {formatApiDateTimeVietnamVi(resolveRow.proposedDeadlineAt ?? resolveRow.ProposedDeadlineAt)}
+                                                </div>
+                                                <p style={{ fontSize: '0.75rem', color: T.slate, margin: '6px 0 0' }}>Theo hạn kiểm duyệt viên đề xuất — không chỉnh sửa.</p>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             )}
 
                             <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
                                 Ghi chú quản trị viên
                                 <span style={{ fontWeight: 500, color: T.slate, marginLeft: 6 }}>
-                                    (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự)
+                                    (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_WORDS} từ)
                                 </span>
                                 <textarea
                                     value={adminNote}
@@ -1795,30 +1839,57 @@ export function ReviewEscalationsManagement() {
                             <button type="button" onClick={closeComplianceResolve} style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: T.slate, lineHeight: 1 }}>×</button>
                         </div>
                         <div style={{ padding: '1rem 1.25rem', display: 'grid', gap: 10 }}>
-                            <div style={{ fontSize: '0.875rem', color: T.slateDark, lineHeight: 1.5 }}>
-                                <p style={{ margin: '0 0 6px' }}>
+                            <div
+                                style={{
+                                    fontSize: '0.875rem',
+                                    color: T.slateDark,
+                                    lineHeight: 1.55,
+                                    display: 'grid',
+                                    gap: 8,
+                                    padding: '0.75rem 0.875rem',
+                                    border: `1px solid ${T.border}`,
+                                    borderRadius: 10,
+                                    background: '#f8fafc',
+                                }}
+                            >
+                                <div>
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Loại yêu cầu:</span>{' '}
                                     <strong>
                                         {complianceResolveRow.__reqType === 'ADMIN_ACTION'
                                             ? 'Yêu cầu xử lý tài khoản'
                                             : 'Yêu cầu trả đơn về hàng đợi'}
                                     </strong>
-                                    {' — STORY — '}
-                                    <strong>{complianceResolveRow.storyTitle ?? complianceResolveRow.story?.title ?? '—'}</strong>
-                                </p>
-                                <p style={{ margin: 0, color: T.slate }}>
-                                    Người gửi: {complianceResolveRow.requesterDisplayName ?? complianceResolveRow.requesterEmail ?? '—'}
+                                </div>
+                                <div>
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Người gửi:</span>{' '}
+                                    {complianceResolveRow.requesterDisplayName ?? complianceResolveRow.requesterEmail ?? '—'}
                                     {' · '}
-                                    Thời gian gửi: {formatApiDateTimeVietnamVi(
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Thời gian gửi:</span>{' '}
+                                    {formatApiDateTimeVietnamVi(
                                         complianceResolveRow.createdAtUtc ??
                                         complianceResolveRow.CreatedAtUtc ??
                                         complianceResolveRow.created_at ??
                                         complianceResolveRow.createdAt ??
                                         complianceResolveRow.CreatedAt
                                     )}
-                                </p>
-                                <p style={{ margin: '6px 0 0', color: T.slate }}>
-                                    Lý do: {complianceResolveRow.message || '—'}
-                                </p>
+                                </div>
+                                <div>
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Tài khoản mục tiêu:</span>{' '}
+                                    <strong style={{ color: T.slateDark }}>
+                                        {complianceResolveRow.targetUserDisplayName
+                                            ?? complianceResolveRow.TargetUserDisplayName
+                                            ?? '—'}
+                                    </strong>
+                                    {' · '}
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Email:</span>{' '}
+                                    {complianceResolveRow.targetUserEmail
+                                        ?? complianceResolveRow.TargetUserEmail
+                                        ?? '—'}
+                                </div>
+                                <div>
+                                    <span style={{ color: T.slate, fontWeight: 600 }}>Lý do:</span>{' '}
+                                    {sanitizeComplianceReasonText(complianceResolveRow.message ?? complianceResolveRow.Message)}
+                                </div>
                             </div>
                             {resolveApiError ? (
                                 <div role="alert" style={{ padding: '0.75rem 1rem', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2' }}>
@@ -1842,7 +1913,7 @@ export function ReviewEscalationsManagement() {
                             <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
                                 Ghi chú quản trị viên
                                 <span style={{ marginLeft: 6, color: T.slate, fontWeight: 500 }}>
-                                    (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự)
+                                    (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_WORDS} từ)
                                 </span>
                                 <textarea
                                     value={complianceAdminNote}

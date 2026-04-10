@@ -243,40 +243,20 @@
     </div>
 
     <div class="modal fade" id="crModalAdminAction" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-person-slash me-1"></i>Yêu cầu admin — tài khoản tác giả</h5>
+                    <h5 class="modal-title"><i class="bi bi-person-slash me-1"></i>Gửi admin — ban tài khoản</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p class="small text-muted mb-3">Mức ưu tiên gửi admin: <strong>tự động</strong> — ban tài khoản = nghiêm trọng; tạm khóa viết = cao.</p>
-                    <ul class="nav nav-tabs mb-3" role="tablist">
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#crActBan" type="button">Ban user</button>
-                        </li>
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#crActSuspend" type="button">Tạm khóa viết</button>
-                        </li>
-                    </ul>
-                    <div class="tab-content">
-                        <div class="tab-pane fade show active" id="crActBan">
-                            <p class="small text-muted">Admin sẽ duyệt và thực hiện ban tài khoản.</p>
-                            <label class="form-label small">Lý do / chi tiết</label>
-                            <textarea class="form-control" id="crBanMsg" rows="3"></textarea>
-                        </div>
-                        <div class="tab-pane fade" id="crActSuspend">
-                            <p class="small text-muted">Đến thời điểm này tác giả không tạo truyện/chương mới (UTC trên server — chọn theo giờ máy bạn, hệ thống gửi ISO UTC).</p>
-                            <label class="form-label small">Khóa đến (local)</label>
-                            <input type="datetime-local" class="form-control mb-2" id="crSuspendUntilLocal" />
-                            <label class="form-label small">Ghi chú</label>
-                            <textarea class="form-control" id="crSuspendMsg" rows="2"></textarea>
-                        </div>
-                    </div>
+                    <p class="small text-muted">Admin sẽ duyệt và thực hiện ban. Tạm khóa quyền viết dùng nút <strong>bật/tắt</strong> (icon viết) trên từng dòng.</p>
+                    <label class="form-label small">Lý do / chi tiết</label>
+                    <textarea class="form-control" id="crBanMsg" rows="3"></textarea>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-                    <button type="button" class="btn btn-danger" id="crAdminActionSubmit">Gửi yêu cầu</button>
+                    <button type="button" class="btn btn-danger" id="crAdminActionSubmit">Gửi yêu cầu ban</button>
                 </div>
             </div>
         </div>
@@ -332,7 +312,7 @@
 @section Scripts {
     <script>
         let crPageSize = 20;
-        let crCtx = { storyId: '', authorId: null, complianceFlagged: false, commentId: null, isCommentReport: false };
+        let crCtx = { storyId: '', authorId: null, complianceFlagged: false, commentId: null, isCommentReport: false, lockReleaseMode: 'story', lockReleaseCommentId: null };
         let crViewMode = 'active';
         let crCommentPageSize = 50;
 
@@ -508,6 +488,13 @@
             return Utils.datetimeLocalToIsoUtc(dtLocalVal) || '';
         }
 
+        /** author_writing_suspended_until từ API — coi là đang khóa nếu mốc &gt; now. */
+        function crIsAuthorWritingSuspendedNow(isoOrNull) {
+            if (!isoOrNull) return false;
+            var t = new Date(isoOrNull).getTime();
+            return !Number.isNaN(t) && t > Date.now();
+        }
+
         async function crLoadReasons() {
             const sel = document.getElementById('crReason');
             try {
@@ -563,10 +550,13 @@
             const flagged = x.complianceFlagged === true || x.ComplianceFlagged === true;
             const hid = x.complianceHidden === true || x.ComplianceHidden === true;
             const cmt = x.commentsDisabled === true || x.CommentsDisabled === true;
+            const suspUntil = x.authorWritingSuspendedUntilUtc || x.AuthorWritingSuspendedUntilUtc;
+            const wLock = crIsAuthorWritingSuspendedNow(suspUntil);
             const parts = [];
             if (flagged) parts.push('<span class="badge bg-warning text-dark">Cờ</span>');
             if (hid) parts.push('<span class="badge bg-secondary">Ẩn</span>');
             if (cmt) parts.push('<span class="badge bg-dark">Tắt BL</span>');
+            if (wLock) parts.push('<span class="badge bg-danger">Khóa viết</span>');
             if (!parts.length) return '<span class="text-muted small">—</span>';
             return '<div class="cr-story-badges d-flex flex-wrap gap-1">' + parts.join('') + '</div>';
         }
@@ -613,14 +603,18 @@
                         const uName = x.commentUserDisplayName || x.CommentUserDisplayName || '';
                         const uEmail = x.commentUserEmail || x.CommentUserEmail || '';
                         const reporterEmail = x.reporterEmail || x.ReporterEmail || '';
+                        const cuSusp = x.commentUserWritingSuspendedUntilUtc || x.CommentUserWritingSuspendedUntilUtc;
+                        const cwSuspended = crIsAuthorWritingSuspendedNow(cuSusp);
                         const cmtCell = (uName ? crEscapeHtml(String(uName)) : '') +
-                            (uEmail ? ' <span class="text-muted">(' + crEscapeHtml(String(uEmail)) + ')</span>' : '');
-                        const banTitle = 'Ban user bị report (gửi admin).';
+                            (uEmail ? ' <span class="text-muted">(' + crEscapeHtml(String(uEmail)) + ')</span>' : '') +
+                            (cwSuspended ? ' <span class="badge bg-danger ms-1">Khóa viết</span>' : '');
+                        const banTitle = 'Gửi admin: ban user';
                         const warnText = x.adminOrModeratorReplyWarningVi || x.AdminOrModeratorReplyWarningVi || null;
 
                         const locked = x.isComplianceLocked === true || x.IsComplianceLocked === true;
                         const mine = x.isComplianceClaimedByMe === true || x.IsComplianceClaimedByMe === true;
                         const hasPendingAdmin = x.hasPendingAdminActionRequest === true || x.HasPendingAdminActionRequest === true;
+                        const hasPendingLockRelease = x.hasPendingLockReleaseRequest === true || x.HasPendingLockReleaseRequest === true;
                         const stUp = (status || '').toUpperCase();
                         const isOpenTicket = stUp === 'NEW' || stUp === 'IN_REVIEW';
 
@@ -656,29 +650,37 @@
                             reportersArr: reportersArr,
                             reporterDetails: reporterDetailsRaw,
                             commentId: String(cid),
-                            canVerifyEvidence: !hasPendingAdmin && (isAdm || (locked && mine)),
+                            canVerifyEvidence: !hasPendingLockRelease && (isAdm || (locked && mine)),
                             warnText: warnText
                         };
 
+                        let actionCell;
+                        if (!isAdm && hasPendingLockRelease) {
+                            actionCell = '<div class="d-inline-flex flex-column align-items-end gap-1">' +
+                                '<span class="small text-warning text-end">Đã gửi yêu cầu admin gỡ lock — tạm không thể thao tác thêm trên thread này.</span></div>';
+                        } else {
                         let claimBtn = '';
                         // Giống report story: Claim lock chỉ phụ thuộc lock/role, không phụ thuộc isOpenTicket của representative status.
-                        if (!locked && !isAdm && !shownClaimByComment.has(cid) && !hasPendingAdmin) {
+                        if (!locked && !isAdm && !shownClaimByComment.has(cid)) {
                             claimBtn = '<button type="button" class="btn btn-outline-primary btn-sm" data-cr-claim-comment data-cid="' + crEscapeHtml(String(cid)) + '" title="Nhận lock để xử lý ticket này"><i class="bi bi-lock"></i> Nhận</button>';
                             shownClaimByComment.add(cid);
                         }
 
                         let releaseBtn = '';
-                        if (locked && isAdm && !shownReleaseByComment.has(cid) && !hasPendingAdmin) {
+                        if (locked && isAdm && !shownReleaseByComment.has(cid)) {
                             releaseBtn = '<button type="button" class="btn btn-outline-warning btn-sm" data-cr-release-comment data-cid="' + crEscapeHtml(String(cid)) + '" title="Admin: gỡ lock comment reports"><i class="bi bi-unlock"></i> Gỡ lock</button>';
                             shownReleaseByComment.add(cid);
+                        }
+
+                        let lockRelCommentBtn = '';
+                        if (!isAdm && locked && mine && !hasPendingLockRelease) {
+                            lockRelCommentBtn = '<button type="button" class="btn btn-outline-info btn-sm" data-cr-open-lock-rel-comment data-cid="' + crEscapeHtml(String(cid)) + '" title="Gửi yêu cầu admin gỡ lock"><i class="bi bi-send"></i> Gỡ lock</button>';
                         }
 
                         // Resolve select (RESOLVED hides comment; choose parent-only vs include replies).
                         const canResolve = isAdm || mine;
                         const resolveCell = canResolve
-                            ? (hasPendingAdmin
-                                ? '<span class="text-muted small">Đang chờ admin…</span>'
-                                : '<select class="form-select form-select-sm cr-comment-resolve-sel" data-rid="' + crEscapeHtml(String(rid)) + '" data-cid="' + crEscapeHtml(String(cid)) + '">' +
+                            ? ('<select class="form-select form-select-sm cr-comment-resolve-sel" data-rid="' + crEscapeHtml(String(rid)) + '" data-cid="' + crEscapeHtml(String(cid)) + '">' +
                                     '<option value="">Đánh dấu…</option>' +
                                     '<option value="RESOLVED_ALL">RESOLVED (ẩn toàn bộ reply)</option>' +
                                     '<option value="RESOLVED_PARENT">RESOLVED (ẩn cha)</option>' +
@@ -686,29 +688,49 @@
                                     '</select>')
                             : '<span class="text-muted small">—</span>';
 
-                        // Giống report story: sau khi compliance đổi trạng thái, vẫn giữ các "thao tác"
-                        // (ban user, bulk close, ...), chỉ dựa vào lock/claim thay vì dựa vào isOpenTicket của
-                        // representative status.
-                        const banBtn = (!isAdm && locked && mine && !hasPendingAdmin)
-                            ? '<button type="button" class="btn btn-outline-danger btn-sm" data-cr-open-admin-act-comment data-rid="' + crEscapeHtml(String(rid)) + '" data-cid="' + crEscapeHtml(String(cid)) + '" title="' + crEscapeHtml(banTitle) + '"><i class="bi bi-person-slash"></i></button>'
-                            : '';
+                        // Gửi đơn admin: không phải "đóng ticket" — vẫn hiện nút nhưng khóa khi đã có đơn PENDING (tránh trùng).
+                        let banBtn = '';
+                        if (!isAdm && locked && mine) {
+                            if (hasPendingAdmin) {
+                                banBtn = '<button type="button" class="btn btn-outline-danger btn-sm" disabled title="Đã có đơn gửi admin chờ xử lý. Vẫn có thể đánh dấu từng report / xác minh; chỉ không đóng hết ticket."><i class="bi bi-person-slash"></i></button>';
+                            } else {
+                                banBtn = '<button type="button" class="btn btn-outline-danger btn-sm" data-cr-open-admin-act-comment data-rid="' + crEscapeHtml(String(rid)) + '" data-cid="' + crEscapeHtml(String(cid)) + '" title="' + crEscapeHtml(banTitle) + '"><i class="bi bi-person-slash"></i></button>';
+                            }
+                        }
 
-                        let actionCell = '<div class="d-inline-flex flex-column align-items-end gap-1">';
+                        let writingSeg = '';
+                        if (!isAdm && locked && mine && !hasPendingLockRelease) {
+                            writingSeg =
+                                '<button type="button" class="btn btn-outline-secondary btn-sm' + (cwSuspended ? ' active' : '') + '" title="' +
+                                (cwSuspended ? 'Đang khóa viết — bấm để tắt' : 'Đang mở viết — bấm để bật khóa') +
+                                '" data-cr-toggle-author-writing data-cid="' + crEscapeHtml(String(cid)) + '" data-on="' + (cwSuspended ? '1' : '0') +
+                                '"><i class="bi bi-pencil-square"></i></button>';
+                        }
+
+                        actionCell = '<div class="d-inline-flex flex-column align-items-end gap-1">';
                         if (claimBtn) actionCell += claimBtn;
                         if (releaseBtn) actionCell += releaseBtn;
+                        if (lockRelCommentBtn) actionCell += lockRelCommentBtn;
+                        if (writingSeg) actionCell += writingSeg;
                         if (banBtn) actionCell += banBtn;
                         actionCell += resolveCell;
 
                         // Bulk close comment thread (giống report story) - do COMPLIANCE tự bấm.
-                        if (!isAdm && locked && mine && !hasPendingAdmin && !shownResolveAllByComment.has(cid)) {
-                            actionCell +=
-                                '<div class="d-flex flex-wrap gap-1 mt-2 justify-content-end">' +
-                                '<button type="button" class="btn btn-success btn-sm" data-cr-resolve-all-comment data-cid="' + crEscapeHtml(String(cid)) + '" title="Đóng hết ticket comment thread này (RESOLVED, ẩn toàn bộ reply)">Xong hết ticket</button>' +
-                                '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-dismiss-all-comment data-cid="' + crEscapeHtml(String(cid)) + '" title="Bác bỏ hết ticket comment thread này (DISMISSED)">Bác bỏ hết</button>' +
-                                '</div>';
+                        if (!isAdm && locked && mine && !shownResolveAllByComment.has(cid)) {
+                            if (hasPendingAdmin) {
+                                actionCell +=
+                                    '<div class="small text-warning mt-2 text-end">Đang có đơn gửi admin — tạm không thể <strong>đóng hết ticket</strong> (Xong hết / Bác bỏ hết). Các thao tác khác vẫn dùng được.</div>';
+                            } else {
+                                actionCell +=
+                                    '<div class="d-flex flex-wrap gap-1 mt-2 justify-content-end">' +
+                                    '<button type="button" class="btn btn-success btn-sm" data-cr-resolve-all-comment data-cid="' + crEscapeHtml(String(cid)) + '" title="Đóng hết ticket comment thread này (RESOLVED, ẩn toàn bộ reply)">Xong hết ticket</button>' +
+                                    '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-dismiss-all-comment data-cid="' + crEscapeHtml(String(cid)) + '" title="Bác bỏ hết ticket comment thread này (DISMISSED)">Bác bỏ hết</button>' +
+                                    '</div>';
+                            }
                             shownResolveAllByComment.add(cid);
                         }
                         actionCell += '</div>';
+                        }
 
                         const pri = x.priorityScore != null ? x.priorityScore : x.PriorityScore;
                         const rcnt = x.reportCount != null ? x.reportCount : x.ReportCount;
@@ -1080,7 +1102,7 @@
                     });
                 });
 
-                // Open admin action modal for BAN_USER (and optionally suspend) on comment author.
+                // Open admin action modal — chỉ ban (gửi admin).
                 host.querySelectorAll('[data-cr-open-admin-act-comment]').forEach(function (btn) {
                     btn.addEventListener('click', function () {
                         const cid = btn.getAttribute('data-cid');
@@ -1089,9 +1111,17 @@
                         crCtx.storyId = ''; // not used for comment action
                         crCtx.authorId = null;
                         document.getElementById('crBanMsg').value = '';
-                        document.getElementById('crSuspendMsg').value = '';
-                        document.getElementById('crSuspendUntilLocal').value = '';
                         new bootstrap.Modal(document.getElementById('crModalAdminAction')).show();
+                    });
+                });
+
+                host.querySelectorAll('[data-cr-open-lock-rel-comment]').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        crCtx.lockReleaseMode = 'comment';
+                        crCtx.lockReleaseCommentId = btn.getAttribute('data-cid') || '';
+                        crCtx.storyId = '';
+                        document.getElementById('crLockReleaseMsg').value = '';
+                        new bootstrap.Modal(document.getElementById('crModalLockRelease')).show();
                     });
                 });
             } catch (e) {
@@ -1144,8 +1174,12 @@
                             const cmtOn = x.commentsDisabled === true || x.CommentsDisabled === true;
                             const hidOn = x.complianceHidden === true || x.ComplianceHidden === true;
                             const fOn = x.complianceFlagged === true || x.ComplianceFlagged === true;
+                            const suspUntil = x.authorWritingSuspendedUntilUtc || x.AuthorWritingSuspendedUntilUtc;
+                            const wSuspended = crIsAuthorWritingSuspendedNow(suspUntil);
                             const openIds = x.openReportIds || x.OpenReportIds || [];
                             const hasOpenTickets = openIds.length > 0;
+                            const hasPendingAdmin = x.hasPendingAdminActionRequest === true || x.HasPendingAdminActionRequest === true;
+                            const hasPendingLockRelease = x.hasPendingLockReleaseRequest === true || x.HasPendingLockReleaseRequest === true;
                             const reasonCountMap = {};
                             (contribs || []).forEach(function (c) {
                                 const lab = c.reasonLabelVi || c.ReasonLabelVi || c.reasonCode || c.ReasonCode || '—';
@@ -1171,7 +1205,7 @@
                                 reporterDetails: reporterDetails,
                                 storyId: String(sid),
                                 storyTitle: title,
-                                canVerifyContributor: isAdm || (locked && mine)
+                                canVerifyContributor: isAdm || (locked && mine && !hasPendingLockRelease)
                             };
                             const storyDetBtn = (reasonSummaryArr.length || reporterDetails.length)
                                 ? '<div class="mt-1"><button type="button" class="btn btn-link btn-sm p-0" data-sr-open-story-detail data-sid="' + crEscapeHtml(String(sid)) + '">Chi tiết report story</button></div>'
@@ -1182,25 +1216,47 @@
                             } else if (mine && isAdm) {
                                 btns += '<button type="button" class="btn btn-outline-warning btn-sm mb-1" data-cr-release="' + crEscapeHtml(String(sid)) + '"><i class="bi bi-unlock"></i> Gỡ lock</button> ';
                             } else if (mine && !isAdm) {
-                                btns += '<button type="button" class="btn btn-outline-info btn-sm mb-1" data-cr-open-lock-rel data-sid="' + crEscapeHtml(String(sid)) + '"><i class="bi bi-send"></i> Gửi admin</button> ';
+                                if (hasPendingLockRelease) {
+                                    btns += '<span class="small text-warning d-block mb-1">Đã gửi yêu cầu gỡ lock.</span> ';
+                                } else {
+                                    btns += '<button type="button" class="btn btn-outline-info btn-sm mb-1" data-cr-open-lock-rel data-sid="' + crEscapeHtml(String(sid)) + '"><i class="bi bi-send"></i> Gửi admin</button> ';
+                                }
                             } else {
                                 btns += '<span class="small text-danger d-block mb-1">Người khác lock</span>';
                             }
                             btns += '<button type="button" class="btn btn-outline-secondary btn-sm mb-1" data-cr-detail="' + crEscapeHtml(String(sid)) + '">Chi tiết BC</button>';
                             let tools = '';
                             if (mine && locked) {
+                                if (!isAdm && hasPendingLockRelease) {
+                                    tools += '<span class="small text-warning d-block text-end mt-1">Đã gửi yêu cầu admin gỡ lock — tạm không thể thao tác thêm trên báo cáo truyện này.</span>';
+                                } else {
                                 tools += '<div class="btn-group btn-group-sm mt-1" role="group">';
                                 tools += '<button type="button" class="btn btn-outline-dark" title="Gắn / bỏ cờ" data-cr-open-flag data-sid="' + String(sid) + '" data-aid="' + crEscapeHtml(aidStr) + '" data-flagged="' + (fOn ? '1' : '0') + '"><i class="bi bi-bookmark-flag"></i></button>';
                                 tools += '<button type="button" class="btn btn-outline-dark" title="Tắt/bật bình luận" data-cr-toggle-cmt data-sid="' + String(sid) + '" data-on="' + (cmtOn ? '1' : '0') + '"><i class="bi bi-chat-dots"></i></button>';
                                 tools += '<button type="button" class="btn btn-outline-dark" title="Ẩn/hiện truyện" data-cr-toggle-hide data-sid="' + String(sid) + '" data-on="' + (hidOn ? '1' : '0') + '"><i class="bi bi-eye-slash"></i></button>';
-                                tools += '<button type="button" class="btn btn-outline-danger" title="Ban / tạm khóa viết → admin" data-cr-open-admin-act data-sid="' + String(sid) + '" data-aid="' + crEscapeHtml(aidStr) + '"><i class="bi bi-person-slash"></i></button>';
+                                if (aidStr) {
+                                    tools += '<button type="button" class="btn btn-outline-dark' + (wSuspended ? ' active' : '') + '" title="' +
+                                        (wSuspended ? 'Đang khóa viết — bấm để tắt' : 'Đang mở viết — bấm để bật khóa') +
+                                        '" data-cr-toggle-author-writing data-sid="' + String(sid) + '" data-on="' + (wSuspended ? '1' : '0') +
+                                        '"><i class="bi bi-pencil-square"></i></button>';
+                                }
+                                if (!isAdm && hasPendingAdmin) {
+                                    tools += '<button type="button" class="btn btn-outline-danger" disabled title="Đã có đơn gửi admin chờ xử lý. Vẫn có thể thao tác mod; chỉ không đóng ticket."><i class="bi bi-person-slash"></i></button>';
+                                } else {
+                                    tools += '<button type="button" class="btn btn-outline-danger" title="Gửi admin: ban tài khoản" data-cr-open-admin-act data-sid="' + String(sid) + '" data-aid="' + crEscapeHtml(aidStr) + '"><i class="bi bi-person-slash"></i></button>';
+                                }
                                 if (aidStr) tools += '<button type="button" class="btn btn-outline-secondary" title="Lịch sử vi phạm" data-cr-open-viol data-aid="' + crEscapeHtml(aidStr) + '"><i class="bi bi-clock-history"></i></button>';
                                 tools += '</div>';
                                 if (hasOpenTickets) {
+                                    if (!isAdm && hasPendingAdmin) {
+                                        tools += '<div class="small text-warning mt-2 text-end">Đang có đơn gửi admin — tạm không thể <strong>đóng hết ticket</strong> (Xong hết / Bác bỏ hết). Các thao tác khác vẫn dùng được.</div>';
+                                    } else {
                                     tools += '<div class="d-flex flex-wrap gap-1 mt-2 justify-content-end">';
                                     tools += '<button type="button" class="btn btn-success btn-sm" data-cr-resolve-all data-sid="' + crEscapeHtml(String(sid)) + '" data-st="RESOLVED" title="Đóng hết ticket NEW/IN_REVIEW">Xong hết ticket</button>';
                                     tools += '<button type="button" class="btn btn-outline-secondary btn-sm" data-cr-resolve-all data-sid="' + crEscapeHtml(String(sid)) + '" data-st="DISMISSED" title="Bác bỏ hết ticket đang mở">Bác bỏ hết</button>';
                                     tools += '</div>';
+                                    }
+                                }
                                 }
                             }
                             html += '<tr>' +
@@ -1529,6 +1585,8 @@
                             const ca = x.createdAtUtc || x.CreatedAtUtc;
                             const lockCell = crFormatComplianceLockSla(x);
                             const mine = x.isComplianceClaimedByMe === true || x.IsComplianceClaimedByMe === true;
+                            const hasPendingAdmin = x.hasPendingAdminActionRequest === true || x.HasPendingAdminActionRequest === true;
+                            const hasPendingLockRelease = x.hasPendingLockReleaseRequest === true || x.HasPendingLockReleaseRequest === true;
                             const stUp = (st || '').toUpperCase();
                             const isOpenTicket = stUp === 'NEW' || stUp === 'IN_REVIEW';
                             let actionCell = '';
@@ -1539,6 +1597,10 @@
                                     '<option value="RESOLVED">RESOLVED</option>' +
                                     '<option value="DISMISSED">DISMISSED</option>' +
                                     '<option value="NEW">NEW</option></select>';
+                            } else if (mine && isOpenTicket && hasPendingLockRelease) {
+                                actionCell = '<span class="small text-warning" title="Đã gửi đơn gỡ lock.">Đã gửi đơn gỡ lock — không đóng ticket.</span>';
+                            } else if (mine && isOpenTicket && hasPendingAdmin) {
+                                actionCell = '<span class="small text-warning" title="Có đơn admin chờ xử lý.">Đang có đơn admin — không đóng ticket.</span>';
                             } else if (mine && isOpenTicket) {
                                 actionCell = '<select class="form-select form-select-sm cr-resolve-sel" data-rid="' + crEscapeHtml(String(rid)) + '">' +
                                     '<option value="">Đánh dấu xử lý…</option>' +
@@ -1648,6 +1710,8 @@
             document.getElementById('crTableHost').addEventListener('click', function (ev) {
                 const rel = ev.target.closest('[data-cr-open-lock-rel]');
                 if (rel) {
+                    crCtx.lockReleaseMode = 'story';
+                    crCtx.lockReleaseCommentId = null;
                     crCtx.storyId = rel.getAttribute('data-sid') || '';
                     document.getElementById('crLockReleaseMsg').value = '';
                     var u1 = document.getElementById('crLockReleaseUrgency');
@@ -1672,9 +1736,18 @@
                     crCtx.commentId = null;
                     crCtx.isCommentReport = false;
                     document.getElementById('crBanMsg').value = '';
-                    document.getElementById('crSuspendMsg').value = '';
-                    document.getElementById('crSuspendUntilLocal').value = '';
                     new bootstrap.Modal(document.getElementById('crModalAdminAction')).show();
+                    return;
+                }
+                const twAw = ev.target.closest('[data-cr-toggle-author-writing]');
+                if (twAw && twAw.getAttribute('data-sid')) {
+                    const sid = twAw.getAttribute('data-sid');
+                    const on = twAw.getAttribute('data-on') === '1';
+                    if (!confirm(on ? 'Tắt tạm khóa quyền viết tác giả?' : 'Bật tạm khóa quyền viết tác giả?')) return;
+                    ApiService.complianceSetStoryAuthorWritingSuspended(sid, !on).then(function () {
+                        Utils.showAlert(!on ? 'Đã bật tạm khóa viết.' : 'Đã tắt tạm khóa viết.', 'success');
+                        crLoad();
+                    }).catch(function (e) { Utils.showAlert(e.message || e, 'danger'); });
                     return;
                 }
                 const vl = ev.target.closest('[data-cr-open-viol]');
@@ -1733,10 +1806,17 @@
             document.getElementById('crLockReleaseSubmit').addEventListener('click', async function () {
                 const msg = document.getElementById('crLockReleaseMsg').value.trim();
                 try {
-                    await ApiService.complianceRequestLockRelease(crCtx.storyId, { message: msg || null });
-                    bootstrap.Modal.getInstance(document.getElementById('crModalLockRelease')).hide();
-                    Utils.showAlert('Đã gửi yêu cầu admin.', 'success');
-                    crLoad();
+                    if (crCtx.lockReleaseMode === 'comment' && crCtx.lockReleaseCommentId) {
+                        await ApiService.complianceRequestCommentLockRelease(crCtx.lockReleaseCommentId, { message: msg || null });
+                        bootstrap.Modal.getInstance(document.getElementById('crModalLockRelease')).hide();
+                        Utils.showAlert('Đã gửi yêu cầu admin (gỡ lock comment).', 'success');
+                        crLoadCommentReports();
+                    } else {
+                        await ApiService.complianceRequestLockRelease(crCtx.storyId, { message: msg || null });
+                        bootstrap.Modal.getInstance(document.getElementById('crModalLockRelease')).hide();
+                        Utils.showAlert('Đã gửi yêu cầu admin.', 'success');
+                        crLoad();
+                    }
                 } catch (e) { Utils.showAlert(e.message || e, 'danger'); }
             });
 
@@ -1752,46 +1832,39 @@
             });
 
             document.getElementById('crAdminActionSubmit').addEventListener('click', async function () {
-                const pane = document.querySelector('#crModalAdminAction .tab-pane.active');
-                const pid = pane ? pane.id : '';
                 try {
-                    if (pid === 'crActBan') {
-                        if (crCtx.isCommentReport && crCtx.commentId) {
-                            await ApiService.complianceRequestAdminActionOnComment(crCtx.commentId, {
-                                requestKind: 'BAN_USER',
-                                message: document.getElementById('crBanMsg').value.trim() || null
-                            });
-                        } else {
-                            await ApiService.complianceRequestAdminAction(crCtx.storyId, {
-                                requestKind: 'BAN_USER',
-                                message: document.getElementById('crBanMsg').value.trim() || null
-                            });
-                        }
+                    if (crCtx.isCommentReport && crCtx.commentId) {
+                        await ApiService.complianceRequestAdminActionOnComment(crCtx.commentId, {
+                            requestKind: 'BAN_USER',
+                            message: document.getElementById('crBanMsg').value.trim() || null
+                        });
                     } else {
-                        const iso = crToIsoUtcFromLocal(document.getElementById('crSuspendUntilLocal').value);
-                        if (!iso) {
-                            Utils.showAlert('Chọn thời điểm kết thúc tạm khóa viết.', 'warning');
-                            return;
-                        }
-                        if (crCtx.isCommentReport && crCtx.commentId) {
-                            await ApiService.complianceRequestAdminActionOnComment(crCtx.commentId, {
-                                requestKind: 'SUSPEND_AUTHOR_WRITING',
-                                message: document.getElementById('crSuspendMsg').value.trim() || null,
-                                proposedSuspendUntilUtc: iso
-                            });
-                        } else {
-                            await ApiService.complianceRequestAdminAction(crCtx.storyId, {
-                                requestKind: 'SUSPEND_AUTHOR_WRITING',
-                                message: document.getElementById('crSuspendMsg').value.trim() || null,
-                                proposedSuspendUntilUtc: iso
-                            });
-                        }
+                        await ApiService.complianceRequestAdminAction(crCtx.storyId, {
+                            requestKind: 'BAN_USER',
+                            message: document.getElementById('crBanMsg').value.trim() || null
+                        });
                     }
                     bootstrap.Modal.getInstance(document.getElementById('crModalAdminAction')).hide();
                     Utils.showAlert('Đã gửi yêu cầu lên admin.', 'success');
                     crLoad();
+                    if (crCtx.isCommentReport) crLoadCommentReports();
                 } catch (e) { Utils.showAlert(e.message || e, 'danger'); }
             });
+
+            var crCommentTableHostEl = document.getElementById('crCommentTableHost');
+            if (crCommentTableHostEl) {
+                crCommentTableHostEl.addEventListener('click', function (ev) {
+                    const twAw = ev.target.closest('[data-cr-toggle-author-writing]');
+                    if (!twAw || !twAw.getAttribute('data-cid')) return;
+                    const cid = twAw.getAttribute('data-cid');
+                    const on = twAw.getAttribute('data-on') === '1';
+                    if (!confirm(on ? 'Tắt tạm khóa quyền viết (chủ bình luận)?' : 'Bật tạm khóa quyền viết (chủ bình luận)?')) return;
+                    ApiService.complianceSetCommentAuthorWritingSuspended(cid, { value: !on }).then(function () {
+                        Utils.showAlert(!on ? 'Đã bật tạm khóa viết.' : 'Đã tắt tạm khóa viết.', 'success');
+                        crLoadCommentReports();
+                    }).catch(function (e) { Utils.showAlert(e.message || e, 'danger'); });
+                });
+            }
 
             crLoad();
         });

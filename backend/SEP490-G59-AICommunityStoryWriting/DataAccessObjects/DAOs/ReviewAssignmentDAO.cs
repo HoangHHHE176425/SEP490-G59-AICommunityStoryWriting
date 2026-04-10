@@ -350,6 +350,71 @@ namespace DataAccessObjects.DAOs
             });
         }
 
+        /// <summary>Gỡ / giao lại lock compliance báo cáo comment (deadline có thể null).</summary>
+        public static void ReleaseComplianceCommentClaimAndOptionallyReassign(
+            Guid commentId,
+            Guid expectedAssigneeId,
+            Guid? newAssigneeId,
+            DateTime? newDeadlineUtc)
+        {
+            const string targetType = TargetTypeComplianceCommentReports;
+            using var context = new StoryPlatformDbContext();
+            context.Database.CreateExecutionStrategy().Execute(() =>
+            {
+                using var tx = context.Database.BeginTransaction();
+                try
+                {
+                    var cur = context.review_assignments
+                        .FirstOrDefault(r => r.target_type == targetType && r.target_id == commentId && r.status == StatusClaimed);
+                    if (cur == null || cur.assignee_id != expectedAssigneeId)
+                        throw new InvalidOperationException("Assignment đã thay đổi; không thể xử lý.");
+
+                    cur.status = StatusCompleted;
+                    cur.completed_at = DateTime.UtcNow;
+                    context.SaveChanges();
+
+                    if (newAssigneeId.HasValue && newAssigneeId.Value != Guid.Empty)
+                    {
+                        var assigneeUser = context.users.FirstOrDefault(u => u.id == newAssigneeId.Value);
+                        if (assigneeUser == null)
+                            throw new ArgumentException("Không tìm thấy người được giao.");
+                        var roleUpper = (assigneeUser.role ?? "").ToUpperInvariant();
+                        if (roleUpper != "COMPLIANCE")
+                            throw new ArgumentException("Chỉ giao lock cho tài khoản COMPLIANCE.");
+                        if (string.Equals(assigneeUser.status, "ACTIVE", StringComparison.OrdinalIgnoreCase) != true)
+                            throw new ArgumentException("Tài khoản không hoạt động.");
+                        if (newAssigneeId.Value == expectedAssigneeId)
+                            throw new ArgumentException("Không giao lại cho chính người gửi yêu cầu.");
+
+                        var dupe = context.review_assignments.Any(r => r.target_type == targetType && r.target_id == commentId && r.status == StatusClaimed);
+                        if (dupe)
+                            throw new InvalidOperationException("Không gán được: thread comment đã có người nhận lock.");
+
+                        context.review_assignments.Add(new review_assignments
+                        {
+                            id = Guid.NewGuid(),
+                            target_type = targetType,
+                            target_id = commentId,
+                            assignee_id = newAssigneeId.Value,
+                            assignee_role = "COMPLIANCE",
+                            status = StatusClaimed,
+                            priority = 0,
+                            assigned_at = DateTime.UtcNow,
+                            review_deadline_at = newDeadlineUtc
+                        });
+                        context.SaveChanges();
+                    }
+
+                    tx.Commit();
+                }
+                catch
+                {
+                    tx.Rollback();
+                    throw;
+                }
+            });
+        }
+
         /// <summary>Các claim moderator (STORY/CHAPTER) đã quá <c>review_deadline_at</c> (UTC).</summary>
         public static List<(string TargetType, Guid TargetId, Guid AssigneeId)> ListOverdueModerationClaims(DateTime utcNow)
         {
