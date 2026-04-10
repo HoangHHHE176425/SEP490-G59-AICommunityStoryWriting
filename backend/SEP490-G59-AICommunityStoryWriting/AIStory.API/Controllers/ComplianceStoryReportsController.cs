@@ -434,6 +434,25 @@ public class ComplianceStoryReportsController : ControllerBase
         }
     }
 
+    /// <summary>Bật/tắt tạm khóa quyền viết của tác giả truyện (compliance/admin, không qua đơn admin).</summary>
+    [HttpPost("stories/{storyId:guid}/author-writing-suspended")]
+    public async Task<IActionResult> SetAuthorWritingSuspended(Guid storyId, [FromBody] SetComplianceStoryBoolRequestDto? body)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue) return Unauthorized();
+        var isAdmin = User.IsInRole("ADMIN");
+        try
+        {
+            await _storyReportService.SetAuthorWritingSuspendedByComplianceAsync(
+                storyId, userId.Value, body?.Value ?? false, isAdmin);
+            return Ok(new { message = "Đã cập nhật." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("stories/{storyId:guid}/admin-action-requests")]
     public async Task<IActionResult> RequestAdminAction(Guid storyId, [FromBody] CreateComplianceAdminActionRequestDto? body)
     {

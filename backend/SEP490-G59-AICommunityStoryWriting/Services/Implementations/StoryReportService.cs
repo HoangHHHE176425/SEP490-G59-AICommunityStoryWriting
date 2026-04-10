@@ -892,6 +892,32 @@ public class StoryReportService : IStoryReportService
         return Task.CompletedTask;
     }
 
+    private static DateTime FarFutureAuthorWritingSuspensionUtc() => DateTime.UtcNow.AddYears(100);
+
+    public Task SetAuthorWritingSuspendedByComplianceAsync(Guid storyId, Guid actorId, bool suspended, bool actorIsAdmin)
+    {
+        EnsureNotBlockedByPendingStoryLockRelease(storyId, actorIsAdmin);
+        EnsureComplianceStoryActPermission(storyId, actorId, actorIsAdmin);
+        var st = StoryDAO.GetById(storyId) ?? throw new InvalidOperationException("Story not found.");
+        var authorId = st.author_id ?? throw new InvalidOperationException("Truyện không có tác giả.");
+        if (suspended && UserDAO.IsAccountBanned(authorId))
+            throw new InvalidOperationException(
+                "Tài khoản tác giả đã bị chặn; không áp dụng tạm khóa quyền viết.");
+
+        UserDAO.SetAuthorWritingSuspendedUntil(authorId, suspended ? FarFutureAuthorWritingSuspensionUtc() : null);
+        ViolationLogDAO.Insert(actorId, authorId, "USER", authorId,
+            suspended ? "SUSPEND_AUTHOR_WRITING" : "AUTHOR_WRITING_ENABLED",
+            suspended ? "Tạm khóa quyền viết (compliance)." : "Đã mở lại quyền viết (compliance).", null);
+        _ = NotifyStoryAuthorComplianceActionAsync(
+            st,
+            actorId,
+            suspended ? "Tạm khóa quyền viết" : "Đã mở lại quyền viết",
+            suspended
+                ? "Xử lý vi phạm viên đã tạm khóa quyền đăng truyện và chương của bạn."
+                : "Xử lý vi phạm viên đã cho phép bạn đăng truyện và chương trở lại.");
+        return Task.CompletedTask;
+    }
+
     private async Task NotifyStoryAuthorComplianceActionAsync(stories story, Guid actorId, string title, string content)
     {
         var authorId = story.author_id;
@@ -947,35 +973,12 @@ public class StoryReportService : IStoryReportService
 
         var kind = (dto.RequestKind ?? "").Trim().ToUpperInvariant();
         if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting)
-        {
-            var reason = dto.Message?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(reason))
-                throw new ArgumentException("Bắt buộc nhập lý do đề xuất khi yêu cầu tạm đình chỉ quyền viết.");
-            if (!dto.ProposedSuspendUntilUtc.HasValue)
-                throw new ArgumentException("Cần ProposedSuspendUntilUtc hợp lệ (UTC).");
-            var until = dto.ProposedSuspendUntilUtc.Value;
-            if (until.Kind == DateTimeKind.Unspecified)
-                until = DateTime.SpecifyKind(until, DateTimeKind.Utc);
-            else if (until.Kind == DateTimeKind.Local)
-                until = until.ToUniversalTime();
-            if (until < DateTime.UtcNow.AddDays(1))
-                throw new ArgumentException("Thời hạn đình chỉ phải tối thiểu 1 ngày kể từ hiện tại.");
-            dto.ProposedSuspendUntilUtc = until;
-        }
+            throw new InvalidOperationException(
+                "Tạm khóa quyền viết do compliance bật/tắt trực tiếp (POST .../author-writing-suspended); không gửi đơn lên admin.");
 
         if (UserDAO.IsAccountBanned(target))
             throw new InvalidOperationException(
-                "Tài khoản này đã bị chặn; không thể gửi thêm yêu cầu chặn tài khoản hoặc tạm đình chỉ quyền viết.");
-
-        if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting && UserDAO.IsAuthorWritingSuspended(target))
-        {
-            var suspUntil = UserDAO.GetAuthorWritingSuspendedUntilUtc(target);
-            var label = suspUntil.HasValue
-                ? ApiDateTime.AsUtcForJson(suspUntil.Value).ToString("dd/MM/yyyy HH:mm") + " UTC"
-                : "—";
-            throw new InvalidOperationException(
-                $"Tác giả đang bị tạm đình chỉ quyền viết (đến {label}); không thể gửi đơn đình chỉ mới cho đến khi hết hạn.");
-        }
+                "Tài khoản này đã bị chặn; không thể gửi yêu cầu chặn tài khoản.");
 
         var id = ComplianceAdminActionRequestDAO.CreatePending(
             storyId,

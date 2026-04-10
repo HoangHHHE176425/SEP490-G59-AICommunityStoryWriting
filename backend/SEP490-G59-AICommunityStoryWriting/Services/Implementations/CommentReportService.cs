@@ -419,6 +419,86 @@ public class CommentReportService : ICommentReportService
         }
     }
 
+    private async Task NotifyUserAuthorWritingSuspendedComplianceAsync(
+        Guid targetUserId,
+        Guid actorUserId,
+        bool suspended,
+        comments comment)
+    {
+        if (targetUserId == Guid.Empty) return;
+        try
+        {
+            var actorName = NotificationDAO.GetUserDisplayName(actorUserId);
+            var targetUrl = comment.story_id.HasValue ? $"/story/{comment.story_id.Value}" : "/notifications";
+            var n = new notifications
+            {
+                id = Guid.NewGuid(),
+                user_id = targetUserId,
+                type = "COMPLIANCE_AUTHOR_WRITING_MODERATION",
+                title = suspended ? "Tạm khóa quyền viết" : "Đã mở lại quyền viết",
+                content = suspended
+                    ? $"Xử lý vi phạm viên {actorName} đã tạm khóa quyền đăng truyện và chương của bạn."
+                    : $"Xử lý vi phạm viên {actorName} đã cho phép bạn đăng truyện và chương trở lại.",
+                link_url = targetUrl,
+                is_read = false,
+                created_at = DateTime.UtcNow
+            };
+            NotificationDAO.Add(n);
+
+            if (_notificationHubNotifier != null)
+            {
+                await _notificationHubNotifier.NotifyUserAsync(targetUserId, new NotificationDto
+                {
+                    Id = n.id,
+                    Type = n.type,
+                    Title = n.title,
+                    Content = n.content,
+                    LinkUrl = n.link_url,
+                    IsRead = false,
+                    CreatedAt = n.created_at
+                });
+            }
+        }
+        catch
+        {
+            // best effort push; không làm fail nghiệp vụ chính.
+        }
+    }
+
+    public Task SetAuthorWritingSuspendedByComplianceAsync(
+        Guid commentId,
+        Guid actorUserId,
+        SetComplianceCommentAuthorWritingSuspendedRequestDto dto,
+        bool actorIsAdmin)
+    {
+        if (dto == null) throw new ArgumentException("Body is required.");
+        var comment = CommentDAO.GetById(commentId) ?? throw new InvalidOperationException("Comment not found.");
+        if (comment.user_id is null)
+            throw new InvalidOperationException("Comment has no user_id.");
+
+        if (!actorIsAdmin && !ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, commentId, actorUserId))
+            throw new InvalidOperationException("Chỉ compliance đang nhận (lock) comment này mới thực hiện được thao tác này.");
+
+        EnsureNotBlockedByPendingCommentLockRelease(commentId, actorIsAdmin);
+
+        var targetUserId = dto.TargetUserId ?? comment.user_id.Value;
+        if (targetUserId == Guid.Empty)
+            throw new ArgumentException("TargetUserId không hợp lệ.");
+
+        if (dto.Value && UserDAO.IsAccountBanned(targetUserId))
+            throw new InvalidOperationException(
+                "Tài khoản này đã bị chặn; không áp dụng tạm khóa quyền viết.");
+
+        var until = dto.Value ? DateTime.UtcNow.AddYears(100) : (DateTime?)null;
+        UserDAO.SetAuthorWritingSuspendedUntil(targetUserId, until);
+        ViolationLogDAO.Insert(actorUserId, targetUserId, "USER", targetUserId,
+            dto.Value ? "SUSPEND_AUTHOR_WRITING" : "AUTHOR_WRITING_ENABLED",
+            dto.Value ? "Tạm khóa quyền viết (compliance, báo cáo comment)." : "Đã mở lại quyền viết (compliance, báo cáo comment).",
+            null);
+        _ = NotifyUserAuthorWritingSuspendedComplianceAsync(targetUserId, actorUserId, dto.Value, comment);
+        return Task.CompletedTask;
+    }
+
     public async Task<Guid> RequestAdminActionAsync(
         Guid commentId,
         Guid requesterId,
@@ -441,35 +521,12 @@ public class CommentReportService : ICommentReportService
         var targetUserId = dto.TargetUserId ?? comment.user_id.Value;
         var kind = dto.RequestKind.Trim().ToUpperInvariant();
         if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting)
-        {
-            var reason = dto.Message?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(reason))
-                throw new ArgumentException("Bắt buộc nhập lý do đề xuất khi yêu cầu tạm đình chỉ quyền viết.");
-            if (!dto.ProposedSuspendUntilUtc.HasValue)
-                throw new ArgumentException("Cần ProposedSuspendUntilUtc hợp lệ (UTC).");
-            var until = dto.ProposedSuspendUntilUtc.Value;
-            if (until.Kind == DateTimeKind.Unspecified)
-                until = DateTime.SpecifyKind(until, DateTimeKind.Utc);
-            else if (until.Kind == DateTimeKind.Local)
-                until = until.ToUniversalTime();
-            if (until < DateTime.UtcNow.AddDays(1))
-                throw new ArgumentException("Thời hạn đình chỉ phải tối thiểu 1 ngày kể từ hiện tại.");
-            dto.ProposedSuspendUntilUtc = until;
-        }
+            throw new InvalidOperationException(
+                "Tạm khóa quyền viết do compliance bật/tắt trực tiếp (POST .../author-writing-suspended); không gửi đơn lên admin.");
 
         if (UserDAO.IsAccountBanned(targetUserId))
             throw new InvalidOperationException(
-                "Tài khoản này đã bị chặn; không thể gửi thêm yêu cầu chặn tài khoản hoặc tạm đình chỉ quyền viết.");
-
-        if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting && UserDAO.IsAuthorWritingSuspended(targetUserId))
-        {
-            var suspUntil = UserDAO.GetAuthorWritingSuspendedUntilUtc(targetUserId);
-            var label = suspUntil.HasValue
-                ? ApiDateTime.AsUtcForJson(suspUntil.Value).ToString("dd/MM/yyyy HH:mm") + " UTC"
-                : "—";
-            throw new InvalidOperationException(
-                $"Người dùng đang bị tạm đình chỉ quyền viết (đến {label}); không thể gửi đơn đình chỉ mới cho đến khi hết hạn.");
-        }
+                "Tài khoản này đã bị chặn; không thể gửi yêu cầu chặn tài khoản.");
 
         var sourceTag = ComplianceAdminActionRequestDAO.FormatCommentReportSourceTag(commentId);
         var enrichedMessage = string.IsNullOrWhiteSpace(dto.Message)
