@@ -156,7 +156,14 @@ namespace AIStory.API.Controllers
                         ValidateIconFile(request.IconImage);
                         var existing = _categoryService.GetById(id);
                         if (existing != null && !string.IsNullOrEmpty(existing.IconUrl))
+                        {
+                            try
+                            {
+                                await _cloudinaryImageService.DeleteImageByUrlAsync(existing.IconUrl, HttpContext.RequestAborted);
+                            }
+                            catch { }
                             TryDeleteLocalIconFile(existing.IconUrl);
+                        }
                         iconUrl = await _cloudinaryImageService.UploadImageAsync(
                             request.IconImage,
                             "category-icons",
@@ -199,13 +206,20 @@ namespace AIStory.API.Controllers
         /// <summary>Xóa thể loại - Chỉ ADMIN</summary>
         [HttpDelete("{id:guid}")]
         [Authorize(Roles = "ADMIN")]
-        public IActionResult Delete(Guid id)
+        public async Task<IActionResult> Delete(Guid id)
         {
             try
             {
                 var existing = _categoryService.GetById(id);
                 if (existing != null && !string.IsNullOrEmpty(existing.IconUrl))
+                {
+                    try
+                    {
+                        await _cloudinaryImageService.DeleteImageByUrlAsync(existing.IconUrl, HttpContext.RequestAborted);
+                    }
+                    catch { }
                     TryDeleteLocalIconFile(existing.IconUrl);
+                }
                 var deleted = _categoryService.Delete(id);
                 return deleted ? NoContent() : NotFound();
             }

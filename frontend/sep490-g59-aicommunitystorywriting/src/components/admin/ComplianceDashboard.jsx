@@ -3,7 +3,6 @@ import {
     MessageSquare,
     ShieldAlert,
     Inbox,
-    MoreVertical,
     ArrowRight,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -182,9 +181,6 @@ export function ComplianceDashboard({ onNavigateToViolations } = {}) {
                                 <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${colorClasses[stat.color]}`}>
                                     <Icon className="w-6 h-6" />
                                 </div>
-                                <button type="button" className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors" aria-hidden>
-                                    <MoreVertical className="w-4 h-4 text-slate-400" />
-                                </button>
                             </div>
                             <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">{stat.title}</p>
                             <p className="text-2xl font-bold text-slate-900 dark:text-white mb-2">

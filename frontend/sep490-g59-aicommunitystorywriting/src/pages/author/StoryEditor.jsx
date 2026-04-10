@@ -806,8 +806,6 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                     const word = it.wordOrPhrase ?? it.WordOrPhrase ?? '';
                                                     const sug = it.suggestion ?? it.Suggestion ?? '';
                                                     const ctx = it.context ?? it.Context ?? '';
-                                                    const contentForPosition = chapterCheckModal.data?.contentForPosition ?? '';
-                                                    const pos = findIssuePosition(contentForPosition, word);
                                                     return (
                                                         <div key={idx} className="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
                                                             <div className="text-sm text-slate-900 dark:text-slate-100">
@@ -821,16 +819,9 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                                     <span style={{ fontWeight: 800 }}>Câu/dòng chứa lỗi</span>
                                                                     <div className="mt-1 whitespace-pre-wrap">{ctx}</div>
                                                                 </div>
-                                                            ) : pos ? (
-                                                                <div className="text-xs text-slate-600 dark:text-slate-300 mt-2">
-                                                                    <span style={{ fontWeight: 800 }}>Vị trí</span>:
-                                                                    {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
-                                                                    {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
-                                                                    {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
-                                                                </div>
                                                             ) : (
                                                                 <div className="text-xs text-slate-400 dark:text-slate-400 mt-2">
-                                                                    Không có câu trích; không xác định được vị trí trong nội dung hiện tại.
+                                                                    Không có đoạn trích chứa từ sai cho mục này.
                                                                 </div>
                                                             )}
                                                         </div>
@@ -847,8 +838,6 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                     const type = it.type ?? it.Type ?? '';
                                                     const desc = it.description ?? it.Description ?? '';
                                                     const quote = it.quote ?? it.Quote ?? '';
-                                                    const contentForPosition = chapterCheckModal.data?.contentForPosition ?? '';
-                                                    const pos = findIssuePosition(contentForPosition, quote);
                                                     return (
                                                         <div
                                                             key={idx}
@@ -864,15 +853,11 @@ export function StoryEditor({ story, onSave, onCancel }) {
                                                                 <div className="mt-2 text-xs text-amber-800 border border-amber-200 bg-amber-50 rounded-lg p-2" style={{ whiteSpace: 'pre-wrap' }}>
                                                                     {quote}
                                                                 </div>
-                                                            ) : null}
-                                                            {pos ? (
+                                                            ) : (
                                                                 <div className="text-xs text-amber-800 mt-2">
-                                                                    <span style={{ fontWeight: 800 }}>Vị trí</span>:
-                                                                    {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
-                                                                    {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
-                                                                    {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
+                                                                    Không có đoạn trích chứa từ cấm cho mục này.
                                                                 </div>
-                                                            ) : null}
+                                                            )}
                                                         </div>
                                                     );
                                                 })

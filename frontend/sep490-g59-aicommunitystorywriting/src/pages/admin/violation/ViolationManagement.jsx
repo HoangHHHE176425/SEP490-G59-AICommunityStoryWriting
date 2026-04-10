@@ -60,7 +60,7 @@ import { useToast } from '../../../components/author/story-editor/Toast';
 const COMPLIANCE_FETCH_CHUNK_STORY = 100;
 const COMPLIANCE_FETCH_CHUNK_COMMENT = 200;
 /** Page size hiển thị theo phân trang (để UI có Next/Prev). */
-const REPORT_PAGE_SIZE = 20;
+const REPORT_PAGE_SIZE = 5;
 
 /** Gọi API phân trang lặp cho đến khi lấy hết bản ghi (hoặc hết maxPages). */
 async function fetchAllPagedItems(fetchPage, { chunkSize = 100, maxPages = 250 } = {}) {
@@ -1852,16 +1852,18 @@ export default function ViolationManagement() {
         const totalPages = Math.max(1, Math.ceil(_totalCount / REPORT_PAGE_SIZE));
         return (
             <div>
-                <div className="w-full overflow-x-auto overflow-y-visible">
+                <div className="w-full overflow-visible">
                     <table className="w-full border-collapse table-fixed">
-                        <thead><tr className="bg-slate-50">
-                            <th style={th}>Ưu tiên</th>
-                            <th style={th}>Mã đơn</th>
-                            <th style={th}>Truyện</th>
-                            <th style={th}>Tác giả</th>
-                            <th style={th}>Số người báo cáo</th>
-                            <th style={th}>Thao tác</th>
-                        </tr></thead>
+                        <thead>
+                            <tr className="bg-slate-50">
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Ưu tiên</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Mã đơn</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Truyện</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Tác giả</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Số người báo cáo</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Thao tác</th>
+                            </tr>
+                        </thead>
                         <tbody>
                             {rows.length === 0 && (
                                 <tr>
@@ -1871,13 +1873,11 @@ export default function ViolationManagement() {
                             {rows.map((r) => (
                                 <tr
                                     key={r.storyId}
-                                    className={`border-t border-slate-200 hover:bg-slate-50/70 ${r.complianceFlagged ? 'bg-amber-200/70 ring-1 ring-amber-300' : ''
-                                        }`}
+                                    className={`border-t border-slate-200 hover:bg-slate-50/70 ${r.complianceFlagged ? 'bg-amber-200/70 ring-1 ring-amber-300' : ''}`}
                                     style={r.complianceFlagged ? { borderLeft: '4px solid #d97706' } : undefined}
                                 >
                                     {(() => {
-                                        const hasPendingReleaseRequest = !!pendingReleaseByStory[r.storyId]
-                                            || !!r.hasPendingLockReleaseRequest;
+                                        const hasPendingReleaseRequest = !!pendingReleaseByStory[r.storyId] || !!r.hasPendingLockReleaseRequest;
                                         const hasPendingAdminAction = !!r.hasPendingAdminActionRequest;
                                         const authorWritingSuspended = isAuthorWritingSuspendedActive(r.authorWritingSuspendedUntilUtc);
                                         const authorBannedForWriting = String(r.authorAccountStatus ?? '').toUpperCase() === 'BANNED';
@@ -1900,11 +1900,7 @@ export default function ViolationManagement() {
                                                 </td>
                                                 <td style={{ ...td, minWidth: 260 }}>
                                                     <div style={{ display: 'inline-flex', gap: 6, position: 'relative', flexWrap: 'nowrap' }}>
-                                                        <button
-                                                            type="button"
-                                                            style={btn}
-                                                            onClick={() => handleStoryRowActionSelect(r, 'detail', storyFlags)}
-                                                        >
+                                                        <button type="button" style={btn} onClick={() => handleStoryRowActionSelect(r, 'detail', storyFlags)}>
                                                             Chi tiết
                                                         </button>
                                                         <details style={hasPendingReleaseRequest ? { pointerEvents: 'none' } : undefined}>
@@ -1920,19 +1916,13 @@ export default function ViolationManagement() {
                                                                         }
                                                                         : {}),
                                                                 }}
-                                                                title={
-                                                                    hasPendingReleaseRequest
-                                                                        ? 'Đang chờ quản trị viên xử lý đơn hủy nhận duyệt — không thể dùng các tác vụ.'
-                                                                        : undefined
-                                                                }
+                                                                title={hasPendingReleaseRequest ? 'Đang chờ quản trị viên xử lý đơn hủy nhận duyệt — không thể dùng các tác vụ.' : undefined}
                                                             >
                                                                 {hasPendingReleaseRequest ? (
                                                                     <span className="inline-flex items-center gap-1.5" aria-label="Tác vụ tạm khóa, chờ quản trị viên">
                                                                         <Lock size={14} className="shrink-0 text-amber-700" aria-hidden />
                                                                         <span>Tác vụ</span>
-                                                                        <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950">
-                                                                            Chờ QTV
-                                                                        </span>
+                                                                        <span className="rounded bg-amber-200/80 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-950">Chờ QTV</span>
                                                                     </span>
                                                                 ) : (
                                                                     'Tác vụ'
@@ -1962,16 +1952,10 @@ export default function ViolationManagement() {
                                                                     type="button"
                                                                     style={menuBtn}
                                                                     disabled={hasPendingReleaseRequest || authorBannedForWriting}
-                                                                    title={
-                                                                        authorBannedForWriting
-                                                                            ? 'Tác giả đã bị chặn — không áp dụng tạm khóa viết.'
-                                                                            : 'Áp dụng ngay lên tài khoản tác giả: chặn chỉnh sửa truyện/chương và gửi duyệt. Không tạo đơn lên quản trị viên.'
-                                                                    }
+                                                                    title={authorBannedForWriting ? 'Tác giả đã bị chặn — không áp dụng tạm khóa viết.' : 'Áp dụng ngay lên tài khoản tác giả: chặn chỉnh sửa truyện/chương và gửi duyệt. Không tạo đơn lên quản trị viên.'}
                                                                     onClick={() => handleStoryRowActionSelect(r, 'toggle-author-writing-suspended', storyFlags)}
                                                                 >
-                                                                    {authorWritingSuspended
-                                                                        ? 'Mở lại quyền viết tác giả'
-                                                                        : 'Tạm khóa quyền viết tác giả'}
+                                                                    {authorWritingSuspended ? 'Mở lại quyền viết tác giả' : 'Tạm khóa quyền viết tác giả'}
                                                                 </button>
                                                                 <button
                                                                     type="button"
@@ -1987,11 +1971,7 @@ export default function ViolationManagement() {
                                                                             : {}),
                                                                     }}
                                                                     disabled={hasPendingReleaseRequest || hasPendingAdminAction}
-                                                                    title={
-                                                                        hasPendingAdminAction && !hasPendingReleaseRequest
-                                                                            ? 'Chờ quản trị viên xử lý yêu cầu chặn / đình chỉ — không thể xử lý hết phiếu lúc này.'
-                                                                            : undefined
-                                                                    }
+                                                                    title={hasPendingAdminAction && !hasPendingReleaseRequest ? 'Chờ quản trị viên xử lý yêu cầu chặn / đình chỉ — không thể xử lý hết phiếu lúc này.' : undefined}
                                                                     onClick={() => handleStoryRowActionSelect(r, 'resolve-all', storyFlags)}
                                                                 >
                                                                     {hasPendingAdminAction && !hasPendingReleaseRequest ? (
@@ -2012,9 +1992,7 @@ export default function ViolationManagement() {
                                                     {hasPendingAdminAction && !hasPendingReleaseRequest ? (
                                                         <div className="text-xs text-sky-900 mt-1 flex items-start gap-1.5 max-w-[280px]">
                                                             <Lock size={12} className="shrink-0 mt-0.5 text-sky-700" aria-hidden />
-                                                            <span>
-                                                                Đang chờ QTV xử lý yêu cầu gửi admin — tạm khóa «Xử lý toàn bộ phiếu báo cáo».
-                                                            </span>
+                                                            <span>Đang chờ QTV xử lý yêu cầu gửi admin — tạm khóa «Xử lý toàn bộ phiếu báo cáo».</span>
                                                         </div>
                                                     ) : null}
                                                 </td>
@@ -2044,7 +2022,7 @@ export default function ViolationManagement() {
         const totalPages = Math.max(1, Math.ceil(_totalCount / REPORT_PAGE_SIZE));
         return (
             <div>
-                <div className="w-full overflow-x-auto overflow-y-visible">
+                <div className="w-full overflow-visible">
                     <table className="w-full border-collapse table-fixed">
                         <thead><tr className="bg-slate-50">
                             <th style={th}>Ưu tiên</th>
@@ -2354,7 +2332,7 @@ export default function ViolationManagement() {
                                 <button
                                     type="button"
                                     onClick={loadClaimableStories}
-                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600"
                                 >
                                     {claimPickerLoading ? 'Đang tải...' : `Nhận duyệt đơn (${claimableStoryCount})`}
                                 </button>
@@ -2362,7 +2340,7 @@ export default function ViolationManagement() {
                                 <button
                                     type="button"
                                     onClick={loadClaimableComments}
-                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"
+                                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600"
                                 >
                                     {commentClaimPickerLoading ? 'Đang tải...' : `Nhận duyệt đơn (${claimableCommentCount})`}
                                 </button>
@@ -2383,7 +2361,7 @@ export default function ViolationManagement() {
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
                                 className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${activeTab === tab.id
-                                    ? 'bg-primary/15 border-primary/40 text-primary'
+                                    ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
                                     : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                                     }`}
                             >
@@ -2397,7 +2375,7 @@ export default function ViolationManagement() {
                                 type="button"
                                 onClick={() => setAdminLogType('moderator')}
                                 className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${adminLogType === 'moderator'
-                                    ? 'bg-primary/15 border-primary/40 text-primary'
+                                    ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
                                     : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                                     }`}
                             >
@@ -2407,7 +2385,7 @@ export default function ViolationManagement() {
                                 type="button"
                                 onClick={() => setAdminLogType('compliance')}
                                 className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${adminLogType === 'compliance'
-                                    ? 'bg-primary/15 border-primary/40 text-primary'
+                                    ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
                                     : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                                     }`}
                             >
@@ -2672,7 +2650,7 @@ export default function ViolationManagement() {
                                     type="button"
                                     onClick={() => setViolationPolicyTab('USER')}
                                     className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${violationPolicyTab === 'USER'
-                                        ? 'bg-primary/15 border-primary/40 text-primary'
+                                        ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
                                         : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                                         }`}
                                 >
@@ -2682,7 +2660,7 @@ export default function ViolationManagement() {
                                     type="button"
                                     onClick={() => setViolationPolicyTab('AUTHOR')}
                                     className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${violationPolicyTab === 'AUTHOR'
-                                        ? 'bg-primary/15 border-primary/40 text-primary'
+                                        ? 'bg-emerald-100 border-emerald-300 text-emerald-700'
                                         : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
                                         }`}
                                 >
@@ -2770,7 +2748,7 @@ export default function ViolationManagement() {
                                         </div>
                                         <button
                                             onClick={() => handleClaimStoryFromPicker(r)}
-                                            className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90"
+                                            className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600"
                                         >
                                             Nhận
                                         </button>
@@ -2813,7 +2791,7 @@ export default function ViolationManagement() {
                                         <button
                                             type="button"
                                             onClick={() => handleClaimCommentFromPicker(r)}
-                                            className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 shrink-0"
+                                            className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:bg-emerald-600 shrink-0"
                                         >
                                             Nhận
                                         </button>

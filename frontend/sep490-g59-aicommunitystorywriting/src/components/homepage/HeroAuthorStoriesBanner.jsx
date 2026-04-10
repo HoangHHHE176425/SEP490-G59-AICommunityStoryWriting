@@ -37,6 +37,14 @@ export function HeroAuthorStoriesBanner() {
     return n > 0 ? n.toFixed(1) : '-';
   };
 
+  const truncateWords = (text, maxWords = 50) => {
+    const normalized = String(text ?? '').trim().replace(/\s+/g, ' ');
+    if (!normalized) return '';
+    const words = normalized.split(' ');
+    if (words.length <= maxWords) return normalized;
+    return `${words.slice(0, maxWords).join(' ')}...`;
+  };
+
   // NOTE: do not show mock on first paint to avoid banner "flash" when navigating to /home.
   const FALLBACK_FEATURED_STORIES = [
     {
@@ -487,7 +495,7 @@ export function HeroAuthorStoriesBanner() {
 
                   {/* Description */}
                   <p className="text-[#94A3B8] font-['Plus_Jakarta_Sans',sans-serif] font-normal text-[16px] mb-6 leading-relaxed max-w-[650px]">
-                    {current.description}
+                    {truncateWords(current.description, 50)}
                   </p>
 
                   {/* Stats Grid */}

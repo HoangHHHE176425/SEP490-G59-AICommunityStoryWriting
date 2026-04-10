@@ -81,7 +81,15 @@ function isExampleOutline(scenes) {
 
 function formatOutlineForDisplay(outline) {
     if (!outline || !outline.trim()) return '';
-    const raw = outline.trim();
+    const normalizeOutlineText = (s) =>
+        (s || '')
+            .replace(/\\r\\n/g, '\n')
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, ' ')
+            .replace(/(^|\n)(\d+)\.(\S)/g, '$1$2. $3')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    const raw = normalizeOutlineText(outline.trim());
     const toParse = extractOutlineJson(raw);
     try {
         const parsed = JSON.parse(toParse);
@@ -616,12 +624,23 @@ export function ChapterEditor({
                             <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>Nội dung AI đã tạo</h3>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
-                            {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
+                            {(() => {
+                                const ideaBlock = (coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ?? '').toString().trim();
+                                const hasContent = ((coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '').toString().trim().length > 0)
+                                    || (((coCreateResult.outline ?? coCreateResult.Outline) || '').toString().trim().length > 0);
+                                const hardStop = ideaBlock.length > 0 && !hasContent;
+                                return hardStop;
+                            })() ? (
                                 <div style={{ padding: '1rem', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b' }}>
                                     {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback}
                                 </div>
                             ) : (
                                 <>
+                                    {((coCreateResult.ideaConflictWarning ?? coCreateResult.IdeaConflictWarning ?? coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback) || '').toString().trim() ? (
+                                        <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                                            {coCreateResult.ideaConflictWarning ?? coCreateResult.IdeaConflictWarning ?? coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback}
+                                        </div>
+                                    ) : null}
                                     {coCreateContextWarning ? (
                                         <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
                                             {coCreateContextWarning}
@@ -633,6 +652,16 @@ export function ChapterEditor({
                                             <div style={{ fontSize: '0.875rem', color: '#374151', whiteSpace: 'pre-wrap' }}>
                                                 {formatOutlineForDisplay(coCreateResult.outline ?? coCreateResult.Outline)}
                                             </div>
+                                            {(() => {
+                                                const chars = coCreateResult.charactersInvolved ?? coCreateResult.CharactersInvolved ?? [];
+                                                if (!Array.isArray(chars) || chars.length === 0) return null;
+                                                return (
+                                                    <div style={{ marginTop: '0.75rem' }}>
+                                                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Nhân vật tham gia</div>
+                                                        <div style={{ fontSize: '0.875rem', color: '#374151' }}>{chars.join(', ')}</div>
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
                                     )}
                                     {(coCreateResult.reviewFeedback ?? coCreateResult.ReviewFeedback) && (
@@ -686,7 +715,12 @@ export function ChapterEditor({
                             )}
                         </div>
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                            {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
+                            {(() => {
+                                const ideaBlock = (coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ?? '').toString().trim();
+                                const hasContent = ((coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '').toString().trim().length > 0)
+                                    || (((coCreateResult.outline ?? coCreateResult.Outline) || '').toString().trim().length > 0);
+                                return ideaBlock.length > 0 && !hasContent;
+                            })() ? (
                                 <button
                                     type="button"
                                     onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); setCoCreateContextWarning(null); }}

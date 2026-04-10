@@ -15,6 +15,7 @@ export default function EditProfile() {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [fieldErrors, setFieldErrors] = useState({});
     const [avatarLoading, setAvatarLoading] = useState(false);
     const [avatarError, setAvatarError] = useState('');
     const [avatarSuccess, setAvatarSuccess] = useState(false);
@@ -46,26 +47,76 @@ export default function EditProfile() {
     }, [user]);
 
     const handleChange = (e) => {
+        const { name, value } = e.target;
         setFormData({
             ...formData,
-            [e.target.name]: e.target.value,
+            [name]: value,
         });
+        setFieldErrors((prev) => ({
+            ...prev,
+            [name]: '',
+        }));
         setError('');
         setSuccess(false);
+    };
+
+    const validateProfileForm = (data) => {
+        const errors = {};
+        const normalizedData = {
+            displayName: data.displayName.trim(),
+            phone: data.phone.trim(),
+            idNumber: data.idNumber.trim(),
+            bio: data.bio.trim(),
+        };
+
+        if (!normalizedData.displayName) {
+            errors.displayName = 'Vui lòng nhập tên hiển thị.';
+        } else if (normalizedData.displayName.length < 2) {
+            errors.displayName = 'Tên hiển thị phải có ít nhất 2 ký tự.';
+        } else if (normalizedData.displayName.length > 100) {
+            errors.displayName = 'Tên hiển thị không được vượt quá 100 ký tự.';
+        }
+
+        if (normalizedData.phone) {
+            const normalizedPhone = normalizedData.phone.replace(/\s+/g, '');
+            const isValidPhone = /^(0\d{9}|\+84\d{9})$/.test(normalizedPhone);
+            if (!isValidPhone) {
+                errors.phone = 'Số điện thoại không hợp lệ (ví dụ: 0912345678 hoặc +84912345678).';
+            }
+        }
+
+        if (normalizedData.idNumber) {
+            const isValidIdNumber = /^(\d{9}|\d{12})$/.test(normalizedData.idNumber);
+            if (!isValidIdNumber) {
+                errors.idNumber = 'CCCD/CMND phải gồm 9 hoặc 12 chữ số.';
+            }
+        }
+
+        if (normalizedData.bio.length > 500) {
+            errors.bio = 'Giới thiệu bản thân không được vượt quá 500 ký tự.';
+        }
+
+        return { errors, normalizedData };
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setSuccess(false);
+        const { errors, normalizedData } = validateProfileForm(formData);
+        if (Object.keys(errors).length > 0) {
+            setFieldErrors(errors);
+            return;
+        }
+        setFieldErrors({});
         setLoading(true);
 
         try {
             const res = await updateMyProfile({
-                displayName: formData.displayName,
-                phone: formData.phone || null,
-                idNumber: formData.idNumber || null,
-                bio: formData.bio || null,
+                displayName: normalizedData.displayName,
+                phone: normalizedData.phone || null,
+                idNumber: normalizedData.idNumber || null,
+                bio: normalizedData.bio || null,
             });
             if (res.success) {
                 setSuccess(true);
@@ -233,10 +284,16 @@ export default function EditProfile() {
                                 type="text"
                                 value={formData.displayName}
                                 onChange={handleChange}
-                                className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
+                                className={`block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none ${fieldErrors.displayName
+                                    ? 'border-red-300 dark:border-red-500'
+                                    : 'border-slate-200 dark:border-slate-600'
+                                    }`}
                                 required
                             />
                         </div>
+                        {fieldErrors.displayName && (
+                            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{fieldErrors.displayName}</p>
+                        )}
                     </div>
 
                     <div>
@@ -271,9 +328,15 @@ export default function EditProfile() {
                                 type="tel"
                                 value={formData.phone}
                                 onChange={handleChange}
-                                className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
+                                className={`block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none ${fieldErrors.phone
+                                    ? 'border-red-300 dark:border-red-500'
+                                    : 'border-slate-200 dark:border-slate-600'
+                                    }`}
                             />
                         </div>
+                        {fieldErrors.phone && (
+                            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{fieldErrors.phone}</p>
+                        )}
                     </div>
 
                     <div>
@@ -289,9 +352,15 @@ export default function EditProfile() {
                                 type="text"
                                 value={formData.idNumber}
                                 onChange={handleChange}
-                                className="block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none"
+                                className={`block w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-700 border rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none ${fieldErrors.idNumber
+                                    ? 'border-red-300 dark:border-red-500'
+                                    : 'border-slate-200 dark:border-slate-600'
+                                    }`}
                             />
                         </div>
+                        {fieldErrors.idNumber && (
+                            <p className="mt-2 text-sm text-red-600 dark:text-red-400">{fieldErrors.idNumber}</p>
+                        )}
                     </div>
                 </div>
 
@@ -304,9 +373,15 @@ export default function EditProfile() {
                         value={formData.bio}
                         onChange={handleChange}
                         rows={6}
-                        className="block w-full px-4 py-3 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none resize-none"
+                        className={`block w-full px-4 py-3 bg-white dark:bg-slate-700 border rounded-lg text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all outline-none resize-none ${fieldErrors.bio
+                            ? 'border-red-300 dark:border-red-500'
+                            : 'border-slate-200 dark:border-slate-600'
+                            }`}
                         placeholder="Nhập giới thiệu về bản thân..."
                     />
+                    {fieldErrors.bio && (
+                        <p className="mt-2 text-sm text-red-600 dark:text-red-400">{fieldErrors.bio}</p>
+                    )}
                 </div>
 
                 <div className="flex justify-between items-center">

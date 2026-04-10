@@ -195,6 +195,7 @@ namespace AIStory.API.Controllers
                     return StatusCode(503, new { message = "Upload ảnh chưa được cấu hình (Cloudinary). Thêm Cloudinary:CloudName, ApiKey, ApiSecret trong cấu hình." });
 
                 Guid userId = GetUserIdFromToken();
+                var currentProfile = await _accountService.GetProfileAsync(userId);
 
                 var avatarUrl = await _cloudinaryImageService.UploadImageAsync(
                     avatar,
@@ -205,6 +206,20 @@ namespace AIStory.API.Controllers
                 {
                     AvatarUrl = avatarUrl
                 });
+
+                var oldAvatarUrl = currentProfile?.AvatarUrl;
+                if (!string.IsNullOrWhiteSpace(oldAvatarUrl) &&
+                    !string.Equals(oldAvatarUrl, avatarUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        await _cloudinaryImageService.DeleteImageByUrlAsync(oldAvatarUrl, HttpContext.RequestAborted);
+                    }
+                    catch
+                    {
+                        // best effort cleanup: không fail request nếu xóa ảnh cũ thất bại
+                    }
+                }
 
                 return Ok(new { message = "Upload avatar thành công!", avatarUrl });
             }

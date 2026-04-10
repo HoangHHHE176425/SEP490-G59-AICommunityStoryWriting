@@ -31,11 +31,17 @@ public class CoCreationResponse
     /// <summary>Nếu có: ý tưởng tác giả mâu thuẫn với ngữ cảnh (vd. nhân vật đã chết nhưng ý tưởng nhắc nhân vật đó). Khi đó không tạo dàn ý/nội dung.</summary>
     public string? IdeaContradictionFeedback { get; set; }
 
+    /// <summary>Cảnh báo xung đột ý tưởng (nếu có) nhưng hệ thống vẫn tiếp tục viết theo hướng đã điều chỉnh.</summary>
+    public string? IdeaConflictWarning { get; set; }
+
     /// <summary>Dàn ý do Agent 1 tạo (rỗng nếu IdeaContradictionFeedback có giá trị).</summary>
     public string Outline { get; set; } = null!;
 
     /// <summary>Tiêu đề chương gợi ý (Agent 1). Null nếu không sinh được hoặc nhánh mâu thuẫn ý tưởng.</summary>
     public string? SuggestedChapterTitle { get; set; }
+
+    /// <summary>Danh sách nhân vật tham gia, được trích từ dàn ý Agent 1.</summary>
+    public List<string>? CharactersInvolved { get; set; }
 
     /// <summary>Nội dung cuối (đã qua kiểm duyệt hoặc bản cuối sau khi hết số lần sửa). Rỗng nếu IdeaContradictionFeedback có giá trị.</summary>
     public string FinalContent { get; set; } = null!;

@@ -33,9 +33,6 @@ export function AuthProvider({ children }) {
     const fetchProfileRef = useRef(fetchProfile);
     fetchProfileRef.current = fetchProfile;
 
-    const fetchProfileRef = useRef(fetchProfile);
-    fetchProfileRef.current = fetchProfile;
-
     // Load cached user + try restore session (refresh cookie -> access token -> profile)
     useEffect(() => {
         const savedUser = localStorage.getItem('user');
@@ -178,6 +175,14 @@ export function AuthProvider({ children }) {
     const uploadMyAvatar = async (file) => {
         const res = await accountApi.uploadAvatar(file);
         if (!res.success) return res;
+        const avatarUrl = res?.data?.avatarUrl ?? null;
+        if (avatarUrl) {
+            // Update ngay UI với URL Cloudinary mới, sau đó đồng bộ profile đầy đủ từ server.
+            saveUser({
+                ...(user || {}),
+                avatarUrl,
+            });
+        }
         await fetchProfile();
         return res;
     };
