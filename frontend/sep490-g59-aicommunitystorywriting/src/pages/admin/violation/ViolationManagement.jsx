@@ -176,6 +176,40 @@ function isAuthorWritingSuspendedActive(untilUtc) {
     return Number.isFinite(t) && t > Date.now();
 }
 
+/** Đếm từ (khớp quy tắc backend: cụm ký tự không phải khoảng trắng). */
+function countWords(text) {
+    const t = String(text ?? '').trim();
+    if (!t) return 0;
+    return t.match(/\S+/g)?.length ?? 0;
+}
+
+const COMPLIANCE_BAN_REASON_MIN_WORDS = 50;
+
+/** Điều kiện trước khi đóng loạt DISMISSED — báo cáo truyện (snapshot lúc mở modal). */
+function getBulkDismissStoryBlockers(modal) {
+    if (!modal || modal.type !== 'story') return [];
+    const blockers = [];
+    if (modal.commentsDisabled) blockers.push('Bình luận truyện vẫn đang bị khóa (chưa mở lại).');
+    if (modal.complianceHidden) blockers.push('Truyện vẫn đang ẩn khỏi người dùng thường.');
+    if (isAuthorWritingSuspendedActive(modal.authorWritingSuspendedUntilUtc)) {
+        blockers.push('Tác giả vẫn đang bị tạm khóa quyền viết.');
+    }
+    return blockers;
+}
+
+/** Điều kiện trước khi đóng loạt DISMISSED — báo cáo bình luận. */
+function getBulkDismissCommentBlockers(modal) {
+    if (!modal || modal.type !== 'comment') return [];
+    const blockers = [];
+    if (modal.isCommentThreadHidden) blockers.push('Chuỗi bình luận vẫn đang bị ẩn.');
+    if (modal.storyCommentsDisabled) blockers.push('Bình luận truyện vẫn đang bị khóa (cấp truyện).');
+    if (modal.storyComplianceHidden) blockers.push('Truyện vẫn đang ẩn khỏi người dùng thường.');
+    if (isAuthorWritingSuspendedActive(modal.storyAuthorWritingSuspendedUntilUtc)) {
+        blockers.push('Tác giả truyện vẫn đang bị tạm khóa quyền viết.');
+    }
+    return blockers;
+}
+
 function formatDate(value) {
     if (!value) return '—';
     const raw = String(value).trim();
@@ -263,6 +297,7 @@ function normalizeStoryQueueItem(x) {
         openReportIds: Array.isArray(openReportIds) ? openReportIds : [],
         hasPendingLockReleaseRequest: coerceBool(pick(x, 'hasPendingLockReleaseRequest', 'HasPendingLockReleaseRequest')),
         hasPendingAdminActionRequest: coerceBool(pick(x, 'hasPendingAdminActionRequest', 'HasPendingAdminActionRequest')),
+        hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
         authorAccountStatus: pick(x, 'authorAccountStatus', 'AuthorAccountStatus') ?? null,
         authorWritingSuspendedUntilUtc: pick(x, 'authorWritingSuspendedUntilUtc', 'AuthorWritingSuspendedUntilUtc') ?? null,
     };
@@ -284,6 +319,7 @@ function normalizeStoryReportRow(x) {
         complianceHidden: coerceBool(pick(x, 'complianceHidden', 'ComplianceHidden')),
         hasPendingLockReleaseRequest: coerceBool(pick(x, 'hasPendingLockReleaseRequest', 'HasPendingLockReleaseRequest')),
         hasPendingAdminActionRequest: coerceBool(pick(x, 'hasPendingAdminActionRequest', 'HasPendingAdminActionRequest')),
+        hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
         authorAccountStatus: pick(x, 'authorAccountStatus', 'AuthorAccountStatus') ?? null,
         authorWritingSuspendedUntilUtc: pick(x, 'authorWritingSuspendedUntilUtc', 'AuthorWritingSuspendedUntilUtc') ?? null,
     };
@@ -314,6 +350,7 @@ function groupStoryRows(rawRows) {
             openReportIds: [],
             hasPendingLockReleaseRequest: false,
             hasPendingAdminActionRequest: false,
+            hasApprovedAdminBanRequest: false,
             authorAccountStatus: null,
             authorWritingSuspendedUntilUtc: null,
         };
@@ -330,6 +367,7 @@ function groupStoryRows(rawRows) {
         prev.complianceHidden = row.complianceHidden;
         prev.hasPendingLockReleaseRequest = prev.hasPendingLockReleaseRequest || row.hasPendingLockReleaseRequest;
         prev.hasPendingAdminActionRequest = prev.hasPendingAdminActionRequest || row.hasPendingAdminActionRequest;
+        prev.hasApprovedAdminBanRequest = prev.hasApprovedAdminBanRequest || row.hasApprovedAdminBanRequest;
         if (String(row.authorAccountStatus || '').toUpperCase() === 'BANNED') prev.authorAccountStatus = 'BANNED';
         else if (!prev.authorAccountStatus) prev.authorAccountStatus = row.authorAccountStatus;
         {
@@ -370,6 +408,10 @@ function normalizeCommentQueueItem(x) {
         reporterDetails: Array.isArray(pick(x, 'reporterDetails', 'ReporterDetails')) ? pick(x, 'reporterDetails', 'ReporterDetails') : [],
         commentUserAccountStatus: pick(x, 'commentUserAccountStatus', 'CommentUserAccountStatus') ?? null,
         commentUserWritingSuspendedUntilUtc: pick(x, 'commentUserWritingSuspendedUntilUtc', 'CommentUserWritingSuspendedUntilUtc') ?? null,
+        storyCommentsDisabled: coerceBool(pick(x, 'storyCommentsDisabled', 'StoryCommentsDisabled')),
+        storyComplianceHidden: coerceBool(pick(x, 'storyComplianceHidden', 'StoryComplianceHidden')),
+        storyAuthorWritingSuspendedUntilUtc: pick(x, 'storyAuthorWritingSuspendedUntilUtc', 'StoryAuthorWritingSuspendedUntilUtc') ?? null,
+        hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
     };
 }
 
@@ -1221,6 +1263,15 @@ export default function ViolationManagement() {
             setAdminActionError('Bắt buộc nhập lý do đề xuất.');
             return;
         }
+        if (requestKind === 'BAN_USER') {
+            const wc = countWords(reason);
+            if (wc < COMPLIANCE_BAN_REASON_MIN_WORDS) {
+                setAdminActionError(
+                    `Lý do đề xuất cần tối thiểu ${COMPLIANCE_BAN_REASON_MIN_WORDS} từ (hiện có ${wc} từ).`,
+                );
+                return;
+            }
+        }
         if (requestKind === 'SUSPEND_AUTHOR_WRITING') {
             if (!adminActionForm.proposedSuspendUntilUtc) {
                 setAdminActionError('Vui lòng chọn thời hạn đình chỉ.');
@@ -1348,8 +1399,34 @@ export default function ViolationManagement() {
         setBulkResolveModal(payload);
     };
 
+    useEffect(() => {
+        if (!bulkResolveModal?.hasApprovedAdminBanRequest) return;
+        setBulkResolveStatus('RESOLVED');
+    }, [bulkResolveModal]);
+
     const submitBulkResolve = async () => {
         if (!bulkResolveModal) return;
+        if (bulkResolveStatus === 'DISMISSED') {
+            if (coerceBool(bulkResolveModal.hasApprovedAdminBanRequest)) {
+                setInfoModal({
+                    title: 'Không thể chọn «Không xử lý được»',
+                    message:
+                        'Đã có yêu cầu chặn tài khoản được quản trị viên chấp nhận. Bắt buộc chọn «Đã xử lý thành công».',
+                });
+                return;
+            }
+            const blockers =
+                bulkResolveModal.type === 'story'
+                    ? getBulkDismissStoryBlockers(bulkResolveModal)
+                    : getBulkDismissCommentBlockers(bulkResolveModal);
+            if (blockers.length > 0) {
+                setInfoModal({
+                    title: 'Không thể chọn «Không xử lý được»',
+                    message: `Vui lòng hoàn tác các tác vụ sau trước khi kết luận không đủ bằng chứng:\n\n• ${blockers.join('\n• ')}`,
+                });
+                return;
+            }
+        }
         setBulkResolveBusy(true);
         try {
             if (bulkResolveModal.type === 'story') {
@@ -1590,6 +1667,10 @@ export default function ViolationManagement() {
                     type: 'story',
                     targetId: row.storyId,
                     targetLabel: row.storyTitle || row.storyId,
+                    commentsDisabled: coerceBool(row.commentsDisabled),
+                    complianceHidden: coerceBool(row.complianceHidden),
+                    authorWritingSuspendedUntilUtc: row.authorWritingSuspendedUntilUtc ?? null,
+                    hasApprovedAdminBanRequest: coerceBool(row.hasApprovedAdminBanRequest),
                 });
                 break;
             default:
@@ -1668,7 +1749,12 @@ export default function ViolationManagement() {
                 openBulkResolveModal({
                     type: 'comment',
                     targetId: row.commentId,
-                    targetLabel: row.commentId,
+                    targetLabel: row.storyTitle ? `${row.storyTitle} — bình luận` : String(row.commentId),
+                    isCommentThreadHidden: coerceBool(row.isCommentThreadHidden),
+                    storyCommentsDisabled: coerceBool(row.storyCommentsDisabled),
+                    storyComplianceHidden: coerceBool(row.storyComplianceHidden),
+                    storyAuthorWritingSuspendedUntilUtc: row.storyAuthorWritingSuspendedUntilUtc ?? null,
+                    hasApprovedAdminBanRequest: coerceBool(row.hasApprovedAdminBanRequest),
                 });
                 break;
             default:
@@ -2839,10 +2925,21 @@ export default function ViolationManagement() {
                                 <textarea
                                     value={adminActionForm.message}
                                     onChange={(e) => setAdminActionForm((p) => ({ ...p, message: e.target.value }))}
-                                    placeholder="Mô tả ngắn gọn lý do đề xuất xử lý..."
                                     style={{ ...input, width: '100%', marginTop: 6, minHeight: 110, resize: 'vertical' }}
                                     disabled={submitBlocked && !adminActionSubmitting}
                                 />
+                                {dm === 'account' ? (
+                                    <p
+                                        className={`text-xs mt-1.5 m-0 leading-relaxed whitespace-pre-line ${
+                                            countWords(adminActionForm.message) < COMPLIANCE_BAN_REASON_MIN_WORDS
+                                                ? 'text-amber-700'
+                                                : 'text-slate-500'
+                                        }`}
+                                    >
+                                        {`${countWords(adminActionForm.message)} / ${COMPLIANCE_BAN_REASON_MIN_WORDS} từ (tối thiểu khi chặn tài khoản)
+Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức độ nghiêm trọng) để quản trị viên có cơ sở xem xét; nội dung quá ngắn hoặc chung chung có thể bị từ chối.`}
+                                    </p>
+                                ) : null}
                             </label>
                             {adminActionError ? (
                                 <div className="text-sm text-red-600">{adminActionError}</div>
@@ -3047,6 +3144,14 @@ export default function ViolationManagement() {
                         <div className="text-sm text-slate-600">
                             <span className="font-semibold">Đối tượng:</span> {bulkResolveModal.targetLabel || '—'}
                         </div>
+                        {coerceBool(bulkResolveModal.hasApprovedAdminBanRequest) && (
+                            <div
+                                className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-md px-3 py-2"
+                                role="status"
+                            >
+                                Đã có yêu cầu chặn tài khoản được quản trị viên chấp nhận — chỉ được chọn «Đã xử lý thành công».
+                            </div>
+                        )}
                         <div className="grid gap-2">
                             <label className="inline-flex items-start gap-2 text-sm text-slate-700">
                                 <input
@@ -3067,7 +3172,7 @@ export default function ViolationManagement() {
                                     name="bulkResolveStatus"
                                     checked={bulkResolveStatus === 'DISMISSED'}
                                     onChange={() => setBulkResolveStatus('DISMISSED')}
-                                    disabled={bulkResolveBusy}
+                                    disabled={bulkResolveBusy || coerceBool(bulkResolveModal.hasApprovedAdminBanRequest)}
                                 />
                                 <span>
                                     <span className="font-semibold">Không xử lý được (không đủ bằng chứng)</span>

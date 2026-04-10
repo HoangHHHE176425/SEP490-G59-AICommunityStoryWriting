@@ -45,6 +45,55 @@ public class CommentReportService : ICommentReportService
     private static bool HasPendingAdminActionForCommentThread(Guid commentId) =>
         ComplianceAdminActionRequestDAO.HasPendingCommentReportAdminAction(commentId);
 
+    private static bool IsAuthorWritingSuspensionStillActive(DateTime? untilUtc)
+    {
+        if (!untilUtc.HasValue) return false;
+        var u = untilUtc.Value;
+        if (u.Kind == DateTimeKind.Unspecified)
+            u = DateTime.SpecifyKind(u, DateTimeKind.Utc);
+        return u.ToUniversalTime() > DateTime.UtcNow;
+    }
+
+    private static async Task EnsureComplianceMayDismissOpenCommentReportsAsync(Guid commentId, StoryPlatformDbContext context)
+    {
+        if (ComplianceAdminActionRequestDAO.CommentThreadHasApprovedBanUserRequest(commentId))
+            throw new InvalidOperationException(
+                "Đã có yêu cầu chặn tài khoản (gắn thread này) được quản trị viên chấp nhận; bắt buộc chọn «Đã xử lý thành công».");
+
+        var comment = await context.comments.AsNoTracking().FirstOrDefaultAsync(c => c.id == commentId)
+            ?? throw new InvalidOperationException("Không tìm thấy bình luận.");
+
+        var commentStatus = (comment.status ?? "").Trim().ToUpperInvariant();
+        var threadHidden = commentStatus == "HIDDEN_PARENT" || commentStatus == "HIDDEN";
+        if (threadHidden)
+            throw new InvalidOperationException(
+                "Chuỗi bình luận vẫn đang bị ẩn; hãy hoàn tác ẩn thread trước khi chọn «Không xử lý được».");
+
+        var sid = comment.story_id;
+        if (!sid.HasValue || sid.Value == Guid.Empty) return;
+
+        if (ComplianceAdminActionRequestDAO.ListStoryIdsWithApprovedBanUserStoryCompliance(new[] { sid.Value }).Contains(sid.Value))
+            throw new InvalidOperationException(
+                "Đã có yêu cầu chặn tài khoản được quản trị viên chấp nhận (luồng báo cáo truyện); bắt buộc chọn «Đã xử lý thành công».");
+
+        var story = await context.stories.AsNoTracking().FirstOrDefaultAsync(s => s.id == sid.Value)
+            ?? throw new InvalidOperationException("Không tìm thấy truyện.");
+
+        if (story.comments_disabled)
+            throw new InvalidOperationException(
+                "Bình luận truyện vẫn đang bị khóa; hãy mở lại bình luận trước khi chọn «Không xử lý được».");
+        if (story.compliance_hidden)
+            throw new InvalidOperationException(
+                "Truyện vẫn đang ẩn khỏi người dùng thường; hãy hiển thị lại trước khi chọn «Không xử lý được».");
+        if (story.author_id is Guid aid)
+        {
+            var snap = UserDAO.GetUsersModerationSnapshot(new[] { aid });
+            if (snap.TryGetValue(aid, out var m) && IsAuthorWritingSuspensionStillActive(m.AuthorWritingSuspendedUntil))
+                throw new InvalidOperationException(
+                    "Tác giả truyện vẫn đang bị tạm khóa quyền viết; hãy mở lại trước khi chọn «Không xử lý được».");
+        }
+    }
+
     private static void EnsureNotBlockedByPendingCommentLockRelease(Guid commentId, bool actorIsAdmin)
     {
         if (actorIsAdmin) return;
@@ -528,6 +577,9 @@ public class CommentReportService : ICommentReportService
             throw new InvalidOperationException(
                 "Tài khoản này đã bị chặn; không thể gửi yêu cầu chặn tài khoản.");
 
+        if (string.Equals(kind, ComplianceAdminActionRequestDAO.KindBanUser, StringComparison.OrdinalIgnoreCase))
+            ComplianceBanUserReasonRules.EnsureBanUserMessageOrThrow(dto.Message);
+
         var sourceTag = ComplianceAdminActionRequestDAO.FormatCommentReportSourceTag(commentId);
         var enrichedMessage = string.IsNullOrWhiteSpace(dto.Message)
             ? sourceTag
@@ -730,6 +782,9 @@ public class CommentReportService : ICommentReportService
 
         if (!actorIsAdmin && HasPendingAdminActionForCommentThread(commentId))
             throw new InvalidOperationException("Đang có yêu cầu gửi admin chờ xử lý, không thể đóng ticket comment thread này.");
+
+        if (string.Equals(st, "DISMISSED", StringComparison.OrdinalIgnoreCase))
+            await EnsureComplianceMayDismissOpenCommentReportsAsync(commentId, context);
 
         // Enforce lock: chỉ compliance đang nhận mới được đóng loạt.
         if (!actorIsAdmin && !ReviewAssignmentDAO.IsAssignedTo(ComplianceTargetType, commentId, complianceUserId))
@@ -1365,6 +1420,32 @@ public class CommentReportService : ICommentReportService
             }
         }
 
+        var commentIdsWithApprovedBanFromThread = new HashSet<Guid>();
+        {
+            var storyIdsForApprovedBan = comments
+                .Select(c => c.story_id ?? Guid.Empty)
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .ToList();
+
+            if (storyIdsForApprovedBan.Count > 0)
+            {
+                var approvedBanRows = await context.compliance_admin_action_requests.AsNoTracking()
+                    .Where(x =>
+                        (x.status ?? "").Trim().ToUpper() == ComplianceAdminActionRequestDAO.StatusApproved
+                        && storyIdsForApprovedBan.Contains(x.story_id)
+                        && x.message != null
+                        && x.message.Contains(ComplianceAdminActionRequestDAO.CommentReportMessageTagPrefix)
+                        && x.request_kind != null
+                        && x.request_kind.Trim().ToUpper() == ComplianceAdminActionRequestDAO.KindBanUser)
+                    .Select(x => x.message)
+                    .ToListAsync();
+
+                foreach (var msg in approvedBanRows)
+                    AddCommentIdsFromComplianceAdminMessage(msg, commentIdsWithApprovedBanFromThread);
+            }
+        }
+
         var commentIdsWithPendingLockRelease = new HashSet<Guid>();
         if (commentIds.Count > 0)
         {
@@ -1449,9 +1530,17 @@ public class CommentReportService : ICommentReportService
         }
 
         var storyIds = comments.Select(c => c.story_id ?? Guid.Empty).Where(id => id != Guid.Empty).Distinct().ToList();
-        var stories = await context.stories.AsNoTracking()
+        var storyEntities = await context.stories.AsNoTracking()
             .Where(s => storyIds.Contains(s.id))
-            .ToDictionaryAsync(s => s.id, s => s.title);
+            .Select(s => new { s.id, s.title, s.comments_disabled, s.compliance_hidden, s.author_id })
+            .ToListAsync();
+        var stories = storyEntities.ToDictionary(x => x.id, x => x.title);
+        var storyMetaById = storyEntities.ToDictionary(x => x.id);
+        var storyAuthorIds = storyEntities.Where(x => x.author_id.HasValue).Select(x => x.author_id!.Value).Distinct().ToList();
+        var storyAuthorSnap = storyAuthorIds.Count > 0
+            ? UserDAO.GetUsersModerationSnapshot(storyAuthorIds)
+            : new Dictionary<Guid, (string? Status, DateTime? AuthorWritingSuspendedUntil)>();
+        var approvedBanStorySet = ComplianceAdminActionRequestDAO.ListStoryIdsWithApprovedBanUserStoryCompliance(storyIds);
 
         var rows = slice.Select(g =>
         {
@@ -1494,12 +1583,30 @@ public class CommentReportService : ICommentReportService
                         .ToList()
                     ,
                     HasPendingAdminActionRequest = false,
-                    HasPendingLockReleaseRequest = false
+                    HasPendingLockReleaseRequest = false,
+                    StoryCommentsDisabled = false,
+                    StoryComplianceHidden = false,
+                    StoryAuthorWritingSuspendedUntilUtc = null,
+                    HasApprovedAdminBanRequest = false
                 };
             }
 
             var storyId = comment.story_id ?? Guid.Empty;
             stories.TryGetValue(storyId, out var storyTitle);
+
+            var storyCommentsDisabled = false;
+            var storyComplianceHidden = false;
+            DateTime? storyAuthorWritingSuspendedUntilUtc = null;
+            if (storyId != Guid.Empty && storyMetaById.TryGetValue(storyId, out var sm))
+            {
+                storyCommentsDisabled = sm.comments_disabled;
+                storyComplianceHidden = sm.compliance_hidden;
+                if (sm.author_id is Guid auid && storyAuthorSnap.TryGetValue(auid, out var au))
+                    storyAuthorWritingSuspendedUntilUtc = ApiDateTime.AsUtcForJson(au.AuthorWritingSuspendedUntil);
+            }
+
+            var hasApprovedAdminBanRequest = commentIdsWithApprovedBanFromThread.Contains(comment.id)
+                || (storyId != Guid.Empty && approvedBanStorySet.Contains(storyId));
 
             var commentUserId = comment.user_id ?? Guid.Empty;
             var displayName = comment.userNavigation?.user_profiles?.nickname?.Trim();
@@ -1555,7 +1662,11 @@ public class CommentReportService : ICommentReportService
                 HasAdminOrModeratorReplyInThread = warningByCommentId.TryGetValue(comment.id, out var w) && w.HasStaff,
                 AdminOrModeratorReplyWarningVi = warningByCommentId.TryGetValue(comment.id, out var w2) ? w2.Note : null,
                 HasPendingAdminActionRequest = commentIdsWithPendingCommentAdminAction.Contains(comment.id),
-                HasPendingLockReleaseRequest = commentIdsWithPendingLockRelease.Contains(comment.id)
+                HasPendingLockReleaseRequest = commentIdsWithPendingLockRelease.Contains(comment.id),
+                StoryCommentsDisabled = storyCommentsDisabled,
+                StoryComplianceHidden = storyComplianceHidden,
+                StoryAuthorWritingSuspendedUntilUtc = storyAuthorWritingSuspendedUntilUtc,
+                HasApprovedAdminBanRequest = hasApprovedAdminBanRequest
             };
         }).ToList();
 
