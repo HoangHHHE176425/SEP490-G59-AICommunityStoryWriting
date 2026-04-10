@@ -72,9 +72,22 @@ public class CommentReportService : ICommentReportService
         var sid = comment.story_id;
         if (!sid.HasValue || sid.Value == Guid.Empty) return;
 
-        if (ComplianceAdminActionRequestDAO.ListStoryIdsWithApprovedBanUserStoryCompliance(new[] { sid.Value }).Contains(sid.Value))
-            throw new InvalidOperationException(
-                "Đã có yêu cầu chặn tài khoản được quản trị viên chấp nhận (luồng báo cáo truyện); bắt buộc chọn «Đã xử lý thành công».");
+        // Luồng story-report chỉ coi là "đã duyệt chặn tài khoản" khi đúng cùng story + cùng target user bình luận.
+        if (comment.user_id is Guid commentUserId && commentUserId != Guid.Empty)
+        {
+            var commentTagPrefix = ComplianceAdminActionRequestDAO.CommentReportMessageTagPrefix;
+            var hasApprovedBanFromStoryFlow = await context.compliance_admin_action_requests.AsNoTracking()
+                .AnyAsync(x =>
+                    x.story_id == sid.Value
+                    && x.target_user_id == commentUserId
+                    && x.status == ComplianceAdminActionRequestDAO.StatusApproved
+                    && x.request_kind != null
+                    && x.request_kind.Trim().ToUpper() == ComplianceAdminActionRequestDAO.KindBanUser
+                    && (x.message == null || !x.message.Contains(commentTagPrefix)));
+            if (hasApprovedBanFromStoryFlow)
+                throw new InvalidOperationException(
+                    "Đã có yêu cầu chặn tài khoản được quản trị viên chấp nhận (luồng báo cáo truyện); bắt buộc chọn «Đã xử lý thành công».");
+        }
 
         var story = await context.stories.AsNoTracking().FirstOrDefaultAsync(s => s.id == sid.Value)
             ?? throw new InvalidOperationException("Không tìm thấy truyện.");
@@ -1540,7 +1553,23 @@ public class CommentReportService : ICommentReportService
         var storyAuthorSnap = storyAuthorIds.Count > 0
             ? UserDAO.GetUsersModerationSnapshot(storyAuthorIds)
             : new Dictionary<Guid, (string? Status, DateTime? AuthorWritingSuspendedUntil)>();
-        var approvedBanStorySet = ComplianceAdminActionRequestDAO.ListStoryIdsWithApprovedBanUserStoryCompliance(storyIds);
+        var approvedBanStoryTargetPairs = new HashSet<(Guid StoryId, Guid TargetUserId)>();
+        if (storyIds.Count > 0)
+        {
+            var commentTagPrefix = ComplianceAdminActionRequestDAO.CommentReportMessageTagPrefix;
+            var approvedBanRowsForStoryFlow = await context.compliance_admin_action_requests.AsNoTracking()
+                .Where(x =>
+                    storyIds.Contains(x.story_id)
+                    && (x.status ?? "").Trim().ToUpper() == ComplianceAdminActionRequestDAO.StatusApproved
+                    && x.request_kind != null
+                    && x.request_kind.Trim().ToUpper() == ComplianceAdminActionRequestDAO.KindBanUser
+                    && x.target_user_id != Guid.Empty
+                    && (x.message == null || !x.message.Contains(commentTagPrefix)))
+                .Select(x => new { x.story_id, x.target_user_id })
+                .ToListAsync();
+            foreach (var x in approvedBanRowsForStoryFlow)
+                approvedBanStoryTargetPairs.Add((x.story_id, x.target_user_id));
+        }
 
         var rows = slice.Select(g =>
         {
@@ -1605,10 +1634,12 @@ public class CommentReportService : ICommentReportService
                     storyAuthorWritingSuspendedUntilUtc = ApiDateTime.AsUtcForJson(au.AuthorWritingSuspendedUntil);
             }
 
-            var hasApprovedAdminBanRequest = commentIdsWithApprovedBanFromThread.Contains(comment.id)
-                || (storyId != Guid.Empty && approvedBanStorySet.Contains(storyId));
-
             var commentUserId = comment.user_id ?? Guid.Empty;
+            var hasApprovedAdminBanRequest = commentIdsWithApprovedBanFromThread.Contains(comment.id)
+                || (storyId != Guid.Empty
+                    && commentUserId != Guid.Empty
+                    && approvedBanStoryTargetPairs.Contains((storyId, commentUserId)));
+
             var displayName = comment.userNavigation?.user_profiles?.nickname?.Trim();
             if (string.IsNullOrWhiteSpace(displayName))
                 displayName = comment.userNavigation?.email?.Trim();

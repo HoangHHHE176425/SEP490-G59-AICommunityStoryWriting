@@ -168,8 +168,8 @@ public class AdminComplianceStoryReportsController : ControllerBase
         if (body == null || string.IsNullOrWhiteSpace(body.Decision))
             return BadRequest(new { message = "Decision is required." });
         var decision = (body.Decision ?? "").Trim().ToUpperInvariant();
-        if (body.AdminNote != null && body.AdminNote.Length > 200)
-            return BadRequest(new { message = "Ký tự quá dài: mô tả tối đa 200 ký tự." });
+        if (body.AdminNote != null && body.AdminNote.Length > 2000)
+            return BadRequest(new { message = "Ký tự quá dài: mô tả tối đa 2000 ký tự." });
         // Resolve đơn compliance admin-action (chặn tài khoản / đình chỉ viết) không dùng StoryReportReasonCatalog;
         // lý do chi tiết nằm ở nội dung đơn + ghi chú admin.
         if (requestId == Guid.Empty)
@@ -223,9 +223,13 @@ public class AdminComplianceStoryReportsController : ControllerBase
 
         var to = EndOfDayIfMidnight(query.DateTo);
         await using var db = new StoryPlatformDbContext();
+        var complianceUsersQ = db.users.AsNoTracking()
+            .Where(u => u.role != null && u.role.ToUpper() == "COMPLIANCE")
+            .Select(u => u.id);
 
         var reportsQ = db.reports.AsNoTracking()
             .Where(r => r.compliance_resolved_by != null && r.resolved_at != null)
+            .Where(r => complianceUsersQ.Contains(r.compliance_resolved_by!.Value))
             .Select(r => new ComplianceLogItemDto
             {
                 Source = SrcReportResolution,
@@ -242,14 +246,19 @@ public class AdminComplianceStoryReportsController : ControllerBase
             });
 
         var actionQ = db.compliance_admin_action_requests.AsNoTracking()
+            .Where(x => complianceUsersQ.Contains(x.requester_id))
             .Select(x => new ComplianceLogItemDto
             {
                 Source = SrcAdminActionRequest,
                 RowId = x.id,
                 ComplianceUserId = x.requester_id,
                 ComplianceUserName = null,
-                TargetType = "STORY",
-                TargetId = x.story_id,
+                TargetType = x.request_kind == "BAN_USER" || x.request_kind == "SUSPEND_AUTHOR_WRITING"
+                    ? "USER"
+                    : "STORY",
+                TargetId = x.request_kind == "BAN_USER" || x.request_kind == "SUSPEND_AUTHOR_WRITING"
+                    ? x.target_user_id
+                    : x.story_id,
                 Status = x.status,
                 Action = x.request_kind,
                 Message = x.message,
@@ -258,6 +267,7 @@ public class AdminComplianceStoryReportsController : ControllerBase
             });
 
         var lockQ = db.compliance_report_lock_requests.AsNoTracking()
+            .Where(x => complianceUsersQ.Contains(x.requester_id))
             .Select(x => new ComplianceLogItemDto
             {
                 Source = SrcLockRequest,
@@ -275,6 +285,7 @@ public class AdminComplianceStoryReportsController : ControllerBase
 
         var violationQ = db.violation_logs.AsNoTracking()
             .Where(v => v.compliance_officer_id != null && v.created_at != null)
+            .Where(v => complianceUsersQ.Contains(v.compliance_officer_id!.Value))
             .Select(v => new ComplianceLogItemDto
             {
                 Source = SrcViolationAction,
@@ -333,8 +344,90 @@ public class AdminComplianceStoryReportsController : ControllerBase
 
         var total = await q.CountAsync();
         var rows = await q.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+        var storyIds = rows
+            .Where(x => string.Equals((x.TargetType ?? "").Trim(), "STORY", StringComparison.OrdinalIgnoreCase) && x.TargetId.HasValue)
+            .Select(x => x.TargetId!.Value)
+            .Distinct()
+            .ToList();
+        var commentIds = rows
+            .Where(x => string.Equals((x.TargetType ?? "").Trim(), "COMMENT", StringComparison.OrdinalIgnoreCase) && x.TargetId.HasValue)
+            .Select(x => x.TargetId!.Value)
+            .Distinct()
+            .ToList();
+        var userIds = rows
+            .Where(x => string.Equals((x.TargetType ?? "").Trim(), "USER", StringComparison.OrdinalIgnoreCase) && x.TargetId.HasValue)
+            .Select(x => x.TargetId!.Value)
+            .Distinct()
+            .ToList();
+
+        var storyMap = await db.stories.AsNoTracking()
+            .Where(s => storyIds.Contains(s.id))
+            .Select(s => new { s.id, s.title, s.author_id })
+            .ToDictionaryAsync(s => s.id, s => new { s.title, s.author_id });
+
+        var commentMap = await db.comments.AsNoTracking()
+            .Where(c => commentIds.Contains(c.id))
+            .Select(c => new { c.id, c.story_id, c.user_id })
+            .ToDictionaryAsync(c => c.id, c => new { c.story_id, c.user_id });
+
+        var commentStoryIds = commentMap.Values
+            .Where(x => x.story_id.HasValue)
+            .Select(x => x.story_id!.Value)
+            .Distinct()
+            .Where(id => !storyMap.ContainsKey(id))
+            .ToList();
+        if (commentStoryIds.Count > 0)
+        {
+            var extraStoryMap = await db.stories.AsNoTracking()
+                .Where(s => commentStoryIds.Contains(s.id))
+                .Select(s => new { s.id, s.title, s.author_id })
+                .ToDictionaryAsync(s => s.id, s => new { s.title, s.author_id });
+            foreach (var kv in extraStoryMap) storyMap[kv.Key] = kv.Value;
+        }
+
         foreach (var r in rows)
+        {
             r.ComplianceUserName = NotificationDAO.GetUserDisplayName(r.ComplianceUserId);
+            var t = (r.TargetType ?? "").Trim().ToUpperInvariant();
+            if (t == "STORY" && r.TargetId.HasValue)
+            {
+                var id = r.TargetId.Value;
+                if (storyMap.TryGetValue(id, out var s))
+                {
+                    var title = string.IsNullOrWhiteSpace(s.title) ? id.ToString() : s.title!;
+                    r.TargetLabel = $"Truyện: {title}";
+                    if (s.author_id.HasValue && s.author_id.Value != Guid.Empty)
+                        r.OwnerLabel = $"Tác giả: {NotificationDAO.GetUserDisplayName(s.author_id.Value)}";
+                }
+                else
+                {
+                    r.TargetLabel = $"Truyện: {id}";
+                }
+            }
+            else if (t == "COMMENT" && r.TargetId.HasValue)
+            {
+                var id = r.TargetId.Value;
+                r.TargetLabel = $"Bình luận: {id}";
+                if (commentMap.TryGetValue(id, out var c))
+                {
+                    if (c.user_id.HasValue && c.user_id.Value != Guid.Empty)
+                        r.OwnerLabel = $"Người bình luận: {NotificationDAO.GetUserDisplayName(c.user_id.Value)}";
+                    if (c.story_id.HasValue && storyMap.TryGetValue(c.story_id.Value, out var s) && !string.IsNullOrWhiteSpace(s.title))
+                        r.TargetLabel = $"Bình luận trong truyện: {s.title}";
+                }
+            }
+            else if (t == "USER" && r.TargetId.HasValue)
+            {
+                var id = r.TargetId.Value;
+                var display = NotificationDAO.GetUserDisplayName(id);
+                r.TargetLabel = $"Tài khoản: {display}";
+                r.OwnerLabel = $"Chủ tài khoản: {display}";
+            }
+            else if (r.TargetId.HasValue)
+            {
+                r.TargetLabel = $"{(string.IsNullOrWhiteSpace(r.TargetType) ? "Đối tượng" : r.TargetType)}: {r.TargetId.Value}";
+            }
+        }
 
         return Ok(new PagedResultDto<ComplianceLogItemDto>
         {

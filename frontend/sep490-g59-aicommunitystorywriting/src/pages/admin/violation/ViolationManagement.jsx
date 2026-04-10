@@ -201,7 +201,9 @@ function getBulkDismissStoryBlockers(modal) {
 function getBulkDismissCommentBlockers(modal) {
     if (!modal || modal.type !== 'comment') return [];
     const blockers = [];
-    if (modal.isCommentThreadHidden) blockers.push('Chuỗi bình luận vẫn đang bị ẩn.');
+    if (modal.isCommentThreadHidden) {
+        blockers.push('Chuỗi bình luận đã bị ẩn (đã áp dụng biện pháp xử lý vi phạm).');
+    }
     if (modal.storyCommentsDisabled) blockers.push('Bình luận truyện vẫn đang bị khóa (cấp truyện).');
     if (modal.storyComplianceHidden) blockers.push('Truyện vẫn đang ẩn khỏi người dùng thường.');
     if (isAuthorWritingSuspendedActive(modal.storyAuthorWritingSuspendedUntilUtc)) {
@@ -846,6 +848,7 @@ export default function ViolationManagement() {
 
     const loadData = useCallback(async (opts = {}) => {
         const afterClaim = opts.afterClaim === true;
+        const searchText = String(filters.search ?? '').trim().toLowerCase();
         setLoading(true);
         setError(null);
         try {
@@ -869,16 +872,32 @@ export default function ViolationManagement() {
                         return;
                     }
                 }
-                data = await getComplianceStoryReports({
-                    page: storyReportPage,
-                    pageSize: REPORT_PAGE_SIZE,
-                    groupByStory: true,
-                    sortBy: 'priority_desc',
-                    claimFilter: 'mine',
-                    statuses: reportStatusApiValue,
-                    search: filters.search || undefined,
-                    flaggedOnly: filters.flaggedOnly ? true : undefined,
-                });
+                if (searchText) {
+                    data = await fetchAllPagedItems(
+                        (pg, sz) => getComplianceStoryReports({
+                            page: pg,
+                            pageSize: sz,
+                            groupByStory: true,
+                            sortBy: 'priority_desc',
+                            claimFilter: 'mine',
+                            statuses: reportStatusApiValue,
+                            search: undefined,
+                            flaggedOnly: filters.flaggedOnly ? true : undefined,
+                        }),
+                        { chunkSize: COMPLIANCE_FETCH_CHUNK_STORY },
+                    );
+                } else {
+                    data = await getComplianceStoryReports({
+                        page: storyReportPage,
+                        pageSize: REPORT_PAGE_SIZE,
+                        groupByStory: true,
+                        sortBy: 'priority_desc',
+                        claimFilter: 'mine',
+                        statuses: reportStatusApiValue,
+                        search: undefined,
+                        flaggedOnly: filters.flaggedOnly ? true : undefined,
+                    });
+                }
             } else if (activeTab === 'comment-reports') {
                 if (!showClaimedCommentList && !afterClaim) {
                     const mineProbe = await getComplianceCommentReports({
@@ -897,21 +916,47 @@ export default function ViolationManagement() {
                         return;
                     }
                 }
-                data = await getComplianceCommentReports({
-                    page: commentReportPage,
-                    pageSize: REPORT_PAGE_SIZE,
-                    claimFilter: 'mine',
-                    status: reportStatusApiValue,
-                    search: filters.search || undefined,
-                });
+                if (searchText) {
+                    data = await fetchAllPagedItems(
+                        (pg, sz) => getComplianceCommentReports({
+                            page: pg,
+                            pageSize: sz,
+                            claimFilter: 'mine',
+                            status: reportStatusApiValue,
+                            search: undefined,
+                        }),
+                        { chunkSize: COMPLIANCE_FETCH_CHUNK_COMMENT },
+                    );
+                } else {
+                    data = await getComplianceCommentReports({
+                        page: commentReportPage,
+                        pageSize: REPORT_PAGE_SIZE,
+                        claimFilter: 'mine',
+                        status: reportStatusApiValue,
+                        search: undefined,
+                    });
+                }
             } else if (activeTab === 'compliance-history') {
-                data = await getMyComplianceActivityLogs({
-                    page: historyPage,
-                    pageSize: REPORT_PAGE_SIZE,
-                    search: filters.search || undefined,
-                    source: filters.historySource && filters.historySource !== 'ALL' ? filters.historySource : undefined,
-                    action: filters.historyAction && filters.historyAction !== 'ALL' ? filters.historyAction : undefined,
-                });
+                if (searchText) {
+                    data = await fetchAllPagedItems(
+                        (pg, sz) => getMyComplianceActivityLogs({
+                            page: pg,
+                            pageSize: sz,
+                            search: undefined,
+                            source: filters.historySource && filters.historySource !== 'ALL' ? filters.historySource : undefined,
+                            action: filters.historyAction && filters.historyAction !== 'ALL' ? filters.historyAction : undefined,
+                        }),
+                        { chunkSize: COMPLIANCE_FETCH_CHUNK_STORY },
+                    );
+                } else {
+                    data = await getMyComplianceActivityLogs({
+                        page: historyPage,
+                        pageSize: REPORT_PAGE_SIZE,
+                        search: undefined,
+                        source: filters.historySource && filters.historySource !== 'ALL' ? filters.historySource : undefined,
+                        action: filters.historyAction && filters.historyAction !== 'ALL' ? filters.historyAction : undefined,
+                    });
+                }
             } else if (activeTab === 'lock-requests') {
                 data = await getAdminComplianceLockRequests({ status: 'PENDING' });
             } else if (activeTab === 'compliance-logs') {
@@ -974,11 +1019,49 @@ export default function ViolationManagement() {
                     groupByStory: false,
                     claimFilter: 'mine',
                     statuses: reportStatusApiValue,
-                    search: filters.search || undefined,
+                    search: undefined,
                     sortBy: 'newest',
                 });
                 const raw = (mergedFb.items ?? []).map(normalizeStoryReportRow);
                 normalizedItems = groupStoryRows(raw);
+            }
+            if (searchText) {
+                const q = searchText;
+                if (activeTab === 'story-reports') {
+                    const filtered = normalizedItems.filter((x) =>
+                        String(x.storyId ?? '').toLowerCase().includes(q)
+                        || String(x.storyTitle ?? '').toLowerCase().includes(q)
+                        || String(x.authorDisplayName ?? '').toLowerCase().includes(q));
+                    const from = (storyReportPage - 1) * REPORT_PAGE_SIZE;
+                    setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
+                    setTotalCount(filtered.length);
+                    return;
+                }
+                if (activeTab === 'comment-reports') {
+                    const filtered = normalizedItems.filter((x) =>
+                        String(x.commentId ?? x.reportId ?? '').toLowerCase().includes(q)
+                        || String(x.storyId ?? '').toLowerCase().includes(q)
+                        || String(x.storyTitle ?? '').toLowerCase().includes(q)
+                        || String(x.commentUserDisplayName ?? '').toLowerCase().includes(q));
+                    const from = (commentReportPage - 1) * REPORT_PAGE_SIZE;
+                    setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
+                    setTotalCount(filtered.length);
+                    return;
+                }
+                if (activeTab === 'compliance-history') {
+                    const filtered = normalizedItems.filter((x) =>
+                        String(x.source ?? '').toLowerCase().includes(q)
+                        || String(x.action ?? '').toLowerCase().includes(q)
+                        || String(x.status ?? '').toLowerCase().includes(q)
+                        || String(x.message ?? '').toLowerCase().includes(q)
+                        || String(x.targetType ?? '').toLowerCase().includes(q)
+                        || String(x.rowId ?? x.reportId ?? x.id ?? '').toLowerCase().includes(q)
+                        || String(x.targetId ?? '').toLowerCase().includes(q));
+                    const from = (historyPage - 1) * REPORT_PAGE_SIZE;
+                    setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
+                    setTotalCount(filtered.length);
+                    return;
+                }
             }
             setRows(normalizedItems);
             setTotalCount(activeTab === 'lock-requests' ? (paged.items?.length ?? 0) : paged.totalCount);
@@ -1420,9 +1503,12 @@ export default function ViolationManagement() {
                     ? getBulkDismissStoryBlockers(bulkResolveModal)
                     : getBulkDismissCommentBlockers(bulkResolveModal);
             if (blockers.length > 0) {
+                const commentDismissPrefix = bulkResolveModal.type === 'comment'
+                    ? 'Mục bình luận này đã có dấu hiệu đã xử lý vi phạm, nên không thể kết luận «không đủ bằng chứng».'
+                    : 'Vui lòng hoàn tác các tác vụ sau trước khi kết luận không đủ bằng chứng:';
                 setInfoModal({
                     title: 'Không thể chọn «Không xử lý được»',
-                    message: `Vui lòng hoàn tác các tác vụ sau trước khi kết luận không đủ bằng chứng:\n\n• ${blockers.join('\n• ')}`,
+                    message: `${commentDismissPrefix}\n\n• ${blockers.join('\n• ')}`,
                 });
                 return;
             }
@@ -1770,6 +1856,7 @@ export default function ViolationManagement() {
                     <table className="w-full border-collapse table-fixed">
                         <thead><tr className="bg-slate-50">
                             <th style={th}>Ưu tiên</th>
+                            <th style={th}>Mã đơn</th>
                             <th style={th}>Truyện</th>
                             <th style={th}>Tác giả</th>
                             <th style={th}>Số người báo cáo</th>
@@ -1778,7 +1865,7 @@ export default function ViolationManagement() {
                         <tbody>
                             {rows.length === 0 && (
                                 <tr>
-                                    <td colSpan={5} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                                    <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
                             {rows.map((r) => (
@@ -1798,6 +1885,7 @@ export default function ViolationManagement() {
                                         return (
                                             <>
                                                 <td style={td}>{(r.priorityScore ?? 0).toFixed?.(1) ?? r.priorityScore}</td>
+                                                <td style={td}><span className="text-xs text-slate-700 break-all">{r.storyId || '—'}</span></td>
                                                 <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                                 <td style={td}>{r.authorDisplayName || '—'}</td>
                                                 <td style={td}>
@@ -1960,6 +2048,7 @@ export default function ViolationManagement() {
                     <table className="w-full border-collapse table-fixed">
                         <thead><tr className="bg-slate-50">
                             <th style={th}>Ưu tiên</th>
+                            <th style={th}>Mã đơn</th>
                             <th style={th}>Truyện</th>
                             <th style={th}>Người bình luận</th>
                             <th style={th}>Số người báo cáo</th>
@@ -1968,7 +2057,7 @@ export default function ViolationManagement() {
                         <tbody>
                             {rows.length === 0 && (
                                 <tr>
-                                    <td colSpan={5} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                                    <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
                             {rows.map((r) => (
@@ -1986,6 +2075,7 @@ export default function ViolationManagement() {
                                         return (
                                             <>
                                                 <td style={td}>{Number(r.priorityScore ?? 0).toFixed(1)}</td>
+                                                <td style={td}><span className="text-xs text-slate-700 break-all">{r.commentId || r.reportId || '—'}</span></td>
                                                 <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                                 <td style={td}>{r.commentUserDisplayName || '—'}</td>
                                                 <td style={td}>{reporterCount > 0 ? reporterCount : '—'}</td>
@@ -2175,6 +2265,7 @@ export default function ViolationManagement() {
                 <div className="overflow-x-auto">
                     <table className="w-full border-collapse">
                         <thead><tr className="bg-slate-50">
+                            <th style={th}>Mã đơn</th>
                             <th style={th}>Thời điểm</th>
                             <th style={th}>Nguồn</th>
                             <th style={th}>Hành động</th>
@@ -2185,11 +2276,12 @@ export default function ViolationManagement() {
                         <tbody>
                             {rows.length === 0 && (
                                 <tr>
-                                    <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Chưa có lịch sử xử lý vi phạm.</td>
+                                    <td colSpan={7} className="p-6 text-center text-sm text-slate-500">Chưa có lịch sử xử lý vi phạm.</td>
                                 </tr>
                             )}
                             {rows.map((r) => (
                                 <tr key={r.rowId || r.reportId || r.id} className="border-t border-slate-200 hover:bg-slate-50/70">
+                                    <td style={td}><span className="text-xs text-slate-700 break-all">{r.rowId || r.reportId || r.id || '—'}</span></td>
                                     <td style={td}>{formatDate(r.createdAtUtc || r.resolvedAtUtc)}</td>
                                     <td style={td}>{complianceHistorySourceVi(r.source)}</td>
                                     <td style={td}>{complianceHistoryActionVi(r.action, r.source)}</td>
@@ -2336,14 +2428,14 @@ export default function ViolationManagement() {
                                     }}
                                     placeholder={
                                         activeTab === 'story-reports'
-                                            ? 'Tìm theo tên truyện, tác giả...'
-                                            : 'Tìm theo tên truyện, người bình luận...'
+                                            ? 'Tìm theo mã đơn, tên truyện, tác giả...'
+                                            : 'Tìm theo mã đơn, tên truyện, người bình luận...'
                                     }
                                     style={input}
                                 />
                                 <button
                                     onClick={() => {
-                                        setFilters({ search: '', statusFilter: 'NEW', flaggedOnly: false });
+                                        setFilters((p) => ({ ...p, search: '', statusFilter: 'NEW', flaggedOnly: false }));
                                         setStoryReportPage(1);
                                         setCommentReportPage(1);
                                     }}
@@ -2376,7 +2468,7 @@ export default function ViolationManagement() {
                                     setFilters((p) => ({ ...p, search: v }));
                                     setHistoryPage(1);
                                 }}
-                                placeholder="Tìm theo đối tượng, nội dung..."
+                                placeholder="Tìm theo mã đơn, đối tượng, nội dung..."
                                 style={input}
                             />
                             <select
@@ -2930,11 +3022,10 @@ export default function ViolationManagement() {
                                 />
                                 {dm === 'account' ? (
                                     <p
-                                        className={`text-xs mt-1.5 m-0 leading-relaxed whitespace-pre-line ${
-                                            countWords(adminActionForm.message) < COMPLIANCE_BAN_REASON_MIN_WORDS
-                                                ? 'text-amber-700'
-                                                : 'text-slate-500'
-                                        }`}
+                                        className={`text-xs mt-1.5 m-0 leading-relaxed whitespace-pre-line ${countWords(adminActionForm.message) < COMPLIANCE_BAN_REASON_MIN_WORDS
+                                            ? 'text-amber-700'
+                                            : 'text-slate-500'
+                                            }`}
                                     >
                                         {`${countWords(adminActionForm.message)} / ${COMPLIANCE_BAN_REASON_MIN_WORDS} từ (tối thiểu khi chặn tài khoản)
 Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức độ nghiêm trọng) để quản trị viên có cơ sở xem xét; nội dung quá ngắn hoặc chung chung có thể bị từ chối.`}

@@ -1073,8 +1073,8 @@ public class StoryReportService : IStoryReportService
         if (requestId == Guid.Empty)
             throw new InvalidOperationException("Không tìm thấy comment.");
 
-        if (dto.AdminNote != null && dto.AdminNote.Length > 200)
-            throw new ArgumentException("Ký tự quá dài: mô tả tối đa 200 ký tự.");
+        if (dto.AdminNote != null && dto.AdminNote.Length > 2000)
+            throw new ArgumentException("Ký tự quá dài: mô tả tối đa 2000 ký tự.");
 
         var decision = (dto.Decision ?? "").Trim().ToUpperInvariant();
         if (decision is not ("APPROVE" or "REJECT"))
