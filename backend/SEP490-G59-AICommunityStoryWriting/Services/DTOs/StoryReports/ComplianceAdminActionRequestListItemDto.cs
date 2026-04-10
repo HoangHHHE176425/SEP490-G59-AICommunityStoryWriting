@@ -30,7 +30,7 @@ public class CreateComplianceAdminActionRequestDto
 {
     public string RequestKind { get; set; } = "";
     public string? Message { get; set; }
-    /// <summary>Chỉ dùng khi kind = SUSPEND_AUTHOR_WRITING (UTC).</summary>
+    /// <summary>Chỉ còn ý nghĩa với đơn SUSPEND cũ do admin duyệt (UTC). Compliance không gửi SUSPEND qua endpoint này nữa.</summary>
     public DateTime? ProposedSuspendUntilUtc { get; set; }
     /// <summary>Tùy chọn: mặc định lấy author của truyện.</summary>
     public Guid? TargetUserId { get; set; }

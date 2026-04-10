@@ -1,3 +1,4 @@
+using AIStory.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -25,6 +26,7 @@ namespace AIStory.API.Controllers
         private readonly IStoryReportService _storyReportService;
         private readonly INotificationHubNotifier _notificationHubNotifier;
         private readonly IStoryCommentPostService _storyCommentPostService;
+        private readonly ICloudinaryImageService _cloudinaryImageService;
         private readonly ILogger<StoriesController> _logger;
 
         public StoriesController(
@@ -33,6 +35,7 @@ namespace AIStory.API.Controllers
             IStoryReportService storyReportService,
             INotificationHubNotifier notificationHubNotifier,
             IStoryCommentPostService storyCommentPostService,
+            ICloudinaryImageService cloudinaryImageService,
             ILogger<StoriesController> logger)
         {
             _storyService = storyService;
@@ -40,6 +43,7 @@ namespace AIStory.API.Controllers
             _storyReportService = storyReportService;
             _notificationHubNotifier = notificationHubNotifier;
             _storyCommentPostService = storyCommentPostService;
+            _cloudinaryImageService = cloudinaryImageService;
             _logger = logger;
         }
 
@@ -82,6 +86,9 @@ namespace AIStory.API.Controllers
 
                 if (request.CoverImage != null && request.CoverImage.Length > 0)
                 {
+                    if (!_cloudinaryImageService.IsConfigured)
+                        return StatusCode(503, new { message = "Upload ảnh chưa được cấu hình (Cloudinary). Thêm Cloudinary:CloudName, ApiKey, ApiSecret trong cấu hình." });
+
                     var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
                     var fileExtension = Path.GetExtension(request.CoverImage.FileName).ToLower();
                     if (!allowedExtensions.Contains(fileExtension))
@@ -94,23 +101,18 @@ namespace AIStory.API.Controllers
                         return BadRequest(new { message = "File size exceeds 5MB limit" });
                     }
 
-                    var uploadsFolder = Path.Combine(
-                        Directory.GetCurrentDirectory(),
-                        "wwwroot",
-                        "uploads",
-                        "covers"
-                    );
-
-                    if (!Directory.Exists(uploadsFolder))
-                        Directory.CreateDirectory(uploadsFolder);
-
-                    var fileName = $"{Guid.NewGuid()}{fileExtension}";
-                    var filePath = Path.Combine(uploadsFolder, fileName);
-
-                    using var stream = new FileStream(filePath, FileMode.Create);
-                    await request.CoverImage.CopyToAsync(stream);
-
-                    coverUrl = $"/uploads/covers/{fileName}";
+                    try
+                    {
+                        coverUrl = await _cloudinaryImageService.UploadImageAsync(
+                            request.CoverImage,
+                            "story-covers",
+                            HttpContext.RequestAborted);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Cloudinary upload cover failed on create");
+                        return BadRequest(new { message = "Không upload được ảnh bìa: " + ex.Message });
+                    }
                 }
 
                 if (string.IsNullOrWhiteSpace(coverUrl))
@@ -768,6 +770,9 @@ namespace AIStory.API.Controllers
 
                 if (request.CoverImage != null && request.CoverImage.Length > 0)
                 {
+                    if (!_cloudinaryImageService.IsConfigured)
+                        return StatusCode(503, new { message = "Upload ảnh chưa được cấu hình (Cloudinary). Thêm Cloudinary:CloudName, ApiKey, ApiSecret trong cấu hình." });
+
                     var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
                     var fileExtension = Path.GetExtension(request.CoverImage.FileName).ToLower();
                     if (!allowedExtensions.Contains(fileExtension))
@@ -780,41 +785,36 @@ namespace AIStory.API.Controllers
                         return BadRequest(new { message = "File size exceeds 5MB limit" });
                     }
 
-                    var uploadsFolder = Path.Combine(
-                        Directory.GetCurrentDirectory(),
-                        "wwwroot",
-                        "uploads",
-                        "covers"
-                    );
-
-                    if (!Directory.Exists(uploadsFolder))
-                        Directory.CreateDirectory(uploadsFolder);
-
                     var existingStory = _storyService.GetById(id);
                     if (existingStory != null && !string.IsNullOrEmpty(existingStory.CoverImage))
                     {
-                        var oldFilePath = Path.Combine(
-                            Directory.GetCurrentDirectory(),
-                            "wwwroot",
-                            existingStory.CoverImage.TrimStart('/')
-                        );
-                        if (System.IO.File.Exists(oldFilePath))
+                        var oldRel = existingStory.CoverImage.TrimStart('/');
+                        if (oldRel.StartsWith("uploads/", StringComparison.OrdinalIgnoreCase))
                         {
-                            try
+                            var oldFilePath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", oldRel);
+                            if (System.IO.File.Exists(oldFilePath))
                             {
-                                System.IO.File.Delete(oldFilePath);
+                                try
+                                {
+                                    System.IO.File.Delete(oldFilePath);
+                                }
+                                catch { }
                             }
-                            catch { }
                         }
                     }
 
-                    var fileName = $"{Guid.NewGuid()}{fileExtension}";
-                    var filePath = Path.Combine(uploadsFolder, fileName);
-
-                    using var stream = new FileStream(filePath, FileMode.Create);
-                    await request.CoverImage.CopyToAsync(stream);
-
-                    coverUrl = $"/uploads/covers/{fileName}";
+                    try
+                    {
+                        coverUrl = await _cloudinaryImageService.UploadImageAsync(
+                            request.CoverImage,
+                            "story-covers",
+                            HttpContext.RequestAborted);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Cloudinary upload cover failed on update");
+                        return BadRequest(new { message = "Không upload được ảnh bìa: " + ex.Message });
+                    }
                 }
 
                 var updateRequest = new UpdateStoryRequestDto

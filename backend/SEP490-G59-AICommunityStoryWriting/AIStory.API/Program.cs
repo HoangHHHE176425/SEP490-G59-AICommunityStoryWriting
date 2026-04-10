@@ -1,3 +1,4 @@
+using AIStory.API.Configurations;
 using AIStory.API.Hubs;
 using AIStory.API.Services;
 using AIStory.Services.Helpers;
@@ -40,6 +41,9 @@ namespace AIStory.API
             // =======================
 
             builder.Services.AddMemoryCache();
+            builder.Services.Configure<CloudinarySettings>(
+                builder.Configuration.GetSection(CloudinarySettings.SectionName));
+            builder.Services.AddSingleton<ICloudinaryImageService, CloudinaryImageService>();
             builder.Services.AddControllers()
                 .AddJsonOptions(options =>
                 {

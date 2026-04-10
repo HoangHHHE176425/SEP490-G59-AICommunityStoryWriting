@@ -33,6 +33,13 @@ public interface ICommentReportService
         CreateComplianceAdminActionRequestDto dto,
         bool actorIsAdmin);
 
+    /// <summary>COMPLIANCE (hoặc ADMIN) đang lock thread: bật/tắt tạm khóa quyền viết, không qua đơn admin.</summary>
+    Task SetAuthorWritingSuspendedByComplianceAsync(
+        Guid commentId,
+        Guid actorUserId,
+        SetComplianceCommentAuthorWritingSuspendedRequestDto dto,
+        bool actorIsAdmin);
+
     /// <summary>COMPLIANCE đang lock thread: gửi admin yêu cầu gỡ lock (sau khi gửi, thread bị chặn mọi thao tác tới khi admin xử lý).</summary>
     Task<Guid> RequestComplianceCommentLockReleaseAsync(
         Guid commentId,

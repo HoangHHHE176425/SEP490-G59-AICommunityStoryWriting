@@ -365,5 +365,16 @@ namespace DataAccessObjects.DAOs
             u.updated_at = DateTime.UtcNow;
             context.SaveChanges();
         }
+
+        /// <summary>Email đăng ký — dùng thông báo (ví dụ sau khi admin duyệt cấm tài khoản).</summary>
+        public static string? GetUserEmail(Guid userId)
+        {
+            if (userId == Guid.Empty) return null;
+            using var context = new StoryPlatformDbContext();
+            return context.users.AsNoTracking()
+                .Where(u => u.id == userId)
+                .Select(u => u.email)
+                .FirstOrDefault();
+        }
     }
 }
