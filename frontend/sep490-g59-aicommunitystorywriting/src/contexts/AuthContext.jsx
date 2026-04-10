@@ -79,9 +79,18 @@ export function AuthProvider({ children }) {
             }
             return;
         }
-        const { stop, startPromise } = createNotificationHubConnection((notification) => {
-            window.dispatchEvent(new CustomEvent('app:notification', { detail: notification }));
-        });
+        const { stop, startPromise } = createNotificationHubConnection(
+            (notification) => {
+                window.dispatchEvent(new CustomEvent('app:notification', { detail: notification }));
+            },
+            (payload) => {
+                window.dispatchEvent(new CustomEvent('app:auth:session-ended', {
+                    detail: {
+                        message: payload?.message || 'Tài khoản của bạn đã bị khóa. Vui lòng đăng nhập lại.'
+                    }
+                }));
+            }
+        );
         notificationHubStopRef.current = stop;
         startPromise?.catch(() => { });
         return () => {

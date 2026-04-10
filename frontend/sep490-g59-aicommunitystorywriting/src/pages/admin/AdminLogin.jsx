@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, ShieldCheck, ArrowLeft } from 'lucide-react';
@@ -17,6 +17,13 @@ export function AdminLogin() {
     const description = isStaffLoginPage
         ? 'Dành cho Kiểm duyệt (MODERATOR) và Compliance. Vui lòng đăng nhập bằng tài khoản staff đã được cấp.'
         : 'Dành cho Quản trị viên (Admin). Vui lòng đăng nhập bằng tài khoản admin đã được cấp.';
+
+    useEffect(() => {
+        const forcedLogoutMessage = location.state?.forcedLogoutMessage;
+        if (forcedLogoutMessage) {
+            setError(forcedLogoutMessage);
+        }
+    }, [location.state]);
 
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });

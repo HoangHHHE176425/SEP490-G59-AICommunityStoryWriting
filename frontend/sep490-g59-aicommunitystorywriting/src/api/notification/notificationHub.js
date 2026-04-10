@@ -10,6 +10,7 @@ function getHubBaseUrl() {
 
 /** Tên event backend gửi khi có thông báo mới (NotificationHub.NewNotification). */
 export const NEW_NOTIFICATION = 'NewNotification';
+export const SESSION_REVOKED = 'SessionRevoked';
 
 /**
  * Tạo và khởi động kết nối SignalR tới hub notification (cho tác giả nhận real-time khi moderator duyệt/từ chối).
@@ -19,7 +20,7 @@ export const NEW_NOTIFICATION = 'NewNotification';
  * @param {(payload: { id: string, type: string, title: string, content: string, linkUrl?: string, isRead: boolean, createdAt?: string }) => void} onNewNotification - Gọi khi nhận thông báo mới (vd: moderator vừa duyệt/từ chối truyện hoặc chương của tác giả).
  * @returns {{ connection: signalR.HubConnection, startPromise: Promise<void>, stop: () => Promise<void> }}
  */
-export function createNotificationHubConnection(onNewNotification) {
+export function createNotificationHubConnection(onNewNotification, onSessionRevoked) {
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('accessToken') : null;
     const hubBase = getHubBaseUrl();
     const url = token
@@ -46,6 +47,14 @@ export function createNotificationHubConnection(onNewNotification) {
         }
     });
 
+    connection.on(SESSION_REVOKED, (payload) => {
+        if (typeof onSessionRevoked === 'function') {
+            onSessionRevoked({
+                message: payload?.message ?? payload?.Message
+            });
+        }
+    });
+
     const startPromise = connection
         .start()
         .then(() => {
@@ -63,6 +72,7 @@ export function createNotificationHubConnection(onNewNotification) {
         async stop() {
             try {
                 connection.off(NEW_NOTIFICATION);
+                connection.off(SESSION_REVOKED);
                 // Tránh stop() trong lúc negotiation → lỗi "The connection was stopped during negotiation".
                 // Đợi start() xong (thành công hoặc thất bại) rồi mới stop.
                 await startPromise.catch(() => {});

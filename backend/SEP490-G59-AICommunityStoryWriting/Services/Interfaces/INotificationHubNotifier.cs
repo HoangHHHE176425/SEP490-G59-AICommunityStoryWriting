@@ -7,4 +7,7 @@ public interface INotificationHubNotifier
 {
     /// Gửi thông báo real-time tới user (author). Client đăng ký hub sẽ nhận event NewNotification.
     Task NotifyUserAsync(Guid userId, NotificationDto notification);
+
+    /// Thu hồi phiên user theo thời gian thực (vd. admin vừa ban tài khoản đang online).
+    Task RevokeUserSessionAsync(Guid userId, string message);
 }

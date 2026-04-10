@@ -23,6 +23,15 @@ function clearAccessToken() {
     localStorage.removeItem("accessToken");
 }
 
+function notifySessionEnded(message) {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("app:auth:session-ended", {
+        detail: {
+            message: message || "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."
+        }
+    }));
+}
+
 // A separate client without interceptors to avoid infinite loops when refreshing.
 const refreshClient = axios.create({
     baseURL: apiUrl,
@@ -110,7 +119,9 @@ axiosInstance.interceptors.response.use(
             const newToken = refreshRes?.data?.accessToken;
             if (!newToken) {
                 clearAccessToken();
-                return Promise.reject(translateAxiosErrorMessage(error));
+                const translatedError = translateAxiosErrorMessage(error);
+                notifySessionEnded(translatedError?.response?.data?.message ?? translatedError?.message);
+                return Promise.reject(translatedError);
             }
 
             setAccessToken(newToken);
@@ -120,7 +131,9 @@ axiosInstance.interceptors.response.use(
             return axiosInstance(originalRequest);
         } catch (refreshErr) {
             clearAccessToken();
-            return Promise.reject(translateAxiosErrorMessage(refreshErr));
+            const translatedRefreshErr = translateAxiosErrorMessage(refreshErr);
+            notifySessionEnded(translatedRefreshErr?.response?.data?.message ?? translatedRefreshErr?.message);
+            return Promise.reject(translatedRefreshErr);
         }
     }
 );

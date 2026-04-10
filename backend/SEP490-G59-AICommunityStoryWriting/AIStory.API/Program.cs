@@ -18,6 +18,7 @@ using Services.Implementations;
 using Services.Implementations.Lookups;
 using Services.Integrations.PayOS;
 using Services.Interfaces;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -179,6 +180,40 @@ namespace AIStory.API
                                     context.Token = accessToken;
                                 }
                                 return Task.CompletedTask;
+                            },
+                            OnTokenValidated = async context =>
+                            {
+                                var sub = context.Principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
+                                          ?? context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                                if (!Guid.TryParse(sub, out var userId))
+                                {
+                                    context.Fail("Invalid token subject.");
+                                    return;
+                                }
+
+                                var db = context.HttpContext.RequestServices.GetRequiredService<StoryPlatformDbContext>();
+                                var status = await db.users
+                                    .AsNoTracking()
+                                    .Where(u => u.id == userId)
+                                    .Select(u => u.status)
+                                    .FirstOrDefaultAsync(context.HttpContext.RequestAborted);
+
+                                if (string.IsNullOrWhiteSpace(status))
+                                {
+                                    context.Fail("User no longer exists.");
+                                    return;
+                                }
+
+                                if (string.Equals(status, "BANNED", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    context.Fail("The account has been banned.");
+                                    return;
+                                }
+
+                                if (!string.Equals(status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    context.Fail("The account is no longer active.");
+                                }
                             }
                         };
                     });

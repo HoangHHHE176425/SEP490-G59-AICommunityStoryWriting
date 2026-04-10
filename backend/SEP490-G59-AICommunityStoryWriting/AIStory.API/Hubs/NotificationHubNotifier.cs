@@ -17,4 +17,12 @@ public class NotificationHubNotifier : INotificationHubNotifier
     {
         await _hubContext.Clients.User(userId.ToString()).SendAsync(NotificationHub.NewNotification, notification);
     }
+
+    public async Task RevokeUserSessionAsync(Guid userId, string message)
+    {
+        await _hubContext.Clients.User(userId.ToString()).SendAsync(NotificationHub.SessionRevoked, new
+        {
+            Message = message
+        });
+    }
 }

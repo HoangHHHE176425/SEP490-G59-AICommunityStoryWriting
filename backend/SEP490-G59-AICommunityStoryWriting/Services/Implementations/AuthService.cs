@@ -180,6 +180,24 @@ namespace AIStory.Services.Implementations
             return $"{trimmed}_{guidSuffix}";
         }
 
+        private static void ThrowIfAccountIsBanned(users user)
+        {
+            if (string.Equals(user.status, "BANNED", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Exception("The account has been banned.");
+            }
+        }
+
+        private static void EnsureAccountIsActive(users user)
+        {
+            ThrowIfAccountIsBanned(user);
+
+            if (!string.Equals(user.status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Exception("Tài khoản của bạn chưa được xác thực. Vui lòng kiểm tra email để lấy mã OTP và xác thực tài khoản.");
+            }
+        }
+
         //  Verify OTP
         public async Task VerifyAccountAsync(VerifyOtpRequest request)
         {
@@ -209,16 +227,7 @@ namespace AIStory.Services.Implementations
                 throw new Exception("Invalid email or password.");
             }
 
-            if (string.Equals(user.status, "BANNED", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new Exception("The account has been banned.");
-            }
-
-            // CHECK TRẠNG THÁI
-            if (user.status != "ACTIVE")
-            {
-                throw new Exception("Tài khoản của bạn chưa được xác thực. Vui lòng kiểm tra email để lấy mã OTP và xác thực tài khoản.");
-            }
+            EnsureAccountIsActive(user);
 
             var accessToken = _tokenService.GenerateAccessToken(user);
             if (string.IsNullOrWhiteSpace(accessToken))
@@ -257,11 +266,9 @@ namespace AIStory.Services.Implementations
             email = email.Trim();
 
             var user = await _userRepo.GetUserByEmail(email);
-            var isNewUser = false;
 
             if (user == null)
             {
-                isNewUser = true;
                 var newUserId = Guid.NewGuid();
 
                 var baseNickname =
@@ -299,6 +306,8 @@ namespace AIStory.Services.Implementations
             }
             else
             {
+                ThrowIfAccountIsBanned(user);
+
                 // Make sure the account is active if Google email is verified.
                 if (!string.Equals(user.status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
                 {
@@ -354,6 +363,16 @@ namespace AIStory.Services.Implementations
             if (user == null)
             {
                 throw new Exception("User not found.");
+            }
+
+            try
+            {
+                EnsureAccountIsActive(user);
+            }
+            catch
+            {
+                await _userRepo.DeleteRefreshToken(refreshToken);
+                throw;
             }
 
             var newAccessToken = _tokenService.GenerateAccessToken(user);
