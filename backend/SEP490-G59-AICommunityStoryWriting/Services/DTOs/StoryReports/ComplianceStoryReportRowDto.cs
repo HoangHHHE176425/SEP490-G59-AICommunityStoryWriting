@@ -40,4 +40,7 @@ public class ComplianceStoryReportRowDto
 
     public bool HasPendingAdminActionRequest { get; set; }
     public bool HasPendingLockReleaseRequest { get; set; }
+
+    /// <summary>Đã có đơn yêu cầu chặn tài khoản (BAN_USER) được admin chấp nhận (luồng báo cáo truyện) — không cho đóng loạt DISMISSED.</summary>
+    public bool HasApprovedAdminBanRequest { get; set; }
 }

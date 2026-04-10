@@ -113,6 +113,11 @@ function mapChapterFromApi(item) {
 
 const CHAPTERS_PAGE_SIZE = 10;
 
+const AUTHOR_WRITING_SUSPENDED_BANNER =
+    'Tài khoản đang bị tạm đình chỉ quyền viết để điều tra vi phạm.';
+const AUTHOR_WRITING_SUSPENDED_TOOLTIP =
+    'Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm.';
+
 export function ChapterListManager({
     story,
     onBack,
@@ -123,7 +128,6 @@ export function ChapterListManager({
     onEditVersion,
     onViewVersion,
     isAuthorWritingSuspended = false,
-    authorWritingSuspendedUntilLabel = '',
 }) {
     const storyId = story?.id ?? story?.Id;
     const [chapters, setChapters] = useState([]);
@@ -332,9 +336,7 @@ export function ChapterListManager({
         historyEntries: null,
     });
     const [messageModal, setMessageModal] = useState({ open: false, title: '', message: '' });
-    const suspendedWriteTitle = isAuthorWritingSuspended
-        ? `Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`
-        : '';
+    const suspendedWriteTitle = isAuthorWritingSuspended ? AUTHOR_WRITING_SUSPENDED_TOOLTIP : '';
     const storyProgressRaw = String(story?.storyProgressStatus ?? story?.StoryProgressStatus ?? '').trim().toUpperCase();
     const storyProgressLocked = storyProgressRaw === 'HIATUS' || storyProgressRaw === 'COMPLETED';
     const storyProgressLockTitle = storyProgressRaw === 'COMPLETED'
@@ -389,8 +391,8 @@ export function ChapterListManager({
         return true;
     };
     /**
-     * Chỉ cho gửi chương N khi chương N-1 đã có kết quả xử lý (duyệt hoặc từ chối),
-     * đồng thời chương N-1 không còn phiên bản đang chờ duyệt.
+     * Chỉ cho gửi chương N khi chương N-1 đã xuất bản (moderator duyệt),
+     * và chương N-1 không còn phiên bản chỉnh sửa đang chờ duyệt.
      */
     const canSubmitBySequentialReview = (chapterNumber) => {
         if (chapterNumber === 1) return true;
@@ -398,8 +400,8 @@ export function ChapterListManager({
         if (!prevChapter) return false;
         const prevStatus = String(prevChapter.status ?? '').toLowerCase();
         const prevHasPendingVersion = (chapterVersionsMap[prevChapter.id] ?? []).some((v) => (v.status ?? '').toLowerCase() === 'pending_review');
-        const prevProcessed = prevStatus === 'published' || prevStatus === 'rejected';
-        return prevProcessed && !prevHasPendingVersion;
+        const prevPublished = prevStatus === 'published';
+        return prevPublished && !prevHasPendingVersion;
     };
     const closeConfirmDialog = () => {
         const isVersionAction = confirmDialog.action?.startsWith('version_');
@@ -715,7 +717,7 @@ export function ChapterListManager({
                                             }}
                                             title={suspendedWriteTitle}
                                         >
-                                            Tài khoản đang bị tạm đình chỉ quyền viết để điều tra vi phạm. Thời hạn: {authorWritingSuspendedUntilLabel || 'Đang cập nhật'}.
+                                            {AUTHOR_WRITING_SUSPENDED_BANNER}
                                         </div>
                                     )}
                                 </div>
@@ -1087,7 +1089,7 @@ export function ChapterListManager({
                                                                 const canSubmitForPublish = canSubmitBySequentialReview(chapter.number);
                                                                 const canSubmitChapter = canSubmitForPublish && !hasPendingVersion;
                                                                 const chapterPublishTitle = !canSubmitForPublish
-                                                                    ? `Chỉ được gửi khi chương ${chapter.number - 1} đã có kết quả duyệt hoặc từ chối duyệt.`
+                                                                    ? `Chỉ được gửi khi chương ${chapter.number - 1} đã xuất bản (đã duyệt).`
                                                                     : hasPendingVersion
                                                                         ? 'Đã có phiên bản đang chờ duyệt, không thể gửi chương gốc.'
                                                                         : 'Gửi chương lên để duyệt xuất bản';
@@ -1511,7 +1513,7 @@ export function ChapterListManager({
                                                                                                     if (isAuthorWritingSuspended || storyProgressLocked || vStatusLower === 'published' || !canSubmitVersion) return;
                                                                                                     openVersionSubmitConfirm(chapter.id, v.id, v.title_snapshot || v.titleSnapshot || '');
                                                                                                 }}
-                                                                                                title={isAuthorWritingSuspended ? suspendedWriteTitle : storyProgressLocked ? storyProgressLockTitle : vStatusLower === 'published' ? 'Đã xuất bản' : chapterIsPublished ? 'Chương đã xuất bản — không gửi thêm phiên bản chỉnh sửa (đã có phiên bản xuất bản).' : !canSubmitVersion ? (!canSubmitForPublish ? `Chỉ được gửi khi chương ${chapter.number - 1} đã có kết quả duyệt hoặc từ chối duyệt.` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.' : 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.') : 'Gửi duyệt phiên bản'}
+                                                                                                title={isAuthorWritingSuspended ? suspendedWriteTitle : storyProgressLocked ? storyProgressLockTitle : vStatusLower === 'published' ? 'Đã xuất bản' : chapterIsPublished ? 'Chương đã xuất bản — không gửi thêm phiên bản chỉnh sửa (đã có phiên bản xuất bản).' : !canSubmitVersion ? (!canSubmitForPublish ? `Chỉ được gửi khi chương ${chapter.number - 1} đã xuất bản (đã duyệt).` : chapterIsPendingReview ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.' : 'Chỉ được gửi một phiên bản tại một thời điểm. Hãy hủy phiên bản đang chờ duyệt trước.') : 'Gửi duyệt phiên bản'}
                                                                                                 disabled={isAuthorWritingSuspended || storyProgressLocked || vStatusLower === 'published' || !canSubmitVersion}
                                                                                                 style={{
                                                                                                     display: 'inline-flex',

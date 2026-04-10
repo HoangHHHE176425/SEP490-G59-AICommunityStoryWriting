@@ -59,6 +59,18 @@ public class ComplianceCommentReportRowDto
 
     /// <summary>Đã gửi yêu cầu admin gỡ lock — chặn mọi thao tác compliance trên thread này.</summary>
     public bool HasPendingLockReleaseRequest { get; set; }
+
+    /// <summary>Snapshot truyện: bình luận đang bị khóa (cấp truyện).</summary>
+    public bool StoryCommentsDisabled { get; set; }
+
+    /// <summary>Snapshot truyện: đang ẩn khỏi người dùng thường (compliance).</summary>
+    public bool StoryComplianceHidden { get; set; }
+
+    /// <summary>Tác giả truyện: đình chỉ quyền viết đến mốc này (UTC), nếu có.</summary>
+    public DateTime? StoryAuthorWritingSuspendedUntilUtc { get; set; }
+
+    /// <summary>Đơn chặn tài khoản đã được admin chấp nhận (thread này hoặc cùng truyện — luồng báo cáo truyện).</summary>
+    public bool HasApprovedAdminBanRequest { get; set; }
 }
 
 public class ComplianceCommentReporterDetailDto

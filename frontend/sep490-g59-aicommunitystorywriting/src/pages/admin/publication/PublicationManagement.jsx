@@ -5,7 +5,7 @@ import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories, getStoryById } from '../../../api/story/storyApi';
 import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, getRejectedChapterVersionsHistory, claimStory, claimChapter, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
 import { getProfileByUserId } from '../../../api/account/accountApi';
-import { reviewDeadlineAfterDaysUtc, localDateTimeInputToIsoUtc, worstTimeStatus, pickReviewDeadlineIso } from '../../../utils/moderatorReviewSla';
+import { reviewDeadlineAfterDaysUtc, worstTimeStatus, pickReviewDeadlineIso } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 import { getActivePolicy } from '../../../api/policy/policyApi';
@@ -432,11 +432,9 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
     const [rejectedCache, setRejectedCache] = useState({ items: [], total: 0, totalPages: 1 });
     const [approvedCacheLoading, setApprovedCacheLoading] = useState(false);
     const [rejectedCacheLoading, setRejectedCacheLoading] = useState(false);
-    /** Popup nhận duyệt: chọn hạn (7/14 ngày hoặc tùy chỉnh) + cam kết */
-    const [claimDeadlineChoice, setClaimDeadlineChoice] = useState('7'); // '7' | '14' | 'custom'
-    const [claimCustomDeadline, setClaimCustomDeadline] = useState('');
+    /** Popup nhận duyệt: chọn hạn 7 / 14 / 21 ngày + cam kết */
+    const [claimDeadlineChoice, setClaimDeadlineChoice] = useState('7'); // '7' | '14' | '21'
     const [claimCommitted, setClaimCommitted] = useState(false);
-    const [claimDeadlineError, setClaimDeadlineError] = useState('');
     const [modalClaimBusy, setModalClaimBusy] = useState(false);
     const [policyModalOpen, setPolicyModalOpen] = useState(false);
     const [policyLoading, setPolicyLoading] = useState(false);
@@ -1119,30 +1117,13 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
     useEffect(() => {
         if (claimConfirmTarget) {
             setClaimDeadlineChoice('7');
-            setClaimCustomDeadline('');
             setClaimCommitted(false);
-            setClaimDeadlineError('');
         }
     }, [claimConfirmTarget]);
 
     const getClaimReviewDeadlineIso = () => {
-        if (claimDeadlineChoice === 'custom') {
-            const iso = localDateTimeInputToIsoUtc(claimCustomDeadline);
-            return iso || reviewDeadlineAfterDaysUtc(7);
-        }
-        return reviewDeadlineAfterDaysUtc(claimDeadlineChoice === '14' ? 14 : 7);
-    };
-    const validateClaimDeadline = () => {
-        if (claimDeadlineChoice !== 'custom') return '';
-        const iso = localDateTimeInputToIsoUtc(claimCustomDeadline);
-        if (!iso) return 'Vui lòng chọn ngày giờ hạn duyệt hợp lệ.';
-        const deadlineMs = Date.parse(iso);
-        if (!Number.isFinite(deadlineMs)) return 'Vui lòng chọn ngày giờ hạn duyệt hợp lệ.';
-        const minDistanceMs = 24 * 60 * 60 * 1000;
-        if (deadlineMs - Date.now() < minDistanceMs) {
-            return 'Hạn hoàn thành phải cách thời điểm hiện tại ít nhất 24 giờ.';
-        }
-        return '';
+        const days = claimDeadlineChoice === '14' ? 14 : claimDeadlineChoice === '21' ? 21 : 7;
+        return reviewDeadlineAfterDaysUtc(days);
     };
 
     const filteredPublications = (filterStatus === 'pending' || filterStatus === 'rejected' || filterStatus === 'approved')
@@ -1252,12 +1233,6 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
             alert('Vui lòng xác nhận cam kết hoàn thành duyệt trong hạn đã chọn.');
             return;
         }
-        const deadlineValidationError = validateClaimDeadline();
-        if (deadlineValidationError) {
-            setClaimDeadlineError(deadlineValidationError);
-            return;
-        }
-        setClaimDeadlineError('');
         const reviewDeadlineAt = getClaimReviewDeadlineIso();
         const { type, id, storyId, chapterIds, isStoryUnclaimed } = claimConfirmTarget;
         setModalClaimBusy(true);
@@ -1818,21 +1793,18 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                             <strong>&quot;{claimConfirmTarget.title}&quot;</strong>
                         </p>
                         <p style={{ margin: '0 0 0.75rem', fontSize: '0.8125rem', color: '#64748b' }}>
-                            Chọn <strong>hạn hoàn thành duyệt</strong> (UTC theo máy chủ). Hạn phải cách hiện tại ít nhất ~24 giờ theo quy định hệ thống.
+                            Chọn hạn hoàn thành duyệt
                         </p>
                         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
                             {[
                                 { v: '7', label: '7 ngày' },
                                 { v: '14', label: '14 ngày' },
-                                { v: 'custom', label: 'Tùy chỉnh' },
+                                { v: '21', label: '21 ngày' },
                             ].map((opt) => (
                                 <button
                                     key={opt.v}
                                     type="button"
-                                    onClick={() => {
-                                        setClaimDeadlineChoice(opt.v);
-                                        if (claimDeadlineError) setClaimDeadlineError('');
-                                    }}
+                                    onClick={() => setClaimDeadlineChoice(opt.v)}
                                     style={{
                                         padding: '0.4rem 0.75rem',
                                         fontSize: '0.8125rem',
@@ -1848,32 +1820,6 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                 </button>
                             ))}
                         </div>
-                        {claimDeadlineChoice === 'custom' && (
-                            <input
-                                type="datetime-local"
-                                value={claimCustomDeadline}
-                                onChange={(e) => {
-                                    setClaimCustomDeadline(e.target.value);
-                                    if (claimDeadlineError) setClaimDeadlineError('');
-                                }}
-                                style={{
-                                    width: '100%',
-                                    marginBottom: '0.75rem',
-                                    padding: '0.5rem',
-                                    borderRadius: '8px',
-                                    border: claimDeadlineError ? '1px solid #ef4444' : '1px solid #cbd5e1',
-                                    fontSize: '0.875rem',
-                                }}
-                            />
-                        )}
-                        {claimDeadlineError && (
-                            <p
-                                role="alert"
-                                style={{ margin: '0 0 0.75rem', fontSize: '0.75rem', fontWeight: 600, color: '#b91c1c' }}
-                            >
-                                {claimDeadlineError}
-                            </p>
-                        )}
                         <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8125rem', color: '#334155', marginBottom: '1rem', cursor: 'pointer' }}>
                             <input
                                 type="checkbox"

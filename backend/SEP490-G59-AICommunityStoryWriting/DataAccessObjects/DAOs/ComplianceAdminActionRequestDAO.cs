@@ -45,6 +45,39 @@ public static class ComplianceAdminActionRequestDAO
                 && (x.message == null || !x.message.Contains(commentTag)));
     }
 
+    /// <summary>Đơn chặn tài khoản (BAN_USER) đã được admin chấp nhận, gửi từ luồng báo cáo truyện (message không gắn thread comment).</summary>
+    public static HashSet<Guid> ListStoryIdsWithApprovedBanUserStoryCompliance(IReadOnlyCollection<Guid> storyIds)
+    {
+        if (storyIds == null || storyIds.Count == 0) return new HashSet<Guid>();
+        var ids = storyIds.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (ids.Count == 0) return new HashSet<Guid>();
+        var commentTag = CommentReportMessageTagPrefix;
+        using var context = new StoryPlatformDbContext();
+        return context.compliance_admin_action_requests.AsNoTracking()
+            .Where(x => ids.Contains(x.story_id)
+                && x.status == StatusApproved
+                && x.request_kind != null
+                && x.request_kind.ToUpper() == KindBanUser
+                && (x.message == null || !x.message.Contains(commentTag)))
+            .Select(x => x.story_id)
+            .Distinct()
+            .ToHashSet();
+    }
+
+    /// <summary>Đơn chặn tài khoản đã duyệt gắn với thread comment (tag [COMMENT_REPORT:…]).</summary>
+    public static bool CommentThreadHasApprovedBanUserRequest(Guid commentId)
+    {
+        if (commentId == Guid.Empty) return false;
+        var marker = FormatCommentReportSourceTag(commentId);
+        using var context = new StoryPlatformDbContext();
+        return context.compliance_admin_action_requests.AsNoTracking()
+            .Any(x => x.status == StatusApproved
+                && x.request_kind != null
+                && x.request_kind.ToUpper() == KindBanUser
+                && x.message != null
+                && x.message.Contains(marker));
+    }
+
     /// <summary>Batch: story_id có đơn admin story-compliance đang PENDING.</summary>
     public static HashSet<Guid> ListStoryIdsWithPendingStoryComplianceAdminAction(IReadOnlyCollection<Guid> storyIds)
     {
