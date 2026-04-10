@@ -40,6 +40,9 @@ namespace Services.DTOs.Moderation
         public DateTime? ReviewDeadlineAt { get; set; }
         public bool HasPendingEscalation { get; set; }
 
+        /// <summary>False khi đã gửi đủ 1 đơn xin gia hạn trong phiên nhận duyệt hiện tại (vẫn có thể gửi hủy nhận).</summary>
+        public bool CanSubmitExtendDeadlineRequest { get; set; }
+
         /// <summary>Thời điểm tác giả gửi bản chờ duyệt (UTC) — dùng hiển thị “đã gửi … trước”.</summary>
         public DateTime? AuthorSubmittedAtUtc { get; set; }
 
