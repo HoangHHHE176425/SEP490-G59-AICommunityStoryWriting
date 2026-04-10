@@ -165,6 +165,7 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         }
 
         var (suggestedTitle, outlineBody) = TryExtractOutlineAndSuggestedTitle(outlineJson);
+        suggestedTitle = EnsureUniqueSuggestedTitle(suggestedTitle, allChaptersOrdered);
         var outlineForPrompt = FormatOutlineForPrompt(outlineBody);
 
         var (p2, m2, k2, u2) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentWriter);
@@ -259,6 +260,31 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
             AgentDurations = durations.Count > 0 ? durations : null,
             ContextWarning = contextWarning
         };
+    }
+
+    private static string? EnsureUniqueSuggestedTitle(string? suggestedTitle, IReadOnlyList<chapters> chaptersOrdered)
+    {
+        if (string.IsNullOrWhiteSpace(suggestedTitle))
+            return suggestedTitle;
+
+        var reserved = chaptersOrdered
+            .Select(c => c.title?.Trim())
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var baseTitle = suggestedTitle.Trim();
+        if (reserved.Add(baseTitle))
+            return baseTitle;
+
+        var n = 2;
+        while (true)
+        {
+            var candidate = $"{baseTitle} ({n})";
+            if (reserved.Add(candidate))
+                return candidate;
+            n++;
+        }
     }
 
     private static int ResolveCoCreateTargetOrderIndex(CoCreationRequest request, List<chapters> allOrdered)

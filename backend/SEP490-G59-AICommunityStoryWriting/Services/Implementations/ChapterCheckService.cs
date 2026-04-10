@@ -403,6 +403,7 @@ Không markdown. Không thêm text ngoài JSON.
                             if (!string.IsNullOrEmpty(extracted))
                                 context = extracted;
                         }
+                        context = ClampContextAroundNeedle(context, needleForExtract);
                     }
 
                     if (!punctuationLike &&
@@ -452,7 +453,7 @@ Không markdown. Không thêm text ngoài JSON.
                || w.Equals("Lỗi chính tả/dấu câu", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Trích dòng (hoặc đoạn ngắn) chứa <paramref name="needle"/> từ nội dung gốc để hiển thị thay cho tọa độ ký tự.</summary>
+    /// <summary>Trích đoạn ngắn chứa <paramref name="needle"/>: tối đa 24 ký tự trước và 24 ký tự sau từ lỗi.</summary>
     private static string? TryExtractContextSnippet(string chapterContent, string needle)
     {
         if (string.IsNullOrWhiteSpace(chapterContent) || string.IsNullOrWhiteSpace(needle)) return null;
@@ -461,24 +462,25 @@ Không markdown. Không thêm text ngoài JSON.
 
         var idx = chapterContent.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
         if (idx < 0) return null;
+        const int contextChars = 24;
+        var start = Math.Max(0, idx - contextChars);
+        var end = Math.Min(chapterContent.Length, idx + needle.Length + contextChars);
+        var snippet = chapterContent[start..end].Trim();
+        if (snippet.Length == 0) return null;
+        return (start > 0 ? "..." : "") + snippet + (end < chapterContent.Length ? "..." : "");
+    }
 
-        var lineStart = chapterContent.LastIndexOf('\n', idx);
-        lineStart = lineStart < 0 ? 0 : lineStart + 1;
-        var lineEnd = chapterContent.IndexOf('\n', idx);
-        if (lineEnd < 0) lineEnd = chapterContent.Length;
-        var line = chapterContent[lineStart..lineEnd].Trim();
-        if (line.Length == 0 || !line.Contains(needle, StringComparison.OrdinalIgnoreCase))
-            return null;
-
-        const int maxLen = 600;
-        if (line.Length <= maxLen) return line;
-
-        var rel = idx - lineStart;
-        var half = maxLen / 2;
-        var a = Math.Max(0, Math.Min(rel - half, line.Length - maxLen));
-        var b = Math.Min(line.Length, a + maxLen);
-        var snippet = line[a..b].Trim();
-        return (a > 0 ? "… " : "") + snippet + (b < line.Length ? " …" : "");
+    private static string? ClampContextAroundNeedle(string? context, string needle)
+    {
+        if (string.IsNullOrWhiteSpace(context) || string.IsNullOrWhiteSpace(needle))
+            return context;
+        var idx = context.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return context;
+        const int contextChars = 24;
+        var start = Math.Max(0, idx - contextChars);
+        var end = Math.Min(context.Length, idx + needle.Length + contextChars);
+        var snippet = context[start..end].Trim();
+        return (start > 0 ? "..." : "") + snippet + (end < context.Length ? "..." : "");
     }
 
     private static string BuildSpellCacheKey(string? title, string content)
