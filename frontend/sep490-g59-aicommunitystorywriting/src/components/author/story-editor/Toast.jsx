@@ -1,19 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle, XCircle, Info, AlertCircle, X } from 'lucide-react';
+
+const GLOBAL_TOAST_DEDUPE = new Map();
 
 export function Toast({ message, type = 'success', duration = 3000, onClose }) {
     const [isVisible, setIsVisible] = useState(true);
     const [isExiting, setIsExiting] = useState(false);
+    const hasClosedRef = useRef(false);
 
     useEffect(() => {
+        const safeDuration = Number.isFinite(Number(duration)) ? Math.max(1000, Number(duration)) : 3000;
         const timer = setTimeout(() => {
             handleClose();
-        }, duration);
+        }, safeDuration);
 
         return () => clearTimeout(timer);
     }, [duration]);
 
     const handleClose = () => {
+        if (hasClosedRef.current) return;
+        hasClosedRef.current = true;
         setIsExiting(true);
         setTimeout(() => {
             setIsVisible(false);
@@ -54,18 +60,15 @@ export function Toast({ message, type = 'success', duration = 3000, onClose }) {
         }
     };
 
-    const config = typeConfig[type];
+    const config = typeConfig[type] ?? typeConfig.info;
     const Icon = config.icon;
 
     return (
         <div
             style={{
-                position: 'fixed',
-                top: '2rem',
-                right: '2rem',
-                zIndex: 9999,
-                minWidth: '300px',
-                maxWidth: '500px',
+                minWidth: '280px',
+                maxWidth: '460px',
+                width: '100%',
                 backgroundColor: config.bgColor,
                 border: `1px solid ${config.borderColor}`,
                 borderRadius: '8px',
@@ -142,8 +145,31 @@ export function useToast() {
     const [toasts, setToasts] = useState([]);
 
     const showToast = (message, type = 'success', duration = 3000) => {
-        const id = Date.now();
-        setToasts(prev => [...prev, { id, message, type, duration }]);
+        const text = String(message ?? '').trim();
+        if (!text) return;
+        const toastType = String(type || 'info');
+        const now = Date.now();
+        const dedupeKey = `${toastType}::${text}`;
+        const lastShownAt = GLOBAL_TOAST_DEDUPE.get(dedupeKey) ?? 0;
+        // Chặn spam cùng nội dung/type trong thời gian ngắn.
+        if (now - lastShownAt < 2000) return;
+        GLOBAL_TOAST_DEDUPE.set(dedupeKey, now);
+        if (GLOBAL_TOAST_DEDUPE.size > 80) {
+            const pruneBefore = now - 15000;
+            for (const [k, t] of GLOBAL_TOAST_DEDUPE.entries()) {
+                if (t < pruneBefore) GLOBAL_TOAST_DEDUPE.delete(k);
+            }
+        }
+        const id = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        setToasts(prev => {
+            // Không thêm lại nếu cùng message/type đang hiện trên màn hình.
+            if (prev.some((t) => t.message === text && String(t.type || 'info') === toastType)) {
+                return prev;
+            }
+            return [...prev, { id, message: text, type: toastType, duration }].slice(-4);
+        });
     };
 
     const removeToast = (id) => {
@@ -153,17 +179,30 @@ export function useToast() {
     const clearToasts = () => setToasts([]);
 
     const ToastContainer = () => (
-        <>
+        <div
+            style={{
+                position: 'fixed',
+                top: '1rem',
+                right: '1rem',
+                zIndex: 9999,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.625rem',
+                pointerEvents: 'none',
+                maxWidth: 'calc(100vw - 2rem)',
+            }}
+        >
             {toasts.map(toast => (
-                <Toast
-                    key={toast.id}
-                    message={toast.message}
-                    type={toast.type}
-                    duration={toast.duration}
-                    onClose={() => removeToast(toast.id)}
-                />
+                <div key={toast.id} style={{ pointerEvents: 'auto' }}>
+                    <Toast
+                        message={toast.message}
+                        type={toast.type}
+                        duration={toast.duration}
+                        onClose={() => removeToast(toast.id)}
+                    />
+                </div>
             ))}
-        </>
+        </div>
     );
 
     return { showToast, ToastContainer, clearToasts };

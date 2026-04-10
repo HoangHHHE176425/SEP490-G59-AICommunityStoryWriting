@@ -102,10 +102,12 @@ export function StoryEditor({ story, onSave, onCancel }) {
             const ext = lowerName.slice(lowerName.lastIndexOf('.'));
             if (!allowedExtensions.includes(ext)) {
                 showToast(`Ảnh bìa chỉ chấp nhận ${allowedExtensions.join(', ').toUpperCase()}`, 'error');
+                e.target.value = '';
                 return;
             }
             if (file.size > 5 * 1024 * 1024) {
                 showToast('Kích thước ảnh bìa không được vượt quá 5MB', 'error');
+                e.target.value = '';
                 return;
             }
             const previewUrl = URL.createObjectURL(file);
@@ -115,7 +117,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                 }
                 return { ...prev, cover: previewUrl, coverFile: file };
             });
-            showToast('Ảnh bìa đã được tải lên thành công!', 'success');
+            e.target.value = '';
         }
     };
 
@@ -386,9 +388,14 @@ export function StoryEditor({ story, onSave, onCancel }) {
         }
 
         if (currentStep < 4) {
+            const fromStep = currentStep;
             setCurrentStep(currentStep + 1);
             window.scrollTo({ top: 0, behavior: 'smooth' });
-            showToast('Đã chuyển sang bước tiếp theo', 'success');
+            if (fromStep === 1) {
+                showToast('Đã điền thông tin truyện thành công.', 'success');
+            } else {
+                showToast('Đã chuyển sang bước tiếp theo', 'success');
+            }
         }
     };
 

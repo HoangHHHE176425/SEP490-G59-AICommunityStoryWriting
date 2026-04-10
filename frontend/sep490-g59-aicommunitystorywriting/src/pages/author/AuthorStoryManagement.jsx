@@ -1287,7 +1287,7 @@ export function AuthorStoryManagement({ onBack }) {
                 };
             });
 
-            showToast('Đã lưu thay đổi thông tin truyện', 'success');
+            showToast('Đã lưu thông tin truyện thành công.', 'success');
         } catch (err) {
             const msg = err?.response?.data?.message ?? err?.response?.data?.error ?? err?.message ?? 'Không thể lưu thay đổi';
             showToast(msg, 'error');
