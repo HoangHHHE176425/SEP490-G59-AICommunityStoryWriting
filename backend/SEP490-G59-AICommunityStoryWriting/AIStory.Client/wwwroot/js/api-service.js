@@ -1186,6 +1186,22 @@ class ApiService {
         });
     }
 
+    /** COMPLIANCE: bật/tắt tạm khóa quyền viết tác giả truyện (không qua admin). */
+    static async complianceSetStoryAuthorWritingSuspended(storyId, value) {
+        return this.request(`/compliance/story-reports/stories/${encodeURIComponent(storyId)}/author-writing-suspended`, {
+            method: 'POST',
+            body: JSON.stringify({ value: !!value })
+        });
+    }
+
+    /** COMPLIANCE: bật/tắt tạm khóa quyền viết (thread comment; body.value + tuỳ chọn targetUserId). */
+    static async complianceSetCommentAuthorWritingSuspended(commentId, body) {
+        return this.request(`/compliance/comment-reports/comments/${encodeURIComponent(commentId)}/author-writing-suspended`, {
+            method: 'POST',
+            body: JSON.stringify(body || {})
+        });
+    }
+
     static async complianceRequestAdminAction(storyId, body) {
         return this.request(`/compliance/story-reports/stories/${encodeURIComponent(storyId)}/admin-action-requests`, {
             method: 'POST',

@@ -103,7 +103,7 @@
                         </div>
                         <div id="chapterEscalationPanel" class="mt-4 border rounded p-3 bg-light" style="display: none;">
                             <h6 class="mb-2"><i class="bi bi-exclamation-octagon text-danger"></i> Báo cáo lên Admin</h6>
-                            <p class="small text-muted">Gia hạn hạn duyệt hoặc hủy nhận để người khác duyệt.</p>
+                            <p class="small text-muted">Gia hạn hạn duyệt (tối đa <strong>một lần</strong> mỗi phiên nhận) hoặc hủy nhận để người khác duyệt.</p>
                             <div class="mb-2">
                                 <label class="form-label small">Loại yêu cầu</label>
                                 <select class="form-select form-select-sm" id="chapterEscKind">
@@ -245,6 +245,19 @@
                 '<div>' + mainLine + ' ' + badge + '</div>' + personalLine;
         }
 
+        function syncChapterEscKindFromSelf(self) {
+            var sel = document.getElementById('chapterEscKind');
+            if (!sel) return;
+            var extOpt = sel.querySelector('option[value="EXTEND_DEADLINE"]');
+            if (!extOpt) return;
+            var canExt = self.canSubmitExtendDeadlineRequest !== false;
+            extOpt.disabled = !canExt;
+            if (!canExt && sel.value === 'EXTEND_DEADLINE') {
+                sel.value = 'RELEASE_ASSIGNMENT';
+                document.getElementById('chapterEscExtendWrap').style.display = 'none';
+            }
+        }
+
         async function refreshChapterAssignmentUi() {
             try {
                 var self = await ApiService.moderatorGetReviewAssignmentSelf('CHAPTER', chapterId);
@@ -254,6 +267,7 @@
                 var myDl = document.getElementById('myReviewDeadlineAt');
                 var escalationLocked = !!(self.isAssignedToMe && self.hasPendingEscalation);
                 var mustClaimFirst = !self.isAssignedToMe;
+                syncChapterEscKindFromSelf(self);
                 var btnApprove = document.getElementById('btnApproveChapter');
                 var btnReject = document.getElementById('btnRejectChapter');
                 var btnConfirmReject = document.getElementById('btnConfirmRejectChapter');
@@ -274,7 +288,8 @@
                         var waitPart = (self.authorSubmittedAtUtc && Utils.formatRelativePastVi)
                             ? ' · Đang chờ: ' + Utils.formatRelativePastVi(self.authorSubmittedAtUtc)
                             : '';
-                        hint.textContent = 'Bạn đang nhận duyệt. Cam kết: ' + dl + waitPart;
+                        var extPart = self.canSubmitExtendDeadlineRequest === false ? ' · Đã dùng lượt xin gia hạn (1 lần/phiên nhận).' : '';
+                        hint.textContent = 'Bạn đang nhận duyệt. Cam kết: ' + dl + waitPart + extPart;
                     }
                 } else {
                     btn.style.display = 'none';
@@ -300,6 +315,11 @@
             }
             var body = { targetType: 'CHAPTER', targetId: chapterId, requestKind: kind, reason: reason };
             if (kind === 'EXTEND_DEADLINE') {
+                var extOptCh = document.querySelector('#chapterEscKind option[value="EXTEND_DEADLINE"]');
+                if (extOptCh && extOptCh.disabled) {
+                    Utils.showAlert('Bạn đã hết lượt xin gia hạn trong phiên nhận duyệt này.', 'warning');
+                    return;
+                }
                 var localStr = document.getElementById('chapterEscDeadline').value;
                 if (!localStr) { Utils.showAlert('Chọn hạn đề xuất.', 'warning'); return; }
                 var pIso = Utils.datetimeLocalToIsoUtc(localStr);

@@ -394,7 +394,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Đóng"></button>
             </div>
             <div class="modal-body pt-2">
-                <p class="small text-muted mb-2">Dùng khi bạn <strong>không thể hoàn thành duyệt đúng hạn</strong>. Admin sẽ xác nhận: <strong>gia hạn hạn duyệt</strong> hoặc <strong>hủy nhận</strong> để moderator khác nhận.</p>
+                <p class="small text-muted mb-2">Dùng khi bạn <strong>không thể hoàn thành duyệt đúng hạn</strong>. Admin sẽ xác nhận: <strong>gia hạn hạn duyệt</strong> (tối đa <strong>một lần</strong> mỗi phiên nhận duyệt) hoặc <strong>hủy nhận</strong> để moderator khác nhận.</p>
                 <div id="escalationMeta" class="alert alert-light border small mb-3"></div>
                 <div class="mb-3">
                     <label class="form-label small mb-1">Loại yêu cầu <span class="text-danger">*</span></label>
@@ -402,7 +402,7 @@
                         <option value="EXTEND_DEADLINE">Gia hạn hạn duyệt</option>
                         <option value="RELEASE_ASSIGNMENT">Hủy nhận duyệt (chuyển cho người khác)</option>
                     </select>
-                    <p class="small text-muted mb-0 mt-2">Mức ưu tiên gửi admin do hệ thống gán theo loại đơn: <strong>Hủy nhận duyệt</strong> → nghiêm trọng; <strong>Gia hạn</strong> → chuẩn (có thể tăng thêm theo hạn / thời gian chờ).</p>
+                    <p class="small text-muted mb-0 mt-2">Mức ưu tiên gửi admin do hệ thống gán theo loại đơn: <strong>Hủy nhận duyệt</strong> → nghiêm trọng; <strong>Gia hạn</strong> → chuẩn (có thể tăng thêm theo hạn / thời gian chờ). Sau khi đã gửi một đơn gia hạn trong lần nhận này, chỉ còn chọn hủy nhận (hoặc nhận lại sau khi admin xử lý).</p>
                 </div>
                 <div id="escExtendBlock" class="mb-3">
                     <label class="form-label small mb-1">Hạn duyệt đề xuất <span class="text-danger">*</span></label>
@@ -610,6 +610,18 @@
             if (block) block.style.display = kind === 'EXTEND_DEADLINE' ? 'block' : 'none';
         }
 
+        function setEscalationExtendOptionEnabled(canExtend) {
+            var sel = document.getElementById('escRequestKind');
+            if (!sel) return;
+            var extOpt = sel.querySelector('option[value="EXTEND_DEADLINE"]');
+            if (!extOpt) return;
+            extOpt.disabled = !canExtend;
+            if (!canExtend && sel.value === 'EXTEND_DEADLINE') {
+                sel.value = 'RELEASE_ASSIGNMENT';
+                toggleEscExtendFields();
+            }
+        }
+
         function setEscQuickDeadline(days) {
             var d = new Date();
             d.setDate(d.getDate() + days);
@@ -622,6 +634,7 @@
             escalationModalState = { type: type, id: id };
             document.getElementById('escReason').value = '';
             document.getElementById('escRequestKind').value = 'EXTEND_DEADLINE';
+            setEscalationExtendOptionEnabled(true);
             toggleEscExtendFields();
             setEscQuickDeadline(7);
             try {
@@ -634,10 +647,16 @@
                     Utils.showAlert('Đã có đơn báo cáo chờ admin xử lý cho mục này.', 'info');
                     return;
                 }
+                var canExt = self.canSubmitExtendDeadlineRequest !== false;
+                setEscalationExtendOptionEnabled(!!canExt);
+                if (!canExt) {
+                    document.getElementById('escRequestKind').value = 'RELEASE_ASSIGNMENT';
+                    toggleEscExtendFields();
+                }
                 var meta = document.getElementById('escalationMeta');
                 var dl = self.reviewDeadlineAt ? Utils.formatDate(self.reviewDeadlineAt) : '—';
-                meta.innerHTML = '<strong>Hạn duyệt hiện tại:</strong> ' + dl +
-                    (self.hasPendingEscalation ? '<br><span class="text-warning fw-semibold">Đang có đơn chờ admin — không gửi trùng.</span>' : '');
+                var extNote = !canExt ? '<br><span class="text-secondary">Bạn đã dùng lượt xin gia hạn (1 lần/phiên nhận). Chỉ còn gửi hủy nhận duyệt.</span>' : '';
+                meta.innerHTML = '<strong>Hạn duyệt hiện tại:</strong> ' + dl + extNote;
                 new bootstrap.Modal(document.getElementById('escalationModal')).show();
             } catch (e) {
                 Utils.showAlert(e.message || 'Không tải được trạng thái nhận duyệt.', 'danger');
@@ -660,6 +679,11 @@
                 reason: reason
             };
             if (kind === 'EXTEND_DEADLINE') {
+                var extOpt = document.querySelector('#escRequestKind option[value="EXTEND_DEADLINE"]');
+                if (extOpt && extOpt.disabled) {
+                    Utils.showAlert('Bạn đã hết lượt xin gia hạn trong phiên nhận duyệt này.', 'warning');
+                    return;
+                }
                 var localStr = (document.getElementById('escProposedDeadlineLocal') || {}).value;
                 if (!localStr) {
                     Utils.showAlert('Chọn hạn duyệt đề xuất.', 'warning');

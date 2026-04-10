@@ -81,7 +81,7 @@
                         </div>
                         <div id="storyEscalationPanel" class="mt-4 border rounded p-3 bg-light" style="display: none;">
                             <h6 class="mb-2"><i class="bi bi-exclamation-octagon text-danger"></i> Báo cáo lên Admin</h6>
-                            <p class="small text-muted">Gia hạn hạn duyệt hoặc hủy nhận để người khác duyệt. Admin xác nhận; đơn được gắn mức ưu tiên.</p>
+                            <p class="small text-muted">Gia hạn hạn duyệt (tối đa <strong>một lần</strong> mỗi phiên nhận) hoặc hủy nhận để người khác duyệt. Admin xác nhận; đơn được gắn mức ưu tiên.</p>
                             <div class="mb-2">
                                 <label class="form-label small">Loại yêu cầu</label>
                                 <select class="form-select form-select-sm" id="storyEscKind">
@@ -218,6 +218,19 @@
                 '<div>' + mainLine + ' ' + badge + '</div>' + personalLine;
         }
 
+        function syncStoryEscKindFromSelf(self) {
+            var sel = document.getElementById('storyEscKind');
+            if (!sel) return;
+            var extOpt = sel.querySelector('option[value="EXTEND_DEADLINE"]');
+            if (!extOpt) return;
+            var canExt = self.canSubmitExtendDeadlineRequest !== false;
+            extOpt.disabled = !canExt;
+            if (!canExt && sel.value === 'EXTEND_DEADLINE') {
+                sel.value = 'RELEASE_ASSIGNMENT';
+                document.getElementById('storyEscExtendWrap').style.display = 'none';
+            }
+        }
+
         async function refreshStoryAssignmentUi() {
             try {
                 var self = await ApiService.moderatorGetReviewAssignmentSelf('STORY', storyId);
@@ -225,6 +238,7 @@
                 var hint = document.getElementById('storyAssignmentHint');
                 var escalationLocked = !!(self.isAssignedToMe && self.hasPendingEscalation);
                 var mustClaimFirst = !self.isAssignedToMe;
+                syncStoryEscKindFromSelf(self);
                 var btnApprove = document.getElementById('btnApproveStory');
                 var btnReject = document.getElementById('btnRejectStory');
                 var btnConfirmReject = document.getElementById('btnConfirmRejectStory');
@@ -241,7 +255,8 @@
                         var waitPart = (self.authorSubmittedAtUtc && Utils.formatRelativePastVi)
                             ? ' · Đang chờ: ' + Utils.formatRelativePastVi(self.authorSubmittedAtUtc)
                             : '';
-                        hint.textContent = 'Bạn đang nhận duyệt. Cam kết: ' + dl + waitPart;
+                        var extPart = self.canSubmitExtendDeadlineRequest === false ? ' · Đã dùng lượt xin gia hạn (1 lần/phiên nhận).' : '';
+                        hint.textContent = 'Bạn đang nhận duyệt. Cam kết: ' + dl + waitPart + extPart;
                     }
                 } else {
                     btn.style.display = 'none';
@@ -265,6 +280,11 @@
             }
             var body = { targetType: 'STORY', targetId: storyId, requestKind: kind, reason: reason };
             if (kind === 'EXTEND_DEADLINE') {
+                var extOpt = document.querySelector('#storyEscKind option[value="EXTEND_DEADLINE"]');
+                if (extOpt && extOpt.disabled) {
+                    Utils.showAlert('Bạn đã hết lượt xin gia hạn trong phiên nhận duyệt này.', 'warning');
+                    return;
+                }
                 var localStr = document.getElementById('storyEscDeadline').value;
                 if (!localStr) { Utils.showAlert('Chọn hạn đề xuất.', 'warning'); return; }
                 var pIso = Utils.datetimeLocalToIsoUtc(localStr);
