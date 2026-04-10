@@ -866,7 +866,7 @@
             }
             var html = pendingStories.map(function (s) {
                 var escalationLocked = !!(s.isClaimedByMe && s.hasPendingEscalation);
-                var cover = s.coverImage ? '<img src="' + apiBaseForImages + (s.coverImage.indexOf('/') === 0 ? '' : '/') + s.coverImage + '" class="cover-wrap img-fluid" alt="" style="width:120px;height:100px;object-fit:cover;">' : '<div class="cover-wrap d-flex align-items-center justify-content-center bg-secondary bg-opacity-25" style="width:120px;height:100px;"><i class="bi bi-image text-muted" style="font-size:2rem;"></i></div>';
+                var cover = s.coverImage ? '<img src="' + resolveMediaSrc(s.coverImage) + '" class="cover-wrap img-fluid" alt="" style="width:120px;height:100px;object-fit:cover;">' : '<div class="cover-wrap d-flex align-items-center justify-content-center bg-secondary bg-opacity-25" style="width:120px;height:100px;"><i class="bi bi-image text-muted" style="font-size:2rem;"></i></div>';
                 var summary = (s.summary || '').substring(0, 180);
                 if ((s.summary || '').length > 180) summary += '...';
                 var reviewBtns;

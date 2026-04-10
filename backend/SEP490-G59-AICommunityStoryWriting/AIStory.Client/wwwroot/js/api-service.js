@@ -1,6 +1,20 @@
 // API Base URL: từ server config (Layout) hoặc mặc định khi chạy API trên port 5000
 const API_BASE_URL = (typeof window !== 'undefined' && window.__API_BASE_URL) ? window.__API_BASE_URL : 'http://localhost:5000/api';
 
+/**
+ * URL ảnh/media từ API: nếu đã là http(s):// (vd. Cloudinary) thì dùng nguyên;
+ * nếu là đường dẫn tương đối (/uploads/...) thì ghép gốc backend (API_BASE_URL bỏ /api).
+ */
+function resolveMediaSrc(pathOrUrl) {
+    if (pathOrUrl == null || pathOrUrl === '') return '';
+    const s = String(pathOrUrl).trim();
+    if (/^https?:\/\//i.test(s)) return s;
+    const base = String(typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : 'http://localhost:5000/api').replace(/\/api\/?$/i, '');
+    const root = base || 'http://localhost:5000';
+    return s.startsWith('/') ? root + s : root + '/' + s;
+}
+if (typeof window !== 'undefined') window.resolveMediaSrc = resolveMediaSrc;
+
 // API Service Class
 class ApiService {
     /**
