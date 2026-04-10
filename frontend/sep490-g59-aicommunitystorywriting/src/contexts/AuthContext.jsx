@@ -33,6 +33,9 @@ export function AuthProvider({ children }) {
     const fetchProfileRef = useRef(fetchProfile);
     fetchProfileRef.current = fetchProfile;
 
+    const fetchProfileRef = useRef(fetchProfile);
+    fetchProfileRef.current = fetchProfile;
+
     // Load cached user + try restore session (refresh cookie -> access token -> profile)
     useEffect(() => {
         const savedUser = localStorage.getItem('user');

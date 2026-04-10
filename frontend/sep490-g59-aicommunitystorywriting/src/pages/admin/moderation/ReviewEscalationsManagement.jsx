@@ -19,9 +19,15 @@ import { getChapters } from '../../../api/chapter/chapterApi';
 import { localDateTimeInputToIsoUtc } from '../../../utils/moderatorReviewSla';
 import { formatApiDateTimeVietnamVi } from '../../../utils/apiDateTime';
 
-/** Khi từ chối đơn escalation: ghi chú admin tối thiểu (ký tự, sau trim) — đồng bộ BE ReviewEscalationService. */
-const ADMIN_REJECT_NOTE_MIN_LENGTH = 10;
+/** Khi từ chối đơn escalation/compliance: ghi chú admin tối thiểu số từ. */
+const ADMIN_REJECT_NOTE_MIN_WORDS = 50;
 const ADMIN_REJECT_NOTE_MAX_LENGTH = 2000;
+
+function countWords(text) {
+    const t = String(text ?? '').trim();
+    if (!t) return 0;
+    return t.split(/\s+/).filter(Boolean).length;
+}
 
 /** Bỏ URL khỏi chuỗi lỗi (tránh hiện localhost trong UI). */
 function sanitizeApiErrorText(s) {
@@ -141,11 +147,18 @@ function targetTypeVi(row) {
 
 /** Nickname/email từ API — chuẩn hóa nhãn tiếng Việt khi hệ thống dùng từ tiếng Anh. */
 function senderDisplayNameVi(row) {
-    const raw = row?.senderName ?? row?.SenderName;
+    const raw = row?.senderName
+        ?? row?.SenderName
+        ?? row?.senderDisplayName
+        ?? row?.SenderDisplayName
+        ?? row?.requesterDisplayName
+        ?? row?.RequesterDisplayName
+        ?? row?.requesterEmail
+        ?? row?.RequesterEmail
+        ?? row?.senderEmail
+        ?? row?.SenderEmail;
     if (raw == null || String(raw).trim() === '') return '—';
-    const n = String(raw).trim();
-    if (/^moderator$/i.test(n)) return 'Kiểm duyệt viên';
-    return n;
+    return String(raw).trim();
 }
 
 function urgencyBadge(tier) {
@@ -622,9 +635,10 @@ export function ReviewEscalationsManagement() {
     const submitReject = async () => {
         if (!resolveRow) return;
         const trimmed = adminNote.trim();
-        if (trimmed.length < ADMIN_REJECT_NOTE_MIN_LENGTH) {
+        const wc = countWords(trimmed);
+        if (wc < ADMIN_REJECT_NOTE_MIN_WORDS) {
             setAdminNoteRejectError(
-                `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự (đã bỏ khoảng trắng đầu/cuối).`,
+                `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_WORDS} từ (hiện tại: ${wc} từ).`,
             );
             return;
         }
@@ -673,9 +687,10 @@ export function ReviewEscalationsManagement() {
         const decision = decisionOverride ?? (reqType === 'ADMIN_ACTION' ? 'APPROVE' : 'APPROVE_UNLOCK');
         const trimmedNote = (complianceAdminNote || '').trim();
         if (decision === 'REJECT') {
-            if (trimmedNote.length < ADMIN_REJECT_NOTE_MIN_LENGTH) {
+            const wc = countWords(trimmedNote);
+            if (wc < ADMIN_REJECT_NOTE_MIN_WORDS) {
                 setComplianceAdminNoteRejectError(
-                    `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự (đã bỏ khoảng trắng đầu/cuối).`,
+                    `Khi từ chối, bắt buộc nhập lý do (ghi chú quản trị viên). Tối thiểu ${ADMIN_REJECT_NOTE_MIN_WORDS} từ (hiện tại: ${wc} từ).`,
                 );
                 return;
             }
@@ -1701,10 +1716,8 @@ export function ReviewEscalationsManagement() {
 
                             {String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase().includes('EXTEND') && (
                                 <div style={{ marginBottom: 16 }}>
-                                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title, marginBottom: 6 }}>Hạn duyệt sau khi chấp nhận</div>
-                                    <div
-                                        aria-readonly="true"
-                                        style={{
+                                    {(() => {
+                                        const extendReadonlyBox = {
                                             padding: '0.5rem 0.75rem',
                                             borderRadius: 8,
                                             border: `1px solid ${T.border}`,
@@ -1712,18 +1725,41 @@ export function ReviewEscalationsManagement() {
                                             fontSize: '0.875rem',
                                             color: T.title,
                                             cursor: 'default',
-                                        }}
-                                    >
-                                        {formatApiDateTimeVietnamVi(resolveRow.proposedDeadlineAt ?? resolveRow.ProposedDeadlineAt)}
-                                    </div>
-                                    <p style={{ fontSize: '0.75rem', color: T.slate, margin: '6px 0 0' }}>Theo hạn kiểm duyệt viên đề xuất — không chỉnh sửa.</p>
+                                        };
+                                        const currentDl =
+                                            resolveRow.currentAssignmentDeadlineAt
+                                            ?? resolveRow.CurrentAssignmentDeadlineAt
+                                            ?? resolveRow.assignmentDeadlineAt
+                                            ?? resolveRow.AssignmentDeadlineAt
+                                            ?? resolveRow.reviewDeadlineAt
+                                            ?? resolveRow.ReviewDeadlineAt;
+                                        const currentDlText = formatApiDateTimeVietnamVi(currentDl);
+                                        return (
+                                            <>
+                                                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title, marginBottom: 6 }}>
+                                                    Hạn duyệt hiện tại của kiểm duyệt viên
+                                                </div>
+                                                <div aria-readonly="true" style={extendReadonlyBox}>
+                                                    {currentDlText && String(currentDlText).trim() !== '' ? currentDlText : '—'}
+                                                </div>
+                                                <p style={{ fontSize: '0.75rem', color: T.slate, margin: '6px 0 12px' }}>
+                                                    Theo hạn kiểm duyệt viên đang giữ — không chỉnh sửa.
+                                                </p>
+                                                <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title, marginBottom: 6 }}>Hạn duyệt sau khi chấp nhận</div>
+                                                <div aria-readonly="true" style={extendReadonlyBox}>
+                                                    {formatApiDateTimeVietnamVi(resolveRow.proposedDeadlineAt ?? resolveRow.ProposedDeadlineAt)}
+                                                </div>
+                                                <p style={{ fontSize: '0.75rem', color: T.slate, margin: '6px 0 0' }}>Theo hạn kiểm duyệt viên đề xuất — không chỉnh sửa.</p>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             )}
 
                             <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
                                 Ghi chú quản trị viên
                                 <span style={{ fontWeight: 500, color: T.slate, marginLeft: 6 }}>
-                                    (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự)
+                                    (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_WORDS} từ)
                                 </span>
                                 <textarea
                                     value={adminNote}
@@ -1877,7 +1913,7 @@ export function ReviewEscalationsManagement() {
                             <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: T.title }}>
                                 Ghi chú quản trị viên
                                 <span style={{ marginLeft: 6, color: T.slate, fontWeight: 500 }}>
-                                    (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_LENGTH} ký tự)
+                                    (tùy chọn khi chấp nhận; bắt buộc khi từ chối — tối thiểu {ADMIN_REJECT_NOTE_MIN_WORDS} từ)
                                 </span>
                                 <textarea
                                     value={complianceAdminNote}

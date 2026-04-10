@@ -65,6 +65,12 @@ export async function setComplianceStoryHidden(storyId, body) {
     return res.data;
 }
 
+/** Bật/tắt tạm khóa quyền viết tác giả (trực tiếp, không qua đơn admin). Body: { value: boolean } */
+export async function setComplianceStoryAuthorWritingSuspended(storyId, body) {
+    const res = await axiosInstance.post(`/compliance/story-reports/stories/${storyId}/author-writing-suspended`, body);
+    return res.data;
+}
+
 /** ADMIN/COMPLIANCE: violation_logs theo user (tác giả / tài khoản). */
 export async function getComplianceUserViolations(userId, take = 80) {
     const res = await axiosInstance.get(`/compliance/story-reports/users/${userId}/violations?take=${encodeURIComponent(take)}`);

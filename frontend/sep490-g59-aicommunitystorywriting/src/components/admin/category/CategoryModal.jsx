@@ -126,18 +126,14 @@ export function CategoryModal({ isOpen, onClose, onSave, category, isViewOnly = 
                 return;
             }
 
-            // Create preview and save File object
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setImagePreview(reader.result);
-                setFormData(prev => ({
-                    ...prev,
-                    icon_url: reader.result,
-                    iconFile: file // Save File object for API
-                }));
-                setErrors(prev => ({ ...prev, icon_url: null }));
-            };
-            reader.readAsDataURL(file);
+            // Preview from local blob URL, while keeping File for multipart upload.
+            const previewUrl = URL.createObjectURL(file);
+            setImagePreview(previewUrl);
+            setFormData(prev => ({
+                ...prev,
+                iconFile: file
+            }));
+            setErrors(prev => ({ ...prev, icon_url: null }));
         }
     };
 
