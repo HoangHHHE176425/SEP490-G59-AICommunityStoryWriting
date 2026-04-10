@@ -110,19 +110,18 @@ namespace Services.Implementations
                     "Không thể đọc được gợi ý từ phản hồi AI. Kiểm tra model trả về đúng JSON với mảng \"suggestions\" (title, summary, direction, key_events, characters_involved). Phản hồi AI (rút gọn): " + snippet);
             }
 
+            var existingTitles = allChaptersOrdered
+                .Select(c => c.title?.Trim())
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Select(t => t!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var dtoList = BuildUniqueSuggestionDtos(suggestions, existingTitles);
+
             if (request.ChapterId.HasValue)
             {
                 var targetChapter = _chapterRepository.GetById(request.ChapterId.Value);
                 if (targetChapter != null && targetChapter.story_id != request.StoryId)
                     throw new InvalidOperationException("ChapterId không khớp truyện.");
-                var dtoList = suggestions.Take(3).Select(s => new NextChapterSuggestionItemDto
-                {
-                    Title = s.Title ?? "Chương tiếp theo",
-                    Summary = s.Summary ?? "",
-                    Direction = s.Direction ?? "",
-                    KeyEvents = s.KeyEvents,
-                    CharactersInvolved = s.CharactersInvolved
-                }).ToList();
                 foreach (var dto in dtoList)
                 {
                     var json = JsonSerializer.Serialize(dto);
@@ -160,14 +159,7 @@ namespace Services.Implementations
 
             return new SuggestNextChapterResponse
             {
-                Suggestions = suggestions.Take(3).Select(s => new NextChapterSuggestionItemDto
-                {
-                    Title = s.Title ?? "Chương tiếp theo",
-                    Summary = s.Summary ?? "",
-                    Direction = s.Direction ?? "",
-                    KeyEvents = s.KeyEvents,
-                    CharactersInvolved = s.CharactersInvolved
-                }).ToList(),
+                Suggestions = dtoList,
                 ContextUsed = new SuggestNextChapterContextDto
                 {
                     StoryTitle = story.title,
@@ -175,6 +167,44 @@ namespace Services.Implementations
                 },
                 ContextWarning = contextWarning
             };
+        }
+
+        private static List<NextChapterSuggestionItemDto> BuildUniqueSuggestionDtos(
+            IReadOnlyList<JsonSuggestion> suggestions,
+            HashSet<string> existingTitles)
+        {
+            var reservedTitles = new HashSet<string>(existingTitles, StringComparer.OrdinalIgnoreCase);
+            var result = new List<NextChapterSuggestionItemDto>();
+            foreach (var s in suggestions.Take(3))
+            {
+                var baseTitle = string.IsNullOrWhiteSpace(s.Title) ? "Chương tiếp theo" : s.Title.Trim();
+                var title = AllocateUniqueTitle(baseTitle, reservedTitles);
+                result.Add(new NextChapterSuggestionItemDto
+                {
+                    Title = title,
+                    Summary = s.Summary ?? "",
+                    Direction = s.Direction ?? "",
+                    KeyEvents = s.KeyEvents,
+                    CharactersInvolved = s.CharactersInvolved
+                });
+            }
+            return result;
+        }
+
+        private static string AllocateUniqueTitle(string baseTitle, HashSet<string> reservedTitles)
+        {
+            baseTitle = string.IsNullOrWhiteSpace(baseTitle) ? "Chương tiếp theo" : baseTitle.Trim();
+            if (reservedTitles.Add(baseTitle))
+                return baseTitle;
+
+            var n = 2;
+            while (true)
+            {
+                var candidate = $"{baseTitle} ({n})";
+                if (reservedTitles.Add(candidate))
+                    return candidate;
+                n++;
+            }
         }
 
         private static int ResolveSuggestTargetOrderIndex(SuggestNextChapterRequest request, List<chapters> allOrdered)
