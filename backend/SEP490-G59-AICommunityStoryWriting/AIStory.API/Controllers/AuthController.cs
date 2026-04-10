@@ -230,6 +230,41 @@ namespace AIStory.API.Controllers
         private string? GetCookie(string name)
             => Request.Cookies.TryGetValue(name, out var v) ? v : null;
 
+        private IActionResult RedirectGoogleCallbackResult(string frontendOrigin, string returnUrl, string? accessToken = null, string? error = null)
+        {
+            Response.Cookies.Delete("google_oauth_state");
+            Response.Cookies.Delete("google_oauth_returnUrl");
+
+            var feCallback = $"{frontendOrigin}/auth/google/callback";
+            var qs = new Dictionary<string, string?>
+            {
+                ["returnUrl"] = returnUrl
+            };
+
+            if (!string.IsNullOrWhiteSpace(accessToken))
+            {
+                qs["accessToken"] = accessToken;
+            }
+
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                qs["error"] = error;
+            }
+
+            var redirect = QueryHelpers.AddQueryString(feCallback, qs!);
+            return Redirect(redirect);
+        }
+
+        private static string GetGoogleLoginFriendlyMessage(Exception ex)
+        {
+            if (string.Equals(ex.Message, "The account has been banned.", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.";
+            }
+
+            return "Đăng nhập bằng Google thất bại. Vui lòng thử lại.";
+        }
+
         /// <summary>
         /// Google OAuth redirect code flow: redirect user to Google authorization endpoint.
         /// </summary>
@@ -278,101 +313,96 @@ namespace AIStory.API.Controllers
             [FromQuery] string? state,
             [FromQuery] string? error)
         {
-            var clientId = _configuration["GoogleOAuth:ClientId"];
-            var clientSecret = _configuration["GoogleOAuth:ClientSecret"];
-            var redirectUri = _configuration["GoogleOAuth:RedirectUri"];
             var frontendOrigin = _configuration["GoogleOAuth:FrontendOrigin"] ?? "http://localhost:5173";
-
-            if (!string.IsNullOrWhiteSpace(error))
-                return BadRequest(new { message = $"Google OAuth error: {error}" });
-
-            if (string.IsNullOrWhiteSpace(code))
-                return BadRequest(new { message = "Missing OAuth code." });
-            if (string.IsNullOrWhiteSpace(state))
-                return BadRequest(new { message = "Missing OAuth state." });
-
-            if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
-                return BadRequest(new { message = "Missing Google OAuth config (GoogleOAuth:ClientId/ClientSecret)." });
-
-            redirectUri ??= $"{Request.Scheme}://{Request.Host}/api/Auth/google/callback";
-
-            var expectedState = GetCookie("google_oauth_state");
-            if (expectedState == null || !string.Equals(expectedState, state, StringComparison.Ordinal))
-                return BadRequest(new { message = "Invalid OAuth state." });
-
             var returnUrl = GetCookie("google_oauth_returnUrl") ?? "/home";
 
-            var tokenEndpoint = "https://oauth2.googleapis.com/token";
-            var client = _httpClientFactory.CreateClient();
-
-            var form = new Dictionary<string, string?>
+            try
             {
-                ["code"] = code,
-                ["client_id"] = clientId,
-                ["client_secret"] = clientSecret,
-                ["redirect_uri"] = redirectUri,
-                ["grant_type"] = "authorization_code"
-            };
+                var clientId = _configuration["GoogleOAuth:ClientId"];
+                var clientSecret = _configuration["GoogleOAuth:ClientSecret"];
+                var redirectUri = _configuration["GoogleOAuth:RedirectUri"];
 
-            using var tokenResp = await client.PostAsync(
-                tokenEndpoint,
-                new FormUrlEncodedContent(form!),
-                HttpContext.RequestAborted);
+                if (!string.IsNullOrWhiteSpace(error))
+                    return RedirectGoogleCallbackResult(frontendOrigin, returnUrl, error: "Đăng nhập Google đã bị hủy hoặc gặp lỗi.");
 
-            var body = await tokenResp.Content.ReadAsStringAsync();
-            if (!tokenResp.IsSuccessStatusCode)
-                return BadRequest(new { message = "Failed to exchange code with Google.", detail = body });
+                if (string.IsNullOrWhiteSpace(code))
+                    return RedirectGoogleCallbackResult(frontendOrigin, returnUrl, error: "Không nhận được mã xác thực từ Google.");
+                if (string.IsNullOrWhiteSpace(state))
+                    return RedirectGoogleCallbackResult(frontendOrigin, returnUrl, error: "Phiên đăng nhập Google không hợp lệ. Vui lòng thử lại.");
 
-            using var doc = JsonDocument.Parse(body);
-            var idToken = doc.RootElement.TryGetProperty("id_token", out var idTokenEl) ? idTokenEl.GetString() : null;
-            if (string.IsNullOrWhiteSpace(idToken))
-                return BadRequest(new { message = "Google did not return id_token." });
+                if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+                    return RedirectGoogleCallbackResult(frontendOrigin, returnUrl, error: "Hệ thống đăng nhập Google đang tạm thời không khả dụng.");
 
-            // Validate id_token signature + audience.
-            var certsJson = await client.GetStringAsync("https://www.googleapis.com/oauth2/v3/certs");
-            var jwks = new JsonWebKeySet(certsJson);
+                redirectUri ??= $"{Request.Scheme}://{Request.Host}/api/Auth/google/callback";
 
-            var validationParameters = new TokenValidationParameters
+                var expectedState = GetCookie("google_oauth_state");
+                if (expectedState == null || !string.Equals(expectedState, state, StringComparison.Ordinal))
+                    return RedirectGoogleCallbackResult(frontendOrigin, returnUrl, error: "Phiên đăng nhập Google đã hết hạn hoặc không hợp lệ.");
+
+                var tokenEndpoint = "https://oauth2.googleapis.com/token";
+                var client = _httpClientFactory.CreateClient();
+
+                var form = new Dictionary<string, string?>
+                {
+                    ["code"] = code,
+                    ["client_id"] = clientId,
+                    ["client_secret"] = clientSecret,
+                    ["redirect_uri"] = redirectUri,
+                    ["grant_type"] = "authorization_code"
+                };
+
+                using var tokenResp = await client.PostAsync(
+                    tokenEndpoint,
+                    new FormUrlEncodedContent(form!),
+                    HttpContext.RequestAborted);
+
+                var body = await tokenResp.Content.ReadAsStringAsync();
+                if (!tokenResp.IsSuccessStatusCode)
+                    return RedirectGoogleCallbackResult(frontendOrigin, returnUrl, error: "Không thể xác thực với Google. Vui lòng thử lại.");
+
+                using var doc = JsonDocument.Parse(body);
+                var idToken = doc.RootElement.TryGetProperty("id_token", out var idTokenEl) ? idTokenEl.GetString() : null;
+                if (string.IsNullOrWhiteSpace(idToken))
+                    return RedirectGoogleCallbackResult(frontendOrigin, returnUrl, error: "Không nhận được thông tin tài khoản từ Google.");
+
+                // Validate id_token signature + audience.
+                var certsJson = await client.GetStringAsync("https://www.googleapis.com/oauth2/v3/certs");
+                var jwks = new JsonWebKeySet(certsJson);
+
+                var validationParameters = new TokenValidationParameters
+                {
+                    ValidateAudience = true,
+                    ValidAudience = clientId,
+                    ValidateIssuer = true,
+                    ValidIssuers = new[] { "https://accounts.google.com", "accounts.google.com" },
+                    ValidateLifetime = true,
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKeys = jwks.Keys,
+                    ClockSkew = TimeSpan.FromMinutes(2),
+                };
+
+                var handler = new JwtSecurityTokenHandler();
+                handler.InboundClaimTypeMap.Clear();
+
+                var principal = handler.ValidateToken(idToken, validationParameters, out _);
+
+                var email = principal.FindFirst("email")?.Value;
+                var name = principal.FindFirst("name")?.Value;
+                var sub = principal.FindFirst("sub")?.Value;
+
+                if (string.IsNullOrWhiteSpace(email))
+                    return RedirectGoogleCallbackResult(frontendOrigin, returnUrl, error: "Không lấy được email từ tài khoản Google.");
+
+                var auth = await _authService.LoginWithGoogleAsync(email, name, sub ?? string.Empty);
+                if (!string.IsNullOrWhiteSpace(auth.RefreshToken))
+                    SetRefreshTokenCookie(auth.RefreshToken);
+
+                return RedirectGoogleCallbackResult(frontendOrigin, returnUrl, accessToken: auth.AccessToken);
+            }
+            catch (Exception ex)
             {
-                ValidateAudience = true,
-                ValidAudience = clientId,
-                ValidateIssuer = true,
-                ValidIssuers = new[] { "https://accounts.google.com", "accounts.google.com" },
-                ValidateLifetime = true,
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKeys = jwks.Keys,
-                ClockSkew = TimeSpan.FromMinutes(2),
-            };
-
-            var handler = new JwtSecurityTokenHandler();
-            handler.InboundClaimTypeMap.Clear();
-
-            var principal = handler.ValidateToken(idToken, validationParameters, out _);
-
-            var email = principal.FindFirst("email")?.Value;
-            var name = principal.FindFirst("name")?.Value;
-            var sub = principal.FindFirst("sub")?.Value;
-
-            if (string.IsNullOrWhiteSpace(email))
-                return BadRequest(new { message = "Google id_token missing email claim." });
-
-            var auth = await _authService.LoginWithGoogleAsync(email, name, sub ?? string.Empty);
-            if (!string.IsNullOrWhiteSpace(auth.RefreshToken))
-                SetRefreshTokenCookie(auth.RefreshToken);
-
-            // Clear state cookies
-            Response.Cookies.Delete("google_oauth_state");
-            Response.Cookies.Delete("google_oauth_returnUrl");
-
-            // Redirect FE callback to store accessToken and finish login.
-            var feCallback = $"{frontendOrigin}/auth/google/callback";
-            var qs = new Dictionary<string, string?>
-            {
-                ["accessToken"] = auth.AccessToken,
-                ["returnUrl"] = returnUrl
-            };
-            var redirect = QueryHelpers.AddQueryString(feCallback, qs!);
-            return Redirect(redirect);
+                return RedirectGoogleCallbackResult(frontendOrigin, returnUrl, error: GetGoogleLoginFriendlyMessage(ex));
+            }
         }
 
     }
