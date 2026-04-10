@@ -4,7 +4,7 @@ import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
 import { getChapters, getChapterById, getChapterRejectionReason } from '../../../api/chapter/chapterApi';
 import { getStoryById } from '../../../api/story/storyApi';
 import { approveStory, approveChapter, rejectStory, rejectChapter, getChapterReviewContent, getPendingChapters, getModeratorChapterVersion, getReviewAssignmentSelf, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
-import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus, localDateTimeInputToIsoUtc, validateModeratorExtendProposedDeadline } from '../../../utils/moderatorReviewSla';
+import { getSlaBadgeStyle, formatPolicySlaCountdown, normalizeTimeStatus, addUtcDaysToDeadlineIso, validateModeratorExtendPresetDays, EXTEND_DEADLINE_DAY_CHOICES } from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { sanitizeRichTextHtml } from '../../../utils/richText';
 import { useToast } from '../../author/story-editor/Toast';
@@ -21,6 +21,8 @@ function mapChapterItem(item) {
         wordCount: item.wordCount ?? item.WordCount ?? 0,
         status: (item.status ?? item.Status ?? '').toLowerCase(),
         publishedAt: item.publishedAt ?? item.PublishedAt ?? null,
+        /** Mốc tác giả gửi xuất bản / chờ duyệt (BE: PendingSince ≈ submitted_for_review_at). */
+        pendingSince: item.pendingSince ?? item.PendingSince ?? item.submittedForReviewAt ?? item.SubmittedForReviewAt ?? null,
         pendingVersionTitle: item.pendingVersionTitle ?? item.PendingVersionTitle ?? null,
         pendingVersionWordCount: item.pendingVersionWordCount ?? item.PendingVersionWordCount ?? null,
         adminRejectedExtendNote: item.adminRejectedExtendNote ?? item.AdminRejectedExtendNote ?? null,
@@ -66,6 +68,23 @@ function normalizeModeratorRejectionHistory(raw) {
         rejectedAt: h.rejectedAt ?? h.RejectedAt ?? null,
         moderatorId: h.moderatorId ?? h.ModeratorId ?? null,
     }));
+}
+
+/** Lý do từ chối xuất bản: tối thiểu số từ (phân tách bằng khoảng trắng). */
+const MODERATOR_REJECTION_REASON_MIN_WORDS = 200;
+/** Lý do gửi escalation (gia hạn/hủy nhận duyệt): tối thiểu số từ. */
+const MODERATOR_ESCALATION_REASON_MIN_WORDS = 50;
+
+function countModeratorRejectionWords(text) {
+    const t = String(text ?? '').trim();
+    if (!t) return 0;
+    return t.split(/\s+/).filter(Boolean).length;
+}
+
+function countModeratorEscalationWords(text) {
+    const t = String(text ?? '').trim();
+    if (!t) return 0;
+    return t.split(/\s+/).filter(Boolean).length;
 }
 
 function buildRejectedHistoryTimeline(selectedChapter, chapters, fetchedRejectionByChapter, chapterHistoryMap) {
@@ -204,7 +223,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     const [escalateKind, setEscalateKind] = useState('EXTEND_DEADLINE');
     const [escalateReason, setEscalateReason] = useState('');
     const [escalateReasonError, setEscalateReasonError] = useState('');
-    const [escalateProposedDeadline, setEscalateProposedDeadline] = useState('');
+    /** Gia hạn: chỉ 3 / 5 / 7 ngày kể từ hạn duyệt hiện tại (BE tính proposedDeadlineAt). */
+    const [escalateExtendDays, setEscalateExtendDays] = useState(3);
     const [escalateSubmitting, setEscalateSubmitting] = useState(false);
     /** Đơn escalation gắn STORY (vd. trả cả truyện về hàng đợi) — tách khỏi assignment theo từng chương. */
     const [storyLevelReviewAssignment, setStoryLevelReviewAssignment] = useState(null);
@@ -438,6 +458,11 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                     if (!cancelled) setReviewAssignment(dto);
                     return;
                 }
+                if (selectedChapter?.isVersionHistory && storyId) {
+                    const dto = await getReviewAssignmentSelf('STORY', storyId);
+                    if (!cancelled) setReviewAssignment(dto);
+                    return;
+                }
                 if (chapters.length === 0 && storyId) {
                     const dto = await getReviewAssignmentSelf('STORY', storyId);
                     if (!cancelled) setReviewAssignment(dto);
@@ -485,17 +510,24 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         return null;
     };
 
-    /** Lỗi hạn đề xuất (gia hạn): hiển thị đỏ trong dialog khi vi phạm 24h / muộn hơn hạn hiện tại / quá 366 ngày. */
+    /** Lỗi gia hạn: thiếu hạn hiện tại, hoặc không khớp +3/+5/+7 ngày / quy tắc 24h. */
     const extendProposedDeadlineError = useMemo(() => {
         if (!escalateOpen || escalateKind !== 'EXTEND_DEADLINE') return null;
-        const raw = escalateProposedDeadline;
-        if (raw == null || String(raw).trim() === '') return null;
-        const iso = localDateTimeInputToIsoUtc(raw);
-        if (!iso) return 'Ngày giờ đề xuất không hợp lệ.';
         const currentDl = reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt ?? null;
-        const check = validateModeratorExtendProposedDeadline(iso, currentDl);
+        const iso = addUtcDaysToDeadlineIso(currentDl, escalateExtendDays);
+        if (!iso) {
+            return currentDl
+                ? 'Không tính được hạn đề xuất.'
+                : 'Chưa tải được hạn duyệt hiện tại — không thể gửi đơn gia hạn.';
+        }
+        const check = validateModeratorExtendPresetDays(iso, currentDl, escalateExtendDays);
         return check.ok ? null : check.message;
-    }, [escalateOpen, escalateKind, escalateProposedDeadline, reviewAssignment]);
+    }, [escalateOpen, escalateKind, escalateExtendDays, reviewAssignment]);
+
+    const escalateProposedPreviewIso = useMemo(() => {
+        const currentDl = reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt ?? null;
+        return addUtcDaysToDeadlineIso(currentDl, escalateExtendDays);
+    }, [reviewAssignment, escalateExtendDays]);
 
     const handleSubmitEscalation = async () => {
         const t = escalationTarget();
@@ -509,18 +541,15 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
             setEscalateReasonError('Vui lòng nhập lý do.');
             return;
         }
-        if (trimmedReason.length < 10) {
-            setEscalateReasonError('Lý do cần ít nhất 10 ký tự (theo quy định hệ thống).');
+        const reasonWordCount = countModeratorEscalationWords(trimmedReason);
+        if (reasonWordCount < MODERATOR_ESCALATION_REASON_MIN_WORDS) {
+            setEscalateReasonError(`Lý do cần ít nhất ${MODERATOR_ESCALATION_REASON_MIN_WORDS} từ (hiện tại: ${reasonWordCount} từ).`);
             return;
         }
         if (escalateKind === 'EXTEND_DEADLINE') {
-            const iso = localDateTimeInputToIsoUtc(escalateProposedDeadline);
-            if (!iso) {
-                showToast('Vui lòng chọn hạn đề xuất (gia hạn).', 'error');
-                return;
-            }
             const currentDl = reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt ?? null;
-            const check = validateModeratorExtendProposedDeadline(iso, currentDl);
+            const iso = addUtcDaysToDeadlineIso(currentDl, escalateExtendDays);
+            const check = validateModeratorExtendPresetDays(iso, currentDl, escalateExtendDays);
             if (!check.ok) {
                 showToast(check.message, 'error');
                 return;
@@ -533,13 +562,18 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                 targetId: t.targetId,
                 requestKind: escalateKind,
                 reason: trimmedReason,
-                proposedDeadlineAt: escalateKind === 'EXTEND_DEADLINE' ? localDateTimeInputToIsoUtc(escalateProposedDeadline) : null,
+                proposedDeadlineAt: escalateKind === 'EXTEND_DEADLINE'
+                    ? addUtcDaysToDeadlineIso(
+                        reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt ?? null,
+                        escalateExtendDays,
+                    )
+                    : null,
             });
             showToast('Đã gửi đơn lên quản trị.', 'success');
             setEscalateOpen(false);
             setEscalateReason('');
             setEscalateReasonError('');
-            setEscalateProposedDeadline('');
+            setEscalateExtendDays(3);
             const dto = await getReviewAssignmentSelf(t.targetType, t.targetId);
             setReviewAssignment(dto);
             onRefresh?.();
@@ -673,8 +707,12 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
     };
 
     const openRejectConfirm = () => {
-        if (!rejectionReason.trim()) {
-            showToast('Vui lòng nhập lý do từ chối', 'error');
+        const wc = countModeratorRejectionWords(rejectionReason);
+        if (wc < MODERATOR_REJECTION_REASON_MIN_WORDS) {
+            showToast(
+                `Lý do từ chối cần tối thiểu ${MODERATOR_REJECTION_REASON_MIN_WORDS} từ (hiện tại: ${wc}).`,
+                'error',
+            );
             return;
         }
         setShowRejectConfirm(true);
@@ -682,7 +720,8 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
 
     const handleRejectSubmit = async () => {
         setShowRejectConfirm(false);
-        if (!rejectionReason.trim()) return;
+        const wc = countModeratorRejectionWords(rejectionReason);
+        if (wc < MODERATOR_REJECTION_REASON_MIN_WORDS) return;
         setIsSubmitting(true);
         try {
             if (selectedChapter) {
@@ -850,6 +889,9 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         (ra.hasPendingEscalation ?? ra.HasPendingEscalation)
         || (sra.hasPendingEscalation ?? sra.HasPendingEscalation),
     );
+    const canSubmitExtendRequest = !(
+        ra.canSubmitExtendDeadlineRequest === false || ra.CanSubmitExtendDeadlineRequest === false
+    );
     const baseCanApproveReject = selectedChapter && !selectedChapter?.isVersionHistory && (
         selectedOrderIndex === 0
         || publishedOrderIndices.has(Number(selectedOrderIndex - 1))
@@ -873,6 +915,18 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
         ?? ''
     ).toUpperCase();
     const showAuthorBannedNote = authorBanStatus === 'BANNED';
+
+    const authorSubmittedAtForHeader = useMemo(() => {
+        if (selectedChapter) {
+            const fromChapter =
+                selectedChapter.pendingSince
+                ?? selectedChapter.PendingSince
+                ?? selectedChapter.submittedForReviewAt
+                ?? selectedChapter.SubmittedForReviewAt;
+            if (fromChapter) return fromChapter;
+        }
+        return publication?.submittedAt ?? null;
+    }, [selectedChapter, publication?.submittedAt]);
 
     return (
         <>
@@ -936,9 +990,13 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
                                     <span>Độ tuổi phù hợp: {publication.ageRating ? (({ ALL: 'Phù hợp mọi lứa tuổi', '13+': 'Từ 13 tuổi', '16+': 'Từ 16 tuổi', '18+': 'Từ 18 tuổi' })[String(publication.ageRating).toUpperCase()] ?? publication.ageRating) : '—'}</span>
                                 </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                                    <Calendar style={{ width: '14px', height: '14px' }} />
-                                    <span>{formatDate(publication.submittedAt)}</span>
+                                <div
+                                    style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexWrap: 'wrap' }}
+                                    title="Thời điểm tác giả gửi xuất bản (chờ duyệt)"
+                                >
+                                    <Calendar style={{ width: '14px', height: '14px', flexShrink: 0 }} aria-hidden />
+                                    <span style={{ fontWeight: 600, color: '#475569' }}>Gửi xuất bản:</span>
+                                    <span>{formatDate(authorSubmittedAtForHeader)}</span>
                                 </div>
                                 <div>
                                     {publication.totalChapters != null ? `${publication.totalChapters} chương` : null}
@@ -1064,12 +1122,13 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                             ) : null}
                                         </span>
                                     </div>
-                                    {!hasPendingEscalationBlock && escalationTarget() && (
+                                    {!hasPendingEscalationBlock && escalationTarget() && canSubmitExtendRequest && (
                                         <button
                                             type="button"
                                             onClick={() => {
                                                 setEscalateKind('EXTEND_DEADLINE');
                                                 setEscalateReasonError('');
+                                                setEscalateExtendDays(3);
                                                 setEscalateOpen(true);
                                             }}
                                             style={{
@@ -1631,7 +1690,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 display: 'block',
                                 fontSize: '0.875rem',
                                 fontWeight: 600,
-                                color: '#991b1b',
+                                color: '#0f172a',
                                 marginBottom: '0.5rem'
                             }}>
                                 Lý do từ chối <span style={{ color: '#ef4444' }}>*</span>
@@ -1639,7 +1698,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                             <textarea
                                 value={rejectionReason}
                                 onChange={(e) => setRejectionReason(e.target.value)}
-                                placeholder="Nhập lý do từ chối xuất bản (bắt buộc)..."
+                                placeholder={`Nhập lý do từ chối xuất bản (bắt buộc, tối thiểu ${MODERATOR_REJECTION_REASON_MIN_WORDS} từ)...`}
                                 rows={4}
                                 style={{
                                     width: '100%',
@@ -1650,11 +1709,23 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                     resize: 'vertical',
                                     outline: 'none',
                                     fontFamily: 'inherit',
-                                    marginBottom: '1rem'
+                                    marginBottom: '0.35rem'
                                 }}
                                 onFocus={(e) => e.target.style.borderColor = '#ef4444'}
                                 onBlur={(e) => e.target.style.borderColor = '#fca5a5'}
                             />
+                            <p style={{
+                                fontSize: '0.75rem',
+                                color: '#64748b',
+                                margin: '0 0 0.75rem 0',
+                                lineHeight: 1.45,
+                            }}>
+                                Lưu ý: cần nhập đủ tối thiểu <strong>{MODERATOR_REJECTION_REASON_MIN_WORDS} từ</strong> mới được xác nhận từ chối. Hiện tại:{' '}
+                                <strong style={{ color: countModeratorRejectionWords(rejectionReason) >= MODERATOR_REJECTION_REASON_MIN_WORDS ? '#15803d' : '#b45309' }}>
+                                    {countModeratorRejectionWords(rejectionReason)}/{MODERATOR_REJECTION_REASON_MIN_WORDS}
+                                </strong>
+                                .
+                            </p>
 
                             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
                                 <button
@@ -1691,27 +1762,54 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
 
                                 <button
                                     onClick={openRejectConfirm}
-                                    disabled={isSubmitting || !rejectionReason.trim() || !canApproveReject}
+                                    disabled={
+                                        isSubmitting
+                                        || countModeratorRejectionWords(rejectionReason) < MODERATOR_REJECTION_REASON_MIN_WORDS
+                                        || !canApproveReject
+                                    }
                                     title={!canApproveReject ? orderHint : undefined}
                                     style={{
                                         padding: '0.75rem 1.5rem',
-                                        backgroundColor: (isSubmitting || !rejectionReason.trim() || !canApproveReject) ? '#e2e8f0' : '#ef4444',
-                                        color: (isSubmitting || !rejectionReason.trim() || !canApproveReject) ? '#94a3b8' : '#ffffff',
+                                        backgroundColor: (
+                                            isSubmitting
+                                            || countModeratorRejectionWords(rejectionReason) < MODERATOR_REJECTION_REASON_MIN_WORDS
+                                            || !canApproveReject
+                                        ) ? '#e2e8f0' : '#ef4444',
+                                        color: (
+                                            isSubmitting
+                                            || countModeratorRejectionWords(rejectionReason) < MODERATOR_REJECTION_REASON_MIN_WORDS
+                                            || !canApproveReject
+                                        ) ? '#94a3b8' : '#ffffff',
                                         fontSize: '0.875rem',
                                         fontWeight: 700,
                                         borderRadius: '8px',
                                         border: 'none',
-                                        cursor: (isSubmitting || !rejectionReason.trim() || !canApproveReject) ? 'not-allowed' : 'pointer',
+                                        cursor: (
+                                            isSubmitting
+                                            || countModeratorRejectionWords(rejectionReason) < MODERATOR_REJECTION_REASON_MIN_WORDS
+                                            || !canApproveReject
+                                        ) ? 'not-allowed' : 'pointer',
                                         transition: 'all 0.2s',
-                                        opacity: (isSubmitting || !rejectionReason.trim() || !canApproveReject) ? 0.5 : 1
+                                        opacity: (
+                                            isSubmitting
+                                            || countModeratorRejectionWords(rejectionReason) < MODERATOR_REJECTION_REASON_MIN_WORDS
+                                            || !canApproveReject
+                                        ) ? 0.5 : 1
                                     }}
                                     onMouseEnter={(e) => {
-                                        if (!isSubmitting && rejectionReason.trim() && canApproveReject) {
+                                        if (
+                                            !isSubmitting
+                                            && countModeratorRejectionWords(rejectionReason) >= MODERATOR_REJECTION_REASON_MIN_WORDS
+                                            && canApproveReject
+                                        ) {
                                             e.currentTarget.style.backgroundColor = '#dc2626';
                                         }
                                     }}
                                     onMouseLeave={(e) => {
-                                        if (rejectionReason.trim() && canApproveReject) {
+                                        if (
+                                            countModeratorRejectionWords(rejectionReason) >= MODERATOR_REJECTION_REASON_MIN_WORDS
+                                            && canApproveReject
+                                        ) {
                                             e.currentTarget.style.backgroundColor = '#ef4444';
                                         }
                                     }}
@@ -1926,6 +2024,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                     onClick={() => {
                         if (escalateSubmitting) return;
                         setEscalateReasonError('');
+                        setEscalateExtendDays(3);
                         setEscalateOpen(false);
                     }}
                 >
@@ -1947,35 +2046,85 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                             Đơn gia hạn theo từng chương (hoặc truyện nếu bạn đang xem cấp truyện). Sau khi gửi, bạn không thể duyệt/từ chối mục đó cho đến khi quản trị viên xử lý.
                             {' '}Để hủy nhận duyệt cả truyện, dùng nút <strong>Hủy nhận duyệt</strong> cạnh &quot;Xem chi tiết&quot; trên danh sách chờ duyệt.
                         </p>
+                        <div
+                            style={{
+                                margin: '0 0 0.9rem',
+                                padding: '0.6rem 0.75rem',
+                                borderRadius: '8px',
+                                border: '1px solid #fde68a',
+                                backgroundColor: '#fffbeb',
+                                fontSize: '0.8125rem',
+                                color: '#92400e',
+                                lineHeight: 1.5,
+                            }}
+                        >
+                            <strong>Lưu ý:</strong> Mỗi lần nhận duyệt, bạn chỉ được gửi <strong>1 đơn xin gia hạn</strong> lên quản trị viên.
+                            Nếu đã gửi đơn gia hạn trong phiên nhận duyệt hiện tại, hệ thống sẽ không cho gửi lần thứ hai.
+                        </div>
                         <div style={{ marginBottom: '0.75rem' }}>
-                            <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
-                                Hạn đề xuất sau gia hạn (bắt buộc)
-                                <input
-                                    type="datetime-local"
-                                    value={escalateProposedDeadline}
-                                    onChange={(e) => setEscalateProposedDeadline(e.target.value)}
-                                    style={{
-                                        display: 'block',
-                                        width: '100%',
-                                        marginTop: '0.35rem',
-                                        padding: '0.5rem',
-                                        borderRadius: '8px',
-                                        border: extendProposedDeadlineError ? '2px solid #ef4444' : '1px solid #cbd5e1',
-                                        outline: extendProposedDeadlineError ? 'none' : undefined,
-                                    }}
-                                />
-                            </label>
+                            <div
+                                style={{
+                                    fontSize: '0.8125rem',
+                                    fontWeight: 600,
+                                    color: '#334155',
+                                    marginBottom: '0.35rem',
+                                }}
+                            >
+                                Gia hạn thêm (bắt buộc)
+                            </div>
+                            <div
+                                role="radiogroup"
+                                aria-label="Số ngày gia hạn"
+                                style={{
+                                    display: 'flex',
+                                    flexWrap: 'wrap',
+                                    gap: '0.5rem',
+                                    padding: '0.5rem',
+                                    borderRadius: '8px',
+                                    border: extendProposedDeadlineError ? '2px solid #ef4444' : '1px solid #cbd5e1',
+                                    backgroundColor: '#f8fafc',
+                                }}
+                            >
+                                {EXTEND_DEADLINE_DAY_CHOICES.map((d) => (
+                                    <label
+                                        key={d}
+                                        style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.35rem',
+                                            fontSize: '0.8125rem',
+                                            fontWeight: 500,
+                                            color: '#334155',
+                                            cursor: 'pointer',
+                                        }}
+                                    >
+                                        <input
+                                            type="radio"
+                                            name="escalateExtendDays"
+                                            checked={escalateExtendDays === d}
+                                            onChange={() => setEscalateExtendDays(d)}
+                                        />
+                                        +{d} ngày
+                                    </label>
+                                ))}
+                            </div>
+                            {escalateProposedPreviewIso ? (
+                                <p style={{ fontSize: '0.75rem', color: '#0f172a', margin: '0.5rem 0 0', lineHeight: 1.45 }}>
+                                    <strong>Hạn đề xuất sau gia hạn:</strong>{' '}
+                                    {formatDate(escalateProposedPreviewIso)}
+                                </p>
+                            ) : null}
                             <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.5rem 0 0', lineHeight: 1.45 }}>
                                 {(reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt) ? (
                                     <>
-                                        <strong>Hạn duyệt hiện tại của bạn:</strong>{' '}
+                                        <strong>Hạn duyệt hiện tại:</strong>{' '}
                                         {formatDate(reviewAssignment?.reviewDeadlineAt ?? reviewAssignment?.ReviewDeadlineAt)}.
-                                        {' '}Hạn đề xuất phải <strong>muộn hơn</strong> mốc này (gia hạn = kéo dài thêm, không được chọn ngày sớm hơn).
-                                        {' '}Ngoài ra phải cách <strong>thời điểm hiện tại ít nhất 24 giờ</strong>.
+                                        {' '}Hệ thống cộng thêm đúng <strong>3, 5 hoặc 7 ngày</strong> vào mốc này.
+                                        {' '}Hạn mới vẫn phải cách <strong>thời điểm hiện tại ít nhất 24 giờ</strong> (nếu không, vui lòng chọn mức gia hạn khác hoặc liên hệ quản trị).
                                     </>
                                 ) : (
                                     <>
-                                        Hạn đề xuất phải <strong>muộn hơn hạn duyệt</strong> bạn đã chọn khi nhận đơn, và cách <strong>hiện tại ít nhất 24 giờ</strong>.
+                                        Cần tải <strong>hạn duyệt hiện tại</strong> để tính gia hạn. Nếu vẫn lỗi, đóng hộp thoại và mở lại trang.
                                     </>
                                 )}
                             </p>
@@ -2008,7 +2157,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                         if (escalateReasonError) setEscalateReasonError('');
                                     }}
                                     rows={4}
-                                    placeholder="Mô tả lý do (tối thiểu 10 ký tự)..."
+                                    placeholder={`Mô tả lý do (tối thiểu ${MODERATOR_ESCALATION_REASON_MIN_WORDS} từ)...`}
                                     aria-invalid={!!escalateReasonError}
                                     style={{
                                         display: 'block',
@@ -2044,6 +2193,7 @@ export function PublicationDetailModal({ publication, onClose, onApprove, onReje
                                 disabled={escalateSubmitting}
                                 onClick={() => {
                                     setEscalateReasonError('');
+                                    setEscalateExtendDays(3);
                                     setEscalateOpen(false);
                                 }}
                                 style={{ padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#f8fafc', cursor: 'pointer' }}

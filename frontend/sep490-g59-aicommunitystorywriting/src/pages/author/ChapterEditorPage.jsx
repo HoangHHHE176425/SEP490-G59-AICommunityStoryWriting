@@ -395,7 +395,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             .finally(() => setVersionsForChapterLoaded(true));
     }, [isVersionMode, sourceChapterForVersion?.id, sourceChapterForVersion?.Id, editingVersion]);
 
-    // Load điều kiện gửi xuất bản version — đồng bộ ChapterListManager (chương trước đã published/rejected, không có version pending ở chương trước)
+    // Load điều kiện gửi xuất bản version — đồng bộ ChapterListManager (chương trước đã published, không có version pending ở chương trước)
     useEffect(() => {
         if (!isVersionMode || !storyId || !sourceChapterForVersion) {
             setVersionPublishEligibility({ prevSequentialOk: false, prevHasPendingVersion: false });
@@ -422,12 +422,12 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 }
                 const prevChapterId = prevChapter.id ?? prevChapter.Id;
                 const prevSt = String(prevChapter.status ?? prevChapter.Status ?? '').toLowerCase();
-                const prevProcessed = prevSt === 'published' || prevSt === 'rejected';
+                const prevPublished = prevSt === 'published';
                 getChapterVersions(prevChapterId)
                     .then((verList) => {
                         const vArr = Array.isArray(verList) ? verList : [];
                         const prevHasPendingVersion = vArr.some((v) => ((v.status ?? v.Status ?? '').toString().toLowerCase() === 'pending_review'));
-                        const prevSequentialOk = prevProcessed && !prevHasPendingVersion;
+                        const prevSequentialOk = prevPublished && !prevHasPendingVersion;
                         setVersionPublishEligibility({ prevSequentialOk, prevHasPendingVersion });
                         setVersionEligibilityLoaded(true);
                     })
@@ -481,12 +481,12 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 }
                 const prevChapterId = prevChapter.id ?? prevChapter.Id;
                 const prevSt = String(prevChapter.status ?? prevChapter.Status ?? '').toLowerCase();
-                const prevProcessed = prevSt === 'published' || prevSt === 'rejected';
+                const prevPublished = prevSt === 'published';
                 try {
                     const prevVers = await getChapterVersions(prevChapterId);
                     const pv = Array.isArray(prevVers) ? prevVers : [];
                     const prevHasPendingVersion = pv.some((v) => String(v.status ?? v.Status ?? '').toLowerCase() === 'pending_review');
-                    const prevSequentialOk = prevProcessed && !prevHasPendingVersion;
+                    const prevSequentialOk = prevPublished && !prevHasPendingVersion;
                     setNormalPublishEligibility({ loaded: true, prevSequentialOk, selfHasPendingVersion });
                 } catch {
                     setNormalPublishEligibility({ loaded: true, prevSequentialOk: false, selfHasPendingVersion });
@@ -756,7 +756,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 : editingVersionIsPendingReview
                     ? 'Phiên bản này đang chờ duyệt, không thể gửi lại.'
                     : !canSubmitForPublishVersion
-                        ? `Chỉ được gửi khi chương ${chapterNumberForVersion - 1} đã có kết quả duyệt hoặc từ chối duyệt.`
+                        ? `Chỉ được gửi khi chương ${chapterNumberForVersion - 1} đã xuất bản (đã duyệt).`
                         : chapterIsPendingReviewVersion
                             ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.'
                             : hasOtherPendingVersion
@@ -780,7 +780,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 : normalPublishEligibility.selfHasPendingVersion
                     ? 'Đã có phiên bản đang chờ duyệt, không thể gửi chương gốc.'
                     : !normalPublishEligibility.prevSequentialOk
-                        ? `Chỉ được gửi khi chương ${(Number(chapterData.number) || 1) - 1} đã có kết quả duyệt hoặc từ chối duyệt.`
+                        ? `Chỉ được gửi khi chương ${(Number(chapterData.number) || 1) - 1} đã xuất bản (đã duyệt).`
                         : 'Gửi chương lên để duyệt xuất bản';
 
     const validateChapterNumber = (num) => {
@@ -1533,7 +1533,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                     >
                         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
                             <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>
-                                AI gợi ý ý tưởng
+                                AI gợi ý
                             </h3>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
@@ -2388,7 +2388,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         <>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
+                                                AI gợi ý{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                             </span>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
@@ -2403,7 +2403,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         <>
                                             <button type="button" onClick={() => handleAISuggestion('paragraph')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
+                                                AI gợi ý{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                             </button>
                                             <button
                                                 type="button"

@@ -390,7 +390,7 @@ export function ChapterEditor({
                     >
                         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
                             <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>
-                                AI gợi ý ý tưởng
+                                AI gợi ý
                             </h3>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
@@ -914,7 +914,7 @@ export function ChapterEditor({
                                             className="flex cursor-not-allowed items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary/50 opacity-70"
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
-                                            AI gợi ý ý tưởng
+                                            AI gợi ý
                                         </button>
                                         <button
                                             type="button"
@@ -943,7 +943,7 @@ export function ChapterEditor({
                                             className="flex items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary transition-all hover:bg-primary/20"
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
-                                            AI gợi ý ý tưởng
+                                            AI gợi ý
                                             {aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                         </button>
                                         <button

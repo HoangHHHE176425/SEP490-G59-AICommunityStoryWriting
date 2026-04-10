@@ -3,7 +3,7 @@ import { RotateCcw } from 'lucide-react';
 import { getModerationLogs } from '../../../api/admin/adminModerationApi';
 import { getAdminComplianceLogs } from '../../../api/admin/adminComplianceApi';
 import { Pagination } from '../../../components/pagination/Pagination';
-import { formatApiDateTimeLocalVi, formatApiDateTimeVietnamVi } from '../../../utils/apiDateTime';
+import { formatLogTimestampVi } from '../../../utils/apiDateTime';
 
 const PAGE_SIZE = 10;
 
@@ -40,24 +40,6 @@ const COMPLIANCE_ACTION_OPTIONS = [
     { value: 'COMMENT_HIDDEN', label: 'Ẩn chuỗi bình luận' },
     { value: 'COMMENT_UNHIDDEN', label: 'Hiện lại chuỗi bình luận' },
 ];
-
-function formatDate(value) {
-    if (!value) return '—';
-    const raw = String(value).trim().replace(' ', 'T');
-    const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
-    if (!m) {
-        const d = new Date(raw);
-        return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('vi-VN');
-    }
-    const [, y, mo, d, h, mi, s = '00'] = m;
-    return `${h}:${mi}:${s} ${d}/${mo}/${y}`;
-}
-
-function formatDateByLogType(value, logType) {
-    if (logType === 'compliance') return formatApiDateTimeLocalVi(value);
-    if (logType === 'moderator') return formatApiDateTimeVietnamVi(value);
-    return formatDate(value);
-}
 
 function targetLabel(item) {
     const t = String(item?.targetType ?? '').toUpperCase();
@@ -427,7 +409,7 @@ export function ModeratorLogsManagement() {
                                 {logType === 'moderator' ? (
                                     rows.map((r) => (
                                         <tr key={r.id ?? `${r.targetId}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
-                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDateByLogType(r.createdAt, logType)}</td>
+                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatLogTimestampVi(r.createdAt)}</td>
                                             <td style={td}>{r.moderatorName || '—'}</td>
                                             <td style={td}>{targetLabel(r)}</td>
                                             <td style={td}>{r.targetTitle || '—'}</td>
@@ -444,7 +426,7 @@ export function ModeratorLogsManagement() {
                                 ) : (
                                     rows.map((r) => (
                                         <tr key={r.id ?? `${r.source}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
-                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatDateByLogType(r.createdAt, logType)}</td>
+                                            <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatLogTimestampVi(r.createdAt)}</td>
                                             <td style={td}>{r.complianceUserName || '—'}</td>
                                             <td style={td}>{complianceSourceLabel(r.source)}</td>
                                             <td style={td}>{complianceActionLabel(r.action)}</td>

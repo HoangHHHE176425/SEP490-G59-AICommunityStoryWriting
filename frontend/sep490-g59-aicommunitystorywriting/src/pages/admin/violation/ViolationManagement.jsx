@@ -21,6 +21,7 @@ import {
 import { useAuth } from '../../../contexts/AuthContext';
 import { getStoryById } from '../../../api/story/storyApi';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
+import { formatLogTimestampVi } from '../../../utils/apiDateTime';
 import { getActivePolicy } from '../../../api/policy/policyApi';
 import { PolicyBody } from '../../../components/policy/PolicyBody';
 import {
@@ -2351,7 +2352,7 @@ export default function ViolationManagement() {
                                         ? renderComplianceHistory()
                                         : activeTab === 'lock-requests' ? renderLockRequests()
                                             : activeTab === 'compliance-logs' ? (
-                                                <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-slate-50"><th style={th}>Thời điểm</th><th style={th}>Nhân viên kiểm duyệt</th><th style={th}>Nguồn</th><th style={th}>Hành động</th><th style={th}>Trạng thái</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-slate-200 hover:bg-slate-50/70"><td style={td}>{formatDate(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
+                                                <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-slate-50"><th style={th}>Thời điểm</th><th style={th}>Nhân viên kiểm duyệt</th><th style={th}>Nguồn</th><th style={th}>Hành động</th><th style={th}>Trạng thái</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-slate-200 hover:bg-slate-50/70"><td style={td}>{formatLogTimestampVi(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
                                             ) : (
                                                 <div className="p-8 text-center text-slate-500 text-sm">Không có dữ liệu hiển thị.</div>
                                             )

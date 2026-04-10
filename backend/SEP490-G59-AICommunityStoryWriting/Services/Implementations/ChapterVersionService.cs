@@ -136,11 +136,11 @@ namespace Services.Implementations
             {
                 var previous = _chapterRepository.GetByStoryIdAndOrderIndex(chapter.story_id.Value, chapter.order_index - 1);
                 if (previous == null)
-                    throw new InvalidOperationException("Phải gửi xuất bản chương theo thứ tự. Chương " + chapter.order_index + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
+                    throw new InvalidOperationException("Phải gửi xuất bản chương theo thứ tự. Chương " + chapter.order_index + " phải đã xuất bản trước khi gửi chương " + (chapter.order_index + 1) + ".");
                 var prevStatus = (previous.status ?? "").Trim().ToUpperInvariant();
                 var prevHasPendingVersion = _versionRepository.GetByChapterId(previous.id).Any(v => string.Equals(v.status, "PENDING_REVIEW", StringComparison.OrdinalIgnoreCase));
-                if (prevStatus != "PUBLISHED" && prevStatus != "PENDING_REVIEW" && !prevHasPendingVersion)
-                    throw new InvalidOperationException("Phải gửi xuất bản chương theo thứ tự. Chương " + chapter.order_index + " chưa được gửi hoặc chưa duyệt, không thể gửi chương " + (chapter.order_index + 1) + ".");
+                if (prevStatus != "PUBLISHED" || prevHasPendingVersion)
+                    throw new InvalidOperationException("Phải gửi xuất bản chương theo thứ tự. Chương " + chapter.order_index + " phải đã xuất bản (duyệt thành công) trước khi gửi chương " + (chapter.order_index + 1) + ".");
             }
             // Không đổi chapter.status — chapter gốc vẫn là DRAFT; chỉ version chuyển sang PENDING_REVIEW.
 
