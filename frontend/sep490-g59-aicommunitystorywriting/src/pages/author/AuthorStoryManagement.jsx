@@ -1149,7 +1149,7 @@ export function AuthorStoryManagement({ onBack }) {
             categoryIds: storyData.categoryIds || [],
             ageRating: storyData.ageRating,
             storyProgressStatus: 'Đang ra',
-            coverImage: storyData.cover,
+            coverImage: storyData.coverFile || storyData.cover,
         };
         const created = await createStory(payload);
         const storyId = created?.id ?? created?.Id;
@@ -1176,7 +1176,7 @@ export function AuthorStoryManagement({ onBack }) {
                 status: 'PENDING_REVIEW',
                 ageRating: storyData.ageRating,
                 storyProgressStatus: storyData.storyProgressStatus,
-                coverImage: storyData.cover,
+                coverImage: storyData.coverFile || storyData.cover,
             });
         }
 
@@ -1251,7 +1251,7 @@ export function AuthorStoryManagement({ onBack }) {
                 status: storyPublishStatus,
                 storyProgressStatus: infoData.status || infoData.publishStatus,
                 ageRating: infoData.ageRating,
-                coverImage: infoData.cover,
+                coverImage: infoData.coverFile || infoData.cover,
             });
 
             // Update FE state đúng field (không ghi đè `status` publication bằng progress status UI).

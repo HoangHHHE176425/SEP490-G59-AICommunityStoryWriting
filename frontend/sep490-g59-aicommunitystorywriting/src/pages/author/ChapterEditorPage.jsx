@@ -97,9 +97,17 @@ function isExampleOutline(scenes) {
 }
 
 /** Dàn ý: đổi "Scene 1/2/3" thành "Bối cảnh 1/2/3"; nếu là JSON scenes thì render Bối cảnh 1, 2, 3... (bỏ hướng dẫn/ví dụ) */
+function normalizeEscapedNewlines(text) {
+    if (typeof text !== 'string') return text ?? '';
+    return text
+        .replace(/\\r\\n/g, '\n')
+        .replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t');
+}
+
 function formatOutlineForDisplay(outline) {
     if (!outline || !outline.trim()) return '';
-    const raw = outline.trim();
+    const raw = normalizeEscapedNewlines(outline).trim();
     const toParse = extractOutlineJson(raw);
     try {
         const parsed = JSON.parse(toParse);
@@ -108,9 +116,9 @@ function formatOutlineForDisplay(outline) {
             if (isExampleOutline(scenes)) return '';
             const joined = scenes
                 .map((s, i) => {
-                    const title = s?.title ?? s?.Title ?? '';
-                    const summary = s?.summary ?? s?.Summary ?? '';
-                    const characters = s?.characters ?? s?.Characters ?? '';
+                    const title = normalizeEscapedNewlines(s?.title ?? s?.Title ?? '');
+                    const summary = normalizeEscapedNewlines(s?.summary ?? s?.Summary ?? '');
+                    const characters = normalizeEscapedNewlines(s?.characters ?? s?.Characters ?? '');
                     const parts = [];
                     if (title) parts.push(title);
                     if (summary) parts.push(summary);
@@ -1583,11 +1591,10 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                         }, 2000);
                                                     }}
                                                     title={copiedSuggestionIndex === index ? 'Đã copy' : 'Copy nhanh'}
-                                                    className={`absolute top-2 right-2 p-1 rounded-lg transition-colors duration-200 ${
-                                                        copiedSuggestionIndex === index
-                                                            ? 'bg-emerald-100 text-emerald-700'
-                                                            : 'text-slate-600 hover:bg-slate-200'
-                                                    }`}
+                                                    className={`absolute top-2 right-2 p-1 rounded-lg transition-colors duration-200 ${copiedSuggestionIndex === index
+                                                        ? 'bg-emerald-100 text-emerald-700'
+                                                        : 'text-slate-600 hover:bg-slate-200'
+                                                        }`}
                                                 >
                                                     {copiedSuggestionIndex === index ? (
                                                         <Check size={16} strokeWidth={2.5} />
@@ -1728,8 +1735,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                     Bạn đang chọn chế độ không nhập định hướng. AI sẽ tự sinh nội dung theo ngữ cảnh hiện tại của truyện.
                                 </div>
                             )}
-                            <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', fontSize: '0.8125rem', color: '#9a3412' }}>
-                                Khi nhập định hướng tùy chỉnh, tác giả phải chịu trách nhiệm với nội dung định hướng đã nhập và nội dung AI sinh ra theo định hướng đó.
+                            <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', fontSize: '0.6875rem', color: '#9a3412' }}>
+                                Lưu ý: Khi nhập định hướng tùy chỉnh, tác giả phải chịu trách nhiệm với nội dung định hướng đã nhập và nội dung AI sinh ra theo định hướng đó.
                             </div>
                         </div>
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
@@ -2021,10 +2028,10 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             {/* Khi tạo/sửa version: không hiển thị Số version, Chương gốc, Chế độ sáng tác. Chỉ hiển thị khi tạo/sửa chương thường. */}
                             {!isVersionMode && (
                                 <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
-                                        <div>
-                                            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                                Chương số <span style={{ color: '#ef4444' }}>*</span>
-                                            </label>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                            Chương số <span style={{ color: '#ef4444' }}>*</span>
+                                        </label>
                                         <input
                                             type="number"
                                             value={chapterData.number}
