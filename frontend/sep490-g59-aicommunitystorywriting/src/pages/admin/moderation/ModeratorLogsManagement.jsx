@@ -288,46 +288,55 @@ export function ModeratorLogsManagement() {
     };
 
     return (
-        <div className="p-8 space-y-6">
+        <div className="p-5 space-y-4">
             <div>
-                <h1 className="text-2xl font-bold text-slate-900 mb-1">Nhật ký kiểm duyệt</h1>
-                <p className="text-sm text-slate-500">
+                <h1 className="text-xl font-bold text-slate-900 mb-1">Nhật ký kiểm duyệt</h1>
+                <p className="text-xs text-slate-500">
                     Theo dõi lịch sử hoạt động của kiểm duyệt viên và xử lý vi phạm viên theo thời gian thực.
                 </p>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-lg font-bold text-slate-900 m-0">
+            <div className="bg-white rounded-lg border border-slate-200 p-3">
+                <div className="flex items-center justify-between mb-2.5">
+                    <h2 className="text-base font-semibold text-slate-900 m-0">
                         {logType === 'moderator'
                             ? 'Nhật ký kiểm duyệt của kiểm duyệt viên'
                             : 'Nhật ký kiểm duyệt của xử lý vi phạm viên'}
                     </h2>
-                    <span className="text-sm text-slate-500">Tổng: {totalCount}</span>
+                    <span className="text-xs text-slate-500">Tổng: {totalCount}</span>
                 </div>
-                <div className="flex gap-2 flex-wrap mb-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap mb-2.5">
+                    <div className="flex gap-1.5 flex-wrap">
+                        <button
+                            type="button"
+                            onClick={() => setLogType('moderator')}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-semibold transition-colors ${logType === 'moderator'
+                                ? 'bg-primary/15 border-primary/40 text-emerald-700'
+                                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                                }`}
+                        >
+                            Nhật ký kiểm duyệt viên
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setLogType('compliance')}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border text-xs font-semibold transition-colors ${logType === 'compliance'
+                                ? 'bg-primary/15 border-primary/40 text-emerald-700'
+                                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                                }`}
+                        >
+                            Nhật ký xử lý vi phạm viên
+                        </button>
+                    </div>
                     <button
-                        type="button"
-                        onClick={() => setLogType('moderator')}
-                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${logType === 'moderator'
-                            ? 'bg-primary/15 border-primary/40 text-emerald-700'
-                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-                            }`}
+                        onClick={onResetFilters}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 text-xs font-medium hover:bg-slate-50"
                     >
-                        Nhật ký kiểm duyệt viên
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setLogType('compliance')}
-                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-full border text-sm font-semibold transition-colors ${logType === 'compliance'
-                            ? 'bg-primary/15 border-primary/40 text-emerald-700'
-                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
-                            }`}
-                    >
-                        Nhật ký xử lý vi phạm viên
+                        <RotateCcw style={{ width: 14, height: 14 }} />
+                        Đặt lại
                     </button>
                 </div>
-                <div className={`grid grid-cols-1 ${logType === 'moderator' ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-3`}>
+                <div className={`grid grid-cols-1 ${logType === 'moderator' ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-2`}>
                     <input
                         value={filters.search}
                         onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))}
@@ -361,7 +370,7 @@ export function ModeratorLogsManagement() {
                             {complianceActionOptions.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
                         </select>
                     )}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                         <label style={{ fontSize: '0.75rem', color: '#64748b' }}>Từ ngày</label>
                         <input
                             type="date"
@@ -370,7 +379,7 @@ export function ModeratorLogsManagement() {
                             style={inputStyle}
                         />
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                         <label style={{ fontSize: '0.75rem', color: '#64748b' }}>Tới ngày</label>
                         <input
                             type="date"
@@ -380,18 +389,9 @@ export function ModeratorLogsManagement() {
                         />
                     </div>
                 </div>
-                <div className="mt-3 flex justify-end">
-                    <button
-                        onClick={onResetFilters}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"
-                    >
-                        <RotateCcw style={{ width: 14, height: 14 }} />
-                        Đặt lại
-                    </button>
-                </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
                 {loading ? (
                     <div className="p-8 text-center text-slate-500 text-sm">Đang tải log kiểm duyệt...</div>
                 ) : error ? (
@@ -432,10 +432,10 @@ export function ModeratorLogsManagement() {
                                             <td style={td}>{r.moderatorName || '—'}</td>
                                             <td style={td}>{targetLabel(r)}</td>
                                             <td style={td}>{r.targetTitle || '—'}</td>
-                                            <td style={{ padding: '0.75rem', ...moderatorActionCellStyle(r.action) }}>
+                                            <td style={{ padding: '0.62rem', ...moderatorActionCellStyle(r.action) }}>
                                                 {actionLabel(r)}
                                             </td>
-                                            <td style={{ padding: '0.75rem', color: '#475569', maxWidth: 420 }}>
+                                            <td style={{ padding: '0.62rem', color: '#475569', maxWidth: 420 }}>
                                                 <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.rejectionReason || ''}>
                                                     {r.rejectionReason || '—'}
                                                 </div>
@@ -452,7 +452,7 @@ export function ModeratorLogsManagement() {
                                             <td style={td}>{r.targetLabel || (r.targetId ? `${r.targetType || 'Đối tượng'}: ${r.targetId}` : '—')}</td>
                                             <td style={td}>{r.ownerLabel || '—'}</td>
                                             <td style={td}>{complianceStatusLabel(r.status)}</td>
-                                            <td style={{ padding: '0.75rem', color: '#475569', maxWidth: 420 }}>
+                                            <td style={{ padding: '0.62rem', color: '#475569', maxWidth: 420 }}>
                                                 <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.message || ''}>
                                                     {r.message || '—'}
                                                 </div>
@@ -479,25 +479,25 @@ export function ModeratorLogsManagement() {
 
 const inputStyle = {
     border: '1px solid #e2e8f0',
-    borderRadius: '8px',
-    padding: '0.6rem 0.75rem',
-    fontSize: '0.875rem',
+    borderRadius: '7px',
+    padding: '0.48rem 0.65rem',
+    fontSize: '0.78rem',
     color: '#0f172a',
-    background: '#f8fafc',
+    background: '#ffffff',
 };
 
 const th = {
     textAlign: 'left',
-    padding: '0.75rem',
+    padding: '0.62rem',
     borderBottom: '1px solid #e2e8f0',
-    fontSize: '0.72rem',
+    fontSize: '0.68rem',
     letterSpacing: '0.02em',
     color: '#64748b',
     fontWeight: 700,
 };
 
 const td = {
-    padding: '0.75rem',
+    padding: '0.62rem',
     color: '#334155',
-    fontSize: '0.875rem',
+    fontSize: '0.8rem',
 };

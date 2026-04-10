@@ -632,14 +632,32 @@ public class StoryReportService : IStoryReportService
         var commentToStory = comments
             .Where(c => c.story_id.HasValue)
             .ToDictionary(c => c.id, c => c.story_id!.Value);
+        var requesterIds = rows.Select(r => r.requester_id).Distinct().ToList();
+        var requesterMap = requesterIds.Count == 0
+            ? new Dictionary<Guid, (string? Email, string? Nickname)>()
+            : ctx.users.AsNoTracking()
+                .Where(u => requesterIds.Contains(u.id))
+                .Select(u => new
+                {
+                    u.id,
+                    u.email,
+                    Nickname = u.user_profiles != null ? u.user_profiles.nickname : null
+                })
+                .ToDictionary(
+                    x => x.id,
+                    x => (
+                        Email: (string?)x.email,
+                        Nickname: string.IsNullOrWhiteSpace(x.Nickname) ? null : x.Nickname!.Trim()
+                    ));
 
         var nowUtc = DateTime.UtcNow;
         var list = new List<ComplianceLockRequestListItemDto>(rows.Count);
         foreach (var x in rows)
         {
-            var name = x.requester?.user_profiles?.nickname?.Trim();
+            requesterMap.TryGetValue(x.requester_id, out var requesterInfo);
+            var name = requesterInfo.Nickname;
             if (string.IsNullOrEmpty(name))
-                name = x.requester?.email;
+                name = requesterInfo.Email;
             var createdUtc = x.created_at.Kind == DateTimeKind.Unspecified
                 ? DateTime.SpecifyKind(x.created_at, DateTimeKind.Utc)
                 : x.created_at.ToUniversalTime();
@@ -679,7 +697,7 @@ public class StoryReportService : IStoryReportService
                 StoryId = storyId,
                 StoryTitle = storyTitle,
                 RequesterId = x.requester_id,
-                RequesterEmail = x.requester?.email,
+                RequesterEmail = requesterInfo.Email,
                 RequesterDisplayName = name,
                 Message = x.message,
                 Status = x.status ?? "",

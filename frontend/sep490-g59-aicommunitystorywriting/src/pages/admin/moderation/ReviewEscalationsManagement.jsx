@@ -97,8 +97,8 @@ const T = {
 
 function pubTabStyle(active, activeBg) {
     return {
-        padding: '0.625rem 1.25rem',
-        fontSize: '0.875rem',
+        padding: '0.46rem 0.95rem',
+        fontSize: '0.78rem',
         fontWeight: 600,
         backgroundColor: active ? activeBg : 'transparent',
         color: active ? '#ffffff' : T.slate,
@@ -301,10 +301,10 @@ const inputBase = {
     display: 'block',
     width: '100%',
     marginTop: 4,
-    padding: '0.5rem 0.625rem',
-    borderRadius: 8,
+    padding: '0.42rem 0.58rem',
+    borderRadius: 7,
     border: `1px solid ${T.border}`,
-    fontSize: '0.875rem',
+    fontSize: '0.78rem',
     color: T.title,
     background: T.card,
     boxSizing: 'border-box',
@@ -764,11 +764,11 @@ export function ReviewEscalationsManagement() {
     const historyPageItems = historyItems.slice((safeHistoryPage - 1) * historyPageSize, safeHistoryPage * historyPageSize);
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.05rem' }}>
             {/* Header — cùng format Quản lý xuất bản / Category */}
             <div>
-                <h1 style={{ fontSize: '1.875rem', fontWeight: 700, color: T.title, margin: 0, marginBottom: '0.5rem' }}>Quản lý đơn</h1>
-                <p style={{ fontSize: '0.875rem', color: T.slate, margin: 0, maxWidth: '42rem', lineHeight: 1.55 }}>
+                <h1 style={{ fontSize: '1.5rem', fontWeight: 700, color: T.title, margin: 0, marginBottom: '0.35rem' }}>Quản lý đơn</h1>
+                <p style={{ fontSize: '0.8rem', color: T.slate, margin: 0, maxWidth: '38rem', lineHeight: 1.45 }}>
                     Quản lý đơn của kiểm duyệt viên và xử lý vi phạm viên, bao gồm đơn chờ xử lý, lịch sử đã xử lý và nhật ký tra cứu.
                 </p>
             </div>
@@ -777,11 +777,11 @@ export function ReviewEscalationsManagement() {
             <div
                 style={{
                     backgroundColor: T.card,
-                    borderRadius: '12px',
-                    padding: '1rem',
+                    borderRadius: '10px',
+                    padding: '0.75rem',
                     border: `1px solid ${T.border}`,
                     display: 'flex',
-                    gap: '0.5rem',
+                    gap: '0.4rem',
                     flexWrap: 'wrap',
                     alignItems: 'center',
                 }}
@@ -847,15 +847,15 @@ export function ReviewEscalationsManagement() {
             </div>
 
             {mainTab === 'orders' && (
-                <div style={{ backgroundColor: T.card, borderRadius: '12px', border: `1px solid ${T.border}`, overflow: 'hidden' }}>
-                    <div style={{ padding: '1.25rem 1.5rem' }}>
-                        <h2 style={{ margin: '0 0 1rem', fontSize: '1.125rem', fontWeight: 600, color: T.title }}>
+                <div style={{ backgroundColor: T.card, borderRadius: '10px', border: `1px solid ${T.border}`, overflow: 'hidden' }}>
+                    <div style={{ padding: '1rem 1.1rem' }}>
+                        <h2 style={{ margin: '0 0 0.8rem', fontSize: '1rem', fontWeight: 600, color: T.title }}>
                             {orderSourceTab === 'compliance'
                                 ? 'Đơn của xử lý vi phạm viên'
                                 : 'Đơn của kiểm duyệt viên'}
                         </h2>
 
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.9rem' }}>
                             <button
                                 type="button"
                                 style={pubTabStyle(listMode === 'pending', T.green)}
@@ -875,18 +875,18 @@ export function ReviewEscalationsManagement() {
                         </div>
 
                         {listMode === 'pending' && (
-                            <div style={{ marginBottom: '1.25rem' }}>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-                                    <div style={{ borderRadius: '12px', border: `1px solid ${T.critical.border}`, background: T.critical.bg, padding: '1rem' }}>
+                            <div style={{ marginBottom: '0.9rem' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.7rem', marginBottom: '0.7rem' }}>
+                                    <div style={{ borderRadius: '10px', border: `1px solid ${T.critical.border}`, background: T.critical.bg, padding: '0.75rem' }}>
                                         <p style={{ fontSize: '0.75rem', color: T.critical.fg, margin: 0, fontWeight: 600 }}>Nghiêm trọng</p>
-                                        <p style={{ fontSize: '1.5rem', fontWeight: 700, color: T.critical.fg, margin: '0.35rem 0 0' }}>{counts.critical}</p>
+                                        <p style={{ fontSize: '1.25rem', fontWeight: 700, color: T.critical.fg, margin: '0.25rem 0 0' }}>{counts.critical}</p>
                                     </div>
-                                    <div style={{ borderRadius: '12px', border: `1px solid ${T.standard.border}`, background: T.standard.bg, padding: '1rem' }}>
+                                    <div style={{ borderRadius: '10px', border: `1px solid ${T.standard.border}`, background: T.standard.bg, padding: '0.75rem' }}>
                                         <p style={{ fontSize: '0.75rem', color: T.standard.fg, margin: 0, fontWeight: 600 }}>Thông thường</p>
-                                        <p style={{ fontSize: '1.5rem', fontWeight: 700, color: T.standard.fg, margin: '0.35rem 0 0' }}>{counts.standard}</p>
+                                        <p style={{ fontSize: '1.25rem', fontWeight: 700, color: T.standard.fg, margin: '0.25rem 0 0' }}>{counts.standard}</p>
                                     </div>
                                 </div>
-                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                                     {[
                                         { key: '', label: 'Tất cả', color: T.sky },
                                         { key: 'CRITICAL', label: 'Chỉ nghiêm trọng', color: '#ef4444' },

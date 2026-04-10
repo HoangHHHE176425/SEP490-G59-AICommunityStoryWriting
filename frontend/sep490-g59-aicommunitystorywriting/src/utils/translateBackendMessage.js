@@ -21,6 +21,7 @@ export function translateBackendMessage(message) {
     { test: /missing refresh token/i, out: 'Thiếu refresh token. Vui lòng đăng nhập lại.' },
     { test: /unauthorized/i, out: 'Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.' },
     { test: /forbidden/i, out: 'Bạn không có quyền thực hiện thao tác này.' },
+    { test: /account has been banned|account is banned|banned/i, out: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.' },
     { test: /logged out/i, out: 'Đã đăng xuất.' },
     { test: /the account has been banned/i, out: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.' },
 
