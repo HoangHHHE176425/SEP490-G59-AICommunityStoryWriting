@@ -23,6 +23,7 @@ namespace Services.Implementations
         private readonly IAIUsageLogRepository _aiUsageLogRepository;
         private readonly IAiGeneratedContentRepository _aiContentRepository;
         private readonly IConfiguration _configuration;
+        private readonly IUserLookup _userLookup;
 
         public AINextChapterService(
             IStoryRepository storyRepository,
@@ -31,7 +32,8 @@ namespace Services.Implementations
             IStoryMemoryEngine memoryEngine,
             IAIUsageLogRepository aiUsageLogRepository,
             IAiGeneratedContentRepository aiContentRepository,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            IUserLookup userLookup)
         {
             _storyRepository = storyRepository;
             _chapterRepository = chapterRepository;
@@ -40,6 +42,7 @@ namespace Services.Implementations
             _aiUsageLogRepository = aiUsageLogRepository;
             _aiContentRepository = aiContentRepository;
             _configuration = configuration;
+            _userLookup = userLookup;
         }
 
         public async Task<SuggestNextChapterResponse> SuggestNextChapterAsync(
@@ -53,6 +56,9 @@ namespace Services.Implementations
 
             if (story.author_id != authorUserId)
                 throw new UnauthorizedAccessException("Chỉ tác giả của truyện mới được sử dụng tính năng gợi ý chương.");
+
+            if (_userLookup.IsAuthorWritingSuspended(authorUserId))
+                throw new InvalidOperationException("Tài khoản đang bị tạm khóa chức năng viết truyện/chương (compliance/admin), không thể dùng gợi ý AI.");
 
             var allChaptersOrdered = _chapterRepository.GetByStoryId(request.StoryId).OrderBy(c => c.order_index).ToList();
             var targetOrderForWarning = ResolveSuggestTargetOrderIndex(request, allChaptersOrdered);

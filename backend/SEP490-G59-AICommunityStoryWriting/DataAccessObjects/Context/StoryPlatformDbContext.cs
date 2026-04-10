@@ -130,6 +130,7 @@ public partial class StoryPlatformDbContext : DbContext
         {
             optionsBuilder.UseSqlServer(
                 "Server= QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;",
+
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
                     maxRetryCount: 5,
                     maxRetryDelay: TimeSpan.FromSeconds(30),

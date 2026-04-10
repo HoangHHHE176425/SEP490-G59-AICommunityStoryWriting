@@ -23,6 +23,28 @@ namespace DataAccessObjects.DAOs
                 .Any(r => r.target_type == targetType && r.target_id == targetId && r.status == StatusPending);
         }
 
+        /// <summary>Số đơn EXTEND_DEADLINE đã gửi (mọi trạng thái) kể từ lúc nhận duyệt hiện tại — giới hạn 1 lần/phiên claim.</summary>
+        public static int CountExtendDeadlineRequestsForSenderSince(
+            string targetType,
+            Guid targetId,
+            Guid senderId,
+            DateTime assignmentStartedAtUtc)
+        {
+            var at = assignmentStartedAtUtc.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(assignmentStartedAtUtc, DateTimeKind.Utc)
+                : assignmentStartedAtUtc.ToUniversalTime();
+
+            using var context = new StoryPlatformDbContext();
+            return context.review_escalation_requests
+                .AsNoTracking()
+                .Count(r =>
+                    r.target_type == targetType
+                    && r.target_id == targetId
+                    && r.sender_id == senderId
+                    && r.request_kind == KindExtend
+                    && r.created_at >= at);
+        }
+
         /// <summary>Tất cả target_id đang có đơn PENDING (dùng batch khi build danh sách chờ duyệt).</summary>
         public static HashSet<Guid> GetPendingTargetIds(string targetType)
         {

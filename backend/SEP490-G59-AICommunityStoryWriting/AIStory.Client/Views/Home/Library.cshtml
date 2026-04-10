@@ -118,7 +118,7 @@
             container.innerHTML = items.map(function (item) {
                 const storyUrl = '/Home/Story/' + item.storyId;
                 const chapterUrl = '/Chapters/Read/' + item.lastReadChapterId;
-                const cover = item.coverImage ? 'http://localhost:5000' + item.coverImage : '';
+                const cover = item.coverImage ? resolveMediaSrc(item.coverImage) : '';
                 const chapterLabel = item.lastReadChapterTitle
                     ? (item.lastReadChapterOrder != null ? 'Chương ' + item.lastReadChapterOrder + ': ' : '') + escapeHtml(item.lastReadChapterTitle)
                     : 'Chương đang đọc';
@@ -151,7 +151,7 @@
             empty.style.display = 'none';
             container.innerHTML = items.map(function (item) {
                 const url = '/Home/Story/' + item.id;
-                const cover = item.coverImage ? 'http://localhost:5000' + item.coverImage : '';
+                const cover = item.coverImage ? resolveMediaSrc(item.coverImage) : '';
                 const updated = item.latestUpdatedAt ? formatDate(item.latestUpdatedAt) : '';
                 return `
                     <div class="d-flex align-items-center border-bottom py-3">

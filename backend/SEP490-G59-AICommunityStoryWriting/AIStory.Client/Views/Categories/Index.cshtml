@@ -291,7 +291,7 @@
                 <tr>
                     <td>${cat.id}</td>
                     <td>
-                        ${cat.iconUrl ? `<img src="http://localhost:5000${cat.iconUrl}" alt="${cat.name}" class="rounded" style="width:32px;height:32px;object-fit:cover;">` : '<i class="bi bi-tag text-muted"></i>'}
+                        ${cat.iconUrl ? `<img src="${resolveMediaSrc(cat.iconUrl)}" alt="${cat.name}" class="rounded" style="width:32px;height:32px;object-fit:cover;">` : '<i class="bi bi-tag text-muted"></i>'}
                         <strong class="ms-2">${cat.name}</strong>
                     </td>
                     <td><code>${cat.slug}</code></td>
@@ -357,7 +357,7 @@
                 document.getElementById('categoryIconImage').value = '';
                 if (category.iconUrl) {
                     document.getElementById('categoryIconPreview').innerHTML =
-                        `<img src="http://localhost:5000${category.iconUrl}" class="img-thumbnail" style="max-height:80px;">
+                        `<img src="${resolveMediaSrc(category.iconUrl)}" class="img-thumbnail" style="max-height:80px;">
                          <p class="text-muted mt-1 small">Ảnh hiện tại. Chọn ảnh mới để thay thế.</p>`;
                 } else {
                     document.getElementById('categoryIconPreview').innerHTML = '';
