@@ -1,5 +1,23 @@
 import axiosInstance from "../axiosInstance";
 
+function extractApiErrorMessage(err, fallback) {
+    const data = err?.response?.data;
+    if (typeof data?.message === "string" && data.message.trim()) return data.message.trim();
+    if (typeof data?.error === "string" && data.error.trim()) return data.error.trim();
+    if (typeof data?.title === "string" && data.title.trim()) {
+        const errors = data?.errors;
+        if (errors && typeof errors === "object") {
+            const details = Object.values(errors)
+                .flat()
+                .map((x) => String(x || "").trim())
+                .filter(Boolean);
+            if (details.length > 0) return `${data.title.trim()}: ${details.join(" | ")}`;
+        }
+        return data.title.trim();
+    }
+    return fallback;
+}
+
 /** Chuyển base64 dataURL sang File (dùng cho ảnh bìa từ form). */
 function dataURLtoFile(dataUrl, filename = "cover.png") {
     if (!dataUrl || typeof dataUrl !== "string") return null;
@@ -82,10 +100,13 @@ export async function createStory(data) {
     if (typeof coverFile === "string" && coverFile.startsWith("data:")) {
         coverFile = dataURLtoFile(coverFile, "cover.png");
     }
+    if (typeof coverFile === "string" && coverFile.startsWith("blob:")) {
+        throw new Error("Ảnh bìa chưa sẵn sàng để tải lên. Vui lòng chọn lại ảnh bìa.");
+    }
     if (coverFile instanceof File) {
         const allowedExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
         const ext = coverFile.name.toLowerCase().substring(coverFile.name.lastIndexOf("."));
-        if (!allowedExtensions.includes(ext) && !coverFile.type?.startsWith("image/")) {
+        if (!allowedExtensions.includes(ext)) {
             throw new Error(`Ảnh bìa: chỉ chấp nhận ${allowedExtensions.join(", ").toUpperCase()}`);
         }
         if (coverFile.size > 5 * 1024 * 1024) {
@@ -100,7 +121,7 @@ export async function createStory(data) {
         });
         return response.data;
     } catch (err) {
-        const msg = err?.response?.data?.message ?? err?.response?.data?.error ?? err?.message;
+        const msg = extractApiErrorMessage(err, err?.message ?? "Không thể tạo truyện. Vui lòng thử lại.");
         throw new Error(typeof msg === "string" ? msg : "Không thể tạo truyện. Vui lòng thử lại.");
     }
 }
@@ -303,10 +324,13 @@ export async function updateStory(id, data) {
     if (typeof coverFile === "string" && coverFile.startsWith("data:")) {
         coverFile = dataURLtoFile(coverFile, "cover.png");
     }
+    if (typeof coverFile === "string" && coverFile.startsWith("blob:")) {
+        throw new Error("Ảnh bìa chưa sẵn sàng để tải lên. Vui lòng chọn lại ảnh bìa.");
+    }
     if (coverFile instanceof File) {
         const allowedExtensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"];
         const ext = coverFile.name.toLowerCase().substring(coverFile.name.lastIndexOf("."));
-        if (!allowedExtensions.includes(ext) && !coverFile.type?.startsWith("image/")) {
+        if (!allowedExtensions.includes(ext)) {
             throw new Error(`Ảnh bìa: chỉ chấp nhận ${allowedExtensions.join(", ").toUpperCase()}`);
         }
         if (coverFile.size > 5 * 1024 * 1024) {

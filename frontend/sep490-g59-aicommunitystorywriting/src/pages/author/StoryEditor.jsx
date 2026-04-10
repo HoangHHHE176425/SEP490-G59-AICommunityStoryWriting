@@ -17,6 +17,7 @@ const countWords = (text) => {
     if (!plain) return 0;
     return plain.split(/\s+/).filter(word => word.length > 0).length;
 };
+const MIN_STORY_SUMMARY_WORDS = 50;
 
 export function StoryEditor({ story, onSave, onCancel }) {
     const { user } = useAuth();
@@ -36,6 +37,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
         tags: [],
         note: '',
         cover: '',
+        coverFile: null,
     });
 
     const [chapters, setChapters] = useState([
@@ -78,6 +80,7 @@ export function StoryEditor({ story, onSave, onCancel }) {
                 tags: [],
                 note: story.summary ?? story.note ?? '',
                 cover: story.cover || '',
+                coverFile: null,
             });
         } else {
             setFormData((prev) => ({ ...prev, author: name, status: 'Đang ra' }));
@@ -88,18 +91,31 @@ export function StoryEditor({ story, onSave, onCancel }) {
 
     const handleFormDataChange = (field, value) => {
         if (!story && field === 'status' && value !== 'Đang ra') return;
-        setFormData({ ...formData, [field]: value });
+        setFormData((prev) => ({ ...prev, [field]: value }));
     };
 
     const handleImageUpload = (e) => {
         const file = e.target.files?.[0];
         if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                handleFormDataChange('cover', reader.result);
-                showToast('Ảnh bìa đã được tải lên thành công!', 'success');
-            };
-            reader.readAsDataURL(file);
+            const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+            const lowerName = String(file.name || '').toLowerCase();
+            const ext = lowerName.slice(lowerName.lastIndexOf('.'));
+            if (!allowedExtensions.includes(ext)) {
+                showToast(`Ảnh bìa chỉ chấp nhận ${allowedExtensions.join(', ').toUpperCase()}`, 'error');
+                return;
+            }
+            if (file.size > 5 * 1024 * 1024) {
+                showToast('Kích thước ảnh bìa không được vượt quá 5MB', 'error');
+                return;
+            }
+            const previewUrl = URL.createObjectURL(file);
+            setFormData((prev) => {
+                if (prev.cover && String(prev.cover).startsWith('blob:')) {
+                    URL.revokeObjectURL(prev.cover);
+                }
+                return { ...prev, cover: previewUrl, coverFile: file };
+            });
+            showToast('Ảnh bìa đã được tải lên thành công!', 'success');
         }
     };
 
@@ -150,6 +166,11 @@ export function StoryEditor({ story, onSave, onCancel }) {
         }
         if (!formData.note || !String(formData.note).trim()) {
             showToast('Vui lòng nhập mô tả truyện', 'error');
+            return false;
+        }
+        const summaryWordCount = countWords(formData.note);
+        if (summaryWordCount < MIN_STORY_SUMMARY_WORDS) {
+            showToast(`Mô tả truyện cần tối thiểu ${MIN_STORY_SUMMARY_WORDS} từ (hiện có ${summaryWordCount} từ).`, 'error');
             return false;
         }
         if (!story && formData.status !== 'Đang ra') {

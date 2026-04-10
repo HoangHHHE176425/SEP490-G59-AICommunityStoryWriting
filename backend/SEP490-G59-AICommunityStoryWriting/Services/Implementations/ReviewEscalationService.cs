@@ -136,6 +136,8 @@ namespace Services.Implementations
                 currentDeadline = NormalizeToUtc(currentDeadline);
                 if (proposed.Value <= currentDeadline)
                     throw new ArgumentException("Hạn đề xuất gia hạn phải muộn hơn hạn duyệt hiện tại của bạn (hạn đã chọn khi nhận duyệt).");
+                if (!MatchesModeratorExtendIncrementDays(currentDeadline, proposed.Value))
+                    throw new ArgumentException("Gia hạn chỉ được chọn thêm 3, 5 hoặc 7 ngày so với hạn duyệt hiện tại.");
             }
 
             var row = new review_escalation_requests
@@ -581,6 +583,18 @@ namespace Services.Implementations
                 throw new ArgumentException("Hạn mới phải sau ít nhất 24 giờ kể từ hiện tại.");
             if (deadlineUtc > now.AddDays(MaxDeadlineDaysAhead))
                 throw new ArgumentException($"Hạn không được vượt quá {MaxDeadlineDaysAhead} ngày.");
+        }
+
+        /// <summary>FE chỉ gửi hạn = hạn hiện tại + 3 / 5 / 7 ngày (UTC); dung sai 1 giờ so với AddDays.</summary>
+        private static bool MatchesModeratorExtendIncrementDays(DateTime currentUtc, DateTime proposedUtc)
+        {
+            foreach (var n in new[] { 3, 5, 7 })
+            {
+                var expected = currentUtc.AddDays(n);
+                if (Math.Abs((proposedUtc - expected).TotalHours) <= 1.0)
+                    return true;
+            }
+            return false;
         }
 
         private static InvalidOperationException InvalidOp(string m) => new(m);

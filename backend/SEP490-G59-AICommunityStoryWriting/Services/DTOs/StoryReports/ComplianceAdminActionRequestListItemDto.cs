@@ -42,8 +42,8 @@ public class AdminResolveComplianceAdminActionRequestDto
     public string Decision { get; set; } = "";
     /// <summary>Mã lý do báo cáo (catalog truyện); bắt buộc khi resolve (UTC: null/blank → từ chối).</summary>
     public string? ReasonCode { get; set; }
-    /// <summary>Ma trận: mô tả / ghi chú admin tối đa 200 ký tự.</summary>
-    [MaxLength(200)]
+    /// <summary>Ma trận: mô tả / ghi chú admin tối đa 2000 ký tự.</summary>
+    [MaxLength(2000)]
     public string? AdminNote { get; set; }
     /// <summary>Admin có thể chỉnh ngày kết thúc tạm khóa viết (UTC); nếu null với SUSPEND thì dùng đề xuất của compliance.</summary>
     public DateTime? SuspendUntilUtc { get; set; }

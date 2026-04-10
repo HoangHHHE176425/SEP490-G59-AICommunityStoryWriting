@@ -52,6 +52,32 @@ export function formatApiDateTimeVietnamVi(value) {
     });
 }
 
+/**
+ * Nhật ký admin (moderation / compliance): JSON từ ASP.NET thường là DateTime Kind=Unspecified, không có "Z".
+ * Nếu ép thành UTC rồi format Asia/Ho_Chi_Minh sẽ cộng thêm +7 so với giờ đã lưu trong DB (lệch giờ VN).
+ * - Chuỗi có Z hoặc ±offset: coi là mốc UTC chuẩn → format giờ VN.
+ * - Chuỗi naive `yyyy-MM-ddTHH:mm:ss`: hiển thị đúng theo các thành phần (wall clock), không đổi múi giờ.
+ */
+export function formatLogTimestampVi(value) {
+    if (value == null || value === '') return '—';
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? '—' : formatApiDateTimeVietnamVi(value.toISOString());
+    }
+    let s = String(value).trim();
+    if (!s) return '—';
+    s = s.replace(' ', 'T');
+    if (/Z$/i.test(s) || /[+-]\d{2}:\d{2}$/.test(s) || /[+-]\d{4}$/.test(s)) {
+        return formatApiDateTimeVietnamVi(s);
+    }
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+    if (m) {
+        const [, y, mo, d, h, mi, secRaw] = m;
+        const sec = (secRaw != null && secRaw !== '' ? secRaw : '00').padStart(2, '0').slice(0, 2);
+        return `${h}:${mi}:${sec} ${d}/${mo}/${y}`;
+    }
+    return formatApiDateTimeVietnamVi(value);
+}
+
 /** Giá trị cho input datetime-local (giờ local trình duyệt). */
 export function apiDateToDatetimeLocalValue(isoOrApi) {
     const d = parseApiDateTimeUtc(isoOrApi);

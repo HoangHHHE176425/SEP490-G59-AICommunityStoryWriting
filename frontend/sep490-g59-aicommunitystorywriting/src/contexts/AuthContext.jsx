@@ -31,6 +31,9 @@ export function AuthProvider({ children }) {
         return profile;
     };
 
+    const fetchProfileRef = useRef(fetchProfile);
+    fetchProfileRef.current = fetchProfile;
+
     // Load cached user + try restore session (refresh cookie -> access token -> profile)
     useEffect(() => {
         const savedUser = localStorage.getItem('user');
@@ -81,6 +84,10 @@ export function AuthProvider({ children }) {
         }
         const { stop, startPromise } = createNotificationHubConnection((notification) => {
             window.dispatchEvent(new CustomEvent('app:notification', { detail: notification }));
+            const t = String(notification?.type ?? '').trim().toUpperCase();
+            if (t === 'COMPLIANCE_STORY_MODERATION_ACTION') {
+                void fetchProfileRef.current?.();
+            }
         });
         notificationHubStopRef.current = stop;
         startPromise?.catch(() => { });
