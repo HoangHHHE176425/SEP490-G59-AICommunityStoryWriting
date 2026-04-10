@@ -404,5 +404,72 @@ namespace AIStory.Tests
             tokenServiceMock.Verify(x => x.GenerateAccessToken(user), Times.Once);
             tokenServiceMock.Verify(x => x.GenerateRefreshToken(), Times.Never);
         }
+
+        [Fact]
+        public async Task UTCID12_GoogleLogin_Fails_WhenExistingAccountIsBanned()
+        {
+            LogUtcContext("UTCID12",
+                "Abnormal path: email đã bị banned thì không được login lại bằng Google.",
+                "Precondition: repo trả về user existing với status = BANNED.",
+                "Input: banned@gmail.com / Google subject bất kỳ.",
+                "Kỳ vọng: throw Exception The account has been banned.; không update user, không tạo refresh token.");
+
+            var email = "banned@gmail.com";
+            var user = CreateUser(email, ValidPassword, "BANNED");
+            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
+
+            userRepoMock.Setup(x => x.GetUserByEmail(email)).ReturnsAsync(user);
+
+            var ex = await Assert.ThrowsAsync<Exception>(() => sut.LoginWithGoogleAsync(email, "Banned User", "google-subject"));
+
+            LogActualMessage(ex.Message);
+            Assert.Equal("The account has been banned.", ex.Message);
+            userRepoMock.Verify(x => x.GetUserByEmail(email), Times.Once);
+            userRepoMock.Verify(x => x.UpdateUser(It.IsAny<users>()), Times.Never);
+            userRepoMock.Verify(x => x.AddRefreshToken(It.IsAny<auth_tokens>()), Times.Never);
+            otpRepoMock.VerifyNoOtherCalls();
+            emailServiceMock.VerifyNoOtherCalls();
+            tokenServiceMock.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task UTCID13_Refresh_Fails_AndRevokesToken_WhenAccountIsBanned()
+        {
+            LogUtcContext("UTCID13",
+                "Abnormal path: refresh token cũ của account bị banned phải bị từ chối và revoke.",
+                "Precondition: repo trả về refresh token hợp lệ, user tương ứng có status = BANNED.",
+                "Input: refresh-token.",
+                "Kỳ vọng: throw Exception The account has been banned.; DeleteRefreshToken được gọi đúng 1 lần; không phát hành token mới.");
+
+            var email = "banned@gmail.com";
+            var user = CreateUser(email, ValidPassword, "BANNED");
+            var tokenRow = new auth_tokens
+            {
+                id = Guid.NewGuid(),
+                user_id = user.id,
+                refresh_token = "refresh-token",
+                device_info = "Browser",
+                expires_at = DateTime.UtcNow.AddDays(30),
+                created_at = DateTime.UtcNow
+            };
+
+            var sut = CreateSut(out var userRepoMock, out var otpRepoMock, out var emailServiceMock, out var tokenServiceMock);
+
+            userRepoMock.Setup(x => x.GetRefreshToken(tokenRow.refresh_token)).ReturnsAsync(tokenRow);
+            userRepoMock.Setup(x => x.GetUserById(user.id)).ReturnsAsync(user);
+            userRepoMock.Setup(x => x.DeleteRefreshToken(tokenRow.refresh_token)).Returns(Task.CompletedTask);
+
+            var ex = await Assert.ThrowsAsync<Exception>(() => sut.RefreshAsync(tokenRow.refresh_token));
+
+            LogActualMessage(ex.Message);
+            Assert.Equal("The account has been banned.", ex.Message);
+            userRepoMock.Verify(x => x.GetRefreshToken(tokenRow.refresh_token), Times.Once);
+            userRepoMock.Verify(x => x.GetUserById(user.id), Times.Once);
+            userRepoMock.Verify(x => x.DeleteRefreshToken(tokenRow.refresh_token), Times.Once);
+            userRepoMock.Verify(x => x.AddRefreshToken(It.IsAny<auth_tokens>()), Times.Never);
+            otpRepoMock.VerifyNoOtherCalls();
+            emailServiceMock.VerifyNoOtherCalls();
+            tokenServiceMock.VerifyNoOtherCalls();
+        }
     }
 }

@@ -71,6 +71,21 @@ namespace DataAccessObjects.DAOs
                 await context.SaveChangesAsync();
             }
         }
+
+        public async Task DeleteRefreshTokensByUserId(StoryPlatformDbContext context, Guid userId)
+        {
+            var tokens = await context.auth_tokens
+                .Where(t => t.user_id == userId)
+                .ToListAsync();
+
+            if (tokens.Count == 0)
+            {
+                return;
+            }
+
+            context.auth_tokens.RemoveRange(tokens);
+            await context.SaveChangesAsync();
+        }
         public async Task<bool> IsNicknameExist(StoryPlatformDbContext context, string nickname, Guid currentUserId)
         {
             return await context.user_profiles
@@ -364,6 +379,17 @@ namespace DataAccessObjects.DAOs
             u.status = (status ?? "").Trim().ToUpperInvariant();
             u.updated_at = DateTime.UtcNow;
             context.SaveChanges();
+        }
+
+        /// <summary>Email đăng ký — dùng thông báo (ví dụ sau khi admin duyệt cấm tài khoản).</summary>
+        public static string? GetUserEmail(Guid userId)
+        {
+            if (userId == Guid.Empty) return null;
+            using var context = new StoryPlatformDbContext();
+            return context.users.AsNoTracking()
+                .Where(u => u.id == userId)
+                .Select(u => u.email)
+                .FirstOrDefault();
         }
     }
 }

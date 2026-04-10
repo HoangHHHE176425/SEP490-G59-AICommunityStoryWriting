@@ -52,6 +52,9 @@ public interface IStoryReportService
 
     Task SetStoryComplianceHiddenAsync(Guid storyId, Guid actorId, bool hidden, bool actorIsAdmin);
 
+    /// <summary>COMPLIANCE (hoặc ADMIN): bật/tắt tạm khóa quyền viết của tác giả truyện, không qua đơn admin.</summary>
+    Task SetAuthorWritingSuspendedByComplianceAsync(Guid storyId, Guid actorId, bool suspended, bool actorIsAdmin);
+
     Task<Guid> RequestComplianceAdminActionAsync(Guid storyId, Guid requesterId, CreateComplianceAdminActionRequestDto dto, bool actorIsAdmin);
 
     /// <summary>ADMIN hoặc COMPLIANCE xem lịch sử violation_logs của user.</summary>

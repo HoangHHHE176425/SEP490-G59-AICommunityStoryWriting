@@ -30,6 +30,11 @@ export function AuthProvider({ children }) {
         saveUser(profile);
         return profile;
     };
+    const fetchProfileRef = useRef(fetchProfile);
+    fetchProfileRef.current = fetchProfile;
+
+    const fetchProfileRef = useRef(fetchProfile);
+    fetchProfileRef.current = fetchProfile;
 
     // Load cached user + try restore session (refresh cookie -> access token -> profile)
     useEffect(() => {
@@ -79,9 +84,22 @@ export function AuthProvider({ children }) {
             }
             return;
         }
-        const { stop, startPromise } = createNotificationHubConnection((notification) => {
-            window.dispatchEvent(new CustomEvent('app:notification', { detail: notification }));
-        });
+        const { stop, startPromise } = createNotificationHubConnection(
+            (notification) => {
+                window.dispatchEvent(new CustomEvent('app:notification', { detail: notification }));
+                const t = String(notification?.type ?? '').trim().toUpperCase();
+                if (t === 'COMPLIANCE_STORY_MODERATION_ACTION') {
+                    void fetchProfileRef.current?.();
+                }
+            },
+            (payload) => {
+                window.dispatchEvent(new CustomEvent('app:auth:session-ended', {
+                    detail: {
+                        message: payload?.message || 'Tài khoản của bạn đã bị khóa. Vui lòng đăng nhập lại.'
+                    }
+                }));
+            }
+        );
         notificationHubStopRef.current = stop;
         startPromise?.catch(() => { });
         return () => {

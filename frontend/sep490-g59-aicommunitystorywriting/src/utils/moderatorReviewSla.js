@@ -51,6 +51,48 @@ export function validateModeratorExtendProposedDeadline(proposedIsoUtc, currentR
     return { ok: true };
 }
 
+/** Gia hạn duyệt: chỉ +3 / +5 / +7 ngày so với hạn hiện tại (khớp ReviewEscalationService). */
+export const EXTEND_DEADLINE_DAY_CHOICES = Object.freeze([3, 5, 7]);
+
+/**
+ * Cộng N ngày vào mốc deadline UTC (khớp DateTime.Utc.AddDays với N nguyên).
+ * @param {string|null|undefined} currentIsoUtc
+ * @param {number} days
+ * @returns {string|null}
+ */
+export function addUtcDaysToDeadlineIso(currentIsoUtc, days) {
+    if (currentIsoUtc == null || String(currentIsoUtc).trim() === '') return null;
+    const cur = new Date(currentIsoUtc);
+    if (!Number.isFinite(cur.getTime())) return null;
+    const n = Number(days);
+    if (!Number.isFinite(n)) return null;
+    return new Date(cur.getTime() + n * 86400000).toISOString();
+}
+
+/**
+ * @param {string} proposedIsoUtc
+ * @param {string|null|undefined} currentReviewDeadlineIso
+ * @param {number} days
+ */
+export function validateModeratorExtendPresetDays(proposedIsoUtc, currentReviewDeadlineIso, days) {
+    if (!EXTEND_DEADLINE_DAY_CHOICES.includes(Number(days))) {
+        return { ok: false, message: 'Chọn thời gian gia hạn 3, 5 hoặc 7 ngày.' };
+    }
+    const expected = addUtcDaysToDeadlineIso(currentReviewDeadlineIso, days);
+    if (!expected) {
+        return { ok: false, message: 'Không tải được hạn duyệt hiện tại — không thể tính gia hạn.' };
+    }
+    const base = validateModeratorExtendProposedDeadline(proposedIsoUtc, currentReviewDeadlineIso);
+    if (!base.ok) return base;
+    const proposedMs = new Date(proposedIsoUtc).getTime();
+    const expectedMs = new Date(expected).getTime();
+    const tolMs = 3600000;
+    if (Math.abs(proposedMs - expectedMs) > tolMs) {
+        return { ok: false, message: 'Hạn đề xuất không khớp lựa chọn gia hạn.' };
+    }
+    return { ok: true };
+}
+
 const TIME_STATUS_RANK = {
     ontime: 0,
     warning: 1,

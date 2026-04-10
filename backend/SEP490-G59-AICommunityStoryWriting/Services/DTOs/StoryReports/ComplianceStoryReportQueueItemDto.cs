@@ -48,4 +48,7 @@ public class ComplianceStoryReportQueueItemDto
 
     /// <summary>Đã gửi yêu cầu admin gỡ lock truyện — chặn mọi thao tác compliance trên truyện này.</summary>
     public bool HasPendingLockReleaseRequest { get; set; }
+
+    /// <summary>Đã có đơn chặn tài khoản (BAN_USER) được admin chấp nhận (luồng báo cáo truyện).</summary>
+    public bool HasApprovedAdminBanRequest { get; set; }
 }

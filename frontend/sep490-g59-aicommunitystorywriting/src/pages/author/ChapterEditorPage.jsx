@@ -97,9 +97,20 @@ function isExampleOutline(scenes) {
 }
 
 /** Dàn ý: đổi "Scene 1/2/3" thành "Bối cảnh 1/2/3"; nếu là JSON scenes thì render Bối cảnh 1, 2, 3... (bỏ hướng dẫn/ví dụ) */
+function normalizeEscapedNewlines(text) {
+    if (typeof text !== 'string') return text ?? '';
+    return text
+        .replace(/\\r\\n/g, '\n')
+        .replace(/\\n/g, '\n')
+        .replace(/\\t/g, '\t');
+}
+
 function formatOutlineForDisplay(outline) {
     if (!outline || !outline.trim()) return '';
-    const raw = outline.trim();
+    const raw = normalizeEscapedNewlines(outline)
+        .replace(/(^|\n)(\d+)\.(\S)/g, '$1$2. $3')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
     const toParse = extractOutlineJson(raw);
     try {
         const parsed = JSON.parse(toParse);
@@ -108,9 +119,9 @@ function formatOutlineForDisplay(outline) {
             if (isExampleOutline(scenes)) return '';
             const joined = scenes
                 .map((s, i) => {
-                    const title = s?.title ?? s?.Title ?? '';
-                    const summary = s?.summary ?? s?.Summary ?? '';
-                    const characters = s?.characters ?? s?.Characters ?? '';
+                    const title = normalizeEscapedNewlines(s?.title ?? s?.Title ?? '');
+                    const summary = normalizeEscapedNewlines(s?.summary ?? s?.Summary ?? '');
+                    const characters = normalizeEscapedNewlines(s?.characters ?? s?.Characters ?? '');
                     const parts = [];
                     if (title) parts.push(title);
                     if (summary) parts.push(summary);
@@ -395,7 +406,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             .finally(() => setVersionsForChapterLoaded(true));
     }, [isVersionMode, sourceChapterForVersion?.id, sourceChapterForVersion?.Id, editingVersion]);
 
-    // Load điều kiện gửi xuất bản version — đồng bộ ChapterListManager (chương trước đã published/rejected, không có version pending ở chương trước)
+    // Load điều kiện gửi xuất bản version — đồng bộ ChapterListManager (chương trước đã published, không có version pending ở chương trước)
     useEffect(() => {
         if (!isVersionMode || !storyId || !sourceChapterForVersion) {
             setVersionPublishEligibility({ prevSequentialOk: false, prevHasPendingVersion: false });
@@ -422,12 +433,12 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 }
                 const prevChapterId = prevChapter.id ?? prevChapter.Id;
                 const prevSt = String(prevChapter.status ?? prevChapter.Status ?? '').toLowerCase();
-                const prevProcessed = prevSt === 'published' || prevSt === 'rejected';
+                const prevPublished = prevSt === 'published';
                 getChapterVersions(prevChapterId)
                     .then((verList) => {
                         const vArr = Array.isArray(verList) ? verList : [];
                         const prevHasPendingVersion = vArr.some((v) => ((v.status ?? v.Status ?? '').toString().toLowerCase() === 'pending_review'));
-                        const prevSequentialOk = prevProcessed && !prevHasPendingVersion;
+                        const prevSequentialOk = prevPublished && !prevHasPendingVersion;
                         setVersionPublishEligibility({ prevSequentialOk, prevHasPendingVersion });
                         setVersionEligibilityLoaded(true);
                     })
@@ -481,12 +492,12 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 }
                 const prevChapterId = prevChapter.id ?? prevChapter.Id;
                 const prevSt = String(prevChapter.status ?? prevChapter.Status ?? '').toLowerCase();
-                const prevProcessed = prevSt === 'published' || prevSt === 'rejected';
+                const prevPublished = prevSt === 'published';
                 try {
                     const prevVers = await getChapterVersions(prevChapterId);
                     const pv = Array.isArray(prevVers) ? prevVers : [];
                     const prevHasPendingVersion = pv.some((v) => String(v.status ?? v.Status ?? '').toLowerCase() === 'pending_review');
-                    const prevSequentialOk = prevProcessed && !prevHasPendingVersion;
+                    const prevSequentialOk = prevPublished && !prevHasPendingVersion;
                     setNormalPublishEligibility({ loaded: true, prevSequentialOk, selfHasPendingVersion });
                 } catch {
                     setNormalPublishEligibility({ loaded: true, prevSequentialOk: false, selfHasPendingVersion });
@@ -756,7 +767,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 : editingVersionIsPendingReview
                     ? 'Phiên bản này đang chờ duyệt, không thể gửi lại.'
                     : !canSubmitForPublishVersion
-                        ? `Chỉ được gửi khi chương ${chapterNumberForVersion - 1} đã có kết quả duyệt hoặc từ chối duyệt.`
+                        ? `Chỉ được gửi khi chương ${chapterNumberForVersion - 1} đã xuất bản (đã duyệt).`
                         : chapterIsPendingReviewVersion
                             ? 'Chương gốc đang chờ duyệt, không thể gửi phiên bản.'
                             : hasOtherPendingVersion
@@ -780,7 +791,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 : normalPublishEligibility.selfHasPendingVersion
                     ? 'Đã có phiên bản đang chờ duyệt, không thể gửi chương gốc.'
                     : !normalPublishEligibility.prevSequentialOk
-                        ? `Chỉ được gửi khi chương ${(Number(chapterData.number) || 1) - 1} đã có kết quả duyệt hoặc từ chối duyệt.`
+                        ? `Chỉ được gửi khi chương ${(Number(chapterData.number) || 1) - 1} đã xuất bản (đã duyệt).`
                         : 'Gửi chương lên để duyệt xuất bản';
 
     const validateChapterNumber = (num) => {
@@ -1315,7 +1326,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                                 const word = it.wordOrPhrase ?? it.WordOrPhrase ?? '';
                                                                 const sug = it.suggestion ?? it.Suggestion ?? '';
                                                                 const ctx = it.context ?? it.Context ?? '';
-                                                                const pos = findIssuePosition(word);
                                                                 return (
                                                                     <div key={idx} style={{ padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
                                                                         <div style={{ fontSize: '0.875rem', color: '#0f172a' }}>
@@ -1340,16 +1350,9 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                                                 <span style={{ fontWeight: 800 }}>Câu/dòng chứa lỗi</span>
                                                                                 <div style={{ marginTop: '4px' }}>{ctx}</div>
                                                                             </div>
-                                                                        ) : pos ? (
-                                                                            <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#475569' }}>
-                                                                                <span style={{ fontWeight: 800 }}>Vị trí</span>:
-                                                                                {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
-                                                                                {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
-                                                                                {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
-                                                                            </div>
                                                                         ) : (
                                                                             <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#94a3b8' }}>
-                                                                                Không có câu trích; không xác định được vị trí trong nội dung hiện tại.
+                                                                                Không có đoạn trích chứa từ sai cho mục này.
                                                                             </div>
                                                                         )}
                                                                     </div>
@@ -1375,7 +1378,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                                 const type = it.type ?? it.Type ?? '';
                                                                 const desc = it.description ?? it.Description ?? '';
                                                                 const quote = it.quote ?? it.Quote ?? '';
-                                                                const pos = findIssuePosition(quote);
                                                                 return (
                                                                     <div key={idx} style={{ padding: '10px 12px', border: '1px solid #fee2e2', borderRadius: '10px', backgroundColor: '#fff7ed' }}>
                                                                         <div style={{ fontSize: '0.875rem', color: '#9a3412' }}>
@@ -1384,19 +1386,15 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                                         <div style={{ fontSize: '0.875rem', color: '#9a3412', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
                                                                             {desc || '—'}
                                                                         </div>
-                                                                        {pos ? (
-                                                                            <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12' }}>
-                                                                                <span style={{ fontWeight: 800 }}>Vị trí</span>:
-                                                                                {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
-                                                                                {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
-                                                                                {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
-                                                                            </div>
-                                                                        ) : null}
                                                                         {quote ? (
                                                                             <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12', backgroundColor: '#fffbeb', border: '1px dashed #fdba74', borderRadius: '10px', padding: '8px 10px', whiteSpace: 'pre-wrap' }}>
                                                                                 {quote}
                                                                             </div>
-                                                                        ) : null}
+                                                                        ) : (
+                                                                            <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12' }}>
+                                                                                Không có đoạn trích chứa từ cấm cho mục này.
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 );
                                                             })}
@@ -1533,7 +1531,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                     >
                         <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid #e5e7eb' }}>
                             <h3 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#111827' }}>
-                                AI gợi ý ý tưởng
+                                AI gợi ý
                             </h3>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
@@ -1583,11 +1581,10 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                         }, 2000);
                                                     }}
                                                     title={copiedSuggestionIndex === index ? 'Đã copy' : 'Copy nhanh'}
-                                                    className={`absolute top-2 right-2 p-1 rounded-lg transition-colors duration-200 ${
-                                                        copiedSuggestionIndex === index
-                                                            ? 'bg-emerald-100 text-emerald-700'
-                                                            : 'text-slate-600 hover:bg-slate-200'
-                                                    }`}
+                                                    className={`absolute top-2 right-2 p-1 rounded-lg transition-colors duration-200 ${copiedSuggestionIndex === index
+                                                        ? 'bg-emerald-100 text-emerald-700'
+                                                        : 'text-slate-600 hover:bg-slate-200'
+                                                        }`}
                                                 >
                                                     {copiedSuggestionIndex === index ? (
                                                         <Check size={16} strokeWidth={2.5} />
@@ -1728,8 +1725,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                     Bạn đang chọn chế độ không nhập định hướng. AI sẽ tự sinh nội dung theo ngữ cảnh hiện tại của truyện.
                                 </div>
                             )}
-                            <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', fontSize: '0.8125rem', color: '#9a3412' }}>
-                                Khi nhập định hướng tùy chỉnh, tác giả phải chịu trách nhiệm với nội dung định hướng đã nhập và nội dung AI sinh ra theo định hướng đó.
+                            <div style={{ marginTop: '0.75rem', padding: '10px 12px', borderRadius: '8px', backgroundColor: '#fff7ed', border: '1px solid #fed7aa', fontSize: '0.6875rem', color: '#9a3412' }}>
+                                Lưu ý: Khi nhập định hướng tùy chỉnh, tác giả phải chịu trách nhiệm với nội dung định hướng đã nhập và nội dung AI sinh ra theo định hướng đó.
                             </div>
                         </div>
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
@@ -1803,12 +1800,23 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             </h3>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
-                            {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
+                            {(() => {
+                                const ideaBlock = (coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ?? '').toString().trim();
+                                const hasContent = ((coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '').toString().trim().length > 0)
+                                    || (((coCreateResult.outline ?? coCreateResult.Outline) || '').toString().trim().length > 0);
+                                const hardStop = ideaBlock.length > 0 && !hasContent;
+                                return hardStop;
+                            })() ? (
                                 <div style={{ padding: '1rem', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b' }}>
                                     {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback}
                                 </div>
                             ) : (
                                 <>
+                                    {((coCreateResult.ideaConflictWarning ?? coCreateResult.IdeaConflictWarning ?? coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback) || '').toString().trim() ? (
+                                        <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                                            {coCreateResult.ideaConflictWarning ?? coCreateResult.IdeaConflictWarning ?? coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback}
+                                        </div>
+                                    ) : null}
                                     {coCreateContextWarning ? (
                                         <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
                                             {coCreateContextWarning}
@@ -1820,6 +1828,16 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                             <div style={{ fontSize: '0.875rem', color: '#374151', whiteSpace: 'pre-wrap' }}>
                                                 {formatOutlineForDisplay(coCreateResult.outline ?? coCreateResult.Outline)}
                                             </div>
+                                            {(() => {
+                                                const chars = coCreateResult.charactersInvolved ?? coCreateResult.CharactersInvolved ?? [];
+                                                if (!Array.isArray(chars) || chars.length === 0) return null;
+                                                return (
+                                                    <div style={{ marginTop: '0.75rem' }}>
+                                                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Nhân vật tham gia</div>
+                                                        <div style={{ fontSize: '0.875rem', color: '#374151' }}>{chars.join(', ')}</div>
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
                                     )}
                                     {(coCreateResult.reviewFeedback ?? coCreateResult.ReviewFeedback) && (
@@ -1880,7 +1898,12 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             )}
                         </div>
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                            {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
+                            {(() => {
+                                const ideaBlock = (coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ?? '').toString().trim();
+                                const hasContent = ((coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '').toString().trim().length > 0)
+                                    || (((coCreateResult.outline ?? coCreateResult.Outline) || '').toString().trim().length > 0);
+                                return ideaBlock.length > 0 && !hasContent;
+                            })() ? (
                                 <button
                                     type="button"
                                     onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); setCoCreateContextWarning(null); }}
@@ -2021,10 +2044,10 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             {/* Khi tạo/sửa version: không hiển thị Số version, Chương gốc, Chế độ sáng tác. Chỉ hiển thị khi tạo/sửa chương thường. */}
                             {!isVersionMode && (
                                 <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '1rem' }}>
-                                        <div>
-                                            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
-                                                Chương số <span style={{ color: '#ef4444' }}>*</span>
-                                            </label>
+                                    <div>
+                                        <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 500, color: '#6b7280', marginBottom: '0.5rem' }}>
+                                            Chương số <span style={{ color: '#ef4444' }}>*</span>
+                                        </label>
                                         <input
                                             type="number"
                                             value={chapterData.number}
@@ -2388,7 +2411,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         <>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
+                                                AI gợi ý{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                             </span>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
@@ -2403,7 +2426,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         <>
                                             <button type="button" onClick={() => handleAISuggestion('paragraph')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý ý tưởng{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
+                                                AI gợi ý{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                             </button>
                                             <button
                                                 type="button"

@@ -99,6 +99,36 @@ public class ComplianceCommentReportsController : ControllerBase
         }
     }
 
+    /// <summary>Bật/tắt tạm khóa quyền viết (mặc định user của comment; có thể gửi TargetUserId), không qua đơn admin.</summary>
+    [HttpPost("comments/{commentId:guid}/author-writing-suspended")]
+    public async Task<IActionResult> SetAuthorWritingSuspended(
+        Guid commentId,
+        [FromBody] SetComplianceCommentAuthorWritingSuspendedRequestDto? body)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue) return Unauthorized(new { message = "Cần đăng nhập." });
+        if (body == null) return BadRequest(new { message = "Body is required." });
+        var actorIsAdmin = User.IsInRole("ADMIN");
+        try
+        {
+            await _commentReportService.SetAuthorWritingSuspendedByComplianceAsync(
+                commentId, userId.Value, body, actorIsAdmin);
+            return Ok(new { message = "Đã cập nhật." });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = "Lỗi khi cập nhật quyền viết.", error = ex.Message });
+        }
+    }
+
     [Authorize(Roles = "COMPLIANCE")]
     [HttpPost("comments/{commentId:guid}/admin-action-requests")]
     public async Task<IActionResult> RequestAdminAction(Guid commentId, [FromBody] CreateComplianceAdminActionRequestDto? body)

@@ -45,11 +45,20 @@ namespace Services.Implementations
             var tt = NormalizeTargetType(targetType);
             var assigned = ReviewAssignmentDAO.IsAssignedTo(tt, targetId, userId);
             DateTime? deadline = null;
+            bool canSubmitExtend = false;
             if (assigned)
             {
                 var info = ReviewAssignmentDAO.GetClaimInfo(tt, targetId);
                 if (info.HasValue)
+                {
                     deadline = info.Value.ReviewDeadlineAt ?? info.Value.AssignedAt.AddDays(7);
+                    if (info.Value.AssigneeId == userId)
+                    {
+                        var extCount = ReviewEscalationDAO.CountExtendDeadlineRequestsForSenderSince(
+                            tt, targetId, userId, info.Value.AssignedAt);
+                        canSubmitExtend = extCount < 1;
+                    }
+                }
             }
 
             var authorSubmitted = GetAuthorSubmissionUtcForReviewTarget(tt, targetId);
@@ -65,7 +74,8 @@ namespace Services.Implementations
                 AuthorSubmittedAtUtc = ApiDateTime.AsUtcForJson(authorSubmitted),
                 PolicySuggestedDeadlineAt = ApiDateTime.AsUtcForJson(policySuggested),
                 TimeStatus = ModeratorReviewSlaHelper.ComputeSlaTimeStatus(authorSubmitted, effectiveFallback),
-                HasPendingEscalation = ReviewEscalationDAO.HasPendingForTarget(tt, targetId)
+                HasPendingEscalation = ReviewEscalationDAO.HasPendingForTarget(tt, targetId),
+                CanSubmitExtendDeadlineRequest = canSubmitExtend
             };
         }
 
@@ -109,18 +119,25 @@ namespace Services.Implementations
             DateTime? proposed = null;
             if (kind == ReviewEscalationDAO.KindExtend)
             {
+                var claimForExtend = ReviewAssignmentDAO.GetClaimInfo(tt, dto.TargetId);
+                if (!claimForExtend.HasValue || claimForExtend.Value.AssigneeId != senderId)
+                    throw new InvalidOperationException("Chỉ moderator đang nhận duyệt mục này mới được xin gia hạn.");
+                var extendUsed = ReviewEscalationDAO.CountExtendDeadlineRequestsForSenderSince(
+                    tt, dto.TargetId, senderId, claimForExtend.Value.AssignedAt);
+                if (extendUsed >= 1)
+                    throw new InvalidOperationException(
+                        "Bạn chỉ được gửi tối đa một đơn xin gia hạn duyệt trong phiên nhận duyệt hiện tại. Có thể chọn hủy nhận duyệt (admin xử lý) rồi để moderator khác nhận, hoặc liên hệ admin.");
+
                 if (!dto.ProposedDeadlineAt.HasValue)
                     throw new ArgumentException("Gia hạn cần gửi proposedDeadlineAt.");
                 proposed = NormalizeToUtc(dto.ProposedDeadlineAt.Value);
                 ValidateNewDeadline(proposed.Value);
-                var claim = ReviewAssignmentDAO.GetClaimInfo(tt, dto.TargetId);
-                if (claim.HasValue)
-                {
-                    var currentDeadline = claim.Value.ReviewDeadlineAt ?? claim.Value.AssignedAt.AddDays(7);
-                    currentDeadline = NormalizeToUtc(currentDeadline);
-                    if (proposed.Value <= currentDeadline)
-                        throw new ArgumentException("Hạn đề xuất gia hạn phải muộn hơn hạn duyệt hiện tại của bạn (hạn đã chọn khi nhận duyệt).");
-                }
+                var currentDeadline = claimForExtend.Value.ReviewDeadlineAt ?? claimForExtend.Value.AssignedAt.AddDays(7);
+                currentDeadline = NormalizeToUtc(currentDeadline);
+                if (proposed.Value <= currentDeadline)
+                    throw new ArgumentException("Hạn đề xuất gia hạn phải muộn hơn hạn duyệt hiện tại của bạn (hạn đã chọn khi nhận duyệt).");
+                if (!MatchesModeratorExtendIncrementDays(currentDeadline, proposed.Value))
+                    throw new ArgumentException("Gia hạn chỉ được chọn thêm 3, 5 hoặc 7 ngày so với hạn duyệt hiện tại.");
             }
 
             var row = new review_escalation_requests
@@ -566,6 +583,18 @@ namespace Services.Implementations
                 throw new ArgumentException("Hạn mới phải sau ít nhất 24 giờ kể từ hiện tại.");
             if (deadlineUtc > now.AddDays(MaxDeadlineDaysAhead))
                 throw new ArgumentException($"Hạn không được vượt quá {MaxDeadlineDaysAhead} ngày.");
+        }
+
+        /// <summary>FE chỉ gửi hạn = hạn hiện tại + 3 / 5 / 7 ngày (UTC); dung sai 1 giờ so với AddDays.</summary>
+        private static bool MatchesModeratorExtendIncrementDays(DateTime currentUtc, DateTime proposedUtc)
+        {
+            foreach (var n in new[] { 3, 5, 7 })
+            {
+                var expected = currentUtc.AddDays(n);
+                if (Math.Abs((proposedUtc - expected).TotalHours) <= 1.0)
+                    return true;
+            }
+            return false;
         }
 
         private static InvalidOperationException InvalidOp(string m) => new(m);

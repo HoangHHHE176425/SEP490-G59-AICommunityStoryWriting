@@ -44,6 +44,9 @@ namespace Repositories.Implementations
         public async Task DeleteRefreshToken(string refreshToken)
             => await UserDAO.Instance.DeleteRefreshToken(_context, refreshToken);
 
+        public async Task DeleteRefreshTokensByUserId(Guid userId)
+            => await UserDAO.Instance.DeleteRefreshTokensByUserId(_context, userId);
+
         public Task<(IEnumerable<users> Items, int TotalCount)> GetUsersAsync(AdminUserQuery query)
             => UserDAO.Instance.GetUsersAsync(_context, query);
 

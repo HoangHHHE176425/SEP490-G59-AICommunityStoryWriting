@@ -199,7 +199,7 @@
                         return `
                         <div class="col-sm-6 col-lg-4 col-xl-3">
                             <div class="card h-100 shadow-sm">
-                                ${s.coverImage ? `<img src="http://localhost:5000${s.coverImage}" class="card-img-top" style="height:170px; object-fit:cover;">` : ''}
+                                ${s.coverImage ? `<img src="${resolveMediaSrc(s.coverImage)}" class="card-img-top" style="height:170px; object-fit:cover;">` : ''}
                                 <div class="card-body">
                                     <div class="fw-bold mb-1">${s.title}</div>
                                     <div class="text-muted small mb-2">${(s.summary || '').substring(0, 90)}${(s.summary || '').length > 90 ? '...' : ''}</div>

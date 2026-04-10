@@ -77,7 +77,10 @@ export function StoryInfoForm({
                                 }}
                             />
                             <button
-                                onClick={() => onChange('cover', '')}
+                                onClick={() => {
+                                    onChange('cover', '');
+                                    onChange('coverFile', null);
+                                }}
                                 disabled={readOnlyFields}
                                 style={{
                                     position: 'absolute',
@@ -351,7 +354,7 @@ export function StoryInfoForm({
                             value={formData.note}
                             onChange={(e) => onChange('note', e.target.value)}
                             disabled={readOnlyFields}
-                            placeholder="Nhập mô tả truyện"
+                            placeholder="Nhập mô tả truyện (tối thiểu 50 từ để mô tả rõ nội dung, bối cảnh và điểm nổi bật)"
                             rows={4}
                             style={{
                                 width: '100%',

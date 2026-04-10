@@ -1,3 +1,4 @@
+using System.Net;
 using BusinessObjects.Entities;
 using BusinessObjects.StoryReporting;
 using BusinessObjects;
@@ -25,15 +26,18 @@ public class StoryReportService : IStoryReportService
     private readonly IUserLookup _userLookup;
     private readonly IUserActivityLookup _userActivityLookup;
     private readonly INotificationHubNotifier? _notificationHubNotifier;
+    private readonly IEmailService? _emailService;
 
     public StoryReportService(
         IUserLookup userLookup,
         IUserActivityLookup userActivityLookup,
-        INotificationHubNotifier? notificationHubNotifier = null)
+        INotificationHubNotifier? notificationHubNotifier = null,
+        IEmailService? emailService = null)
     {
         _userLookup = userLookup;
         _userActivityLookup = userActivityLookup;
         _notificationHubNotifier = notificationHubNotifier;
+        _emailService = emailService;
     }
 
     public IReadOnlyList<StoryReportReasonOptionDto> GetReasonOptions()
@@ -348,10 +352,12 @@ public class StoryReportService : IStoryReportService
             var storyIdsOnPage = slice.Select(x => x.StoryId).Distinct().ToList();
             var pendingLockStories = ComplianceReportLockRequestDAO.ListPendingStoryTargetIds(storyIdsOnPage);
             var pendingAdminStories = ComplianceAdminActionRequestDAO.ListStoryIdsWithPendingStoryComplianceAdminAction(storyIdsOnPage);
+            var approvedBanStories = ComplianceAdminActionRequestDAO.ListStoryIdsWithApprovedBanUserStoryCompliance(storyIdsOnPage);
             foreach (var q in slice)
             {
                 q.HasPendingLockReleaseRequest = pendingLockStories.Contains(q.StoryId);
                 q.HasPendingAdminActionRequest = pendingAdminStories.Contains(q.StoryId);
+                q.HasApprovedAdminBanRequest = approvedBanStories.Contains(q.StoryId);
             }
             EnrichAuthorModerationForQueueItems(slice);
 
@@ -454,10 +460,12 @@ public class StoryReportService : IStoryReportService
         var storyIdsFlat = sliceR.Select(x => x.StoryId).Distinct().ToList();
         var pendingLockFlat = ComplianceReportLockRequestDAO.ListPendingStoryTargetIds(storyIdsFlat);
         var pendingAdminFlat = ComplianceAdminActionRequestDAO.ListStoryIdsWithPendingStoryComplianceAdminAction(storyIdsFlat);
+        var approvedBanFlat = ComplianceAdminActionRequestDAO.ListStoryIdsWithApprovedBanUserStoryCompliance(storyIdsFlat);
         foreach (var row in sliceR)
         {
             row.HasPendingLockReleaseRequest = pendingLockFlat.Contains(row.StoryId);
             row.HasPendingAdminActionRequest = pendingAdminFlat.Contains(row.StoryId);
+            row.HasApprovedAdminBanRequest = approvedBanFlat.Contains(row.StoryId);
         }
         EnrichAuthorModerationForStoryRows(sliceR);
 
@@ -839,6 +847,38 @@ public class StoryReportService : IStoryReportService
         }
     }
 
+    private static bool IsAuthorWritingSuspensionStillActive(DateTime? untilUtc)
+    {
+        if (!untilUtc.HasValue) return false;
+        var u = untilUtc.Value;
+        if (u.Kind == DateTimeKind.Unspecified)
+            u = DateTime.SpecifyKind(u, DateTimeKind.Utc);
+        return u.ToUniversalTime() > DateTime.UtcNow;
+    }
+
+    /// <summary>Kiểm tra trước khi compliance đóng hết ticket truyện với DISMISSED.</summary>
+    private static void EnsureComplianceMayDismissOpenStoryReports(Guid storyId)
+    {
+        if (ComplianceAdminActionRequestDAO.ListStoryIdsWithApprovedBanUserStoryCompliance(new[] { storyId }).Contains(storyId))
+            throw new InvalidOperationException(
+                "Đã có yêu cầu chặn tài khoản được quản trị viên chấp nhận; bắt buộc chọn «Đã xử lý thành công» (RESOLVED).");
+
+        var st = StoryDAO.GetById(storyId) ?? throw new InvalidOperationException("Không tìm thấy truyện.");
+        if (st.comments_disabled)
+            throw new InvalidOperationException(
+                "Bình luận truyện vẫn đang bị khóa; hãy mở lại bình luận trước khi chọn «Không xử lý được».");
+        if (st.compliance_hidden)
+            throw new InvalidOperationException(
+                "Truyện vẫn đang ẩn khỏi người dùng thường; hãy hiển thị lại trước khi chọn «Không xử lý được».");
+        if (st.author_id is Guid aid)
+        {
+            var snap = UserDAO.GetUsersModerationSnapshot(new[] { aid });
+            if (snap.TryGetValue(aid, out var m) && IsAuthorWritingSuspensionStillActive(m.AuthorWritingSuspendedUntil))
+                throw new InvalidOperationException(
+                    "Tác giả vẫn đang bị tạm khóa quyền viết; hãy mở lại quyền viết trước khi chọn «Không xử lý được».");
+        }
+    }
+
     private static void EnsureComplianceStoryActPermission(Guid storyId, Guid userId, bool actorIsAdmin)
     {
         if (actorIsAdmin) return;
@@ -889,6 +929,32 @@ public class StoryReportService : IStoryReportService
             hidden
                 ? "Xử lý vi phạm viên đã ẩn truyện của bạn khỏi danh sách công khai."
                 : "Xử lý vi phạm viên đã hiển thị lại truyện của bạn trên danh sách công khai.");
+        return Task.CompletedTask;
+    }
+
+    private static DateTime FarFutureAuthorWritingSuspensionUtc() => DateTime.UtcNow.AddYears(100);
+
+    public Task SetAuthorWritingSuspendedByComplianceAsync(Guid storyId, Guid actorId, bool suspended, bool actorIsAdmin)
+    {
+        EnsureNotBlockedByPendingStoryLockRelease(storyId, actorIsAdmin);
+        EnsureComplianceStoryActPermission(storyId, actorId, actorIsAdmin);
+        var st = StoryDAO.GetById(storyId) ?? throw new InvalidOperationException("Story not found.");
+        var authorId = st.author_id ?? throw new InvalidOperationException("Truyện không có tác giả.");
+        if (suspended && UserDAO.IsAccountBanned(authorId))
+            throw new InvalidOperationException(
+                "Tài khoản tác giả đã bị chặn; không áp dụng tạm khóa quyền viết.");
+
+        UserDAO.SetAuthorWritingSuspendedUntil(authorId, suspended ? FarFutureAuthorWritingSuspensionUtc() : null);
+        ViolationLogDAO.Insert(actorId, authorId, "USER", authorId,
+            suspended ? "SUSPEND_AUTHOR_WRITING" : "AUTHOR_WRITING_ENABLED",
+            suspended ? "Tạm khóa quyền viết (compliance)." : "Đã mở lại quyền viết (compliance).", null);
+        _ = NotifyStoryAuthorComplianceActionAsync(
+            st,
+            actorId,
+            suspended ? "Tạm khóa quyền viết" : "Đã mở lại quyền viết",
+            suspended
+                ? "Xử lý vi phạm viên đã tạm khóa quyền đăng truyện và chương của bạn."
+                : "Xử lý vi phạm viên đã cho phép bạn đăng truyện và chương trở lại.");
         return Task.CompletedTask;
     }
 
@@ -947,35 +1013,15 @@ public class StoryReportService : IStoryReportService
 
         var kind = (dto.RequestKind ?? "").Trim().ToUpperInvariant();
         if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting)
-        {
-            var reason = dto.Message?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(reason))
-                throw new ArgumentException("Bắt buộc nhập lý do đề xuất khi yêu cầu tạm đình chỉ quyền viết.");
-            if (!dto.ProposedSuspendUntilUtc.HasValue)
-                throw new ArgumentException("Cần ProposedSuspendUntilUtc hợp lệ (UTC).");
-            var until = dto.ProposedSuspendUntilUtc.Value;
-            if (until.Kind == DateTimeKind.Unspecified)
-                until = DateTime.SpecifyKind(until, DateTimeKind.Utc);
-            else if (until.Kind == DateTimeKind.Local)
-                until = until.ToUniversalTime();
-            if (until < DateTime.UtcNow.AddDays(1))
-                throw new ArgumentException("Thời hạn đình chỉ phải tối thiểu 1 ngày kể từ hiện tại.");
-            dto.ProposedSuspendUntilUtc = until;
-        }
+            throw new InvalidOperationException(
+                "Tạm khóa quyền viết do compliance bật/tắt trực tiếp (POST .../author-writing-suspended); không gửi đơn lên admin.");
 
         if (UserDAO.IsAccountBanned(target))
             throw new InvalidOperationException(
-                "Tài khoản này đã bị chặn; không thể gửi thêm yêu cầu chặn tài khoản hoặc tạm đình chỉ quyền viết.");
+                "Tài khoản này đã bị chặn; không thể gửi yêu cầu chặn tài khoản.");
 
-        if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting && UserDAO.IsAuthorWritingSuspended(target))
-        {
-            var suspUntil = UserDAO.GetAuthorWritingSuspendedUntilUtc(target);
-            var label = suspUntil.HasValue
-                ? ApiDateTime.AsUtcForJson(suspUntil.Value).ToString("dd/MM/yyyy HH:mm") + " UTC"
-                : "—";
-            throw new InvalidOperationException(
-                $"Tác giả đang bị tạm đình chỉ quyền viết (đến {label}); không thể gửi đơn đình chỉ mới cho đến khi hết hạn.");
-        }
+        if (string.Equals(kind, ComplianceAdminActionRequestDAO.KindBanUser, StringComparison.OrdinalIgnoreCase))
+            ComplianceBanUserReasonRules.EnsureBanUserMessageOrThrow(dto.Message);
 
         var id = ComplianceAdminActionRequestDAO.CreatePending(
             storyId,
@@ -1022,13 +1068,13 @@ public class StoryReportService : IStoryReportService
         return Task.FromResult<IReadOnlyList<ComplianceAdminActionRequestListItemDto>>(list);
     }
 
-    public Task AdminResolveComplianceAdminActionRequestAsync(Guid requestId, Guid adminId, AdminResolveComplianceAdminActionRequestDto dto)
+    public async Task AdminResolveComplianceAdminActionRequestAsync(Guid requestId, Guid adminId, AdminResolveComplianceAdminActionRequestDto dto)
     {
         if (requestId == Guid.Empty)
             throw new InvalidOperationException("Không tìm thấy comment.");
 
-        if (dto.AdminNote != null && dto.AdminNote.Length > 200)
-            throw new ArgumentException("Ký tự quá dài: mô tả tối đa 200 ký tự.");
+        if (dto.AdminNote != null && dto.AdminNote.Length > 2000)
+            throw new ArgumentException("Ký tự quá dài: mô tả tối đa 2000 ký tự.");
 
         var decision = (dto.Decision ?? "").Trim().ToUpperInvariant();
         if (decision is not ("APPROVE" or "REJECT"))
@@ -1056,7 +1102,7 @@ public class StoryReportService : IStoryReportService
         {
             ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId,
                 ComplianceAdminActionRequestDAO.StatusRejected, dto.AdminNote, "REJECT");
-            return Task.CompletedTask;
+            return;
         }
 
         var kind = (row.request_kind ?? "").Trim().ToUpperInvariant();
@@ -1068,7 +1114,8 @@ public class StoryReportService : IStoryReportService
                 dto.AdminNote ?? row.message, "ADMIN_APPROVE_COMPLIANCE_REQUEST");
             ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId,
                 ComplianceAdminActionRequestDAO.StatusApproved, dto.AdminNote, "BAN_USER");
-            return Task.CompletedTask;
+            await TrySendAccountBannedByAdminApprovalEmailAsync(row.target_user_id, story.title);
+            return;
         }
 
         if (kind == ComplianceAdminActionRequestDAO.KindSuspendAuthorWriting)
@@ -1086,10 +1133,39 @@ public class StoryReportService : IStoryReportService
                 dto.AdminNote ?? row.message, until.Value.ToString("O"));
             ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId,
                 ComplianceAdminActionRequestDAO.StatusApproved, dto.AdminNote, "SUSPEND_WRITING");
-            return Task.CompletedTask;
+            return;
         }
 
         throw new InvalidOperationException("Loại yêu cầu không hỗ trợ.");
+    }
+
+    /// <summary>Sau khi admin duyệt đơn BAN_USER — gửi email best-effort, không làm fail nghiệp vụ cấm.</summary>
+    private async Task TrySendAccountBannedByAdminApprovalEmailAsync(Guid targetUserId, string? storyTitle)
+    {
+        if (_emailService == null) return;
+        try
+        {
+            var to = UserDAO.GetUserEmail(targetUserId);
+            if (string.IsNullOrWhiteSpace(to)) return;
+
+            var safeTitle = string.IsNullOrWhiteSpace(storyTitle)
+                ? "truyện liên quan"
+                : WebUtility.HtmlEncode(storyTitle.Trim());
+
+            var body =
+                "<p>Xin chào,</p>" +
+                "<p>Quản trị viên đã <b>phê duyệt</b> yêu cầu xử lý vi phạm từ bộ phận tuân thủ; " +
+                "<b>tài khoản của bạn đã bị cấm</b> sử dụng nền tảng AICommunityStoryWriting.</p>" +
+                $"<p>Nội dung liên quan: truyện «{safeTitle}».</p>" +
+                "<p>Nếu bạn cho rằng đây là nhầm lẫn, vui lòng liên hệ bộ phận hỗ trợ qua kênh chính thức của nền tảng.</p>" +
+                "<p>Trân trọng,<br/>AICommunityStoryWriting</p>";
+
+            await _emailService.SendEmailAsync(to.Trim(), "Thông báo: tài khoản đã bị cấm", body);
+        }
+        catch
+        {
+            // best effort
+        }
     }
 
     private static ComplianceAdminActionRequestListItemDto MapComplianceAdminActionRequest(compliance_admin_action_requests x)
@@ -1266,6 +1342,8 @@ public class StoryReportService : IStoryReportService
         if (!actorIsAdmin && ComplianceAdminActionRequestDAO.HasPendingStoryComplianceAdminAction(storyId))
             throw new InvalidOperationException("Đang có yêu cầu gửi admin chờ xử lý, không thể đóng hết ticket báo cáo truyện này.");
         var st = NormalizeComplianceResolveStatus(dto?.Status);
+        if (string.Equals(st, "DISMISSED", StringComparison.OrdinalIgnoreCase))
+            EnsureComplianceMayDismissOpenStoryReports(storyId);
         List<Guid> reporterIds;
         var hasOpenReports = false;
         using (var context = new StoryPlatformDbContext())

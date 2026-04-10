@@ -15,6 +15,7 @@ namespace Repositories.Interfaces
         Task AddRefreshToken(auth_tokens token);
         Task<auth_tokens?> GetRefreshToken(string refreshToken);
         Task DeleteRefreshToken(string refreshToken);
+        Task DeleteRefreshTokensByUserId(Guid userId);
 
         // Admin
         Task<(IEnumerable<users> Items, int TotalCount)> GetUsersAsync(AdminUserQuery query);

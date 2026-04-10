@@ -22,6 +22,7 @@ export function translateBackendMessage(message) {
     { test: /unauthorized/i, out: 'Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.' },
     { test: /forbidden/i, out: 'Bạn không có quyền thực hiện thao tác này.' },
     { test: /logged out/i, out: 'Đã đăng xuất.' },
+    { test: /the account has been banned/i, out: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.' },
 
     // OAuth / Google
     { test: /registration successful/i, out: 'Đăng ký thành công. Vui lòng kiểm tra email để xác thực OTP.' },

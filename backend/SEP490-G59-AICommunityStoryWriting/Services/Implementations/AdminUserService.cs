@@ -13,11 +13,16 @@ namespace Services.Implementations
     {
         private readonly IUserRepository _userRepo;
         private readonly IModeratorCategoryAssignmentRepository _modCatRepo;
+        private readonly INotificationHubNotifier? _notificationHubNotifier;
 
-        public AdminUserService(IUserRepository userRepo, IModeratorCategoryAssignmentRepository modCatRepo)
+        public AdminUserService(
+            IUserRepository userRepo,
+            IModeratorCategoryAssignmentRepository modCatRepo,
+            INotificationHubNotifier? notificationHubNotifier = null)
         {
             _userRepo = userRepo;
             _modCatRepo = modCatRepo;
+            _notificationHubNotifier = notificationHubNotifier;
         }
 
         public async Task<PagedResultDto<AdminUserListItemDto>> GetUsersAsync(AdminUserQueryDto query)
@@ -115,7 +120,16 @@ namespace Services.Implementations
             user.updated_at = DateTime.UtcNow;
             await _userRepo.UpdateUser(user);
             if (string.Equals(user.status, "BANNED", StringComparison.OrdinalIgnoreCase))
+            {
+                await _userRepo.DeleteRefreshTokensByUserId(user.id);
+                if (_notificationHubNotifier != null)
+                {
+                    await _notificationHubNotifier.RevokeUserSessionAsync(
+                        user.id,
+                        "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên để được hỗ trợ.");
+                }
                 BannedAuthorModerationSweep.Run();
+            }
             return true;
         }
 

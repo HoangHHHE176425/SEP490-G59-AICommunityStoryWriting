@@ -274,6 +274,10 @@ RÀNG BUỘC BẮT BUỘC:
 - Tuyệt đối không gợi ý thay đổi văn phong, ngữ nghĩa, đại từ, hoặc “trau chuốt” câu chữ.
 - Không paraphrase, không biên tập, không thay từ đúng bằng từ khác.
 - Không bịa lỗi.
+- Mỗi lỗi hợp lệ PHẢI có:
+  + wordOrPhrase: từ/cụm sai cụ thể.
+  + context: đoạn TRÍCH NGUYÊN VĂN chứa đúng từ sai, ngắn gọn quanh lỗi (ưu tiên khoảng 24 ký tự trước + 24 ký tự sau).
+- Nếu không thể chỉ ra từ sai cụ thể kèm context hợp lệ: KHÔNG được trả lỗi đó.
 
 Trả về DUY NHẤT một JSON hợp lệ, không markdown hay giải thích:
 {{ ""spellingErrors"": [ {{ ""wordOrPhrase"": ""từ/cụm sai"", ""suggestion"": ""gợi ý sửa"", ""context"": ""một câu (hoặc một dòng đối thoại) copy NGUYÊN VĂN từ nội dung phía trên, phải chứa đúng từ/cụm sai"" }} ], ""summary"": ""Tóm tắt ngắn cho tác giả (1-2 câu)"" }}
@@ -291,13 +295,6 @@ Nếu không có lỗi chính tả (hoặc không chắc chắn): spellingErrors
                 ? $"Phát hiện {issueCount} lỗi chính tả (đã kiểm tra theo {chunkCount} đoạn để giảm bỏ sót)."
                 : $"Phát hiện {issueCount} lỗi chính tả.";
         }
-
-        foreach (var s in chunkSummaries)
-        {
-            if (SummaryIndicatesSpellingIssue(s))
-                return s;
-        }
-
         return "Không phát hiện lỗi chính tả.";
     }
 
@@ -352,6 +349,7 @@ Bạn là hệ thống kiểm tra chính tả (typo) cho nội dung chương tru
 
 CHỈ được phép trả về các lỗi chính tả/đánh máy khi chắc chắn. Nếu không chắc chắn thì phải bỏ qua và trả danh sách rỗng.
 TUYỆT ĐỐI CẤM: đổi văn phong, đổi ngữ nghĩa, đổi đại từ, biên tập câu, diễn giải lại, hoặc thay từ đúng bằng từ khác.
+Mỗi lỗi bắt buộc phải có wordOrPhrase cụ thể và context trích nguyên văn có chứa đúng từ đó; không đủ điều kiện thì không được trả lỗi.
 
 Đầu ra BẮT BUỘC: chỉ một JSON hợp lệ theo đúng schema:
 { "spellingErrors": [ { "wordOrPhrase": "...", "suggestion": "...", "context": "..." } ], "summary": "..." }
@@ -403,6 +401,7 @@ Không markdown. Không thêm text ngoài JSON.
                             if (!string.IsNullOrEmpty(extracted))
                                 context = extracted;
                         }
+                        context = ClampContextAroundNeedle(context, needleForExtract);
                     }
 
                     if (!punctuationLike &&
@@ -427,14 +426,7 @@ Không markdown. Không thêm text ngoài JSON.
             var summary = root.TryGetProperty("summary", out var sum) ? sum.GetString() : null;
             var dedup = DeduplicateIssues(spelling);
             if (dedup.Count == 0 && SummaryIndicatesSpellingIssue(summary))
-            {
-                dedup.Add(new SpellingIssue
-                {
-                    WordOrPhrase = "Lỗi chính tả/dấu câu",
-                    Suggestion = "Tóm tắt có nêu lỗi chính tả nhưng không trích được câu chứa từ sai trong nội dung. Vui lòng đọc phần tóm tắt và rà lại toàn đoạn.",
-                    Context = summary
-                });
-            }
+                summary = "Không trích xuất được từ sai cụ thể từ phản hồi AI. Vui lòng chạy lại kiểm tra.";
             return (dedup, summary);
         }
         catch
@@ -452,7 +444,7 @@ Không markdown. Không thêm text ngoài JSON.
                || w.Equals("Lỗi chính tả/dấu câu", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Trích dòng (hoặc đoạn ngắn) chứa <paramref name="needle"/> từ nội dung gốc để hiển thị thay cho tọa độ ký tự.</summary>
+    /// <summary>Trích đoạn ngắn chứa <paramref name="needle"/>: tối đa 24 ký tự trước và 24 ký tự sau từ lỗi.</summary>
     private static string? TryExtractContextSnippet(string chapterContent, string needle)
     {
         if (string.IsNullOrWhiteSpace(chapterContent) || string.IsNullOrWhiteSpace(needle)) return null;
@@ -461,24 +453,25 @@ Không markdown. Không thêm text ngoài JSON.
 
         var idx = chapterContent.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
         if (idx < 0) return null;
+        const int contextChars = 24;
+        var start = Math.Max(0, idx - contextChars);
+        var end = Math.Min(chapterContent.Length, idx + needle.Length + contextChars);
+        var snippet = chapterContent[start..end].Trim();
+        if (snippet.Length == 0) return null;
+        return (start > 0 ? "..." : "") + snippet + (end < chapterContent.Length ? "..." : "");
+    }
 
-        var lineStart = chapterContent.LastIndexOf('\n', idx);
-        lineStart = lineStart < 0 ? 0 : lineStart + 1;
-        var lineEnd = chapterContent.IndexOf('\n', idx);
-        if (lineEnd < 0) lineEnd = chapterContent.Length;
-        var line = chapterContent[lineStart..lineEnd].Trim();
-        if (line.Length == 0 || !line.Contains(needle, StringComparison.OrdinalIgnoreCase))
-            return null;
-
-        const int maxLen = 600;
-        if (line.Length <= maxLen) return line;
-
-        var rel = idx - lineStart;
-        var half = maxLen / 2;
-        var a = Math.Max(0, Math.Min(rel - half, line.Length - maxLen));
-        var b = Math.Min(line.Length, a + maxLen);
-        var snippet = line[a..b].Trim();
-        return (a > 0 ? "… " : "") + snippet + (b < line.Length ? " …" : "");
+    private static string? ClampContextAroundNeedle(string? context, string needle)
+    {
+        if (string.IsNullOrWhiteSpace(context) || string.IsNullOrWhiteSpace(needle))
+            return context;
+        var idx = context.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return context;
+        const int contextChars = 24;
+        var start = Math.Max(0, idx - contextChars);
+        var end = Math.Min(context.Length, idx + needle.Length + contextChars);
+        var snippet = context[start..end].Trim();
+        return (start > 0 ? "..." : "") + snippet + (end < context.Length ? "..." : "");
     }
 
     private static string BuildSpellCacheKey(string? title, string content)
