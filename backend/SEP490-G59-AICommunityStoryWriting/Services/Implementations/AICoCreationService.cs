@@ -1,6 +1,7 @@
 using System.ClientModel;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using BusinessObjects.Entities;
 using Microsoft.Extensions.Configuration;
 using OpenAI.Chat;
@@ -147,26 +148,37 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         progress?.Report(new CoCreateProgressEvent { Step = "Outline", DurationMs = swOutline.ElapsedMilliseconds, Message = "Đã xong dàn ý" });
         LogUsage(authorUserId, request.StoryId, null, ActionOutline, m1, 0, 0);
 
+        string? ideaConflictWarning = null;
         var ideaFeedback = TryParseIdeaContradiction(outlineJson);
         if (ideaFeedback != null)
         {
-            return new CoCreationResponse
+            ideaConflictWarning = ideaFeedback;
+            progress?.Report(new CoCreateProgressEvent
             {
-                IdeaContradictionFeedback = ideaFeedback,
-                Outline = string.Empty,
-                SuggestedChapterTitle = null,
-                FinalContent = string.Empty,
-                Approved = false,
-                RevisionCount = 0,
-                ReviewFeedback = null,
-                AgentDurations = durations.Count > 0 ? durations : null,
-                ContextWarning = contextWarning
-            };
+                Step = "Outline_Conflict_Adjust",
+                DurationMs = 0,
+                Message = "Phát hiện xung đột ý tưởng; đang điều chỉnh để vẫn viết tiếp."
+            });
+            outlineJson = await RunAgent1OutlineAsync(
+                clientPlanner,
+                story,
+                contextBlock,
+                effectiveIdea,
+                languageInstruction,
+                cancellationToken,
+                allowContradictionResponse: false);
+
+            // Nếu model vẫn trả nhánh contradiction thì fallback dàn ý tối thiểu để không dừng luồng.
+            if (TryParseIdeaContradiction(outlineJson) != null)
+                outlineJson = BuildForcedOutlineFallbackJson(effectiveIdea);
         }
 
-        var (suggestedTitle, outlineBody) = TryExtractOutlineAndSuggestedTitle(outlineJson);
+        var (suggestedTitle, outlineBody, charactersFromPayload) = TryExtractOutlineAndSuggestedTitle(outlineJson);
         suggestedTitle = EnsureUniqueSuggestedTitle(suggestedTitle, allChaptersOrdered);
         var outlineForPrompt = FormatOutlineForPrompt(outlineBody);
+        var charactersInvolved = (charactersFromPayload?.Count ?? 0) > 0
+            ? charactersFromPayload!
+            : ExtractCharactersInvolved(outlineForPrompt);
 
         var (p2, m2, k2, u2) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentWriter);
         var clientWriter = AIClientHelper.CreateChatClient(p2, m2, k2, u2);
@@ -249,6 +261,8 @@ Nếu có mâu thuẫn, phải tuân theo thứ tự này.
         {
             Outline = outlineForPrompt,
             SuggestedChapterTitle = suggestedTitle,
+            CharactersInvolved = charactersInvolved,
+            IdeaConflictWarning = ideaConflictWarning,
             FinalContent = draft,
             Approved = approved,
             RevisionCount = revisionCount,
@@ -427,10 +441,12 @@ Output Format (bắt buộc):
 Cấu trúc:
 {
   "suggestedChapterTitle": "Một dòng tiêu đề gợi ý (ngắn, gợi tình tiết; không prefix kiểu \"Chương 1\" hay \"Chapter 1\")",
-  "outline": "Toàn bộ dàn ý: Scene Objective, Scene Outline (2–7 ý), Characters Involved, Potential Conflict, Expected Outcome — dùng \\n trong chuỗi JSON để xuống dòng giữa các mục."
+  "outline": "Toàn bộ dàn ý: Scene Objective, Scene Outline (2–7 ý), Characters Involved, Potential Conflict, Expected Outcome — dùng \\n trong chuỗi JSON để xuống dòng giữa các mục.",
+  "charactersInvolved": ["Tên nhân vật 1", "Tên nhân vật 2"]
 }
 Trường suggestedChapterTitle bắt buộc (chuỗi, có thể rỗng "" nếu không đặt được tiêu đề ngắn).
 Trường outline bắt buộc, nội dung đúng cấu trúc Scene như các mục Scene Objective / Scene Outline / … đã nêu phía trên.
+Trường charactersInvolved bắt buộc: mảng tên nhân vật (không thêm mô tả như "để tạo...", "hook", v.v.).
 
 2) Khi TỪ CHỐI (ideaContradiction):
 → Chỉ trả về: { "ideaContradiction": true, "feedback": "Giải thích ngắn gọn bằng tiếng Việt." }
@@ -610,10 +626,20 @@ Quy tắc:
         return (draft, okFinal, review, rewrites);
     }
 
-    private async Task<string> RunAgent1OutlineAsync(ChatClient client, stories story, string contextBlock, string authorIdea, string languageInstruction, CancellationToken ct)
+    private async Task<string> RunAgent1OutlineAsync(
+        ChatClient client,
+        stories story,
+        string contextBlock,
+        string authorIdea,
+        string languageInstruction,
+        CancellationToken ct,
+        bool allowContradictionResponse = true)
     {
         var storyInfo = $"Story Information:\nTitle: {story.title}\nSummary: {story.summary ?? ""}\n\nUser Idea:\n{authorIdea}";
-        var userPrompt = $"{storyInfo}\n\n---\n{DbContextLabel}\n\n{contextBlock}\n\n---\n{languageInstruction}\n\nNgữ cảnh trên là phần truyện ĐÃ XẢY RA. Chỉ sinh outline cho phần TIẾP THEO (sau điểm kết thúc hiện tại). Trả lời bằng cùng ngôn ngữ truyện. Khi chấp nhận: trả về đúng một JSON có suggestedChapterTitle + outline theo system prompt. Chỉ trả JSON ideaContradiction khi mâu thuẫn RÕ RÀNG với context (Character/Event Memory).";
+        var contradictionInstruction = allowContradictionResponse
+            ? "Chỉ trả JSON ideaContradiction khi mâu thuẫn RÕ RÀNG với context (Character/Event Memory)."
+            : "KHÔNG được trả ideaContradiction. Dù có xung đột, hãy tự điều chỉnh ý tưởng để vẫn tạo JSON suggestedChapterTitle + outline hợp lệ.";
+        var userPrompt = $"{storyInfo}\n\n---\n{DbContextLabel}\n\n{contextBlock}\n\n---\n{languageInstruction}\n\nNgữ cảnh trên là phần truyện ĐÃ XẢY RA. Chỉ sinh outline cho phần TIẾP THEO (sau điểm kết thúc hiện tại). Trả lời bằng cùng ngôn ngữ truyện. Khi chấp nhận: trả về đúng một JSON có suggestedChapterTitle + outline theo system prompt. {contradictionInstruction}";
         var messages = new List<ChatMessage>
         {
             new SystemChatMessage(GetAgent1SystemPrompt()),
@@ -625,6 +651,26 @@ Quy tắc:
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("Agent dàn ý không trả về nội dung.");
         return text.Trim();
+    }
+
+    private static string BuildForcedOutlineFallbackJson(string effectiveIdea)
+    {
+        var idea = (effectiveIdea ?? "").Trim();
+        if (idea.Length > 260) idea = idea[..260] + "...";
+        var outline = "Scene Objective: Tiếp tục mạch truyện theo ý tưởng tác giả đã được điều chỉnh cho phù hợp ngữ cảnh.\n"
+            + "Scene Outline:\n"
+            + $"- Khởi đầu từ điểm kết thúc hiện tại và mở ra tình huống mới theo ý tưởng: {idea}\n"
+            + "- Đẩy xung đột theo hướng nhất quán với Character/Event Memory.\n"
+            + "- Kết thúc bằng một câu hỏi mở cho chương kế tiếp.\n"
+            + "Characters Involved: Nhân vật chính của mạch truyện hiện tại.\n"
+            + "Potential Conflict: Mâu thuẫn giữa mục tiêu cá nhân và sự thật mới được hé lộ.\n"
+            + "Expected Outcome: Tạo đà tự nhiên cho diễn biến tiếp theo.";
+        return JsonSerializer.Serialize(new
+        {
+            suggestedChapterTitle = "Chương tiếp theo",
+            outline,
+            charactersInvolved = new[] { "Nhân vật chính" }
+        });
     }
 
     private async Task<string> RunAgent2ExpandAsync(
@@ -744,12 +790,12 @@ Quy tắc:
         return null;
     }
 
-    /// <summary>Trích tiêu đề gợi ý và phần outline từ JSON Agent 1; fallback toàn bộ chuỗi nếu không parse được (tương thích cũ).</summary>
-    private static (string? SuggestedTitle, string OutlineBody) TryExtractOutlineAndSuggestedTitle(string outlineRaw)
+    /// <summary>Trích tiêu đề gợi ý, outline và danh sách nhân vật từ JSON Agent 1; fallback toàn bộ chuỗi nếu không parse được (tương thích cũ).</summary>
+    private static (string? SuggestedTitle, string OutlineBody, List<string>? CharactersInvolved) TryExtractOutlineAndSuggestedTitle(string outlineRaw)
     {
         var raw = outlineRaw.Trim();
         if (raw.Length == 0)
-            return (null, outlineRaw);
+            return (null, outlineRaw, null);
 
         var toParse = raw;
         if (toParse.StartsWith("```", StringComparison.Ordinal))
@@ -765,17 +811,17 @@ Quy tắc:
             using var doc = JsonDocument.Parse(toParse);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
-                return (null, outlineRaw);
+                return (null, outlineRaw, null);
 
             if (root.TryGetProperty("ideaContradiction", out var ic) && ic.ValueKind == JsonValueKind.True)
-                return (null, outlineRaw);
+                return (null, outlineRaw, null);
 
             if (!root.TryGetProperty("outline", out var outlineEl) || outlineEl.ValueKind != JsonValueKind.String)
-                return (null, outlineRaw);
+                return (null, outlineRaw, null);
 
-            var outlineText = outlineEl.GetString()?.Trim() ?? "";
+            var outlineText = NormalizeOutlineText(outlineEl.GetString());
             if (outlineText.Length == 0)
-                return (null, outlineRaw);
+                return (null, outlineRaw, null);
 
             string? title = null;
             if (root.TryGetProperty("suggestedChapterTitle", out var st) && st.ValueKind == JsonValueKind.String)
@@ -783,12 +829,45 @@ Quy tắc:
             else if (root.TryGetProperty("suggested_chapter_title", out var st2) && st2.ValueKind == JsonValueKind.String)
                 title = NormalizeSuggestedTitle(st2.GetString());
 
-            return (title, outlineText);
+            var chars = TryReadCharactersFromRoot(root);
+            return (title, outlineText, chars);
         }
         catch
         {
-            return (null, outlineRaw);
+            return (null, outlineRaw, null);
         }
+    }
+
+    private static List<string>? TryReadCharactersFromRoot(JsonElement root)
+    {
+        static IEnumerable<string> keys()
+            => new[] { "charactersInvolved", "characters_involved", "characters", "cast", "nhanVatThamGia", "nhan_vat_tham_gia" };
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<string>();
+        foreach (var key in keys())
+        {
+            if (!root.TryGetProperty(key, out var prop)) continue;
+            if (prop.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in prop.EnumerateArray())
+                {
+                    var s = item.ValueKind == JsonValueKind.String ? item.GetString() : null;
+                    if (!IsLikelyCharacterToken(s)) continue;
+                    var t = s!.Trim();
+                    if (seen.Add(t)) result.Add(t);
+                }
+            }
+            else if (prop.ValueKind == JsonValueKind.String)
+            {
+                foreach (var part in (prop.GetString() ?? "").Split(new[] { ',', ';', '/', '|', '，' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var s = part.Trim();
+                    if (!IsLikelyCharacterToken(s)) continue;
+                    if (seen.Add(s)) result.Add(s);
+                }
+            }
+        }
+        return result.Count > 0 ? result : null;
     }
 
     private static string? NormalizeSuggestedTitle(string? s)
@@ -802,10 +881,90 @@ Quy tắc:
         return t.Length == 0 ? null : t;
     }
 
+    private static List<string> ExtractCharactersInvolved(string outline)
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddName(string? value)
+        {
+            var t = (value ?? "").Trim().Trim('-', '*', '•', '"', '\'', '.', '!', '?', ':', ';');
+            if (!IsLikelyCharacterToken(t)) return;
+            if (seen.Add(t))
+                result.Add(t);
+        }
+
+        void AddFromCsv(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            foreach (var part in value.Split(new[] { ',', ';', '/', '|', '，' }, StringSplitOptions.RemoveEmptyEntries))
+                AddName(part);
+        }
+
+        bool IsCharacterLabel(string t)
+        {
+            return t.StartsWith("Characters Involved", StringComparison.OrdinalIgnoreCase)
+                || t.StartsWith("Characters", StringComparison.OrdinalIgnoreCase)
+                || t.StartsWith("Nhân vật tham gia", StringComparison.OrdinalIgnoreCase)
+                || t.StartsWith("Nhân vật", StringComparison.OrdinalIgnoreCase);
+        }
+
+        var lines = (outline ?? string.Empty).Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var t = lines[i].Trim();
+            if (t.Length == 0) continue;
+            if (!IsCharacterLabel(t)) continue;
+
+            var colonIdx = t.IndexOf(':');
+            if (colonIdx >= 0 && colonIdx < t.Length - 1)
+            {
+                AddFromCsv(t[(colonIdx + 1)..]);
+                continue;
+            }
+
+            // Header-only line: parse the following bullet lines.
+            for (var j = i + 1; j < lines.Length; j++)
+            {
+                var next = lines[j].Trim();
+                if (next.Length == 0) break;
+                if (next.Contains(':')) break;
+                if (next.StartsWith("-") || next.StartsWith("*") || next.StartsWith("•"))
+                    AddName(next[1..]);
+                else
+                    AddName(next);
+            }
+        }
+
+        return result;
+    }
+
+    private static bool IsLikelyCharacterToken(string? candidate)
+    {
+        var t = (candidate ?? "").Trim().Trim('.', ',', ';', ':', '!', '?', '"', '\'');
+        if (t.Length < 2 || t.Length > 64)
+            return false;
+
+        if (!Regex.IsMatch(t, @"^[\p{L}\p{M} .'-]{2,64}$", RegexOptions.CultureInvariant))
+            return false;
+
+        return true;
+    }
+
+    private static string NormalizeOutlineText(string? text)
+    {
+        var s = (text ?? "").Trim();
+        if (s.Length == 0) return string.Empty;
+        s = s.Replace("\\r\\n", "\n").Replace("\\n", "\n").Replace("\\t", " ");
+        s = Regex.Replace(s, @"(?m)^(\d+)\.(\S)", "$1. $2");
+        s = Regex.Replace(s, @"\n{3,}", "\n\n");
+        return s.Trim();
+    }
+
     /// <summary>Chuẩn hóa outline để đưa vào Agent 2: nếu là format Story Analyzer (Scene Objective, Scene Outline, ...) thì trả về nguyên bản; nếu là JSON scenes thì format lại.</summary>
     private static string FormatOutlineForPrompt(string outlineRaw)
     {
-        var raw = outlineRaw.Trim();
+        var raw = NormalizeOutlineText(outlineRaw);
         if (raw.StartsWith("```"))
         {
             var start = raw.IndexOf('\n') + 1;

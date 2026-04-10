@@ -99,7 +99,15 @@ function isExampleOutline(scenes) {
 /** Dàn ý: đổi "Scene 1/2/3" thành "Bối cảnh 1/2/3"; nếu là JSON scenes thì render Bối cảnh 1, 2, 3... (bỏ hướng dẫn/ví dụ) */
 function formatOutlineForDisplay(outline) {
     if (!outline || !outline.trim()) return '';
-    const raw = outline.trim();
+    const normalizeOutlineText = (s) =>
+        (s || '')
+            .replace(/\\r\\n/g, '\n')
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, ' ')
+            .replace(/(^|\n)(\d+)\.(\S)/g, '$1$2. $3')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+    const raw = normalizeOutlineText(outline.trim());
     const toParse = extractOutlineJson(raw);
     try {
         const parsed = JSON.parse(toParse);
@@ -1315,7 +1323,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                                 const word = it.wordOrPhrase ?? it.WordOrPhrase ?? '';
                                                                 const sug = it.suggestion ?? it.Suggestion ?? '';
                                                                 const ctx = it.context ?? it.Context ?? '';
-                                                                const pos = findIssuePosition(word);
                                                                 return (
                                                                     <div key={idx} style={{ padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
                                                                         <div style={{ fontSize: '0.875rem', color: '#0f172a' }}>
@@ -1340,16 +1347,9 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                                                 <span style={{ fontWeight: 800 }}>Câu/dòng chứa lỗi</span>
                                                                                 <div style={{ marginTop: '4px' }}>{ctx}</div>
                                                                             </div>
-                                                                        ) : pos ? (
-                                                                            <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#475569' }}>
-                                                                                <span style={{ fontWeight: 800 }}>Vị trí</span>:
-                                                                                {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
-                                                                                {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
-                                                                                {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
-                                                                            </div>
                                                                         ) : (
                                                                             <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#94a3b8' }}>
-                                                                                Không có câu trích; không xác định được vị trí trong nội dung hiện tại.
+                                                                                Không có đoạn trích chứa từ sai cho mục này.
                                                                             </div>
                                                                         )}
                                                                     </div>
@@ -1375,7 +1375,6 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                                 const type = it.type ?? it.Type ?? '';
                                                                 const desc = it.description ?? it.Description ?? '';
                                                                 const quote = it.quote ?? it.Quote ?? '';
-                                                                const pos = findIssuePosition(quote);
                                                                 return (
                                                                     <div key={idx} style={{ padding: '10px 12px', border: '1px solid #fee2e2', borderRadius: '10px', backgroundColor: '#fff7ed' }}>
                                                                         <div style={{ fontSize: '0.875rem', color: '#9a3412' }}>
@@ -1384,19 +1383,15 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                                         <div style={{ fontSize: '0.875rem', color: '#9a3412', marginTop: '4px', whiteSpace: 'pre-wrap' }}>
                                                                             {desc || '—'}
                                                                         </div>
-                                                                        {pos ? (
-                                                                            <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12' }}>
-                                                                                <span style={{ fontWeight: 800 }}>Vị trí</span>:
-                                                                                {pos.paraNo != null ? ` đoạn ${pos.paraNo}` : ''}
-                                                                                {pos.lineNo != null ? `${pos.paraNo != null ? ',' : ''} dòng ${pos.lineNo}` : ''}
-                                                                                {pos.charOffset != null ? `${(pos.paraNo != null || pos.lineNo != null) ? ',' : ''} ký tự ${pos.charOffset}` : ''}
-                                                                            </div>
-                                                                        ) : null}
                                                                         {quote ? (
                                                                             <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12', backgroundColor: '#fffbeb', border: '1px dashed #fdba74', borderRadius: '10px', padding: '8px 10px', whiteSpace: 'pre-wrap' }}>
                                                                                 {quote}
                                                                             </div>
-                                                                        ) : null}
+                                                                        ) : (
+                                                                            <div style={{ marginTop: '8px', fontSize: '0.8125rem', color: '#7c2d12' }}>
+                                                                                Không có đoạn trích chứa từ cấm cho mục này.
+                                                                            </div>
+                                                                        )}
                                                                     </div>
                                                                 );
                                                             })}
@@ -1803,12 +1798,23 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             </h3>
                         </div>
                         <div style={{ padding: '1.25rem 1.5rem', overflowY: 'auto', flex: 1 }}>
-                            {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
+                            {(() => {
+                                const ideaBlock = (coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ?? '').toString().trim();
+                                const hasContent = ((coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '').toString().trim().length > 0)
+                                    || (((coCreateResult.outline ?? coCreateResult.Outline) || '').toString().trim().length > 0);
+                                const hardStop = ideaBlock.length > 0 && !hasContent;
+                                return hardStop;
+                            })() ? (
                                 <div style={{ padding: '1rem', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b' }}>
                                     {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback}
                                 </div>
                             ) : (
                                 <>
+                                    {((coCreateResult.ideaConflictWarning ?? coCreateResult.IdeaConflictWarning ?? coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback) || '').toString().trim() ? (
+                                        <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
+                                            {coCreateResult.ideaConflictWarning ?? coCreateResult.IdeaConflictWarning ?? coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback}
+                                        </div>
+                                    ) : null}
                                     {coCreateContextWarning ? (
                                         <div style={{ marginBottom: '1rem', padding: '0.75rem', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', color: '#92400e', fontSize: '0.875rem', lineHeight: 1.5 }}>
                                             {coCreateContextWarning}
@@ -1820,6 +1826,16 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                             <div style={{ fontSize: '0.875rem', color: '#374151', whiteSpace: 'pre-wrap' }}>
                                                 {formatOutlineForDisplay(coCreateResult.outline ?? coCreateResult.Outline)}
                                             </div>
+                                            {(() => {
+                                                const chars = coCreateResult.charactersInvolved ?? coCreateResult.CharactersInvolved ?? [];
+                                                if (!Array.isArray(chars) || chars.length === 0) return null;
+                                                return (
+                                                    <div style={{ marginTop: '0.75rem' }}>
+                                                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280', marginBottom: '0.25rem' }}>Nhân vật tham gia</div>
+                                                        <div style={{ fontSize: '0.875rem', color: '#374151' }}>{chars.join(', ')}</div>
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
                                     )}
                                     {(coCreateResult.reviewFeedback ?? coCreateResult.ReviewFeedback) && (
@@ -1880,7 +1896,12 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                             )}
                         </div>
                         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid #e5e7eb', display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-                            {coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ? (
+                            {(() => {
+                                const ideaBlock = (coCreateResult.ideaContradictionFeedback ?? coCreateResult.IdeaContradictionFeedback ?? '').toString().trim();
+                                const hasContent = ((coCreateResult.finalContent ?? coCreateResult.FinalContent ?? '').toString().trim().length > 0)
+                                    || (((coCreateResult.outline ?? coCreateResult.Outline) || '').toString().trim().length > 0);
+                                return ideaBlock.length > 0 && !hasContent;
+                            })() ? (
                                 <button
                                     type="button"
                                     onClick={() => { setShowCoCreateResultPopup(false); setCoCreateResult(null); setCoCreateContextWarning(null); }}
