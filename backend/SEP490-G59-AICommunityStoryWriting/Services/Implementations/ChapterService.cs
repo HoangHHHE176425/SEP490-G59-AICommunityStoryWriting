@@ -422,6 +422,7 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
             var storyForUpdate = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryAuthorNotWritingSuspended(storyForUpdate);
             EnsureStoryProgressAllowsChapterWrite(storyForUpdate, "chỉnh sửa chương");
 
             var previousStatus = chapter.status?.ToUpperInvariant() ?? "DRAFT";
@@ -611,6 +612,7 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
             var storyForDelete = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryAuthorNotWritingSuspended(storyForDelete);
             EnsureStoryProgressAllowsChapterWrite(storyForDelete, "xóa chương");
 
             var statusUpper = (chapter.status ?? "").Trim().ToUpperInvariant();
@@ -690,6 +692,9 @@ namespace Services.Implementations
             if (chapter == null)
                 return false;
 
+            var storyUnpublish = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryAuthorNotWritingSuspended(storyUnpublish);
+
             if (ReviewAssignmentDAO.IsLocked(ReviewAssignmentDAO.TargetTypeChapter, id))
                 throw new InvalidOperationException("Kiểm duyệt viên đã nhận duyệt đơn này, bạn không thể hủy xuất bản. Vui lòng chờ kết quả duyệt.");
 
@@ -713,6 +718,9 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null)
                 return false;
+
+            var storyReorder = _storyLookup.GetById(chapter.story_id ?? Guid.Empty);
+            EnsureStoryAuthorNotWritingSuspended(storyReorder);
 
             var storyId = chapter.story_id ?? Guid.Empty;
             var existingChapter = _chapterRepository.GetByStoryIdAndOrderIndex(storyId, newOrderIndex);
@@ -762,6 +770,12 @@ namespace Services.Implementations
                 throw new InvalidOperationException(
                     "Phải gửi xuất bản chương theo thứ tự. Chương " + (chapter.order_index) + " phải đã xuất bản (duyệt thành công) trước khi gửi chương " + (chapter.order_index + 1) + ".");
             }
+        }
+
+        private void EnsureStoryAuthorNotWritingSuspended(stories? story)
+        {
+            if (story?.author_id is Guid aid && _userLookup.IsAuthorWritingSuspended(aid))
+                throw new InvalidOperationException("Tác giả đang bị tạm khóa chức năng viết truyện/chương (compliance/admin).");
         }
 
         private static void EnsureStoryProgressAllowsChapterWrite(stories? story, string actionVi)

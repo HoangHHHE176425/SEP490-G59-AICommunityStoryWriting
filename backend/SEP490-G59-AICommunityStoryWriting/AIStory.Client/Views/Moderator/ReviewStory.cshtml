@@ -112,7 +112,6 @@
 @section Scripts {
     <script>
         const storyId = '@(storyId)';
-        const apiBase = 'http://localhost:5000';
 
         document.addEventListener('DOMContentLoaded', function () {
             if (!AuthHelper.isAuthenticated() || !AuthHelper.hasAnyRole('MODERATOR', 'ADMIN')) {
@@ -159,7 +158,7 @@
 
                 const coverWrap = document.getElementById('storyCoverWrap');
                 if (s.coverImage) {
-                    coverWrap.innerHTML = `<img src="${apiBase}${s.coverImage}" class="img-fluid rounded" alt="${s.title}" style="max-height: 320px; object-fit: cover;">`;
+                    coverWrap.innerHTML = `<img src="${resolveMediaSrc(s.coverImage)}" class="img-fluid rounded" alt="${s.title}" style="max-height: 320px; object-fit: cover;">`;
                 } else {
                     coverWrap.innerHTML = '<div class="bg-secondary d-flex align-items-center justify-content-center rounded" style="height: 280px;"><i class="bi bi-image text-white" style="font-size: 4rem;"></i></div>';
                 }
