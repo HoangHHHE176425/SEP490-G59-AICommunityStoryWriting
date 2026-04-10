@@ -228,76 +228,92 @@ export function AiConfig() {
                                             </p>
                                         </div>
                                     ) : (
-                                        <table className="w-full text-[11px]">
-                                            <thead className="bg-slate-50">
-                                                <tr className="text-left text-slate-500">
-                                                    <th className="px-3 py-2 font-medium">Từ/cụm từ</th>
-                                                    <th className="px-3 py-2 font-medium">Nhóm</th>
-                                                    <th className="px-3 py-2 font-medium text-right">Xóa</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="bg-white">
-                                                {bannedWords.map((bw, idx) => {
-                                                    const isSensitive = String(bw.category || '')
-                                                        .toLowerCase()
-                                                        .includes('sensitive');
-                                                    return (
-                                                        <tr
-                                                            key={bw.id}
-                                                            className={`border-t border-slate-100 ${
-                                                                idx % 2 === 1 ? 'bg-slate-50/40' : ''
-                                                            }`}
-                                                        >
-                                                            <td className="px-3 py-2 font-medium text-slate-800">
-                                                                {bw.word}
-                                                            </td>
-                                                            <td className="px-3 py-2">
-                                                                <span
-                                                                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${
-                                                                        isSensitive
-                                                                            ? 'bg-amber-50 text-amber-700 ring-amber-200'
-                                                                            : 'bg-sky-50 text-sky-700 ring-sky-200'
+                                        <>
+                                            <table className="w-full table-fixed text-[11px]">
+                                                <colgroup>
+                                                    <col className="w-1/2" />
+                                                    <col className="w-1/3" />
+                                                    <col className="w-1/6" />
+                                                </colgroup>
+                                                <thead className="bg-slate-50">
+                                                    <tr className="text-left text-slate-500">
+                                                        <th className="px-3 py-2 font-medium">Từ/cụm từ</th>
+                                                        <th className="px-3 py-2 font-medium">Nhóm</th>
+                                                        <th className="px-3 py-2 font-medium text-right">Xóa</th>
+                                                    </tr>
+                                                </thead>
+                                            </table>
+                                            <div className="max-h-60 overflow-y-auto border-t border-slate-200">
+                                                <table className="w-full table-fixed text-[11px]">
+                                                    <colgroup>
+                                                        <col className="w-1/2" />
+                                                        <col className="w-1/3" />
+                                                        <col className="w-1/6" />
+                                                    </colgroup>
+                                                    <tbody className="bg-white">
+                                                        {bannedWords.map((bw, idx) => {
+                                                            const isSensitive = String(bw.category || '')
+                                                                .toLowerCase()
+                                                                .includes('sensitive');
+                                                            return (
+                                                                <tr
+                                                                    key={bw.id}
+                                                                    className={`border-t border-slate-100 ${
+                                                                        idx % 2 === 1 ? 'bg-slate-50/40' : ''
                                                                     }`}
                                                                 >
-                                                                    {bw.category}
-                                                                </span>
-                                                            </td>
-                                                            <td className="px-3 py-2 text-right">
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={deletingWordId === bw.id}
-                                                                    onClick={() =>
-                                                                        (async () => {
-                                                                            try {
-                                                                                setError('');
-                                                                                setSuccess('');
-                                                                                setDeletingWordId(bw.id);
-                                                                                await deleteAdminBannedWord(bw.id);
-                                                                                setBannedWords((list) =>
-                                                                                    list.filter((x) => x.id !== bw.id)
-                                                                                );
-                                                                                setSuccess('Đã xóa từ cấm.');
-                                                                            } catch (e) {
-                                                                                const msg =
-                                                                                    e?.response?.data?.message ||
-                                                                                    e?.message ||
-                                                                                    'Không xóa được từ cấm. Vui lòng thử lại.';
-                                                                                setError(msg);
-                                                                            } finally {
-                                                                                setDeletingWordId(null);
+                                                                    <td className="px-3 py-2 font-medium text-slate-800">
+                                                                        {bw.word}
+                                                                    </td>
+                                                                    <td className="px-3 py-2">
+                                                                        <span
+                                                                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${
+                                                                                isSensitive
+                                                                                    ? 'bg-amber-50 text-amber-700 ring-amber-200'
+                                                                                    : 'bg-sky-50 text-sky-700 ring-sky-200'
+                                                                            }`}
+                                                                        >
+                                                                            {bw.category}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-3 py-2 text-right">
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={deletingWordId === bw.id}
+                                                                            onClick={() =>
+                                                                                (async () => {
+                                                                                    try {
+                                                                                        setError('');
+                                                                                        setSuccess('');
+                                                                                        setDeletingWordId(bw.id);
+                                                                                        await deleteAdminBannedWord(bw.id);
+                                                                                        setBannedWords((list) =>
+                                                                                            list.filter((x) => x.id !== bw.id)
+                                                                                        );
+                                                                                        setSuccess('Đã xóa từ cấm.');
+                                                                                    } catch (e) {
+                                                                                        const msg =
+                                                                                            e?.response?.data?.message ||
+                                                                                            e?.message ||
+                                                                                            'Không xóa được từ cấm. Vui lòng thử lại.';
+                                                                                        setError(msg);
+                                                                                    } finally {
+                                                                                        setDeletingWordId(null);
+                                                                                    }
+                                                                                })()
                                                                             }
-                                                                        })()
-                                                                    }
-                                                                    className="inline-flex items-center justify-center rounded-lg px-2 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-50"
-                                                                >
-                                                                    {deletingWordId === bw.id ? 'Đang xóa…' : 'Xóa'}
-                                                                </button>
-                                                            </td>
-                                                        </tr>
-                                                    );
-                                                })}
-                                            </tbody>
-                                        </table>
+                                                                            className="inline-flex items-center justify-center rounded-lg px-2 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-50"
+                                                                        >
+                                                                            {deletingWordId === bw.id ? 'Đang xóa…' : 'Xóa'}
+                                                                        </button>
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </>
                                     )}
                                 </div>
                             </div>

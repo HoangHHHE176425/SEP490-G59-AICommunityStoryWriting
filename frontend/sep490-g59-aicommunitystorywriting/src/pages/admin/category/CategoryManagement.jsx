@@ -368,7 +368,7 @@ export function CategoryManagement() {
                             alignItems: 'center',
                             gap: '0.5rem',
                             padding: '0.625rem 1rem',
-                            backgroundColor: '#13ec5b',
+                            backgroundColor: 'var(--admin-primary, #10b981)',
                             color: '#ffffff',
                             fontSize: '0.875rem',
                             fontWeight: 'bold',
@@ -377,8 +377,8 @@ export function CategoryManagement() {
                             cursor: 'pointer',
                             transition: 'background-color 0.2s'
                         }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#10d352'}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#13ec5b'}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--admin-primary-ink, #047857)'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'var(--admin-primary, #10b981)'}
                     >
                         <Plus style={{ width: '16px', height: '16px' }} />
                         Thêm thể loại
@@ -396,7 +396,7 @@ export function CategoryManagement() {
                                 {allCategoriesForStats.length}
                             </p>
                         </div>
-                        <div style={{ width: '48px', height: '48px', backgroundColor: 'rgba(19, 236, 91, 0.1)', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ width: '48px', height: '48px', backgroundColor: 'var(--admin-primary-soft, rgba(16, 185, 129, 0.14))', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <span style={{ fontSize: '1.5rem' }}>📚</span>
                         </div>
                     </div>
@@ -480,7 +480,7 @@ export function CategoryManagement() {
                 {/* Loading State */}
                 {loading && (
                     <div style={{ padding: '3rem', textAlign: 'center' }}>
-                        <Loader2 style={{ width: '48px', height: '48px', color: '#13ec5b', margin: '0 auto', animation: 'spin 1s linear infinite' }} />
+                        <Loader2 style={{ width: '48px', height: '48px', color: 'var(--admin-primary, #10b981)', margin: '0 auto', animation: 'spin 1s linear infinite' }} />
                         <p style={{ color: '#64748b', fontSize: '0.875rem', marginTop: '1rem' }}>
                             Đang tải danh sách thể loại...
                         </p>
@@ -503,7 +503,7 @@ export function CategoryManagement() {
                             onClick={() => loadCategories(currentPage)}
                             style={{
                                 padding: '0.625rem 1rem',
-                                backgroundColor: '#13ec5b',
+                                backgroundColor: 'var(--admin-primary, #10b981)',
                                 color: '#ffffff',
                                 fontSize: '0.875rem',
                                 fontWeight: 'bold',
@@ -827,7 +827,7 @@ export function CategoryManagement() {
                                     padding: '0.5rem 0.875rem',
                                     borderRadius: '8px',
                                     border: 'none',
-                                    backgroundColor: confirmDialog.action === 'delete' ? '#dc2626' : '#13ec5b',
+                                    backgroundColor: confirmDialog.action === 'delete' ? '#dc2626' : 'var(--admin-primary, #10b981)',
                                     color: '#fff',
                                     fontWeight: 700,
                                     cursor: 'pointer',

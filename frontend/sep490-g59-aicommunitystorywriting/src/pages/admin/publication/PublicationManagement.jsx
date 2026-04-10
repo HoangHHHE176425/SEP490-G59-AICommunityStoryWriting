@@ -1361,7 +1361,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                         padding: '0.5rem 1rem',
                         fontSize: '0.875rem',
                         fontWeight: 600,
-                        backgroundColor: '#0ea5e9',
+                        backgroundColor: 'var(--admin-primary, #10b981)',
                         color: '#ffffff',
                         border: 'none',
                         borderRadius: '8px',
@@ -1384,7 +1384,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                 fontSize: '0.75rem',
                                 fontWeight: 700,
                                 backgroundColor: '#ffffff',
-                                color: '#0ea5e9',
+                                color: 'var(--admin-primary, #10b981)',
                                 borderRadius: '9999px',
                             }}
                         >
@@ -1406,8 +1406,8 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                 flexWrap: 'wrap'
             }}>
                 {[
-                    { value: 'pending', label: 'Chờ duyệt', color: '#ffc107' },
-                    { value: 'approved', label: 'Đã duyệt', color: '#10b981' },
+                    { value: 'pending', label: 'Chờ duyệt', color: 'var(--admin-primary, #10b981)' },
+                    { value: 'approved', label: 'Đã duyệt', color: 'var(--admin-primary, #10b981)' },
                     { value: 'rejected', label: 'Từ chối', color: '#ef4444' }
                 ].map(tab => (
                     <button
@@ -1720,7 +1720,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                                                             padding: '0.5rem 0.875rem',
                                                                             fontSize: '0.8125rem',
                                                                             fontWeight: 600,
-                                                                            backgroundColor: item._blockedFromPriorDeadlineForfeit ? '#e2e8f0' : '#0ea5e9',
+                                                                            backgroundColor: item._blockedFromPriorDeadlineForfeit ? '#e2e8f0' : 'var(--admin-primary, #10b981)',
                                                                             color: item._blockedFromPriorDeadlineForfeit ? '#64748b' : '#fff',
                                                                             border: 'none',
                                                                             borderRadius: '8px',
@@ -1810,7 +1810,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                         fontSize: '0.8125rem',
                                         fontWeight: 600,
                                         borderRadius: '8px',
-                                        border: claimDeadlineChoice === opt.v ? '2px solid #0ea5e9' : '1px solid #e2e8f0',
+                                        border: claimDeadlineChoice === opt.v ? '2px solid var(--admin-primary, #10b981)' : '1px solid #e2e8f0',
                                         backgroundColor: claimDeadlineChoice === opt.v ? '#e0f2fe' : '#fff',
                                         color: '#0f172a',
                                         cursor: 'pointer',
@@ -1847,7 +1847,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                     padding: '0.5rem 1rem',
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
-                                    backgroundColor: claimCommitted && !modalClaimBusy ? '#0ea5e9' : '#94a3b8',
+                                    backgroundColor: claimCommitted && !modalClaimBusy ? 'var(--admin-primary, #10b981)' : '#94a3b8',
                                     color: '#fff',
                                     border: 'none',
                                     borderRadius: '8px',
@@ -2016,7 +2016,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                                     padding: '0.5rem 1rem',
                                     fontSize: '0.875rem',
                                     fontWeight: 600,
-                                    backgroundColor: '#0ea5e9',
+                                    backgroundColor: 'var(--admin-primary, #10b981)',
                                     color: '#fff',
                                     border: 'none',
                                     borderRadius: '8px',

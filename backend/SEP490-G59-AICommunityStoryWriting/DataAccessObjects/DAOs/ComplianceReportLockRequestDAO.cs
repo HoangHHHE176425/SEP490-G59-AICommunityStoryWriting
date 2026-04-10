@@ -78,8 +78,6 @@ public static class ComplianceReportLockRequestDAO
         using var context = new StoryPlatformDbContext();
         var st = (status ?? StatusPending).Trim().ToUpperInvariant();
         return context.compliance_report_lock_requests.AsNoTracking()
-            .Include(x => x.requester)
-            .ThenInclude(u => u!.user_profiles)
             .Where(x => x.status != null && x.status.ToUpper() == st)
             .OrderBy(x => x.created_at)
             .ToList();
@@ -89,8 +87,6 @@ public static class ComplianceReportLockRequestDAO
     {
         using var context = new StoryPlatformDbContext();
         return context.compliance_report_lock_requests.AsNoTracking()
-            .Include(x => x.requester)
-            .ThenInclude(u => u!.user_profiles)
             .Where(x => x.requester_id == requesterId)
             .OrderByDescending(x => x.created_at)
             .ToList();

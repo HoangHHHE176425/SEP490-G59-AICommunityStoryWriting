@@ -198,7 +198,7 @@ export function CategoryManagement() {
                             alignItems: 'center',
                             gap: '0.5rem',
                             padding: '0.625rem 1rem',
-                            backgroundColor: '#13ec5b',
+                            backgroundColor: 'var(--admin-primary, #10b981)',
                             color: '#ffffff',
                             fontSize: '0.875rem',
                             fontWeight: 'bold',
@@ -207,8 +207,8 @@ export function CategoryManagement() {
                             cursor: 'pointer',
                             transition: 'background-color 0.2s'
                         }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#10d352'}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#13ec5b'}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--admin-primary-ink, #047857)'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'var(--admin-primary, #10b981)'}
                     >
                         <Plus style={{ width: '16px', height: '16px' }} />
                         Thêm thể loại
@@ -226,7 +226,7 @@ export function CategoryManagement() {
                                 {categories.length}
                             </p>
                         </div>
-                        <div style={{ width: '48px', height: '48px', backgroundColor: 'rgba(19, 236, 91, 0.1)', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ width: '48px', height: '48px', backgroundColor: 'var(--admin-primary-soft, rgba(16, 185, 129, 0.14))', borderRadius: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <span style={{ fontSize: '1.5rem' }}>📚</span>
                         </div>
                     </div>
@@ -584,7 +584,7 @@ export function CategoryManagement() {
                         >
                             Trước
                         </button>
-                        <button style={{ padding: '0.375rem 0.75rem', border: 'none', borderRadius: '0.5rem', fontSize: '0.875rem', backgroundColor: '#13ec5b', color: '#ffffff', cursor: 'pointer' }}>
+                        <button style={{ padding: '0.375rem 0.75rem', border: 'none', borderRadius: '0.5rem', fontSize: '0.875rem', backgroundColor: 'var(--admin-primary, #10b981)', color: '#ffffff', cursor: 'pointer' }}>
                             1
                         </button>
                         <button style={{ padding: '0.375rem 0.75rem', border: '1px solid #e2e8f0', borderRadius: '0.5rem', fontSize: '0.875rem', backgroundColor: '#ffffff', color: '#1e293b', cursor: 'pointer', transition: 'background-color 0.2s' }}
