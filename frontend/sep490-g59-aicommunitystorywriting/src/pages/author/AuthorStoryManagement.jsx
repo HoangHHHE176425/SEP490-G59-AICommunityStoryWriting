@@ -102,23 +102,10 @@ function mapStoryFromApi(item) {
     };
 }
 
-function formatSuspensionUntilVi(dateValue) {
-    if (!dateValue) return '';
-    const raw = String(dateValue).trim();
-    // Nếu backend trả datetime không kèm timezone (Kind=Unspecified), coi đó là UTC để tránh lệch giờ.
-    const normalized = /(Z|[+-]\d{2}:\d{2}|[+-]\d{4})$/i.test(raw) ? raw : `${raw}Z`;
-    const d = new Date(normalized);
-    if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleString('vi-VN', {
-        timeZone: 'Asia/Ho_Chi_Minh',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-    });
-}
+const AUTHOR_WRITING_SUSPENDED_BANNER =
+    'Tài khoản đang bị tạm đình chỉ quyền viết để điều tra vi phạm.';
+const AUTHOR_WRITING_SUSPENDED_TOOLTIP =
+    'Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm.';
 
 const BANK_ACCOUNT_NUMBER_MIN = 6;
 const BANK_ACCOUNT_NUMBER_MAX = 19;
@@ -216,9 +203,6 @@ export function AuthorStoryManagement({ onBack }) {
             : `${String(authorWritingSuspendedUntilRaw).trim()}Z`)
         : null;
     const isAuthorWritingSuspended = !!(authorWritingSuspendedUntilDate && !Number.isNaN(authorWritingSuspendedUntilDate.getTime()) && authorWritingSuspendedUntilDate.getTime() > Date.now());
-    const authorWritingSuspendedUntilLabel = isAuthorWritingSuspended
-        ? formatSuspensionUntilVi(authorWritingSuspendedUntilDate)
-        : '';
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
 
@@ -760,7 +744,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleCreateStory = () => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         setCurrentStory(null);
@@ -769,7 +753,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleEditStory = async (story) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         const statusLower = String(story?.status ?? '').toLowerCase();
@@ -804,7 +788,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleAddChapter = async (story) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         const storyId = story?.id ?? story?.Id;
@@ -840,7 +824,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleEditChapter = async (chapter) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         setViewChapterOnly(false);
@@ -905,7 +889,7 @@ export function AuthorStoryManagement({ onBack }) {
     /** Mở màn tạo version mới: form để trống, chỉ cần chapter id + số chương để hiển thị. */
     const handleAddVersion = (story, chapterFromList) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         const chapterId = chapterFromList?.id ?? chapterFromList?.Id;
@@ -934,7 +918,7 @@ export function AuthorStoryManagement({ onBack }) {
     /** Mở editor chỉnh sửa version đã có: load chi tiết version rồi mở ChapterEditorPage ở chế độ edit version. */
     const handleEditVersion = async (chapter, versionFromList) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         const chapterId = chapter?.id ?? chapter?.Id;
@@ -1021,7 +1005,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleSaveChapter = async (chapterData) => {
         if (isAuthorWritingSuspended && !viewChapterOnly) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             throw new Error('AUTHOR_WRITING_SUSPENDED');
         }
         const storyId = currentStory?.id ?? currentStory?.Id;
@@ -1132,7 +1116,7 @@ export function AuthorStoryManagement({ onBack }) {
 
     const handleDeleteStory = (storyId) => {
         if (isAuthorWritingSuspended) {
-            showToast(`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`, 'error');
+            showToast(AUTHOR_WRITING_SUSPENDED_TOOLTIP, 'error');
             return;
         }
         if (!storyId) return;
@@ -1347,7 +1331,6 @@ export function AuthorStoryManagement({ onBack }) {
                 <ChapterListManager
                     story={currentStory}
                     isAuthorWritingSuspended={isAuthorWritingSuspended}
-                    authorWritingSuspendedUntilLabel={authorWritingSuspendedUntilLabel}
                     onBack={() => {
                         setActiveView('stories');
                         setCurrentStory(null);
@@ -2075,9 +2058,9 @@ export function AuthorStoryManagement({ onBack }) {
                                                     fontSize: '0.75rem',
                                                     fontWeight: 600,
                                                 }}
-                                                title={`Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`}
+                                                title={AUTHOR_WRITING_SUSPENDED_TOOLTIP}
                                             >
-                                                Tài khoản đang bị tạm đình chỉ quyền viết để điều tra vi phạm. Thời hạn: {authorWritingSuspendedUntilLabel || 'Đang cập nhật'}.
+                                                {AUTHOR_WRITING_SUSPENDED_BANNER}
                                             </div>
                                         )}
                                     </div>
@@ -2085,7 +2068,7 @@ export function AuthorStoryManagement({ onBack }) {
                                 <button
                                     onClick={handleCreateStory}
                                     disabled={isAuthorWritingSuspended}
-                                    title={isAuthorWritingSuspended ? `Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.` : 'Thêm truyện mới'}
+                                    title={isAuthorWritingSuspended ? AUTHOR_WRITING_SUSPENDED_TOOLTIP : 'Thêm truyện mới'}
                                     style={{
                                         display: 'flex',
                                         alignItems: 'center',
@@ -2388,7 +2371,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                         disabled={isAuthorWritingSuspended || story.status === 'pending_review'}
                                                         title={
                                                             isAuthorWritingSuspended
-                                                                ? `Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`
+                                                                ? AUTHOR_WRITING_SUSPENDED_TOOLTIP
                                                                 : story.status === 'pending_review'
                                                                     ? 'Truyện đang ở trạng thái chờ duyệt, không thể chỉnh sửa'
                                                                     : 'Chỉnh sửa truyện'
@@ -2429,7 +2412,7 @@ export function AuthorStoryManagement({ onBack }) {
                                                     <button
                                                         onClick={() => !isAuthorWritingSuspended && story.status === 'draft' && handleDeleteStory(story.id)}
                                                         disabled={isAuthorWritingSuspended || story.status !== 'draft'}
-                                                        title={isAuthorWritingSuspended ? `Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.` : story.status === 'draft' ? 'Xóa truyện' : 'Chỉ được xóa truyện khi ở trạng thái Bản nháp'}
+                                                        title={isAuthorWritingSuspended ? AUTHOR_WRITING_SUSPENDED_TOOLTIP : story.status === 'draft' ? 'Xóa truyện' : 'Chỉ được xóa truyện khi ở trạng thái Bản nháp'}
                                                         style={{
                                                             display: 'flex',
                                                             alignItems: 'center',

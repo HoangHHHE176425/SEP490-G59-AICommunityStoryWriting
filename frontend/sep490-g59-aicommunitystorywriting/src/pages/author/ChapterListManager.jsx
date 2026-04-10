@@ -113,6 +113,11 @@ function mapChapterFromApi(item) {
 
 const CHAPTERS_PAGE_SIZE = 10;
 
+const AUTHOR_WRITING_SUSPENDED_BANNER =
+    'Tài khoản đang bị tạm đình chỉ quyền viết để điều tra vi phạm.';
+const AUTHOR_WRITING_SUSPENDED_TOOLTIP =
+    'Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm.';
+
 export function ChapterListManager({
     story,
     onBack,
@@ -123,7 +128,6 @@ export function ChapterListManager({
     onEditVersion,
     onViewVersion,
     isAuthorWritingSuspended = false,
-    authorWritingSuspendedUntilLabel = '',
 }) {
     const storyId = story?.id ?? story?.Id;
     const [chapters, setChapters] = useState([]);
@@ -332,9 +336,7 @@ export function ChapterListManager({
         historyEntries: null,
     });
     const [messageModal, setMessageModal] = useState({ open: false, title: '', message: '' });
-    const suspendedWriteTitle = isAuthorWritingSuspended
-        ? `Bạn đang bị tạm đình chỉ quyền viết để điều tra vi phạm đến ${authorWritingSuspendedUntilLabel}.`
-        : '';
+    const suspendedWriteTitle = isAuthorWritingSuspended ? AUTHOR_WRITING_SUSPENDED_TOOLTIP : '';
     const storyProgressRaw = String(story?.storyProgressStatus ?? story?.StoryProgressStatus ?? '').trim().toUpperCase();
     const storyProgressLocked = storyProgressRaw === 'HIATUS' || storyProgressRaw === 'COMPLETED';
     const storyProgressLockTitle = storyProgressRaw === 'COMPLETED'
@@ -715,7 +717,7 @@ export function ChapterListManager({
                                             }}
                                             title={suspendedWriteTitle}
                                         >
-                                            Tài khoản đang bị tạm đình chỉ quyền viết để điều tra vi phạm. Thời hạn: {authorWritingSuspendedUntilLabel || 'Đang cập nhật'}.
+                                            {AUTHOR_WRITING_SUSPENDED_BANNER}
                                         </div>
                                     )}
                                 </div>

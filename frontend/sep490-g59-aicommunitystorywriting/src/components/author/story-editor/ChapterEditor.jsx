@@ -438,11 +438,10 @@ export function ChapterEditor({
                                                         }, 2000);
                                                     }}
                                                     title={copiedSuggestionIndex === index ? 'Đã copy' : 'Copy nhanh'}
-                                                    className={`absolute top-2 right-2 p-1 rounded-lg transition-colors duration-200 ${
-                                                        copiedSuggestionIndex === index
+                                                    className={`absolute top-2 right-2 p-1 rounded-lg transition-colors duration-200 ${copiedSuggestionIndex === index
                                                             ? 'bg-emerald-100 text-emerald-700'
                                                             : 'text-slate-600 hover:bg-slate-200'
-                                                    }`}
+                                                        }`}
                                                 >
                                                     {copiedSuggestionIndex === index ? (
                                                         <Check size={16} strokeWidth={2.5} />

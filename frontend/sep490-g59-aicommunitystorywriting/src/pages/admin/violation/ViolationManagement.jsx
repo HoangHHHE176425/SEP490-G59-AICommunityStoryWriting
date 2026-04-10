@@ -45,6 +45,7 @@ import {
     resolveAllOpenComplianceCommentReports,
     resolveAllOpenComplianceStoryReports,
     setComplianceCommentThreadHidden,
+    setComplianceStoryAuthorWritingSuspended,
     setComplianceStoryCommentsDisabled,
     setComplianceStoryFlag,
     setComplianceStoryHidden,
@@ -166,6 +167,13 @@ function publicComplianceReportCommentPath(storyId, chapterId, commentId) {
     if (ch && cid) return publicChapterCommentLocationPath(storyId, ch, cid);
     if (cid) return publicStoryCommentLocationPath(storyId, cid);
     return publicStoryDetailPath(storyId);
+}
+
+/** author_writing_suspended_until: BE đặt +100 năm khi bật, null khi tắt. */
+function isAuthorWritingSuspendedActive(untilUtc) {
+    if (untilUtc == null || untilUtc === '') return false;
+    const t = new Date(untilUtc).getTime();
+    return Number.isFinite(t) && t > Date.now();
 }
 
 function formatDate(value) {
@@ -1550,25 +1558,25 @@ export default function ViolationManagement() {
                     authorWritingSuspendedUntilUtc: row.authorWritingSuspendedUntilUtc,
                 });
                 break;
-            case 'request-suspend-writing':
-                if (hasPendingAdminAction) {
+            case 'toggle-author-writing-suspended': {
+                const suspended = isAuthorWritingSuspendedActive(row.authorWritingSuspendedUntilUtc);
+                const banned = String(row.authorAccountStatus ?? '').toUpperCase() === 'BANNED';
+                if (banned) {
                     setInfoModal({
-                        title: 'Không thể gửi yêu cầu',
-                        message:
-                            'Đang có yêu cầu gửi quản trị viên chờ xử lý; tạm thời không thể gửi «Yêu cầu tạm đình chỉ quyền viết».',
+                        title: 'Không thể thao tác',
+                        message: 'Tài khoản tác giả đã bị chặn; không áp dụng tạm khóa quyền viết.',
                     });
                     return;
                 }
-                setAdminActionForm({ requestKind: 'SUSPEND_AUTHOR_WRITING', message: '', proposedSuspendUntilUtc: '' });
-                setAdminActionError('');
-                setActionModal({
-                    type: 'story',
-                    targetId: row.storyId,
-                    adminDialogMode: 'writing',
-                    authorAccountStatus: row.authorAccountStatus,
-                    authorWritingSuspendedUntilUtc: row.authorWritingSuspendedUntilUtc,
+                openStoryActionConfirm({
+                    title: suspended ? 'Xác nhận tắt tạm khóa viết' : 'Xác nhận bật tạm khóa viết',
+                    message: suspended
+                        ? 'Mở lại quyền viết cho tác giả (tạo/sửa truyện, chương, phiên bản và gửi duyệt)?'
+                        : 'Tạm khóa quyền viết của tác giả trực tiếp. Tác giả không thể thao tác truyện/chương/phiên bản và không gửi duyệt được.',
+                    run: () => actionWithReload(() => setComplianceStoryAuthorWritingSuspended(row.storyId, { value: !suspended })),
                 });
                 break;
+            }
             case 'resolve-all':
                 if (hasPendingAdminAction) {
                     setInfoModal({
@@ -1698,6 +1706,8 @@ export default function ViolationManagement() {
                                         const hasPendingReleaseRequest = !!pendingReleaseByStory[r.storyId]
                                             || !!r.hasPendingLockReleaseRequest;
                                         const hasPendingAdminAction = !!r.hasPendingAdminActionRequest;
+                                        const authorWritingSuspended = isAuthorWritingSuspendedActive(r.authorWritingSuspendedUntilUtc);
+                                        const authorBannedForWriting = String(r.authorAccountStatus ?? '').toUpperCase() === 'BANNED';
                                         const storyFlags = { hasPendingReleaseRequest, hasPendingAdminAction };
                                         return (
                                             <>
@@ -1776,33 +1786,18 @@ export default function ViolationManagement() {
                                                                 <button type="button" style={menuBtn} disabled={hasPendingReleaseRequest} onClick={() => handleStoryRowActionSelect(r, 'request-ban', storyFlags)}>Yêu cầu chặn tài khoản</button>
                                                                 <button
                                                                     type="button"
-                                                                    style={{
-                                                                        ...menuBtn,
-                                                                        ...(hasPendingAdminAction && !hasPendingReleaseRequest
-                                                                            ? {
-                                                                                borderLeft: '3px solid #0ea5e9',
-                                                                                background: '#f0f9ff',
-                                                                                color: '#0c4a6e',
-                                                                                opacity: 0.85,
-                                                                            }
-                                                                            : {}),
-                                                                    }}
-                                                                    disabled={hasPendingReleaseRequest || hasPendingAdminAction}
+                                                                    style={menuBtn}
+                                                                    disabled={hasPendingReleaseRequest || authorBannedForWriting}
                                                                     title={
-                                                                        hasPendingAdminAction && !hasPendingReleaseRequest
-                                                                            ? 'Chờ quản trị viên xử lý đơn gửi admin — không thể gửi đơn đình chỉ quyền viết lúc này.'
-                                                                            : undefined
+                                                                        authorBannedForWriting
+                                                                            ? 'Tác giả đã bị chặn — không áp dụng tạm khóa viết.'
+                                                                            : 'Áp dụng ngay lên tài khoản tác giả: chặn chỉnh sửa truyện/chương và gửi duyệt. Không tạo đơn lên quản trị viên.'
                                                                     }
-                                                                    onClick={() => handleStoryRowActionSelect(r, 'request-suspend-writing', storyFlags)}
+                                                                    onClick={() => handleStoryRowActionSelect(r, 'toggle-author-writing-suspended', storyFlags)}
                                                                 >
-                                                                    {hasPendingAdminAction && !hasPendingReleaseRequest ? (
-                                                                        <span className="inline-flex items-center gap-1.5">
-                                                                            <Lock size={12} className="shrink-0" aria-hidden />
-                                                                            Yêu cầu tạm đình chỉ quyền viết
-                                                                        </span>
-                                                                    ) : (
-                                                                        'Yêu cầu tạm đình chỉ quyền viết'
-                                                                    )}
+                                                                    {authorWritingSuspended
+                                                                        ? 'Mở lại quyền viết tác giả'
+                                                                        : 'Tạm khóa quyền viết tác giả'}
                                                                 </button>
                                                                 <button
                                                                     type="button"
@@ -1844,7 +1839,7 @@ export default function ViolationManagement() {
                                                         <div className="text-xs text-sky-900 mt-1 flex items-start gap-1.5 max-w-[280px]">
                                                             <Lock size={12} className="shrink-0 mt-0.5 text-sky-700" aria-hidden />
                                                             <span>
-                                                                Đang chờ QTV xử lý yêu cầu — tạm khóa «Xử lý toàn bộ phiếu báo cáo» và «Yêu cầu tạm đình chỉ quyền viết».
+                                                                Đang chờ QTV xử lý yêu cầu gửi admin — tạm khóa «Xử lý toàn bộ phiếu báo cáo».
                                                             </span>
                                                         </div>
                                                     ) : null}

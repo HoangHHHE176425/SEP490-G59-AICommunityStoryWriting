@@ -109,7 +109,10 @@ export function Header() {
                 // UX request: không hiển thị toast duyệt/từ chối chương vì dễ bị nháy lặp.
                 const skipChapterModerationToast =
                     chapterModerationToastTypes.has(type) || /^CHAPTER_/.test(type);
-                if (!skipChapterModerationToast) {
+                // Trên /author (Truyện của tôi, danh sách chương, soạn thảo): đã cập nhật UI qua fetchProfile — không toast khi compliance bật/tắt quyền viết.
+                const skipComplianceAuthorWritingToast =
+                    type === 'COMPLIANCE_STORY_MODERATION_ACTION' && location.pathname === '/author';
+                if (!skipChapterModerationToast && !skipComplianceAuthorWritingToast) {
                     showToastRef.current(toastMsg, toastType, 5000);
                 }
                 // Khi có ủng hộ hoặc độc giả mở khóa chương (thu nhập tác giả), cập nhật ví ngay
@@ -121,7 +124,7 @@ export function Header() {
         };
         window.addEventListener('app:notification', handler);
         return () => window.removeEventListener('app:notification', handler);
-    }, [isAuthenticated, fetchNotifications]);
+    }, [isAuthenticated, fetchNotifications, location.pathname]);
 
     const fetchWallet = useCallback(async () => {
         if (!isAuthenticated) {
