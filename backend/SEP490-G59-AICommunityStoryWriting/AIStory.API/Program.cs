@@ -63,14 +63,21 @@ namespace AIStory.API
             {
                 options.AddPolicy("AllowClient", policy =>
                 {
-
                     policy.SetIsOriginAllowed(origin =>
                     {
                         if (string.IsNullOrWhiteSpace(origin)) return false;
                         if (corsExtraSet.Contains(origin)) return true;
                         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
-                        return uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-                               || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase);
+
+                        var isConfiguredOrigin = Array.Exists(
+                            corsAllowedOrigins,
+                            allowedOrigin => string.Equals(allowedOrigin, origin, StringComparison.OrdinalIgnoreCase));
+
+                        var isLocalhost = corsAllowLocalhost &&
+                                          (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                                           || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase));
+
+                        return isConfiguredOrigin || isLocalhost;
                     })
                         .AllowAnyMethod()
                         .AllowAnyHeader()

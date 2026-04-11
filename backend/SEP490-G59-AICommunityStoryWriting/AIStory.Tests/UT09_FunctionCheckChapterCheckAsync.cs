@@ -44,9 +44,10 @@ public class UT09_FunctionCheckChapterCheckAsync
         _output.WriteLine(string.IsNullOrEmpty(productNote) ? "Ghi chú: (xem assert / stack trace nếu fail)." : $"Ghi chú: {productNote}");
     }
 
-    private static string BuildSpellCacheKeyForTest(string contentAfterTrimAndTruncate)
+    /// <summary>Khớp <see cref="Services.Implementations.ChapterCheckService"/> — tiêu đề (có thể rỗng) + nội dung.</summary>
+    private static string BuildSpellCacheKeyForTest(string contentAfterTrimAndTruncate, string? chapterTitle = null)
     {
-        var normalized = NormalizeForCache(contentAfterTrimAndTruncate);
+        var normalized = NormalizeForCache($"{chapterTitle ?? ""}\n{contentAfterTrimAndTruncate}");
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
         return $"chapter-check:spell:{Convert.ToHexString(bytes)}";
     }
