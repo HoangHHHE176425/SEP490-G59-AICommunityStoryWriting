@@ -6,8 +6,7 @@ import {
     MessageSquare,
     DollarSign,
     ArrowUp,
-    ArrowDown,
-    MoreVertical
+    ArrowDown
 } from 'lucide-react';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -82,6 +81,7 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
     const [chartUsersTotal, setChartUsersTotal] = useState(0);
     const [chartUsersReaders, setChartUsersReaders] = useState(0);
     const [chartUsersAuthors, setChartUsersAuthors] = useState(0);
+    const [viewChartPoints, setViewChartPoints] = useState([]);
 
     // Moderator-only counts (để render dashboard đúng nhiệm vụ duyệt)
     const [modPendingStoriesCount, setModPendingStoriesCount] = useState(0);
@@ -99,19 +99,22 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
         return Math.max(total - readers - authors, 0);
     }, [chartUsersTotal, chartUsersReaders, chartUsersAuthors]);
 
-    const barHeights = useMemo(() => {
-        if (!isModeratorPanel) return [65, 45, 78, 52, 88, 45, 92, 73, 56, 84, 67, 91];
-        const a = Number(chartUsersReaders ?? 0);
-        const b = Number(chartUsersAuthors ?? 0);
-        const c = Number(chartsVip ?? 0);
-        const sum = a + b + c;
-        const safeSum = sum > 0 ? sum : 1;
-        const toHeight = (v) => 10 + Math.round((Number(v) / safeSum) * 80); // percent
-        const hA = toHeight(a);
-        const hB = toHeight(b);
-        const hC = toHeight(c);
-        return [hA, hB, hC, hA, hB, hC, hA, hB, hC, hA, hB, hC];
-    }, [isModeratorPanel, chartUsersReaders, chartUsersAuthors, chartsVip]);
+    const viewBars = useMemo(() => {
+        if (!Array.isArray(viewChartPoints) || viewChartPoints.length === 0) {
+            return [];
+        }
+        const maxViews = Math.max(...viewChartPoints.map((p) => Number(p?.views ?? 0)), 1);
+        return viewChartPoints.map((point, index) => {
+            const views = Number(point?.views ?? 0);
+            const height = 10 + Math.round((views / maxViews) * 80);
+            return {
+                key: point?.id ?? `v-${index}`,
+                label: point?.label ?? `#${index + 1}`,
+                views,
+                height,
+            };
+        });
+    }, [viewChartPoints]);
 
     const statsToShow = useMemo(() => {
         if (!isModeratorPanel) return stats;
@@ -298,6 +301,11 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
                     const topRaw = Array.isArray(topViewsRes?.items) ? topViewsRes.items : (topViewsRes?.Items ?? []);
                     const topMapped = topRaw.map(mapStoryListItemToBrowseStory).filter(Boolean);
                     const topViewsTotalApprox = topMapped.reduce((sum, s) => sum + Number(s?.views ?? 0), 0);
+                    const topViewPoints = topMapped.slice(0, 12).map((story, index) => ({
+                        id: story?.id ?? `story-${index}`,
+                        label: `Top ${index + 1}`,
+                        views: Number(story?.views ?? 0),
+                    }));
 
                     const recentRaw = Array.isArray(recentStoriesRes?.items) ? recentStoriesRes.items : (recentStoriesRes?.Items ?? []);
                     const recentMapped = recentRaw.map(mapStoryListItemToBrowseStory).filter(Boolean);
@@ -349,6 +357,7 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
                         setRecentActivities(mappedRecentActivities);
                         setActivityPage(1);
                         setTopStories(topMapped.slice(0, 4));
+                        setViewChartPoints(topViewPoints);
 
                         // Pie chart: active readers / authors (wallet summary)
                         setChartUsersTotal(totalUsers);
@@ -426,9 +435,6 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
                                 <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${colorClasses[stat.color]}`}>
                                     <Icon className="w-6 h-6" />
                                 </div>
-                                <button className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors">
-                                    <MoreVertical className="w-4 h-4 text-slate-400" />
-                                </button>
                             </div>
                             <p className="text-sm text-slate-500 dark:text-slate-400 mb-1">
                                 {stat.title}
@@ -614,21 +620,21 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
                             Thống kê lượt xem
                         </h2>
                         <div className="h-64 flex items-end justify-between gap-2">
-                            {barHeights.map((height, index) => (
+                            {(loading ? [] : viewBars).map((bar) => (
                                 <div
-                                    key={index}
+                                    key={bar.key}
                                     className="flex-1 bg-primary/20 hover:bg-primary/40 rounded-t transition-colors relative group cursor-pointer"
-                                    style={{ height: `${height}%` }}
+                                    style={{ height: `${bar.height}%` }}
                                 >
                                     <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-2 py-1 rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                                        {height}K views
+                                        {formatStoryViews(bar.views)}
                                     </div>
                                 </div>
                             ))}
                         </div>
                         <div className="flex justify-between mt-4 text-xs text-slate-500 dark:text-slate-400">
-                            {['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'T8', 'T9', 'T10', 'T11', 'T12'].map((month) => (
-                                <span key={month}>{month}</span>
+                            {(loading ? [] : viewBars).map((bar) => (
+                                <span key={`lbl-${bar.key}`}>{bar.label}</span>
                             ))}
                         </div>
                     </div>
@@ -641,13 +647,33 @@ export function AdminDashboard({ onNavigatePublicationStatus } = {}) {
                         </h2>
                         <div className="h-64 flex items-center justify-center">
                             <div className="relative w-48 h-48">
-                                {/* Simple pie chart representation */}
-                                <div
-                                    className="absolute inset-0 rounded-full"
-                                    style={{
-                                        background: 'conic-gradient(#13ec5b 0deg 180deg, #3b82f6 180deg 270deg, #f59e0b 270deg 360deg)'
-                                    }}
-                                ></div>
+                                {(() => {
+                                    const total = Number(chartUsersTotal ?? 0);
+                                    const readers = Number(chartUsersReaders ?? 0);
+                                    const authors = Number(chartUsersAuthors ?? 0);
+                                    const vip = Number(chartsVip ?? 0);
+                                    if (total <= 0) {
+                                        return (
+                                            <div
+                                                className="absolute inset-0 rounded-full"
+                                                style={{ background: '#e2e8f0' }}
+                                            />
+                                        );
+                                    }
+                                    const readerDeg = Math.round((readers / total) * 360);
+                                    const authorDeg = Math.round((authors / total) * 360);
+                                    const vipDeg = Math.max(0, 360 - readerDeg - authorDeg);
+                                    const authorStart = readerDeg;
+                                    const vipStart = readerDeg + authorDeg;
+                                    return (
+                                        <div
+                                            className="absolute inset-0 rounded-full"
+                                            style={{
+                                                background: `conic-gradient(#13ec5b 0deg ${readerDeg}deg, #3b82f6 ${authorStart}deg ${vipStart}deg, #f59e0b ${vipStart}deg ${vipStart + vipDeg}deg)`,
+                                            }}
+                                        />
+                                    );
+                                })()}
                                 <div className="absolute inset-4 bg-white dark:bg-slate-900 rounded-full flex items-center justify-center">
                                     <div className="text-center">
                                         <p className="text-2xl font-bold text-slate-900 dark:text-white">

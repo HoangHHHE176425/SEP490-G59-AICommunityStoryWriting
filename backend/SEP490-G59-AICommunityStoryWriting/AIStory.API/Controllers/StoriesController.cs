@@ -788,6 +788,12 @@ namespace AIStory.API.Controllers
                     var existingStory = _storyService.GetById(id);
                     if (existingStory != null && !string.IsNullOrEmpty(existingStory.CoverImage))
                     {
+                        try
+                        {
+                            await _cloudinaryImageService.DeleteImageByUrlAsync(existingStory.CoverImage, HttpContext.RequestAborted);
+                        }
+                        catch { }
+
                         var oldRel = existingStory.CoverImage.TrimStart('/');
                         if (oldRel.StartsWith("uploads/", StringComparison.OrdinalIgnoreCase))
                         {
