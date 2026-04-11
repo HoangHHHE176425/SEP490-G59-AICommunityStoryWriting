@@ -53,18 +53,29 @@ namespace AIStory.API
                 });
             // Đăng ký DbContext, để OnConfiguring trong StoryPlatformDbContext tự cấu hình connection string.
             builder.Services.AddDbContext<StoryPlatformDbContext>();
+            var corsAllowedOrigins = builder.Configuration
+                .GetSection("Cors:AllowedOrigins")
+                .Get<string[]>() ?? Array.Empty<string>();
+            var corsAllowLocalhost = builder.Configuration.GetValue<bool>("Cors:AllowLocalhost");
             // CORS Configuration
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowClient", policy =>
                 {
-
                     policy.SetIsOriginAllowed(origin =>
                     {
                         if (string.IsNullOrWhiteSpace(origin)) return false;
                         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
-                        return uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-                               || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase);
+
+                        var isConfiguredOrigin = Array.Exists(
+                            corsAllowedOrigins,
+                            allowedOrigin => string.Equals(allowedOrigin, origin, StringComparison.OrdinalIgnoreCase));
+
+                        var isLocalhost = corsAllowLocalhost &&
+                                          (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                                           || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase));
+
+                        return isConfiguredOrigin || isLocalhost;
                     })
                         .AllowAnyMethod()
                         .AllowAnyHeader()
