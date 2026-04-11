@@ -130,9 +130,7 @@ export async function uploadAvatar(file) {
     const formData = new FormData();
     formData.append("avatar", file);
     try {
-        const res = await axiosInstance.post("/Account/avatar", formData, {
-            headers: { "Content-Type": "multipart/form-data" },
-        });
+        const res = await axiosInstance.post("/Account/avatar", formData);
         return { success: true, data: res.data };
     } catch (err) {
         return { success: false, message: getErrorMessage(err) };

@@ -1,39 +1,73 @@
-# Visual Studio
+# -----------------------------
+# Visual Studio / IDE
+# -----------------------------
 .vs/
 *.user
 *.suo
-
-# Build outputs
-bin/
-obj/
-
-# IDE
 .vscode/
 .idea/
 
+# -----------------------------
+# Build outputs
+# -----------------------------
+bin/
+obj/
+
+# -----------------------------
 # OS
+# -----------------------------
 Thumbs.db
 .DS_Store
 
+# -----------------------------
 # Temporary / Backup files
+# -----------------------------
 *.tmp
 *.bak
 *.backup
 
+# -----------------------------
 # Git filter-branch temporary (safe to delete after rewrite)
+# -----------------------------
 .git-rewrite/
 
-# Local secrets (do NOT commit)
-**/appsettings.Local.json
-**/appsettings.*.Local.json
+# -----------------------------
+# Appsettings — không commit (mặc định / môi trường / bí mật)
+# deploy bằng file riêng hoặc env
+# -----------------------------
+**/appsettings.json
+**/appsettings.*.json
+
+# -----------------------------
+# Database Context (chứa connection string, bí mật)
+# -----------------------------
 backend/SEP490-G59-AICommunityStoryWriting/DataAccessObjects/Context/StoryPlatformDbContext.cs
 
+# -----------------------------
 # Runtime uploads (do NOT commit)
+# -----------------------------
 **/wwwroot/uploads/**
 
-# Docs (không đẩy lên GitHub)
+# -----------------------------
+# Docs / tài liệu
+# -----------------------------
 docs/
 
+# -----------------------------
 # AI vector index artifacts (FAISS)
+# -----------------------------
 backend/SEP490-G59-AICommunityStoryWriting/AIStory.API/Data/faiss/
 **/*.faiss.bin
+
+# -----------------------------
+# Optional: publish / deploy folders
+# -----------------------------
+backend/SEP490-G59-AICommunityStoryWriting/AIStory.API/publish*/
+publish-api/
+publish-vps/
+deploy/
+
+# -----------------------------
+# Environment files
+# -----------------------------
+frontend/sep490-g59-aicommunitystorywriting/.env*

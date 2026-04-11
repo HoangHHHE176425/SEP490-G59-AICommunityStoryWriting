@@ -1,4 +1,5 @@
 using BusinessObjects;
+using BusinessObjects.Account;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using DataAccessObjects.Queries;
@@ -20,6 +21,18 @@ namespace Repositories.Implementations
 
         public async Task<users?> GetUserById(Guid id)
             => await UserDAO.Instance.FindUserById(_context, id);
+
+        public Task<(int StoryCount, long TotalViews, int TotalFavorites)> GetAuthorStoryAggregatesAsync(Guid authorId)
+            => UserDAO.Instance.GetAuthorStoryAggregatesAsync(_context, authorId);
+
+        public Task<bool> UserExistsAsync(Guid userId)
+            => UserDAO.Instance.UserExistsAsync(_context, userId);
+
+        public Task<string?> GetUserProfileNicknameAsync(Guid userId)
+            => UserDAO.Instance.GetUserProfileNicknameAsync(_context, userId);
+
+        public Task PersistUserProfileAsync(Guid userId, UserProfilePersistModel model)
+            => UserDAO.Instance.PersistUserProfileAsync(_context, userId, model);
 
         public async Task<bool> IsEmailExist(string email)
             => await UserDAO.Instance.CheckEmailExists(_context, email);
