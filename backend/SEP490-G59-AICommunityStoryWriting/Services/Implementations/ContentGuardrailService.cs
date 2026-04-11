@@ -1,13 +1,10 @@
 using Microsoft.Extensions.Configuration;
-using OpenAI.Chat;
 using Repositories;
 using Services.DTOs.AI;
-using Services.Helpers;
 using Services.Interfaces;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Text;
-using System.Text.Json;
 
 namespace Services.Implementations;
 
@@ -30,18 +27,14 @@ public class ContentGuardrailService : IContentGuardrailService
     {
         var bannedWords = GetBannedWords();
         var ruleResult = CheckAgainstWordList(draftContent, bannedWords);
-        if (!_configuration.GetValue("ContentGuardrail:EnableAiBannedWords", true))
-            return ruleResult;
-        return await MergeWithAiResultAsync(draftContent, bannedWords, ruleResult, cancellationToken);
+        return await Task.FromResult(ruleResult);
     }
 
     public async Task<GuardrailResult> CheckCommentBannedWordsAsync(string content, CancellationToken cancellationToken = default)
     {
         var bannedWords = GetBannedWordsCommentOnly();
         var ruleResult = CheckAgainstWordList(content, bannedWords);
-        if (!_configuration.GetValue("ContentGuardrail:EnableAiBannedWords", true))
-            return ruleResult;
-        return await MergeWithAiResultAsync(content, bannedWords, ruleResult, cancellationToken);
+        return await Task.FromResult(ruleResult);
     }
 
     private static GuardrailResult CheckAgainstWordList(string? draftContent, string[] bannedWords)
@@ -66,7 +59,7 @@ public class ContentGuardrailService : IContentGuardrailService
                 violations.Add(new GuardrailViolation
                 {
                     Type = "BannedWord",
-                    Message = "Nội dung chứa từ không được phép.",
+                    Message = $"Từ cấm: {w}",
                     Quote = ExtractContextSnippet(draftSource, draftNorm, wNorm)
                 });
         }
@@ -76,156 +69,6 @@ public class ContentGuardrailService : IContentGuardrailService
             Passed = violations.Count == 0,
             Violations = violations
         };
-    }
-
-    private async Task<GuardrailResult> MergeWithAiResultAsync(
-        string? draftContent,
-        string[] bannedWords,
-        GuardrailResult ruleResult,
-        CancellationToken cancellationToken)
-    {
-        var aiResult = await DetectWithAiAsync(draftContent, bannedWords, cancellationToken);
-        if (aiResult == null || aiResult.Violations.Count == 0)
-            return ruleResult;
-
-        var merged = new List<GuardrailViolation>(ruleResult.Violations);
-        var set = new HashSet<string>(
-            merged.Select(v => $"{v.Type}|{v.Quote}".ToLowerInvariant()),
-            StringComparer.OrdinalIgnoreCase);
-
-        foreach (var v in aiResult.Violations)
-        {
-            var key = $"{v.Type}|{v.Quote}".ToLowerInvariant();
-            if (set.Add(key))
-                merged.Add(v);
-        }
-
-        return new GuardrailResult { Passed = merged.Count == 0, Violations = merged };
-    }
-
-    private async Task<GuardrailResult?> DetectWithAiAsync(
-        string? draftContent,
-        string[] bannedWords,
-        CancellationToken cancellationToken)
-    {
-        var normalized = ChapterContentNormalizer.NormalizeForAi(draftContent, 6000);
-        if (string.IsNullOrWhiteSpace(normalized))
-            return null;
-
-        try
-        {
-            var (provider, model, apiKey, baseUrl) =
-                AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentConsistencyChecker);
-            var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
-            var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentConsistencyChecker)
-                          ?? new ChatCompletionOptions();
-            options.Temperature = 0;
-            options.TopP = 1;
-
-            var bannedList = string.Join(", ", bannedWords.Where(x => !string.IsNullOrWhiteSpace(x)).Take(300));
-            var messages = new List<ChatMessage>
-            {
-                new SystemChatMessage("""
-Bạn là bộ lọc từ cấm theo ngữ cảnh cho nội dung truyện.
-Chỉ trả về JSON hợp lệ, không markdown, không giải thích ngoài JSON.
-Nếu không phát hiện vi phạm thì trả {"violations":[]}.
-Mỗi violation phải có:
-- matchedPhrase: từ/cụm vi phạm.
-- contextSnippet: đoạn trích chứa matchedPhrase, chỉ tối đa 24 ký tự trước và 24 ký tự sau.
-- reason: lý do ngắn.
-"""),
-                new UserChatMessage($"""
-Danh sách từ cấm tham chiếu: {bannedList}
-
-Nội dung cần kiểm tra:
----
-{normalized}
----
-
-Trả về JSON object có field "violations" là mảng object gồm: matchedPhrase, contextSnippet, reason.
-""")
-            };
-
-            var completion = await client.CompleteChatAsync(messages, options, cancellationToken);
-            var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
-            if (string.IsNullOrWhiteSpace(text))
-                return null;
-            return ParseAiGuardrail(text, normalized);
-        }
-        catch
-        {
-            // Nếu AI lỗi/time-out thì fallback kết quả rule-based, không làm fail request.
-            return null;
-        }
-    }
-
-    private static GuardrailResult ParseAiGuardrail(string raw, string source)
-    {
-        var t = UnwrapJson(raw);
-        using var doc = JsonDocument.Parse(t);
-        var root = doc.RootElement;
-        var list = new List<GuardrailViolation>();
-        if (!root.TryGetProperty("violations", out var arr) || arr.ValueKind != JsonValueKind.Array)
-            return new GuardrailResult { Passed = true, Violations = list };
-
-        foreach (var item in arr.EnumerateArray())
-        {
-            if (item.ValueKind != JsonValueKind.Object) continue;
-            var phrase = item.TryGetProperty("matchedPhrase", out var p) ? p.GetString() ?? "" : "";
-            var snippet = item.TryGetProperty("contextSnippet", out var c) ? c.GetString() ?? "" : "";
-            var reason = item.TryGetProperty("reason", out var r) ? r.GetString() ?? "" : "";
-            snippet = ClampAroundNeedle(snippet, phrase, source);
-            if (string.IsNullOrWhiteSpace(snippet) && !string.IsNullOrWhiteSpace(phrase))
-                snippet = ExtractContextSnippet(source, NormalizeForMatch(source), NormalizeForMatch(phrase), 24);
-            if (string.IsNullOrWhiteSpace(snippet)) continue;
-
-            list.Add(new GuardrailViolation
-            {
-                Type = "BannedWord",
-                Message = string.IsNullOrWhiteSpace(reason) ? "Nội dung chứa từ không được phép." : reason.Trim(),
-                Quote = snippet
-            });
-        }
-
-        return new GuardrailResult { Passed = list.Count == 0, Violations = list };
-    }
-
-    private static string UnwrapJson(string raw)
-    {
-        var t = raw.Trim();
-        if (t.StartsWith("```", StringComparison.Ordinal))
-        {
-            var start = t.IndexOf('\n');
-            if (start >= 0)
-            {
-                start++;
-                var end = t.IndexOf("```", start, StringComparison.Ordinal);
-                if (end > start) t = t[start..end].Trim();
-            }
-        }
-        var i = t.IndexOf('{');
-        var j = t.LastIndexOf('}');
-        if (i >= 0 && j > i) return t[i..(j + 1)];
-        return t;
-    }
-
-    private static string ClampAroundNeedle(string? snippet, string? needle, string source)
-    {
-        var s = (snippet ?? "").Trim();
-        var n = (needle ?? "").Trim();
-        if (s.Length == 0 || n.Length == 0) return s;
-
-        var idx = s.IndexOf(n, StringComparison.OrdinalIgnoreCase);
-        if (idx >= 0)
-        {
-            const int ctx = 24;
-            var start = Math.Max(0, idx - ctx);
-            var end = Math.Min(s.Length, idx + n.Length + ctx);
-            return (start > 0 ? "..." : "") + s[start..end].Trim() + (end < s.Length ? "..." : "");
-        }
-
-        var sourceSnippet = ExtractContextSnippet(source, NormalizeForMatch(source), NormalizeForMatch(n), 24);
-        return sourceSnippet;
     }
 
     /// <summary>Lấy danh sách từ cấm: ưu tiên DB (ai_sensitive_words, category BannedWord), không có thì dùng config.</summary>
