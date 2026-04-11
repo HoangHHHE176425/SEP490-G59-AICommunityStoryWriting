@@ -1,3 +1,4 @@
+using BusinessObjects.Account;
 using BusinessObjects.Entities;
 using DataAccessObjects.Queries;
 
@@ -6,7 +7,11 @@ namespace Repositories.Interfaces
     public interface IUserRepository
     {
         Task<users?> GetUserByEmail(string email);
-        Task<users?> GetUserById(Guid id); 
+        Task<users?> GetUserById(Guid id);
+        Task<bool> UserExistsAsync(Guid userId);
+        Task<string?> GetUserProfileNicknameAsync(Guid userId);
+        Task PersistUserProfileAsync(Guid userId, UserProfilePersistModel model);
+        Task<(int StoryCount, long TotalViews, int TotalFavorites)> GetAuthorStoryAggregatesAsync(Guid authorId);
         Task<bool> IsEmailExist(string email);
         Task AddUser(users user);
         Task UpdateUser(users user);

@@ -6,6 +6,7 @@ using AIStory.Services.Implementations;
 using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -249,9 +250,33 @@ namespace AIStory.API
             // HTTP pipeline
             // =======================
 
+            // Nginx (or another reverse proxy) terminates TLS and forwards http://127.0.0.1:5000
+            var forwardedHeadersOptions = new ForwardedHeadersOptions
+            {
+                ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+            };
+            forwardedHeadersOptions.KnownNetworks.Clear();
+            forwardedHeadersOptions.KnownProxies.Clear();
+            forwardedHeadersOptions.KnownProxies.Add(System.Net.IPAddress.Loopback);
+            forwardedHeadersOptions.KnownProxies.Add(System.Net.IPAddress.IPv6Loopback);
+            app.UseForwardedHeaders(forwardedHeadersOptions);
+
             if (app.Environment.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
+            }
+
+            // Biến môi trường đọc trực tiếp (ưu tiên hơn appsettings*.Local.json đè systemd).
+            static bool EnvIsTrue(string name) =>
+                string.Equals(Environment.GetEnvironmentVariable(name), "true", StringComparison.OrdinalIgnoreCase);
+
+            var swaggerFromEnv = EnvIsTrue("Swagger__Enabled") || EnvIsTrue("Swagger__EnableInProduction");
+            var swaggerEnabled = app.Environment.IsDevelopment()
+                || swaggerFromEnv
+                || app.Configuration.GetValue("Swagger:Enabled", false)
+                || app.Configuration.GetValue("Swagger:EnableInProduction", false);
+            if (swaggerEnabled)
+            {
                 app.UseSwagger();
                 app.UseSwaggerUI(c =>
                 {
@@ -261,6 +286,7 @@ namespace AIStory.API
 
             // In Development we often run on http://localhost:5000 (no HTTPS).
             // Enabling HTTPS redirection there breaks CORS preflight (OPTIONS) due to redirects.
+            // Behind nginx with TLS, forwarded X-Forwarded-Proto keeps scheme correct so redirects behave.
             if (!app.Environment.IsDevelopment())
             {
                 app.UseHttpsRedirection();
