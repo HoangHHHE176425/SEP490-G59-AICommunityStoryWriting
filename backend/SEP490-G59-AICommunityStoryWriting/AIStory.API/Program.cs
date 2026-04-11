@@ -18,7 +18,6 @@ using Services.Implementations;
 using Services.Implementations.Lookups;
 using Services.Integrations.PayOS;
 using Services.Interfaces;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -53,6 +52,11 @@ namespace AIStory.API
                 });
             // Đăng ký DbContext, để OnConfiguring trong StoryPlatformDbContext tự cấu hình connection string.
             builder.Services.AddDbContext<StoryPlatformDbContext>();
+
+            var corsExtraOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                ?? Array.Empty<string>();
+            var corsExtraSet = new HashSet<string>(corsExtraOrigins, StringComparer.OrdinalIgnoreCase);
+
             // CORS Configuration
             builder.Services.AddCors(options =>
             {
@@ -62,6 +66,7 @@ namespace AIStory.API
                     policy.SetIsOriginAllowed(origin =>
                     {
                         if (string.IsNullOrWhiteSpace(origin)) return false;
+                        if (corsExtraSet.Contains(origin)) return true;
                         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
                         return uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
                                || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase);
@@ -180,40 +185,6 @@ namespace AIStory.API
                                     context.Token = accessToken;
                                 }
                                 return Task.CompletedTask;
-                            },
-                            OnTokenValidated = async context =>
-                            {
-                                var sub = context.Principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
-                                          ?? context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                                if (!Guid.TryParse(sub, out var userId))
-                                {
-                                    context.Fail("Invalid token subject.");
-                                    return;
-                                }
-
-                                var db = context.HttpContext.RequestServices.GetRequiredService<StoryPlatformDbContext>();
-                                var status = await db.users
-                                    .AsNoTracking()
-                                    .Where(u => u.id == userId)
-                                    .Select(u => u.status)
-                                    .FirstOrDefaultAsync(context.HttpContext.RequestAborted);
-
-                                if (string.IsNullOrWhiteSpace(status))
-                                {
-                                    context.Fail("User no longer exists.");
-                                    return;
-                                }
-
-                                if (string.Equals(status, "BANNED", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    context.Fail("The account has been banned.");
-                                    return;
-                                }
-
-                                if (!string.Equals(status, "ACTIVE", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    context.Fail("The account is no longer active.");
-                                }
                             }
                         };
                     });
@@ -296,6 +267,23 @@ namespace AIStory.API
             }
 
             app.UseStaticFiles();
+
+            // Trang FE trên Internet (vd. http://103.x) gọi API trên localhost/LAN — Chrome yêu cầu
+            // Private Network Access: preflight OPTIONS phải có Access-Control-Allow-Private-Network.
+            app.Use(async (context, next) =>
+            {
+                if (HttpMethods.IsOptions(context.Request.Method) &&
+                    context.Request.Headers.TryGetValue("Access-Control-Request-Private-Network", out var pna) &&
+                    string.Equals(pna.ToString(), "true", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.OnStarting(() =>
+                    {
+                        context.Response.Headers.Append("Access-Control-Allow-Private-Network", "true");
+                        return Task.CompletedTask;
+                    });
+                }
+                await next();
+            });
 
             // Enable CORS
             app.UseCors("AllowClient");
