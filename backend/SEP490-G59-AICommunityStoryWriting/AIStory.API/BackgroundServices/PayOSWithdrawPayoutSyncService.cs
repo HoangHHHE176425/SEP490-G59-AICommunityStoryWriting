@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Services.Helpers;
 using Services.Integrations.PayOS;
 
 namespace AIStory.API.BackgroundServices
@@ -115,26 +116,18 @@ namespace AIStory.API.BackgroundServices
                         return;
                     }
 
-                    // PayOS payout approvalState uses values like: PROCESSING, SUCCEEDED, FAILED, REJECTED, CANCELLED...
-                    // Our UI needs: COMPLETED / FAILED. Keep PROCESSING when not terminal.
-                    var approvalState = string.Equals(payout.ApprovalState, "SUCCEEDED", StringComparison.OrdinalIgnoreCase)
-                        ? "COMPLETED"
-                        : string.Equals(payout.ApprovalState, "COMPLETED", StringComparison.OrdinalIgnoreCase)
-                            ? "COMPLETED"
-                        : string.Equals(payout.ApprovalState, "PARTIAL_COMPLETED", StringComparison.OrdinalIgnoreCase)
-                            ? "COMPLETED"
-                        : string.Equals(payout.ApprovalState, "FAILED", StringComparison.OrdinalIgnoreCase)
-                            ? "FAILED"
-                        : string.Equals(payout.ApprovalState, "REJECTED", StringComparison.OrdinalIgnoreCase)
-                            ? "FAILED"
-                        : string.Equals(payout.ApprovalState, "CANCELLED", StringComparison.OrdinalIgnoreCase)
-                            ? "FAILED"
-                        : null;
+                    var approvalState = AuthorWithdrawWalletHelper.MapPayOSPayoutToSettlementStatus(
+                        payout.ApprovalState,
+                        payout.FirstTransactionState);
 
                     // Not terminal -> keep PROCESSING
                     if (approvalState == null)
                     {
-                        _logger.LogInformation("[PayOS] payout not terminal. payoutId={PayoutId}, approvalState={ApprovalState}", payoutId, payout.ApprovalState);
+                        _logger.LogInformation(
+                            "[PayOS] payout not terminal. payoutId={PayoutId}, approvalState={ApprovalState}, firstTx={FirstTx}",
+                            payoutId,
+                            payout.ApprovalState,
+                            payout.FirstTransactionState);
                         await tx.CommitAsync(cancellationToken);
                         return;
                     }
@@ -172,7 +165,7 @@ namespace AIStory.API.BackgroundServices
 
                     if (approvalState == "COMPLETED")
                     {
-                        wallet.frozen_balance = Math.Max(0m, (wallet.frozen_balance ?? 0m) - current.amount_requested);
+                        AuthorWithdrawWalletHelper.ApplyPayoutCompleted(wallet, current.amount_requested);
                         current.status = "COMPLETED";
                     }
                     else
