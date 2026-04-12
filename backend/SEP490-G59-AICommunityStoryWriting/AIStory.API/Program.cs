@@ -1,3 +1,4 @@
+using AIStory.API.BackgroundServices;
 using AIStory.API.Configurations;
 using AIStory.API.Hubs;
 using AIStory.API.Services;
@@ -6,6 +7,7 @@ using AIStory.Services.Implementations;
 using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +16,6 @@ using Microsoft.OpenApi.Models;
 using Repositories;
 using Repositories.Implementations;
 using Repositories.Interfaces;
-using AIStory.API.BackgroundServices;
 using Services.Implementations;
 using Services.Implementations.Lookups;
 using Services.Integrations.PayOS;
@@ -319,6 +320,77 @@ namespace AIStory.API
             app.MapControllers();
             app.MapHub<ModeratorHub>("/hubs/moderator");
             app.MapHub<NotificationHub>("/hubs/notifications");
+            using (var scope = app.Services.CreateScope())
+            {
+                var context = scope.ServiceProvider.GetRequiredService<StoryPlatformDbContext>();
+
+                string hashedPassword = BCrypt.Net.BCrypt.HashPassword("123456");
+
+                users CreateUser(string email, string role, int ageDays)
+                {
+                    var createdAt = DateTime.Now.AddDays(-ageDays);
+
+                    var user = new users
+                    {
+                        id = Guid.NewGuid(),
+                        email = email,
+                        password_hash = hashedPassword,
+                        role = role,
+                        status = "ACTIVE",
+                        created_at = createdAt,
+                        updated_at = createdAt
+                    };
+
+                    return user;
+                }
+
+                void AddUserWithProfile(string email, string role, string nickname, string bio, int ageDays)
+                {
+                    if (!context.users.Any(u => u.email == email))
+                    {
+                        var user = CreateUser(email, role, ageDays);
+
+                        context.users.Add(user);
+
+                        context.user_profiles.Add(new user_profiles
+                        {
+                            user_id = user.id, // FK chuẩn theo DB
+                            nickname = nickname,
+                            bio = bio,
+                            updated_at = DateTime.Now   
+                        });
+                    }
+                }
+
+                // ================= ADMIN (1 account duy nhất) =================
+                AddUserWithProfile(
+                    "admin@aistory.com",
+                    "ADMIN",
+                    "Nguyễn Minh Quân",
+                    "System Administrator",
+                    500
+                );
+
+                // ================= AUTHOR =================
+                AddUserWithProfile("hoang.nguyen@aistory.com", "AUTHOR", "Hoàng Nguyễn", "Tác giả fantasy", 300);
+                AddUserWithProfile("linh.tran@aistory.com", "AUTHOR", "Linh Trần", "Tác giả ngôn tình", 280);
+                AddUserWithProfile("tuan.pham@aistory.com", "AUTHOR", "Tuấn Phạm", "Tác giả hành động", 260);
+
+                // ================= MODERATOR =================
+                AddUserWithProfile("hieu.le@aistory.com", "MODERATOR", "Hiếu Lê", "Moderator", 250);
+                AddUserWithProfile("anh.do@aistory.com", "MODERATOR", "Anh Đỗ", "Moderator", 240);
+
+                // ================= COMPLIANCE =================
+                AddUserWithProfile("thao.vo@aistory.com", "COMPLIANCE", "Thảo Võ", "Compliance", 220);
+                AddUserWithProfile("khanh.bui@aistory.com", "COMPLIANCE", "Khánh Bùi", "Compliance", 210);
+
+                // ================= USER =================
+                AddUserWithProfile("nam.nguyen@aistory.com", "USER", "Nam Nguyễn", "Độc giả mới", 10);
+                AddUserWithProfile("hoa.pham@aistory.com", "USER", "Hoa Phạm", "Đọc truyện mỗi ngày", 60);
+                AddUserWithProfile("long.tran@aistory.com", "USER", "Long Trần", "Fan truyện lâu năm", 200);
+
+                context.SaveChanges();
+            }
             app.Run();
         }
     }
