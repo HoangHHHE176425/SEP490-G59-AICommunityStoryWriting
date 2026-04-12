@@ -141,8 +141,7 @@ public class CommentReportService : ICommentReportService
         if (!CommentReportReasonCatalog.TryGet(request.ReasonCode, out _))
             throw new ArgumentException("Invalid reason code.");
 
-        if (request.Description != null && request.Description.Length > 200)
-            throw new ArgumentException("Ký tự quá dài: mô tả báo cáo tối đa 200 ký tự.");
+        UserReportDescriptionRules.ValidateDescription(request.Description);
 
         if (reporterId == Guid.Empty || !_userLookup.Exists(reporterId))
             throw new InvalidOperationException("USER không tồn tại.");
@@ -183,7 +182,7 @@ public class CommentReportService : ICommentReportService
         await using var context = new StoryPlatformDbContext();
 
         var code = request.ReasonCode.Trim().ToUpperInvariant();
-        var desc = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+        var desc = (request.Description ?? "").Trim();
 
         var reporterIdStr = reporterId.ToString();
 
@@ -240,7 +239,7 @@ public class CommentReportService : ICommentReportService
         else
         {
             row.reporter_id = reporterId; // lưu reporter mới nhất để hiển thị
-            if (desc != null) row.description = desc; // cập nhật mô tả mới nhất nếu có
+            row.description = desc;
             row.contributor_count += 1;
         }
 
@@ -254,7 +253,7 @@ public class CommentReportService : ICommentReportService
         });
 
         await context.SaveChangesAsync();
-        _ = NotifyCommentOwnerReportedAsync(comment, reporterId, request.ReasonCode, request.Description);
+        _ = NotifyCommentOwnerReportedAsync(comment, reporterId, request.ReasonCode, desc);
         return row.id;
     }
 

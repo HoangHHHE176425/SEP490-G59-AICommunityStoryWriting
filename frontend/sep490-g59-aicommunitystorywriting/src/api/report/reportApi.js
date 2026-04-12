@@ -19,3 +19,9 @@ export async function reportStoryComment(storyId, commentId, body) {
     const res = await axiosInstance.post(`/stories/${storyId}/comments/${commentId}/reports`, body);
     return res.data;
 }
+
+/** Báo cáo bình luận trên chương (cùng DTO với reportStoryComment). */
+export async function reportChapterComment(chapterId, commentId, body) {
+    const res = await axiosInstance.post(`/chapters/${chapterId}/comments/${commentId}/reports`, body);
+    return res.data;
+}

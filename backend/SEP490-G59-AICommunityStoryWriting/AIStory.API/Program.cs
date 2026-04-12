@@ -57,6 +57,8 @@ namespace AIStory.API
             var corsExtraOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
                 ?? Array.Empty<string>();
             var corsExtraSet = new HashSet<string>(corsExtraOrigins, StringComparer.OrdinalIgnoreCase);
+            var corsAllowedOrigins = corsExtraOrigins;
+            var corsAllowLocalhost = builder.Environment.IsDevelopment();
 
             // CORS Configuration
             builder.Services.AddCors(options =>

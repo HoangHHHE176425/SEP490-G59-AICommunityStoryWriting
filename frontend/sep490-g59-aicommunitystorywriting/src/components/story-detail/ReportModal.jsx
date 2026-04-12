@@ -1,5 +1,9 @@
 import { X, Flag } from 'lucide-react';
 import { useState } from 'react';
+import {
+    MODERATOR_ESCALATION_REASON_MIN_WORDS,
+    countModeratorEscalationReasonWords,
+} from '../../utils/moderatorReviewSla';
 
 const REASON_OPTIONS = [
     { value: 'spam', label: 'Spam' },
@@ -36,12 +40,17 @@ export function ReportModal({
 
     if (!isOpen) return null;
 
+    const descriptionWordCount = countModeratorEscalationReasonWords(reportDetails);
+    const descriptionMeetsMinWords = descriptionWordCount >= MODERATOR_ESCALATION_REASON_MIN_WORDS;
+    const descriptionIncomplete =
+        reportDetails.trim().length > 0 && !descriptionMeetsMinWords;
+
     const normalizedReasonOptions = Array.isArray(reasonOptions) && reasonOptions.length > 0
         ? reasonOptions
         : REASON_OPTIONS;
 
     const handleSubmit = async () => {
-        if (!reportReason) return;
+        if (!reportReason || !descriptionMeetsMinWords) return;
 
         const reasonLabel = REASON_OPTIONS.find((o) => o.value === reportReason)?.label ?? reportReason;
         const payload = {
@@ -115,7 +124,7 @@ export function ReportModal({
 
                     <div className="mb-4">
                         <label className="block text-base font-semibold text-slate-800 dark:text-slate-100 mb-2">
-                            Mô tả thêm (tùy chọn)
+                            Mô tả chi tiết (bắt buộc, tối thiểu 50 từ)
                         </label>
                         <textarea
                             value={reportDetails}
@@ -123,10 +132,21 @@ export function ReportModal({
                                 setReportDetails(e.target.value);
                                 onClearError?.();
                             }}
-                            className="w-full p-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-900 dark:text-slate-100 outline-none focus:border-red-400 dark:focus:border-red-500 focus:ring-2 focus:ring-red-300/60 dark:focus:ring-red-500/30 resize-none"
-                            rows={4}
-                            placeholder="Nhập mô tả ngắn gọn (nếu có)..."
+                            maxLength={8000}
+                            className={`w-full p-3 bg-white dark:bg-slate-800 border rounded-lg text-sm text-slate-900 dark:text-slate-100 outline-none focus:ring-2 resize-none ${
+                                descriptionIncomplete
+                                    ? 'border-red-400 dark:border-red-600 focus:border-red-500 dark:focus:border-red-500 focus:ring-red-300/60 dark:focus:ring-red-500/30'
+                                    : 'border-slate-300 dark:border-slate-600 focus:border-red-400 dark:focus:border-red-500 focus:ring-red-300/60 dark:focus:ring-red-500/30'
+                            }`}
+                            rows={6}
+                            placeholder="Mô tả rõ vi phạm hoặc ngữ cảnh (ít nhất 50 từ)..."
                         />
+                        <p
+                            className={`mt-1.5 text-sm ${descriptionMeetsMinWords ? 'text-slate-500 dark:text-slate-400' : 'text-red-600 dark:text-red-400 font-medium'}`}
+                        >
+                            {descriptionWordCount}/{MODERATOR_ESCALATION_REASON_MIN_WORDS} từ
+                            {!descriptionMeetsMinWords ? ' — cần thêm nội dung để gửi báo cáo.' : ''}
+                        </p>
                     </div>
                 </div>
 
@@ -141,7 +161,7 @@ export function ReportModal({
                     <button
                         type="button"
                         onClick={handleSubmit}
-                        disabled={!reportReason || submitting}
+                        disabled={!reportReason || submitting || !descriptionMeetsMinWords}
                         className="min-w-32 px-5 py-2.5 bg-red-600 text-white text-sm font-bold rounded-full shadow-sm hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {submitting ? 'Đang gửi...' : 'Gửi báo cáo'}
