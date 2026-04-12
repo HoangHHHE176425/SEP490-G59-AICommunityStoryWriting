@@ -16,6 +16,8 @@ namespace Services.Implementations
     {
         /// <summary>Từ chối đơn escalation: ghi chú admin bắt buộc, tối thiểu ký tự (đồng bộ FE).</summary>
         private const int AdminRejectNoteMinLength = 10;
+        /// <summary>Lý do moderator gửi đơn escalation (gia hạn / trả về hàng đợi): tối thiểu số từ sau trim (đồng bộ FE moderatorReviewSla).</summary>
+        private const int ModeratorEscalationReasonMinWords = 50;
         private const int MinHoursUntilDeadline = 24;
         private const int MaxDeadlineDaysAhead = 366;
         private const double WarningDaysThreshold = 2; // escalation list tier (admin)
@@ -79,6 +81,13 @@ namespace Services.Implementations
             };
         }
 
+        private static int CountModeratorEscalationReasonWords(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s))
+                return 0;
+            return s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        }
+
         public Guid Submit(Guid senderId, ModeratorSubmitReviewEscalationDto dto)
         {
             if (dto == null)
@@ -113,8 +122,10 @@ namespace Services.Implementations
             if (kind != ReviewEscalationDAO.KindExtend && kind != ReviewEscalationDAO.KindRelease)
                 throw new ArgumentException("requestKind phải là EXTEND_DEADLINE hoặc RELEASE_ASSIGNMENT.");
             var reason = (dto.Reason ?? "").Trim();
-            if (reason.Length < 10)
-                throw new ArgumentException("Lý do báo cáo cần ít nhất 10 ký tự.");
+            var wordCount = CountModeratorEscalationReasonWords(reason);
+            if (wordCount < ModeratorEscalationReasonMinWords)
+                throw new ArgumentException(
+                    $"Lý do báo cáo cần ít nhất {ModeratorEscalationReasonMinWords} từ (hiện tại: {wordCount} từ).");
 
             DateTime? proposed = null;
             if (kind == ReviewEscalationDAO.KindExtend)

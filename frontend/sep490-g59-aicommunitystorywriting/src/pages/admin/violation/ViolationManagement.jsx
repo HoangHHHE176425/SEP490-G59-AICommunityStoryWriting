@@ -302,6 +302,7 @@ function normalizeStoryQueueItem(x) {
         hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
         authorAccountStatus: pick(x, 'authorAccountStatus', 'AuthorAccountStatus') ?? null,
         authorWritingSuspendedUntilUtc: pick(x, 'authorWritingSuspendedUntilUtc', 'AuthorWritingSuspendedUntilUtc') ?? null,
+        oldestReportAtUtc: pick(x, 'oldestReportAtUtc', 'OldestReportAtUtc') ?? null,
     };
 }
 
@@ -355,6 +356,7 @@ function groupStoryRows(rawRows) {
             hasApprovedAdminBanRequest: false,
             authorAccountStatus: null,
             authorWritingSuspendedUntilUtc: null,
+            oldestReportAtUtc: null,
         };
         prev.reportCount += 1;
         prev.priorityScore = Math.max(prev.priorityScore, row.severityScore || 0);
@@ -376,6 +378,17 @@ function groupStoryRows(rawRows) {
             const tPrev = prev.authorWritingSuspendedUntilUtc ? new Date(prev.authorWritingSuspendedUntilUtc).getTime() : 0;
             const tRow = row.authorWritingSuspendedUntilUtc ? new Date(row.authorWritingSuspendedUntilUtc).getTime() : 0;
             if (tRow > tPrev) prev.authorWritingSuspendedUntilUtc = row.authorWritingSuspendedUntilUtc;
+        }
+        if (row.createdAtUtc) {
+            const tRow = new Date(row.createdAtUtc).getTime();
+            if (Number.isFinite(tRow)) {
+                if (!prev.oldestReportAtUtc) {
+                    prev.oldestReportAtUtc = row.createdAtUtc;
+                } else {
+                    const tPrev = new Date(prev.oldestReportAtUtc).getTime();
+                    if (Number.isFinite(tPrev) && tRow < tPrev) prev.oldestReportAtUtc = row.createdAtUtc;
+                }
+            }
         }
         m.set(storyId, prev);
     }
@@ -414,6 +427,8 @@ function normalizeCommentQueueItem(x) {
         storyComplianceHidden: coerceBool(pick(x, 'storyComplianceHidden', 'StoryComplianceHidden')),
         storyAuthorWritingSuspendedUntilUtc: pick(x, 'storyAuthorWritingSuspendedUntilUtc', 'StoryAuthorWritingSuspendedUntilUtc') ?? null,
         hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
+        /** BE gán = thời điểm báo cáo sớm nhất trong nhóm bình luận. */
+        createdAtUtc: pick(x, 'createdAtUtc', 'CreatedAtUtc') ?? null,
     };
 }
 
@@ -1861,13 +1876,14 @@ export default function ViolationManagement() {
                                 <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Truyện</th>
                                 <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Tác giả</th>
                                 <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Số người báo cáo</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Thời điểm báo cáo</th>
                                 <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Thao tác</th>
                             </tr>
                         </thead>
                         <tbody>
                             {rows.length === 0 && (
                                 <tr>
-                                    <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                                    <td colSpan={7} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
                             {rows.map((r) => (
@@ -1898,6 +1914,7 @@ export default function ViolationManagement() {
                                                         return unique.size;
                                                     })()}
                                                 </td>
+                                                <td style={td}><span className="text-sm text-slate-700 whitespace-nowrap" title={r.oldestReportAtUtc ? String(r.oldestReportAtUtc) : undefined}>{formatDate(r.oldestReportAtUtc)}</span></td>
                                                 <td style={{ ...td, minWidth: 260 }}>
                                                     <div style={{ display: 'inline-flex', gap: 6, position: 'relative', flexWrap: 'nowrap' }}>
                                                         <button type="button" style={btn} onClick={() => handleStoryRowActionSelect(r, 'detail', storyFlags)}>
@@ -2030,12 +2047,13 @@ export default function ViolationManagement() {
                             <th style={th}>Truyện</th>
                             <th style={th}>Người bình luận</th>
                             <th style={th}>Số người báo cáo</th>
+                            <th style={th}>Thời điểm báo cáo</th>
                             <th style={th}>Thao tác</th>
                         </tr></thead>
                         <tbody>
                             {rows.length === 0 && (
                                 <tr>
-                                    <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                                    <td colSpan={7} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
                             {rows.map((r) => (
@@ -2057,6 +2075,7 @@ export default function ViolationManagement() {
                                                 <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                                 <td style={td}>{r.commentUserDisplayName || '—'}</td>
                                                 <td style={td}>{reporterCount > 0 ? reporterCount : '—'}</td>
+                                                <td style={td}><span className="text-sm text-slate-700 whitespace-nowrap" title={r.createdAtUtc ? String(r.createdAtUtc) : undefined}>{formatDate(r.createdAtUtc)}</span></td>
                                                 <td style={{ ...td, minWidth: 260 }}>
                                                     <div style={{ display: 'inline-flex', gap: 6, position: 'relative', flexWrap: 'nowrap' }}>
                                                         <button
