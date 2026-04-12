@@ -1,4 +1,5 @@
 using BusinessObjects;
+using BusinessObjects.Account;
 using BusinessObjects.Entities;
 using DataAccessObjects.Queries;
 using Microsoft.EntityFrameworkCore;
@@ -25,10 +26,106 @@ namespace DataAccessObjects.DAOs
 
         public async Task<users?> FindUserById(StoryPlatformDbContext context, Guid id)
         {
+            // Do not Include(stories): tracking many stories on every GetUserById caused SaveChanges to UPDATE
+            // story rows (or hit concurrency) during profile/password/admin updates. Use GetAuthorStoryAggregatesAsync for stats.
             return await context.users
                 .Include(u => u.user_profiles)
-                .Include(u => u.stories) // Include truyện để đếm view, like, số lượng
                 .FirstOrDefaultAsync(u => u.id == id);
+        }
+
+        /// <summary>Aggregates for profile/stats without loading every story entity into the change tracker.</summary>
+        public async Task<(int StoryCount, long TotalViews, int TotalFavorites)> GetAuthorStoryAggregatesAsync(
+            StoryPlatformDbContext context,
+            Guid authorId)
+        {
+            var stats = await context.stories
+                .AsNoTracking()
+                .Where(s => s.author_id == authorId)
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Count = g.Count(),
+                    TotalViews = g.Sum(s => (long)(s.total_views ?? 0)),
+                    TotalFavorites = g.Sum(s => s.total_favorites ?? 0)
+                })
+                .FirstOrDefaultAsync();
+
+            return stats == null
+                ? (0, 0L, 0)
+                : (stats.Count, stats.TotalViews, stats.TotalFavorites);
+        }
+
+        public Task<bool> UserExistsAsync(StoryPlatformDbContext context, Guid userId)
+            => context.users.AnyAsync(u => u.id == userId);
+
+        public async Task<string?> GetUserProfileNicknameAsync(StoryPlatformDbContext context, Guid userId)
+        {
+            return await context.user_profiles
+                .AsNoTracking()
+                .Where(p => p.user_id == userId)
+                .Select(p => p.nickname)
+                .FirstOrDefaultAsync();
+        }
+
+        /// <summary>
+        /// Loads only <see cref="users"/> and <see cref="user_profiles"/> for this user, then saves.
+        /// Avoids re-attaching unrelated tracked entities that can cause UPDATE ... 0 rows (concurrency exceptions).
+        /// </summary>
+        public async Task PersistUserProfileAsync(StoryPlatformDbContext context, Guid userId, UserProfilePersistModel model)
+        {
+            var user = await context.users.FirstOrDefaultAsync(u => u.id == userId);
+            if (user == null)
+            {
+                throw new InvalidOperationException("User not found");
+            }
+
+            var profile = await context.user_profiles.FirstOrDefaultAsync(p => p.user_id == userId);
+            if (profile == null)
+            {
+                profile = new user_profiles
+                {
+                    user_id = userId,
+                    social_links = "{}",
+                    settings = "{\"allow_notif\": true}"
+                };
+                context.user_profiles.Add(profile);
+            }
+
+            if (model.SetNickname)
+            {
+                profile.nickname = model.Nickname;
+            }
+
+            if (model.SetPhone)
+            {
+                profile.phone = model.Phone;
+            }
+
+            if (model.SetIdNumber)
+            {
+                profile.id_number = model.IdNumber;
+            }
+
+            if (model.SetBio)
+            {
+                profile.bio = model.Bio;
+            }
+
+            if (model.SetDescription)
+            {
+                profile.description = model.Description;
+            }
+
+            if (model.SetAvatarUrl)
+            {
+                profile.avatar_url = model.AvatarUrl;
+            }
+
+            var now = DateTime.UtcNow;
+            profile.updated_at = now;
+            user.updated_at = now;
+
+            await context.SaveChangesAsync();
         }
 
         public async Task<bool> CheckEmailExists(StoryPlatformDbContext context, string email)
@@ -44,7 +141,14 @@ namespace DataAccessObjects.DAOs
 
         public async Task UpdateUser(StoryPlatformDbContext context, users user)
         {
-            context.users.Update(user);
+            // Do not use DbSet.Update(user): it marks the whole tracked graph Modified and can UPDATE unrelated rows.
+            var entry = context.Entry(user);
+            if (entry.State == EntityState.Detached)
+            {
+                context.Attach(user);
+                entry.State = EntityState.Modified;
+            }
+
             await context.SaveChangesAsync();
         }
 
@@ -107,7 +211,6 @@ namespace DataAccessObjects.DAOs
 
                 user.updated_at = DateTime.UtcNow;
 
-                context.users.Update(user);
                 await context.SaveChangesAsync();
             }
         }

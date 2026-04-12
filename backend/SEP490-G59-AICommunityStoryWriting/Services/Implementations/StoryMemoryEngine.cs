@@ -44,8 +44,12 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         if (story == null)
             return string.Empty;
 
+        var ragStatusCo = _ragService.GetRagStatus(storyId);
+        if (!ragStatusCo.EmbeddingConfigured)
+            throw new InvalidOperationException(
+                "Chưa cấu hình embedding: AI:EmbeddingBaseUrl, AI:EmbeddingModel và API key (AI:ApiKey hoặc AI:EmbeddingApiKey). Xem thông báo tương tự khi gợi ý chương.");
         if (!_ragService.IsRagAvailableForStory(storyId))
-            throw new InvalidOperationException("Truyện chưa được index RAG. Vui lòng gọi POST /api/ai/index-rag trước khi sử dụng đồng sáng tác.");
+            throw new InvalidOperationException("Truyện chưa được index RAG. Gọi POST /api/ai/index-rag sau khi đã cấu hình embedding và có chương PUBLISHED có nội dung.");
 
         int ragMaxChars = _configuration.GetValue("AI:CoCreateRagMaxChars", DefaultRagMaxChars);
         int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);
@@ -80,8 +84,12 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         if (story == null)
             return string.Empty;
 
+        var ragStatusSuggest = _ragService.GetRagStatus(storyId);
+        if (!ragStatusSuggest.EmbeddingConfigured)
+            throw new InvalidOperationException(
+                "Chưa cấu hình embedding: AI:EmbeddingBaseUrl, AI:EmbeddingModel và API key (AI:ApiKey hoặc AI:EmbeddingApiKey). Với OpenRouter: BaseUrl https://openrouter.ai/api/v1, model openai/text-embedding-3-small.");
         if (!_ragService.IsRagAvailableForStory(storyId))
-            throw new InvalidOperationException("Truyện chưa được index RAG. Vui lòng gọi index-rag trước khi sử dụng gợi ý chương.");
+            throw new InvalidOperationException("Truyện chưa được index RAG. Gọi POST /api/ai/index-rag (hoặc thử lại gợi ý) sau khi có chương PUBLISHED có nội dung.");
 
         int ragMaxChars = _configuration.GetValue("AI:CoCreateRagMaxChars", DefaultRagMaxChars);
         int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);

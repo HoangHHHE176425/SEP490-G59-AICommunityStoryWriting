@@ -1,4 +1,5 @@
 using AIStory.Services.Helpers;
+using BusinessObjects.Account;
 using BusinessObjects.Entities;
 using Repositories.Interfaces;
 using Services.DTOs.Account;
@@ -68,44 +69,44 @@ namespace Services.Implementations
 
         public async Task UpdateProfileAsync(Guid userId, UpdateProfileRequest request)
         {
-            var user = await _userRepo.GetUserById(userId);
-            if (user == null) throw new Exception("User not found");
-
-            if (user.user_profiles == null)
+            if (!await _userRepo.UserExistsAsync(userId))
             {
-                user.user_profiles = new user_profiles
-                {
-                    user_id = userId,
-                    social_links = "{}",
-                    settings = "{\"allow_notif\": true}"
-                };
+                throw new Exception("User not found");
             }
 
-            //  KIỂM TRA TRÙNG NICKNAME
+            var currentNickname = await _userRepo.GetUserProfileNicknameAsync(userId);
+
+            var setNickname = false;
+            string? nickname = null;
             if (!string.IsNullOrEmpty(request.DisplayName))
             {
-                // Chỉ check nếu nickname thay đổi so với cái cũ
-                if (request.DisplayName != user.user_profiles.nickname)
+                if (request.DisplayName != currentNickname)
                 {
-                    bool isExist = await _userRepo.IsNicknameExist(request.DisplayName, userId);
-                    if (isExist)
+                    if (await _userRepo.IsNicknameExist(request.DisplayName, userId))
                     {
                         throw new Exception($"Tên hiển thị '{request.DisplayName}' đã được sử dụng. Vui lòng chọn tên khác.");
                     }
-                    user.user_profiles.nickname = request.DisplayName;
+
+                    setNickname = true;
+                    nickname = request.DisplayName;
                 }
             }
 
-            if (!string.IsNullOrEmpty(request.Phone)) user.user_profiles.phone = request.Phone;
-            if (!string.IsNullOrEmpty(request.IdNumber)) user.user_profiles.id_number = request.IdNumber;
-            if (request.Bio != null) user.user_profiles.bio = request.Bio;
-            if (request.Description != null) user.user_profiles.description = request.Description;
-            if (!string.IsNullOrEmpty(request.AvatarUrl)) user.user_profiles.avatar_url = request.AvatarUrl;
-
-            user.user_profiles.updated_at = DateTime.UtcNow;
-            user.updated_at = DateTime.UtcNow;
-
-            await _userRepo.UpdateUser(user);
+            await _userRepo.PersistUserProfileAsync(userId, new UserProfilePersistModel
+            {
+                SetNickname = setNickname,
+                Nickname = nickname,
+                SetPhone = !string.IsNullOrEmpty(request.Phone),
+                Phone = request.Phone,
+                SetIdNumber = !string.IsNullOrEmpty(request.IdNumber),
+                IdNumber = request.IdNumber,
+                SetBio = request.Bio != null,
+                Bio = request.Bio,
+                SetDescription = request.Description != null,
+                Description = request.Description,
+                SetAvatarUrl = !string.IsNullOrEmpty(request.AvatarUrl),
+                AvatarUrl = request.AvatarUrl
+            });
         }
 
         public async Task<UserProfileResponse> GetProfileAsync(Guid userId)
@@ -113,9 +114,7 @@ namespace Services.Implementations
             var user = await _userRepo.GetUserById(userId);
             if (user == null) throw new Exception("User not found");
 
-            int storyCount = user.stories?.Count ?? 0;
-            long totalReads = user.stories?.Sum(s => s.total_views ?? 0) ?? 0;
-            int totalLikes = user.stories?.Sum(s => s.total_favorites ?? 0) ?? 0;
+            var (storyCount, totalReads, totalLikes) = await _userRepo.GetAuthorStoryAggregatesAsync(userId);
 
             // 2. Tạo Tags (Giả lập logic hiển thị)
             var tags = new List<string>();

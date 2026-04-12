@@ -11,6 +11,7 @@ export default defineConfig({
     allowedHosts: [
       'localhost',
       '127.0.0.1',
+      'aistorywrite.com.vn',
       '.ngrok-free.dev', // Cho phép tất cả các subdomain ngrok
       '.ngrok.io',
       'zoila-unapperceptive-censoriously.ngrok-free.dev' // Host cụ thể của bạn

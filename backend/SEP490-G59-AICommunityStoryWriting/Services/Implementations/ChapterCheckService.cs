@@ -213,6 +213,12 @@ public class ChapterCheckService : IChapterCheckService
         var maxChunk = _configuration.GetValue("ChapterCheck:SpellChunkMaxChars", 3200);
         if (maxChunk < 800) maxChunk = 3200;
 
+        var overlapChars = _configuration.GetValue("ChapterCheck:SpellChunkOverlapChars", 200);
+        overlapChars = Math.Max(0, overlapChars);
+
+        var parallelism = _configuration.GetValue("ChapterCheck:SpellChunkParallelism", 4);
+        parallelism = Math.Clamp(parallelism, 1, 16);
+
         var (provider, model, apiKey, baseUrl) = AIClientHelper.GetConfigForAgent(_configuration, AIClientHelper.AgentConsistencyChecker);
         var client = AIClientHelper.CreateChatClient(provider, model, apiKey, baseUrl);
         var options = AIClientHelper.GetCompletionOptions(_configuration, AIClientHelper.AgentConsistencyChecker);
@@ -220,38 +226,91 @@ public class ChapterCheckService : IChapterCheckService
         options.Temperature = 0;
         options.TopP = 1;
 
-        var chunks = SplitIntoSpellChunks(content, maxChunk);
+        var chunks = SplitIntoSpellChunks(content, maxChunk, overlapChars);
         var allIssues = new List<SpellingIssue>();
         var chunkSummaries = new List<string>();
 
-        for (var ci = 0; ci < chunks.Count; ci++)
+        if (chunks.Count == 1 || parallelism == 1)
         {
-            var chunk = chunks[ci];
-            var userPrompt = BuildSpellCheckUserPrompt(chapterTitle, chunk, ci + 1, chunks.Count);
-            var messages = new List<ChatMessage>
+            for (var ci = 0; ci < chunks.Count; ci++)
             {
-                new SystemChatMessage(GetSystemPrompt()),
-                new UserChatMessage(userPrompt)
-            };
-
-            var completion = await client.CompleteChatAsync(messages, options, cancellationToken);
-            var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
-
-            if (string.IsNullOrWhiteSpace(text))
-                return (new List<SpellingIssue>(), null, "Không đọc được kết quả kiểm tra chính tả từ AI.");
-
-            var (chunkIssues, chunkSummary) = ParseSpellingResponse(text, content);
-            allIssues.AddRange(chunkIssues);
-            if (!string.IsNullOrWhiteSpace(chunkSummary))
-                chunkSummaries.Add(chunkSummary.Trim());
+                var (chunkIssues, chunkSummary, rawErr) = await RunSpellChunkOnceAsync(
+                    client, options, chapterTitle, chunks[ci], ci + 1, chunks.Count, content, cancellationToken);
+                if (rawErr != null)
+                    return (new List<SpellingIssue>(), null, rawErr);
+                allIssues.AddRange(chunkIssues);
+                if (!string.IsNullOrWhiteSpace(chunkSummary))
+                    chunkSummaries.Add(chunkSummary.Trim());
+            }
+        }
+        else
+        {
+            using var gate = new SemaphoreSlim(parallelism, parallelism);
+            var indexed = chunks.Select((c, i) => (Chunk: c, Index: i)).ToArray();
+            var tasks = indexed.Select(async item =>
+            {
+                await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    return await RunSpellChunkOnceAsync(
+                        client,
+                        options,
+                        chapterTitle,
+                        item.Chunk,
+                        item.Index + 1,
+                        chunks.Count,
+                        content,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            });
+            var results = await Task.WhenAll(tasks).ConfigureAwait(false);
+            foreach (var (chunkIssues, chunkSummary, rawErr) in results)
+            {
+                if (rawErr != null)
+                    return (new List<SpellingIssue>(), null, rawErr);
+                allIssues.AddRange(chunkIssues);
+                if (!string.IsNullOrWhiteSpace(chunkSummary))
+                    chunkSummaries.Add(chunkSummary.Trim());
+            }
         }
 
-        var deduped = DeduplicateIssues(allIssues);
+        var deduped = MergeExpandAndDedupeSpellIssues(allIssues, content);
         var finalSummary = BuildMergedSpellSummary(deduped.Count, chunks.Count, chunkSummaries);
 
         merged = new SpellCheckMerged { Issues = deduped, Summary = finalSummary };
         _cache.Set(cacheKey, merged, SpellCacheTtl);
         return (deduped, finalSummary, null);
+    }
+
+    private static async Task<(List<SpellingIssue> Issues, string? Summary, string? RawError)> RunSpellChunkOnceAsync(
+        ChatClient client,
+        ChatCompletionOptions options,
+        string? chapterTitle,
+        string chunk,
+        int chunkIndex,
+        int chunkCount,
+        string fullChapterContent,
+        CancellationToken cancellationToken)
+    {
+        var userPrompt = BuildSpellCheckUserPrompt(chapterTitle, chunk, chunkIndex, chunkCount);
+        var messages = new List<ChatMessage>
+        {
+            new SystemChatMessage(GetSystemPrompt()),
+            new UserChatMessage(userPrompt)
+        };
+
+        var completion = await client.CompleteChatAsync(messages, options, cancellationToken).ConfigureAwait(false);
+        var text = completion.Value.Content?.Count > 0 ? completion.Value.Content[0].Text : null;
+
+        if (string.IsNullOrWhiteSpace(text))
+            return (new List<SpellingIssue>(), null, "Không đọc được kết quả kiểm tra chính tả từ AI.");
+
+        var (chunkIssues, chunkSummary) = ParseSpellingResponse(text, fullChapterContent);
+        return (chunkIssues, chunkSummary, null);
     }
 
     private static string BuildSpellCheckUserPrompt(string? chapterTitle, string chunkBody, int chunkIndex, int chunkCount)
@@ -261,29 +320,38 @@ public class ChapterCheckService : IChapterCheckService
             ? $"(Đoạn {chunkIndex}/{chunkCount} — chỉ báo lỗi chính tả trong đoạn dưới đây, không suy diễn ngoài đoạn.)\n\n"
             : "";
 
-        return $@"{titlePart}{scopeNote}Nội dung chương cần kiểm tra chính tả:
+        return $@"{titlePart}{scopeNote}Nội dung cần kiểm tra (chính tả / đánh máy):
 
 ---
 {chunkBody}
 ---
 
-Nhiệm vụ: CHỈ tìm lỗi chính tả/đánh máy (typo) trong đoạn trên (tiếng Việt hoặc tiếng Anh).
+Nhiệm vụ: tìm mọi lỗi chính tả hoặc typo trong đoạn trên (tiếng Việt và từ/cụm tiếng Anh nếu có trong văn bản).
 
-RÀNG BUỘC BẮT BUỘC:
-- Chỉ ghi nhận khi chắc chắn là typo. Nếu không chắc chắn: bỏ qua.
-- Tuyệt đối không gợi ý thay đổi văn phong, ngữ nghĩa, đại từ, hoặc “trau chuốt” câu chữ.
-- Không paraphrase, không biên tập, không thay từ đúng bằng từ khác.
-- Không bịa lỗi.
-- Mỗi lỗi hợp lệ PHẢI có:
-  + wordOrPhrase: từ/cụm sai cụ thể.
-  + context: đoạn TRÍCH NGUYÊN VĂN chứa đúng từ sai, ngắn gọn quanh lỗi (ưu tiên khoảng 24 ký tự trước + 24 ký tự sau).
-- Nếu không thể chỉ ra từ sai cụ thể kèm context hợp lệ: KHÔNG được trả lỗi đó.
+Tiêu chí báo cáo (ưu tiên đủ lỗi có căn cứ, không tự giới hạn số lượng; mỗi lỗi một phần tử trong spellingErrors):
+- Sai dấu thanh, dấu mũ, hoặc nhầm vần rõ rệt (ví dụ: một dấu sai khiến từ không còn là từ đúng chuẩn).
+- Nhầm phụ âm/âm trong tiếng Việt thuần: l/n, ch/tr, s/x, d/gi/r; i/y khi rõ là lỗi gõ trong từ Việt (không đụng từ mượn/tiếng Anh hợp lệ).
+- Chữ Latin bất thường trong từ/cụm tiếng Việt (ví dụ j, w, f thay cho đ/g/ph/qu khi rõ là nhầm bàn phím hoặc không thuộc bảng chữ thường dùng cho tiếng Việt).
+- Lỗi gõ: ký tự thừa/thiếu, nhầm phím liền kề, sai hoa/thường giữa câu khi rõ là lỗi (không phải chủ đích văn chương).
 
-Trả về DUY NHẤT một JSON hợp lệ, không markdown hay giải thích:
-{{ ""spellingErrors"": [ {{ ""wordOrPhrase"": ""từ/cụm sai"", ""suggestion"": ""gợi ý sửa"", ""context"": ""một câu (hoặc một dòng đối thoại) copy NGUYÊN VĂN từ nội dung phía trên, phải chứa đúng từ/cụm sai"" }} ], ""summary"": ""Tóm tắt ngắn cho tác giả (1-2 câu)"" }}
+Bỏ qua (không đưa vào spellingErrors):
+- Tên riêng, biệt danh, địa danh, thuật ngữ hư cấu do tác giả đặt (trừ khi lỗi là sai chính tả chuẩn tiếng Việt trong cụm không phải tên).
+- Tiếng Anh/từ nước ngoài đúng chính tả nguồn gốc.
+- Hai cách viết đều hợp lệ; hoặc không phân biệt được typo và chủ đích nghệ thuật.
 
-BẮT BUỘC: với mỗi lỗi trong spellingErrors, ""context"" phải là đoạn copy từ nội dung gốc (không tự viết lại), và phải chứa đúng ""wordOrPhrase"".
-Nếu không có lỗi chính tả (hoặc không chắc chắn): spellingErrors = [], summary = ""Không phát hiện lỗi chính tả.""";
+Ràng buộc nghiệp vụ:
+- Cùng một wordOrPhrase và suggestion xuất hiện ở nhiều câu khác nhau: một phần tử JSON cho cặp đó là đủ; backend sẽ tách thành nhiều dòng kết quả, mỗi dòng kèm đúng câu chứa lỗi tương ứng.
+- Không paraphrase, không biên tập câu, không đổi văn phong, ngữ nghĩa, xưng hô hay đại từ.
+- Không thay từ đúng bằng từ đồng nghĩa; không bịa lỗi.
+- suggestion: sửa tối thiểu (chỉ phần sai), giữ nguyên nghĩa câu.
+- wordOrPhrase: đúng nguyên văn từ/cụm sai trong đoạn.
+- context: copy NGUYÊN VĂN **cả câu** (hoặc cả dòng thoại) chứa wordOrPhrase — từ đầu câu tới hết câu (dấu . ! ? … hoặc xuống dòng đoạn); BẮT BUỘC chứa chính xác wordOrPhrase (kể cả ký tự sai).
+- Không đủ wordOrPhrase + context hợp lệ thì không trả lỗi đó.
+
+Đầu ra: DUY NHẤT một JSON hợp lệ, không markdown, không ```, không text ngoài JSON:
+{{ ""spellingErrors"": [ {{ ""wordOrPhrase"": ""..."", ""suggestion"": ""..."", ""context"": ""..."" }} ], ""summary"": ""Tóm tắt ngắn (1–2 câu), ghi số lỗi hoặc xác nhận không có lỗi"" }}
+
+Nếu không có lỗi đủ điều kiện: spellingErrors = [] và summary = ""Không phát hiện lỗi chính tả.""";
     }
 
     /// <summary>Gộp tóm tắt từng đoạn; ưu tiên số lỗi thực tế đã parse.</summary>
@@ -298,10 +366,12 @@ Nếu không có lỗi chính tả (hoặc không chắc chắn): spellingErrors
         return "Không phát hiện lỗi chính tả.";
     }
 
-    /// <summary>Chia nội dung dài thành khối ≤ maxChars, ưu tiên cắt tại xuống dòng.</summary>
-    private static IReadOnlyList<string> SplitIntoSpellChunks(string content, int maxChars)
+    /// <summary>Chia nội dung dài thành khối ≤ maxChars, ưu tiên cắt tại xuống dòng; overlap giảm sót lỗi ở ranh giới chunk.</summary>
+    private static IReadOnlyList<string> SplitIntoSpellChunks(string content, int maxChars, int overlapChars)
     {
         if (maxChars < 800) maxChars = 800;
+        overlapChars = Math.Max(0, Math.Min(overlapChars, Math.Max(0, maxChars / 2 - 1)));
+
         content = content.Replace("\r\n", "\n", StringComparison.Ordinal);
         if (content.Length <= maxChars)
             return new[] { content };
@@ -335,7 +405,12 @@ Nếu không có lỗi chính tả (hoặc không chắc chắn): spellingErrors
             var piece = content[start..splitAt].TrimEnd();
             if (piece.Length > 0)
                 list.Add(piece);
-            start = splitAt;
+
+            if (splitAt >= content.Length)
+                break;
+
+            var nextStart = overlapChars > 0 ? Math.Max(splitAt - overlapChars, start + 1) : splitAt;
+            start = nextStart;
             while (start < content.Length && content[start] == '\n') start++;
         }
 
@@ -345,16 +420,16 @@ Nếu không có lỗi chính tả (hoặc không chắc chắn): spellingErrors
     private static string GetSystemPrompt()
     {
         return """
-Bạn là hệ thống kiểm tra chính tả (typo) cho nội dung chương truyện.
+Bạn là trình kiểm tra chính tả và lỗi đánh máy (typo) cho văn bản chương truyện.
 
-CHỈ được phép trả về các lỗi chính tả/đánh máy khi chắc chắn. Nếu không chắc chắn thì phải bỏ qua và trả danh sách rỗng.
-TUYỆT ĐỐI CẤM: đổi văn phong, đổi ngữ nghĩa, đổi đại từ, biên tập câu, diễn giải lại, hoặc thay từ đúng bằng từ khác.
-Mỗi lỗi bắt buộc phải có wordOrPhrase cụ thể và context trích nguyên văn có chứa đúng từ đó; không đủ điều kiện thì không được trả lỗi.
+Nguyên tắc: chỉ báo lỗi khi có bằng chứng trực tiếp trên nguyên văn đoạn được gửi (từ/cụm sai thật sự xuất hiện trong đó). Ưu tiên liệt kê đủ các lỗi typo/chính tả rõ ràng; không tự giới hạn chỉ một vài lỗi.
 
-Đầu ra BẮT BUỘC: chỉ một JSON hợp lệ theo đúng schema:
+TUYỆT ĐỐI CẤM: đổi văn phong, ngữ nghĩa, xưng hô, đại từ, biên tập lại câu, diễn giải, paraphrase, hoặc thay từ đúng bằng từ đồng nghĩa “hay hơn”.
+
+Mỗi lỗi phải có wordOrPhrase khớp nguyên văn và context là **cả câu** (hoặc cả dòng thoại) copy nguyên văn từ đoạn user gửi, bắt buộc chứa đúng wordOrPhrase (kể cả ký tự sai). Thiếu một trong hai thì không được trả lỗi đó.
+
+Đầu ra: DUY NHẤT một JSON hợp lệ, không markdown, không giải thích ngoài JSON, đúng schema:
 { "spellingErrors": [ { "wordOrPhrase": "...", "suggestion": "...", "context": "..." } ], "summary": "..." }
-Với mỗi lỗi, "context" phải là một câu/dòng trích NGUYÊN VĂN từ nội dung chương và chứa đúng từ/cụm sai.
-Không markdown. Không thêm text ngoài JSON.
 """;
     }
 
@@ -383,7 +458,8 @@ Không markdown. Không thêm text ngoài JSON.
                     var context = item.TryGetProperty("context", out var c) ? c.GetString() : null;
                     var punctuationLike = IsLikelyPunctuationIssue(wordOrPhrase, suggestion, context);
 
-                    if (!IsLikelyTypoCorrection(wordOrPhrase, suggestion) && !punctuationLike)
+                    var chapterAnchored = IsChapterAnchoredTypo(wordOrPhrase, suggestion, context, chapterContent, punctuationLike);
+                    if (!IsLikelyTypoCorrection(wordOrPhrase, suggestion) && !punctuationLike && !chapterAnchored)
                         continue;
                     if (IsAcceptedVariantPair(wordOrPhrase, suggestion))
                         continue;
@@ -393,15 +469,25 @@ Không markdown. Không thêm text ngoài JSON.
                         !string.IsNullOrEmpty(needleForExtract) &&
                         !IsPlaceholderTypoLabel(needleForExtract))
                     {
-                        var ctxTrim = (context ?? "").Trim();
-                        if (string.IsNullOrEmpty(ctxTrim) ||
-                            !ctxTrim.Contains(needleForExtract, StringComparison.OrdinalIgnoreCase))
+                        var fromChapter = SentenceContextExtractor.TryExtractSentenceContainingNeedle(chapterContent, needleForExtract);
+                        if (!string.IsNullOrEmpty(fromChapter))
+                            context = fromChapter;
+                        else
                         {
-                            var extracted = TryExtractContextSnippet(chapterContent, needleForExtract);
-                            if (!string.IsNullOrEmpty(extracted))
-                                context = extracted;
+                            var ctxTrim = (context ?? "").Trim();
+                            if (string.IsNullOrEmpty(ctxTrim) ||
+                                !ctxTrim.Contains(needleForExtract, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var extracted = SentenceContextExtractor.TryShortContextSnippetContainingNeedle(chapterContent, needleForExtract);
+                                if (!string.IsNullOrEmpty(extracted))
+                                    context = extracted;
+                            }
+                            else
+                            {
+                                var fromCtx = SentenceContextExtractor.TryExtractSentenceContainingNeedle(ctxTrim, needleForExtract);
+                                context = !string.IsNullOrEmpty(fromCtx) ? fromCtx : ctxTrim;
+                            }
                         }
-                        context = ClampContextAroundNeedle(context, needleForExtract);
                     }
 
                     if (!punctuationLike &&
@@ -444,34 +530,28 @@ Không markdown. Không thêm text ngoài JSON.
                || w.Equals("Lỗi chính tả/dấu câu", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Trích đoạn ngắn chứa <paramref name="needle"/>: tối đa 24 ký tự trước và 24 ký tự sau từ lỗi.</summary>
-    private static string? TryExtractContextSnippet(string chapterContent, string needle)
+    /// <summary>
+    /// Bỏ qua bộ lọc Levenshtein khi AI đã neo lỗi bằng trích đoạn copy nguyên văn khớp cả chương (giảm sót gợi ý hợp lệ tiếng Việt).
+    /// </summary>
+    private static bool IsChapterAnchoredTypo(
+        string wordOrPhrase,
+        string suggestion,
+        string? context,
+        string chapterContent,
+        bool punctuationLike)
     {
-        if (string.IsNullOrWhiteSpace(chapterContent) || string.IsNullOrWhiteSpace(needle)) return null;
-        needle = needle.Trim();
-        if (needle.Length == 0) return null;
+        if (punctuationLike) return false;
+        if (string.IsNullOrWhiteSpace(wordOrPhrase) || string.IsNullOrWhiteSpace(suggestion)) return false;
+        var needle = wordOrPhrase.Trim();
+        if (needle.Length == 0 || IsPlaceholderTypoLabel(needle)) return false;
+        if (string.Equals(needle, suggestion.Trim(), StringComparison.OrdinalIgnoreCase)) return false;
 
-        var idx = chapterContent.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0) return null;
-        const int contextChars = 24;
-        var start = Math.Max(0, idx - contextChars);
-        var end = Math.Min(chapterContent.Length, idx + needle.Length + contextChars);
-        var snippet = chapterContent[start..end].Trim();
-        if (snippet.Length == 0) return null;
-        return (start > 0 ? "..." : "") + snippet + (end < chapterContent.Length ? "..." : "");
-    }
+        if (!chapterContent.Contains(needle, StringComparison.OrdinalIgnoreCase)) return false;
 
-    private static string? ClampContextAroundNeedle(string? context, string needle)
-    {
-        if (string.IsNullOrWhiteSpace(context) || string.IsNullOrWhiteSpace(needle))
-            return context;
-        var idx = context.IndexOf(needle, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0) return context;
-        const int contextChars = 24;
-        var start = Math.Max(0, idx - contextChars);
-        var end = Math.Min(context.Length, idx + needle.Length + contextChars);
-        var snippet = context[start..end].Trim();
-        return (start > 0 ? "..." : "") + snippet + (end < context.Length ? "..." : "");
+        var ctx = (context ?? "").Trim();
+        if (ctx.Length < 12 || !ctx.Contains(needle, StringComparison.OrdinalIgnoreCase)) return false;
+
+        return chapterContent.Contains(ctx, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildSpellCacheKey(string? title, string content)
@@ -497,13 +577,94 @@ Không markdown. Không thêm text ngoài JSON.
         return AcceptedVariantPairs.Contains($"{left}|{right}");
     }
 
+    /// <summary>Gộp kết quả nhiều chunk: mỗi cặp (từ sai, gợi ý) chỉ mở rộng một lần trên toàn chương → một dòng cho mỗi lần xuất hiện, mỗi dòng một câu ngữ cảnh.</summary>
+    private static List<SpellingIssue> MergeExpandAndDedupeSpellIssues(List<SpellingIssue> allIssues, string chapterContent)
+    {
+        if (allIssues.Count == 0) return allIssues;
+
+        var punctuationLike = new List<SpellingIssue>();
+        var typoLike = new List<SpellingIssue>();
+        foreach (var issue in allIssues)
+        {
+            if (ShouldSkipOccurrenceExpansion(issue))
+                punctuationLike.Add(issue);
+            else
+                typoLike.Add(issue);
+        }
+
+        var expanded = new List<SpellingIssue>();
+        var seenTypoPair = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var issue in typoLike)
+        {
+            var w = issue.WordOrPhrase?.Trim() ?? "";
+            var s = issue.Suggestion?.Trim() ?? "";
+            if (w.Length == 0)
+            {
+                expanded.Add(issue);
+                continue;
+            }
+
+            var pairKey = $"{w}|{s}";
+            if (!seenTypoPair.Add(pairKey))
+                continue;
+
+            expanded.AddRange(ExpandTypoToAllOccurrencesInChapter(issue, chapterContent));
+        }
+
+        expanded.AddRange(punctuationLike);
+        return DeduplicateIssues(expanded);
+    }
+
+    private static bool ShouldSkipOccurrenceExpansion(SpellingIssue issue)
+    {
+        var w = issue.WordOrPhrase?.Trim() ?? "";
+        if (IsPlaceholderTypoLabel(w))
+            return true;
+        return IsLikelyPunctuationIssue(w, issue.Suggestion ?? "", issue.Context);
+    }
+
+    private static List<SpellingIssue> ExpandTypoToAllOccurrencesInChapter(SpellingIssue template, string chapterContent)
+    {
+        var w = template.WordOrPhrase?.Trim() ?? "";
+        if (w.Length == 0 || !chapterContent.Contains(w, StringComparison.OrdinalIgnoreCase))
+            return new List<SpellingIssue> { template };
+
+        var list = new List<SpellingIssue>();
+        var pos = 0;
+        while (true)
+        {
+            var idx = chapterContent.IndexOf(w, pos, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) break;
+
+            var sent = SentenceContextExtractor.TryExtractSentenceContainingNeedleAt(chapterContent, w, idx);
+            if (string.IsNullOrEmpty(sent) || !sent.Contains(w, StringComparison.OrdinalIgnoreCase))
+            {
+                var fb = SentenceContextExtractor.TryExtractContextSnippetAt(chapterContent, w, idx);
+                sent = !string.IsNullOrEmpty(fb)
+                    ? fb
+                    : template.Context?.Trim() ?? "";
+            }
+
+            list.Add(new SpellingIssue
+            {
+                WordOrPhrase = template.WordOrPhrase ?? "",
+                Suggestion = template.Suggestion ?? "",
+                Context = sent
+            });
+
+            pos = idx + Math.Max(1, w.Length);
+        }
+
+        return list.Count > 0 ? list : new List<SpellingIssue> { template };
+    }
+
     private static List<SpellingIssue> DeduplicateIssues(List<SpellingIssue> issues)
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var result = new List<SpellingIssue>();
         foreach (var i in issues)
         {
-            var key = $"{i.WordOrPhrase?.Trim()}|{i.Suggestion?.Trim()}";
+            var key = $"{i.WordOrPhrase?.Trim()}|{i.Suggestion?.Trim()}|{i.Context?.Trim()}";
             if (set.Add(key))
                 result.Add(i);
         }

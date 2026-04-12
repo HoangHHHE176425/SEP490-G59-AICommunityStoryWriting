@@ -14,7 +14,7 @@ public class RagStatusResponse
     public Guid StoryId { get; set; }
     /// <summary>RAG đã sẵn sàng cho co-create / suggest (có embedding config + có chunk + có vector index nếu dùng FAISS).</summary>
     public bool Available { get; set; }
-    /// <summary>Đã cấu hình Embedding (BaseUrl + model).</summary>
+    /// <summary>Đã cấu hình đủ để gọi API embedding (BaseUrl + model + API key với OpenAI/OpenRouter, hoặc chỉ BaseUrl với Ollama).</summary>
     public bool EmbeddingConfigured { get; set; }
     /// <summary>Số chunk trong index FAISS (chỉ dùng file, không DB).</summary>
     public int ChunkCount { get; set; }

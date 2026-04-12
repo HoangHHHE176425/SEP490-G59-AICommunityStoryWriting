@@ -69,9 +69,19 @@ namespace Services.Implementations
             if (!hasContent)
                 throw new InvalidOperationException("Truyện cần có ít nhất một chương đã xuất bản (PUBLISHED) và có nội dung để gợi ý chương tiếp theo.");
 
+            var ragStatus = _ragService.GetRagStatus(request.StoryId);
+            if (!ragStatus.EmbeddingConfigured)
+            {
+                throw new InvalidOperationException(
+                    "Chưa cấu hình embedding: cần AI:EmbeddingBaseUrl (vd. https://openrouter.ai/api/v1), AI:EmbeddingModel (vd. openai/text-embedding-3-small) và API key AI:ApiKey hoặc AI:EmbeddingApiKey. Với OpenRouter thường dùng cùng key với chat; đặt trong appsettings.Local.json hoặc biến môi trường trên server.");
+            }
+
             await _ragService.TryEnsureIndexedAsync(request.StoryId, afterChapterId: request.AfterChapterId, cancellationToken);
             if (!_ragService.IsRagAvailableForStory(request.StoryId))
-                throw new InvalidOperationException("Truyện chưa được index RAG. Vui lòng cấu hình embedding (AI:EmbeddingBaseUrl, EmbeddingModel) và đảm bảo truyện có chương có nội dung.");
+            {
+                throw new InvalidOperationException(
+                    "Truyện chưa có chỉ mục RAG (chưa có chunk vector). Đảm bảo chương PUBLISHED có nội dung sau khi chunk, rồi gọi POST /api/ai/index-rag hoặc thử lại — kiểm tra thư mục VectorStore (Data/faiss) có quyền ghi trên server.");
+            }
 
             var lastChapterContent = chapters.LastOrDefault()?.content ?? "";
             var ragQuery = $"{story.summary ?? ""} {lastChapterContent}".Trim();

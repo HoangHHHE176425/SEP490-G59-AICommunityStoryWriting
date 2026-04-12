@@ -540,6 +540,17 @@ export function AuthorStoryManagement({ onBack }) {
 
                 if (res?.success && res?.data?.items) {
                     setAuthorActivityItems(res.data.items);
+                    // Keep withdrawable balance in sync after admin approves / PayOS completes (poll only refreshed activity before).
+                    if (activeView === 'withdraw') {
+                        try {
+                            const w = await coinApi.getMyWallet();
+                            if (!cancelled && w?.success && w?.data != null) {
+                                setWithdrawBalance(w.data.incomeBalance ?? w.data.income_balance ?? 0);
+                            }
+                        } catch {
+                            /* ignore */
+                        }
+                    }
                 } else {
                     if (!silent) {
                         setAuthorActivityItems([]);
