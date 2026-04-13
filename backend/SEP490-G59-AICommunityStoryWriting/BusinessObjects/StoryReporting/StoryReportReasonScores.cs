@@ -22,11 +22,10 @@ public static class StoryReportReasonScores
         return ByCode.TryGetValue(k, out var s) ? s : ByCode["OTHER"];
     }
 
-    /// <summary>
     /// Điểm severity gộp khi nhiều người chọn lý do khác nhau:
     /// max(severity của lý do có nhiều phiếu nhất, trung bình có trọng số theo số phiếu từng lý do).
     /// Hòa số phiếu → lý do có severity cao hơn được coi là dominant.
-    /// </summary>
+
     public static double ComputeAggregatedSeverity(IReadOnlyDictionary<string, int> reasonCounts)
     {
         if (reasonCounts == null || reasonCounts.Count == 0)
