@@ -202,7 +202,7 @@ export function PolicyManagement() {
                 </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 p-4 mb-6 flex flex-wrap gap-4">
+            <div className="bg-[#f8fdfb] rounded-xl border border-[#c9f0d8] p-4 mb-6 flex flex-wrap gap-4">
                 <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-slate-600">Loại:</span>
                     {FILTER_TYPE.map((opt) => (
@@ -210,15 +210,17 @@ export function PolicyManagement() {
                             key={opt.value}
                             type="button"
                             onClick={() => setFilterType(opt.value)}
-                            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                                filterType === opt.value ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ring-1 ${
+                                filterType === opt.value
+                                    ? 'bg-[#22c55e] text-white ring-[#22c55e]'
+                                    : 'bg-white text-slate-700 ring-[#cbd5e1] hover:bg-[#f7fcf9]'
                             }`}
                         >
                             {opt.label}
                         </button>
                     ))}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-slate-600">Trạng thái:</span>
                     {[
                         { value: null, label: 'Tất cả' },
@@ -229,8 +231,10 @@ export function PolicyManagement() {
                             key={String(opt.value)}
                             type="button"
                             onClick={() => setFilterActive(opt.value)}
-                            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                                filterActive === opt.value ? 'bg-emerald-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ring-1 ${
+                                filterActive === opt.value
+                                    ? 'bg-[#22c55e] text-white ring-[#22c55e]'
+                                    : 'bg-white text-slate-700 ring-[#cbd5e1] hover:bg-[#f7fcf9]'
                             }`}
                         >
                             {opt.label}

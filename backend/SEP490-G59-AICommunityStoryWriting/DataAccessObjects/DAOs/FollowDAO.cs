@@ -62,6 +62,26 @@ namespace DataAccessObjects.DAOs
                 .Count(f => f.author_id == authorId);
         }
 
+        /// <summary>
+        /// Đếm follower có <c>followed_at</c> từ 00:00 Thứ Hai tuần hiện tại (theo giờ máy chủ),
+        /// khớp với <see cref="FollowAuthor"/> ghi <c>DateTime.Now</c>.
+        /// Bản ghi <c>followed_at</c> null không tính.
+        /// </summary>
+        public static int GetAuthorNewFollowerCountThisCalendarWeek(Guid authorId)
+        {
+            var today = DateTime.Now.Date;
+            int daysSinceMonday = ((int)today.DayOfWeek - (int)DayOfWeek.Monday + 7) % 7;
+            var weekStart = today.AddDays(-daysSinceMonday);
+
+            using var context = new StoryPlatformDbContext();
+            return context.follows
+                .AsNoTracking()
+                .Count(f =>
+                    f.author_id == authorId
+                    && f.followed_at.HasValue
+                    && f.followed_at.Value >= weekStart);
+        }
+
         /// <summary>Lấy danh sách user_id đang theo dõi tác giả (để gửi thông báo khi tác giả có chapter/story mới). Loại trừ author_id để không gửi thông báo cho chính tác giả.</summary>
         public static IReadOnlyList<Guid> GetAuthorFollowerIds(Guid authorId)
         {

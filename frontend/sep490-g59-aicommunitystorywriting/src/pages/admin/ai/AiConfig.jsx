@@ -81,7 +81,7 @@ export function AiConfig() {
 
             <div className="space-y-5">
                     {/* Giới hạn sử dụng AI & Danh sách từ cấm */}
-                    <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4">
+                    <section className="bg-white rounded-xl border border-[#c9f0d8] shadow-sm p-5 space-y-4">
                         <div className="flex items-start justify-between gap-4">
                             <div>
                                 <h2 className="text-sm font-semibold text-slate-900">
@@ -95,7 +95,7 @@ export function AiConfig() {
 
                         <div className="space-y-4">
                             {/* Daily limit */}
-                            <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="rounded-xl border border-[#c9f0d8] bg-white p-4">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="space-y-1">
                                         <p className="text-[12px] font-semibold text-slate-900">
@@ -150,7 +150,7 @@ export function AiConfig() {
                             </div>
 
                             {/* Banned words */}
-                            <div className="rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="rounded-xl border border-[#c9f0d8] bg-white p-4">
                                 <div className="flex items-start justify-between gap-3">
                                     <div className="space-y-1">
                                         <p className="text-[12px] font-semibold text-slate-900">
@@ -217,9 +217,9 @@ export function AiConfig() {
                                     </button>
                                 </div>
 
-                                <div className="mt-3 overflow-hidden rounded-lg border border-slate-200">
+                                <div className="mt-3 overflow-hidden rounded-lg border border-[#c9f0d8]">
                                     {bannedWords.length === 0 ? (
-                                        <div className="px-4 py-6">
+                                        <div className="bg-[#f8fdfb] px-4 py-6">
                                             <p className="text-[12px] font-semibold text-slate-800">
                                                 Chưa có từ cấm nào
                                             </p>
@@ -229,28 +229,34 @@ export function AiConfig() {
                                         </div>
                                     ) : (
                                         <>
-                                            <table className="w-full table-fixed text-[11px]">
+                                            <table className="w-full table-fixed border-collapse text-[11px] text-slate-800">
                                                 <colgroup>
                                                     <col className="w-1/2" />
                                                     <col className="w-1/3" />
                                                     <col className="w-1/6" />
                                                 </colgroup>
-                                                <thead className="bg-slate-50">
-                                                    <tr className="text-left text-slate-500">
-                                                        <th className="px-3 py-2 font-medium">Từ/cụm từ</th>
-                                                        <th className="px-3 py-2 font-medium">Nhóm</th>
-                                                        <th className="px-3 py-2 font-medium text-right">Xóa</th>
+                                                <thead>
+                                                    <tr className="border-b border-[#c9f0d8] bg-[#f0faf5]">
+                                                        <th className="px-3 py-2 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                                            Từ/cụm từ
+                                                        </th>
+                                                        <th className="px-3 py-2 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                                            Nhóm
+                                                        </th>
+                                                        <th className="px-3 py-2 text-right text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                                            Xóa
+                                                        </th>
                                                     </tr>
                                                 </thead>
                                             </table>
-                                            <div className="max-h-60 overflow-y-auto border-t border-slate-200">
-                                                <table className="w-full table-fixed text-[11px]">
+                                            <div className="max-h-60 overflow-y-auto border-t border-[#c9f0d8]">
+                                                <table className="w-full table-fixed border-collapse text-[11px]">
                                                     <colgroup>
                                                         <col className="w-1/2" />
                                                         <col className="w-1/3" />
                                                         <col className="w-1/6" />
                                                     </colgroup>
-                                                    <tbody className="bg-white">
+                                                    <tbody>
                                                         {bannedWords.map((bw, idx) => {
                                                             const isSensitive = String(bw.category || '')
                                                                 .toLowerCase()
@@ -258,9 +264,7 @@ export function AiConfig() {
                                                             return (
                                                                 <tr
                                                                     key={bw.id}
-                                                                    className={`border-t border-slate-100 ${
-                                                                        idx % 2 === 1 ? 'bg-slate-50/40' : ''
-                                                                    }`}
+                                                                    className="border-t border-[#c9f0d8] bg-white transition-colors first:border-t-0 hover:bg-[#f7fcf9]"
                                                                 >
                                                                     <td className="px-3 py-2 font-medium text-slate-800">
                                                                         {bw.word}

@@ -647,7 +647,7 @@ export function AdminLayout({ children, activePage = 'dashboard', onNavigate }) 
                 }}
                 className={isSidebarOpen ? 'lg:ml-64' : 'lg:ml-20'}
             >
-                <div style={{ padding: '1.5rem' }}>
+                <div style={{ padding: '0 1.5rem 1.5rem' }}>
                     {children}
                 </div>
             </main>

@@ -57,7 +57,17 @@ const config: Config = {
 
       /* ===== FONT ===== */
       fontFamily: {
-        sans: ["Plus Jakarta Sans", "ui-sans-serif", "system-ui"],
+        sans: [
+          '"Plus Jakarta Sans"',
+          "Segoe UI",
+          "Roboto",
+          "Helvetica Neue",
+          "Arial",
+          "Noto Sans",
+          "ui-sans-serif",
+          "system-ui",
+          "sans-serif",
+        ],
       },
 
       /* ===== RADIUS ===== */

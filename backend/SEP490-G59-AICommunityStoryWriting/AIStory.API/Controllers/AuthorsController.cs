@@ -41,6 +41,15 @@ namespace AIStory.API.Controllers
             return Ok(new { followersCount = count });
         }
 
+        /// <summary>Số follower mới từ 00:00 Thứ Hai tuần này (giờ máy chủ).</summary>
+        [HttpGet("{authorId:guid}/followers-this-week")]
+        [AllowAnonymous]
+        public IActionResult GetNewFollowersThisWeek(Guid authorId)
+        {
+            var count = FollowDAO.GetAuthorNewFollowerCountThisCalendarWeek(authorId);
+            return Ok(new { newFollowersThisWeek = count });
+        }
+
         /// <summary>Danh sách người theo dõi tác giả (phân trang).</summary>
         [HttpGet("{authorId:guid}/followers")]
         [AllowAnonymous]

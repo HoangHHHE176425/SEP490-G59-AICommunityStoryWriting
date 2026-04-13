@@ -3,7 +3,13 @@ import React, { useEffect, useState } from 'react';
 import { TrendingUp, Flame, CheckCircle, UserPlus, UserMinus } from 'lucide-react';
 import { getStories } from '../../api/story/storyApi';
 import { getProfileByUserId } from '../../api/account/accountApi';
-import { getAuthorFollowing, getAuthorFollowersCount, followAuthor, unfollowAuthor } from '../../api/author/authorApi';
+import {
+  getAuthorFollowing,
+  getAuthorFollowersCount,
+  getAuthorNewFollowersThisWeek,
+  followAuthor,
+  unfollowAuthor,
+} from '../../api/author/authorApi';
 import { resolveAuthorAvatarUrl } from '../../utils/storyAuthorAvatar';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -140,7 +146,28 @@ export function TrendingAuthorsSection() {
         }
 
         const authorList = Array.from(authorAgg.values()).sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
-        const topAuthors = authorList.slice(0, 3);
+        const topForMetrics = authorList.slice(0, Math.min(20, authorList.length));
+
+        const followerCounts = await Promise.all(
+          topForMetrics.map((a) => getAuthorFollowersCount(a.authorId).catch(() => 0))
+        );
+        const weeklyCounts = await Promise.all(
+          topForMetrics.map((a) => getAuthorNewFollowersThisWeek(a.authorId).catch(() => 0))
+        );
+
+        const enriched = topForMetrics.map((a, idx) => ({
+          ...a,
+          followersNum: Math.max(0, Number(followerCounts[idx]) || 0),
+          newFollowersThisWeek: Math.max(0, Number(weeklyCounts[idx]) || 0),
+        }));
+
+        enriched.sort((a, b) => {
+          const dw = (b.newFollowersThisWeek ?? 0) - (a.newFollowersThisWeek ?? 0);
+          if (dw !== 0) return dw;
+          return (b.views ?? 0) - (a.views ?? 0);
+        });
+
+        const topAuthors = enriched.slice(0, 3);
 
         const profiles =
           isAuthenticated && topAuthors.length > 0
@@ -151,24 +178,19 @@ export function TrendingAuthorsSection() {
           profileMap[a.authorId] = profiles[idx];
         });
 
-        const followerCounts = await Promise.all(
-          topAuthors.map((a) => getAuthorFollowersCount(a.authorId).catch(() => 0))
-        );
+        const maxWeekly = Math.max(1, ...topAuthors.map((a) => a.newFollowersThisWeek ?? 0));
 
-        const overallMaxViews = Math.max(...authorList.map((x) => x.views ?? 0), 1);
-
-        const mapped = topAuthors.map((a, idx) => {
+        const mapped = topAuthors.map((a) => {
           const profile = profileMap[a.authorId];
           const displayName =
             profile?.displayName?.trim() || a.authorName || 'Tác giả';
-          const followersNum = Math.max(0, Number(followerCounts[idx]) || 0);
+          const followersNum = a.followersNum;
           const followers = formatCompactNumber(followersNum);
           const verified = Boolean(profile?.isVerified);
 
-          const growthRatio = overallMaxViews > 0 ? (a.views ?? 0) / overallMaxViews : 0;
-          const growthPct = Math.max(0, Math.round(growthRatio * 100));
-
-          const newFollowersNum = Math.round(followersNum * 0.08);
+          const w = a.newFollowersThisWeek ?? 0;
+          const growthPct = Math.max(0, Math.round((w / maxWeekly) * 100));
+          const newFollowersNum = w;
           const newFollowers = `+${formatCompactNumber(newFollowersNum)}`;
 
           return {
@@ -275,13 +297,14 @@ export function TrendingAuthorsSection() {
       if (nextFollowing) await followAuthor(authorId);
       else await unfollowAuthor(authorId);
 
-      const delta = nextFollowing ? 1 : -1;
-      setTrendingAuthors((prev) =>
-        prev.map((a) => {
-          if (a?.id !== authorId) return a;
-          const followersNum = Math.max(0, Number(a?.followersNum ?? 0) + delta);
-          const newFollowersNum = Math.max(0, Number(a?.newFollowersNum ?? 0) + delta);
+      const [followersNum, newFollowersNum] = await Promise.all([
+        getAuthorFollowersCount(authorId),
+        getAuthorNewFollowersThisWeek(authorId),
+      ]);
 
+      setTrendingAuthors((prev) => {
+        const updated = prev.map((a) => {
+          if (a?.id !== authorId) return a;
           return {
             ...a,
             isFollowing: nextFollowing,
@@ -290,8 +313,13 @@ export function TrendingAuthorsSection() {
             newFollowersNum,
             newFollowers: `+${formatCompactNumber(newFollowersNum)}`,
           };
-        })
-      );
+        });
+        const maxW = Math.max(1, ...updated.map((x) => x.newFollowersNum ?? 0));
+        return updated.map((x) => ({
+          ...x,
+          growth: `+${Math.max(0, Math.round(((x.newFollowersNum ?? 0) / maxW) * 100))}%`,
+        }));
+      });
     } catch (err) {
       console.error('TrendingAuthorsSection follow toggle failed:', err);
     } finally {
@@ -311,7 +339,7 @@ export function TrendingAuthorsSection() {
               Tác Giả Đang Trending
             </h2>
             <p className="text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] font-normal text-[14px]">
-              Tăng trưởng nhanh nhất tuần này
+              Theo follower mới từ Thứ Hai tuần này (giờ máy chủ)
             </p>
           </div>
         </div>
