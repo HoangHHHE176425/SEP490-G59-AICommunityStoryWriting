@@ -269,6 +269,14 @@ export function AuthorStoryManagement({ onBack }) {
     const MIN_WITHDRAW_VND = 50_000;
     const MIN_WITHDRAW_COINS = Math.floor(MIN_WITHDRAW_VND / COIN_RATE_VND); // 500
 
+    const withdrawBalanceNum =
+        withdrawBalance != null && withdrawBalance !== '' ? Number(withdrawBalance) : null;
+    /** Tránh min > max trên input[type=number] (gây tooltip tiếng Anh sai nghĩa khi số dư < mức tối thiểu). */
+    const withdrawInputUseNativeMinMax =
+        withdrawBalanceNum != null &&
+        Number.isFinite(withdrawBalanceNum) &&
+        withdrawBalanceNum >= MIN_WITHDRAW_COINS;
+
     const formatVnd = (vnd) => {
         try {
             return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(vnd || 0);
@@ -1773,8 +1781,9 @@ export function AuthorStoryManagement({ onBack }) {
                                     <input
                                         type="number"
                                         placeholder="0"
-                                        min={MIN_WITHDRAW_COINS}
-                                        max={withdrawBalance != null ? withdrawBalance : undefined}
+                                        min={withdrawInputUseNativeMinMax ? MIN_WITHDRAW_COINS : undefined}
+                                        max={withdrawInputUseNativeMinMax ? withdrawBalanceNum : undefined}
+                                        step={1}
                                         value={withdrawAmount}
                                         onChange={(e) => setWithdrawAmount(e.target.value.replace(/[^0-9]/g, '') || '')}
                                         style={{
@@ -1789,6 +1798,19 @@ export function AuthorStoryManagement({ onBack }) {
                                         onFocus={(e) => { e.currentTarget.style.borderColor = '#13ec5b'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(19, 236, 91, 0.2)'; }}
                                         onBlur={(e) => { e.currentTarget.style.borderColor = '#e5e7eb'; e.currentTarget.style.boxShadow = 'none'; }}
                                     />
+                                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.5rem 0 0 0', maxWidth: '520px', lineHeight: 1.45 }}>
+                                        Rút tối thiểu <strong>{MIN_WITHDRAW_COINS.toLocaleString('vi-VN')} coin</strong> (khoảng{' '}
+                                        {formatVnd(MIN_WITHDRAW_VND)}).
+                                        {withdrawBalanceNum != null &&
+                                        Number.isFinite(withdrawBalanceNum) &&
+                                        withdrawBalanceNum > 0 &&
+                                        withdrawBalanceNum < MIN_WITHDRAW_COINS ? (
+                                            <span style={{ display: 'block', color: '#b45309', marginTop: '0.35rem', fontWeight: 500 }}>
+                                                Số dư hiện tại ({withdrawBalanceNum.toLocaleString('vi-VN')} coin) chưa đủ mức rút tối
+                                                thiểu.
+                                            </span>
+                                        ) : null}
+                                    </p>
                                     {!selectedBankAccount && (
                                         <p style={{ fontSize: '0.8125rem', color: '#b45309', margin: '0.5rem 0 0 0' }}>
                                             Vui lòng chọn tài khoản ngân hàng để rút tiền.
@@ -1824,7 +1846,9 @@ export function AuthorStoryManagement({ onBack }) {
                                     onClick={async () => {
                                         const amount = Number(withdrawAmount);
                                         if (!amount || amount < MIN_WITHDRAW_COINS) {
-                                            setWithdrawError('Số tiền rút tối thiểu là 50.000 VND.');
+                                            setWithdrawError(
+                                                `Số coin rút tối thiểu là ${MIN_WITHDRAW_COINS.toLocaleString('vi-VN')} coin (tương đương khoảng ${formatVnd(MIN_WITHDRAW_VND)}).`
+                                            );
                                             return;
                                         }
                                         if (!selectedBankAccount?.bank_bin && !BANK_BIN_MAP[selectedBankAccount?.bank_name || '']) {

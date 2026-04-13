@@ -391,7 +391,7 @@ export function ModeratorLogsManagement() {
                 </div>
             </div>
 
-            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+            <div className="bg-white rounded-lg border border-[#c9f0d8] overflow-hidden">
                 {loading ? (
                     <div className="p-8 text-center text-slate-500 text-sm">Đang tải log kiểm duyệt...</div>
                 ) : error ? (
@@ -403,7 +403,7 @@ export function ModeratorLogsManagement() {
                         <table className="w-full border-collapse">
                             <thead>
                                 {logType === 'moderator' ? (
-                                    <tr className="bg-slate-50">
+                                    <tr className="border-b border-[#c9f0d8] bg-[#f0faf5]">
                                         <th style={th}>THỜI ĐIỂM</th>
                                         <th style={th}>KIỂM DUYỆT VIÊN</th>
                                         <th style={th}>ĐỐI TƯỢNG</th>
@@ -412,7 +412,7 @@ export function ModeratorLogsManagement() {
                                         <th style={th}>LÝ DO</th>
                                     </tr>
                                 ) : (
-                                    <tr className="bg-slate-50">
+                                    <tr className="border-b border-[#c9f0d8] bg-[#f0faf5]">
                                         <th style={th}>THỜI ĐIỂM</th>
                                         <th style={th}>XỬ LÝ VI PHẠM VIÊN</th>
                                         <th style={th}>NGUỒN</th>
@@ -427,7 +427,7 @@ export function ModeratorLogsManagement() {
                             <tbody>
                                 {logType === 'moderator' ? (
                                     rows.map((r) => (
-                                        <tr key={r.id ?? `${r.targetId}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
+                                        <tr key={r.id ?? `${r.targetId}-${r.createdAt}`} className="border-b border-[#c9f0d8] bg-white transition-colors hover:bg-[#f7fcf9]">
                                             <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatLogTimestampVi(r.createdAt)}</td>
                                             <td style={td}>{r.moderatorName || '—'}</td>
                                             <td style={td}>{targetLabel(r)}</td>
@@ -444,7 +444,7 @@ export function ModeratorLogsManagement() {
                                     ))
                                 ) : (
                                     rows.map((r) => (
-                                        <tr key={r.id ?? `${r.source}-${r.createdAt}`} className="border-b border-slate-100 hover:bg-slate-50/70">
+                                        <tr key={r.id ?? `${r.source}-${r.createdAt}`} className="border-b border-[#c9f0d8] bg-white transition-colors hover:bg-[#f7fcf9]">
                                             <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatLogTimestampVi(r.createdAt)}</td>
                                             <td style={td}>{r.complianceUserName || '—'}</td>
                                             <td style={td}>{complianceSourceLabel(r.source)}</td>
@@ -489,11 +489,13 @@ const inputStyle = {
 const th = {
     textAlign: 'left',
     padding: '0.62rem',
-    borderBottom: '1px solid #e2e8f0',
-    fontSize: '0.68rem',
+    borderBottom: '1px solid #c9f0d8',
+    fontSize: '0.72rem',
     letterSpacing: '0.02em',
-    color: '#64748b',
+    color: '#047857',
+    background: '#f0faf5',
     fontWeight: 700,
+    textTransform: 'uppercase',
 };
 
 const td = {

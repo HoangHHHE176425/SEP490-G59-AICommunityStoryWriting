@@ -709,10 +709,15 @@ function complianceAdminActionKindVi(k) {
 function Modal({ title, onClose, children, maxWidth = 1100 }) {
     return (
         <div className="fixed inset-0 z-[1200] bg-slate-900/45 flex items-center justify-center p-3">
-            <div className="bg-white w-[96vw] max-h-[88vh] rounded-xl border border-slate-200 shadow-2xl flex flex-col" style={{ maxWidth }}>
-                <div className="flex justify-between items-center border-b border-slate-200 px-4 py-3">
-                    <h3 className="m-0 text-base font-bold text-slate-900">{title}</h3>
-                    <button className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" onClick={onClose}>
+            <div className="bg-white w-[96vw] max-h-[88vh] rounded-xl border border-[#c9f0d8] shadow-2xl flex flex-col" style={{ maxWidth }}>
+                <div className="flex justify-between items-center border-b border-white/20 bg-primary px-4 py-3 rounded-t-xl">
+                    <h3 className="m-0 text-base font-bold text-primary-foreground">{title}</h3>
+                    <button
+                        type="button"
+                        className="inline-flex items-center justify-center w-8 h-8 rounded-lg border border-white/40 bg-white/15 text-primary-foreground hover:bg-white/25"
+                        onClick={onClose}
+                        aria-label="Đóng"
+                    >
                         <X style={{ width: 16, height: 16 }} />
                     </button>
                 </div>
@@ -1855,13 +1860,13 @@ export default function ViolationManagement() {
                 <div className="w-full overflow-visible">
                     <table className="w-full border-collapse table-fixed">
                         <thead>
-                            <tr className="bg-slate-50">
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Ưu tiên</th>
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Mã đơn</th>
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Truyện</th>
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Tác giả</th>
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Số người báo cáo</th>
-                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20, background: '#f8fafc' }}>Thao tác</th>
+                            <tr className="bg-[#f0faf5]">
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Ưu tiên</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Mã đơn</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Truyện</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Tác giả</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Số người báo cáo</th>
+                                <th style={{ ...th, position: 'sticky', top: 0, zIndex: 20 }}>Thao tác</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1873,7 +1878,7 @@ export default function ViolationManagement() {
                             {rows.map((r) => (
                                 <tr
                                     key={r.storyId}
-                                    className={`border-t border-slate-200 hover:bg-slate-50/70 ${r.complianceFlagged ? 'bg-amber-200/70 ring-1 ring-amber-300' : ''}`}
+                                    className={`border-t border-[#c9f0d8] hover:bg-[#f7fcf9] ${r.complianceFlagged ? 'bg-amber-200/70 ring-1 ring-amber-300' : ''}`}
                                     style={r.complianceFlagged ? { borderLeft: '4px solid #d97706' } : undefined}
                                 >
                                     {(() => {
@@ -2024,7 +2029,7 @@ export default function ViolationManagement() {
             <div>
                 <div className="w-full overflow-visible">
                     <table className="w-full border-collapse table-fixed">
-                        <thead><tr className="bg-slate-50">
+                        <thead><tr className="bg-[#f0faf5]">
                             <th style={th}>Ưu tiên</th>
                             <th style={th}>Mã đơn</th>
                             <th style={th}>Truyện</th>
@@ -2039,7 +2044,7 @@ export default function ViolationManagement() {
                                 </tr>
                             )}
                             {rows.map((r) => (
-                                <tr key={r.commentId} className="border-t border-slate-200 hover:bg-slate-50/70">
+                                <tr key={r.commentId} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
                                     {(() => {
                                         const hasPendingAdmin = !!r.hasPendingAdminActionRequest;
                                         const hasPendingLockRel = !!pendingReleaseByComment[r.commentId]
@@ -2215,11 +2220,11 @@ export default function ViolationManagement() {
     const renderLockRequests = () => (
         <div className="overflow-x-auto">
             <table className="w-full border-collapse">
-                <thead><tr className="bg-slate-50">
+                <thead><tr className="bg-[#f0faf5]">
                     <th style={th}>Truyện</th><th style={th}>Người gửi</th><th style={th}>Nội dung</th><th style={th}>Thời điểm</th><th style={th}>Thao tác quản trị</th>
                 </tr></thead>
                 <tbody>{rows.map((r) => (
-                    <tr key={r.id} className="border-t border-slate-200 hover:bg-slate-50/70">
+                    <tr key={r.id} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
                         <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                         <td style={td}>{r.requesterDisplayName || r.requesterEmail || '—'}</td>
                         <td style={td}>{r.message || '—'}</td>
@@ -2242,7 +2247,7 @@ export default function ViolationManagement() {
             <div>
                 <div className="overflow-x-auto">
                     <table className="w-full border-collapse">
-                        <thead><tr className="bg-slate-50">
+                        <thead><tr className="bg-[#f0faf5]">
                             <th style={th}>Mã đơn</th>
                             <th style={th}>Thời điểm</th>
                             <th style={th}>Nguồn</th>
@@ -2258,7 +2263,7 @@ export default function ViolationManagement() {
                                 </tr>
                             )}
                             {rows.map((r) => (
-                                <tr key={r.rowId || r.reportId || r.id} className="border-t border-slate-200 hover:bg-slate-50/70">
+                                <tr key={r.rowId || r.reportId || r.id} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
                                     <td style={td}><span className="text-xs text-slate-700 break-all">{r.rowId || r.reportId || r.id || '—'}</span></td>
                                     <td style={td}>{formatDate(r.createdAtUtc || r.resolvedAtUtc)}</td>
                                     <td style={td}>{complianceHistorySourceVi(r.source)}</td>
@@ -2299,7 +2304,7 @@ export default function ViolationManagement() {
     };
 
     return (
-        <div className="max-w-[1720px] mx-auto px-4 md:px-6 py-6 space-y-6">
+        <div className="max-w-[1720px] mx-auto px-4 md:px-6 pt-0 pb-6 space-y-6">
             <div>
                 <h1 className="text-2xl font-bold text-slate-900 mb-1">Xử lý báo cáo vi phạm</h1>
                 <p className="text-sm text-slate-500">
@@ -2324,7 +2329,7 @@ export default function ViolationManagement() {
             </div>
 
             <div className="space-y-4 pb-8">
-                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                <div className="bg-white rounded-xl border border-[#c9f0d8] p-4 shadow-sm">
                     <h2 className="text-lg font-bold text-slate-900 mb-3">Bộ lọc và điều hướng</h2>
                     {(activeTab === 'story-reports' || activeTab === 'comment-reports') && (
                         <div className="mb-3 flex flex-wrap gap-2 items-center">
@@ -2488,7 +2493,7 @@ export default function ViolationManagement() {
                     )}
                 </div>
 
-                <div className="bg-white rounded-xl border border-slate-200 shadow-sm min-h-[62vh] flex flex-col overflow-visible">
+                <div className="bg-white rounded-xl border border-[#c9f0d8] shadow-sm min-h-[62vh] flex flex-col overflow-visible">
                     <div className="flex-1 overflow-visible">
                         {loading ? <div className="p-8 text-center text-slate-500 text-sm">Đang tải...</div> : error ? <div className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div> : (
                             activeTab === 'story-reports'
@@ -2503,7 +2508,7 @@ export default function ViolationManagement() {
                                         ? renderComplianceHistory()
                                         : activeTab === 'lock-requests' ? renderLockRequests()
                                             : activeTab === 'compliance-logs' ? (
-                                                <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-slate-50"><th style={th}>Thời điểm</th><th style={th}>Nhân viên kiểm duyệt</th><th style={th}>Nguồn</th><th style={th}>Hành động</th><th style={th}>Trạng thái</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-slate-200 hover:bg-slate-50/70"><td style={td}>{formatLogTimestampVi(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
+                                                <div className="overflow-x-auto"><table className="w-full border-collapse"><thead><tr className="bg-[#f0faf5]"><th style={th}>Thời điểm</th><th style={th}>Nhân viên kiểm duyệt</th><th style={th}>Nguồn</th><th style={th}>Hành động</th><th style={th}>Trạng thái</th></tr></thead><tbody>{rows.map((r) => <tr key={r.rowId} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]"><td style={td}>{formatLogTimestampVi(r.createdAtUtc)}</td><td style={td}>{r.complianceUserName || '—'}</td><td style={td}>{r.source || '—'}</td><td style={td}>{r.action || '—'}</td><td style={td}>{r.status || '—'}</td></tr>)}</tbody></table></div>
                                             ) : (
                                                 <div className="p-8 text-center text-slate-500 text-sm">Không có dữ liệu hiển thị.</div>
                                             )
@@ -3293,7 +3298,7 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
                         <div className="text-sm text-slate-600">Đang tải...</div>
                     ) : (
                         <div className="flex flex-col gap-4">
-                            <div className="flex flex-wrap gap-1 border-b border-slate-200">
+                            <div className="flex flex-wrap gap-1 border-b border-[#c9f0d8]">
                                 <button
                                     type="button"
                                     className={`px-3 py-2 text-sm font-semibold rounded-t-md border-b-2 -mb-px transition-colors ${myRequestsTab === 'cancel_claim'
@@ -3317,10 +3322,10 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
                             </div>
 
                             {myRequestsTab === 'cancel_claim' && (
-                                <div className="overflow-x-auto">
+                                <div className="overflow-x-auto rounded-lg border border-[#c9f0d8]">
                                     <table className="w-full border-collapse text-sm">
                                         <thead>
-                                            <tr className="bg-slate-50">
+                                            <tr className="bg-[#f0faf5]">
                                                 <th style={th}>Truyện</th>
                                                 <th style={th}>Trạng thái</th>
                                                 <th style={th}>Gửi lúc</th>
@@ -3340,7 +3345,7 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
                                                     const complianceMsg = requestFieldDisplay(row.message ?? row.Message);
                                                     const adminNote = requestFieldDisplay(row.resolutionNote ?? row.ResolutionNote);
                                                     return (
-                                                        <tr key={String(row.id ?? row.Id)} className="border-t border-slate-200">
+                                                        <tr key={String(row.id ?? row.Id)} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
                                                             <td style={td}>{row.storyTitle ?? row.StoryTitle ?? '—'}</td>
                                                             <td style={td}>
                                                                 <ComplianceRequestStatusPill status={row.status ?? row.Status} />
@@ -3360,10 +3365,10 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
                             )}
 
                             {myRequestsTab === 'ban_suspend' && (
-                                <div className="overflow-x-auto">
+                                <div className="overflow-x-auto rounded-lg border border-[#c9f0d8]">
                                     <table className="w-full border-collapse text-sm">
                                         <thead>
-                                            <tr className="bg-slate-50">
+                                            <tr className="bg-[#f0faf5]">
                                                 <th style={th}>Truyện</th>
                                                 <th style={th}>Loại</th>
                                                 <th style={th}>Trạng thái</th>
@@ -3384,7 +3389,7 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
                                                     const complianceMsg = requestFieldDisplay(row.message ?? row.Message);
                                                     const adminNote = requestFieldDisplay(row.resolutionNote ?? row.ResolutionNote);
                                                     return (
-                                                        <tr key={String(row.id ?? row.Id)} className="border-t border-slate-200">
+                                                        <tr key={String(row.id ?? row.Id)} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
                                                             <td style={td}>{row.storyTitle ?? row.StoryTitle ?? '—'}</td>
                                                             <td style={td}>{complianceAdminActionKindVi(row.requestKind ?? row.RequestKind)}</td>
                                                             <td style={td}>
@@ -3412,17 +3417,19 @@ Lưu ý: Viết đủ chi tiết (hành vi vi phạm, bằng chứng, mức đ�
     );
 }
 
+/** Cùng palette nút "Xem chính sách…" / "Xem quy trình…": nền mint, chữ teal đậm, viền xanh nhạt. */
 const th = {
     textAlign: 'left',
     padding: '0.75rem',
-    borderBottom: '1px solid #e2e8f0',
+    borderBottom: '1px solid #c9f0d8',
     fontSize: '0.72rem',
     letterSpacing: '0.02em',
-    color: '#64748b',
+    color: '#047857',
+    background: '#f0faf5',
     fontWeight: 700,
     textTransform: 'uppercase',
 };
-const td = { padding: '0.75rem', color: '#334155', verticalAlign: 'top', fontSize: '0.875rem' };
+const td = { padding: '0.75rem', color: '#0f172a', verticalAlign: 'top', fontSize: '0.875rem' };
 const input = { border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.6rem 0.75rem', fontSize: '0.875rem', color: '#0f172a', background: '#f8fafc' };
 const btn = { display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', borderRadius: 8, padding: '0.4rem 0.7rem', cursor: 'pointer', whiteSpace: 'nowrap' };
 const menuBtn = {
