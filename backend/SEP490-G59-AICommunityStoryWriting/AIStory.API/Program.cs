@@ -55,7 +55,7 @@ namespace AIStory.API
             // Đăng ký DbContext, để OnConfiguring trong StoryPlatformDbContext tự cấu hình connection string.
             builder.Services.AddDbContext<StoryPlatformDbContext>();
 
-            var corsExtraOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+            var corsAllowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
                 ?? Array.Empty<string>();
             var corsExtraSet = new HashSet<string>(corsExtraOrigins, StringComparer.OrdinalIgnoreCase);
             var corsAllowLocalhost = builder.Configuration.GetValue("Cors:AllowLocalhost", builder.Environment.IsDevelopment());
@@ -68,7 +68,7 @@ namespace AIStory.API
                     policy.SetIsOriginAllowed(origin =>
                     {
                         if (string.IsNullOrWhiteSpace(origin)) return false;
-                        if (corsExtraSet.Contains(origin)) return true;
+                        if (corsAllowedSet.Contains(origin)) return true;
                         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
 
                         var isLocalhost = corsAllowLocalhost &&
