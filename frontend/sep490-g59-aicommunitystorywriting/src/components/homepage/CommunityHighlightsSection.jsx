@@ -40,13 +40,13 @@ function storyMetaFromItem(s) {
 function ContentWithQuotes({ text, accentColor }) {
   const parts = String(text).split(/(«[^»]*»)/g);
   return (
-    <span className="leading-relaxed">
+    <span className="font-sans antialiased leading-relaxed">
       {parts.map((part, i) => {
         if (part.startsWith('«') && part.endsWith('»')) {
           return (
             <span
               key={i}
-              className="font-extrabold drop-shadow-[0_1px_0_rgba(255,255,255,0.8)]"
+              className="font-sans font-extrabold antialiased drop-shadow-[0_1px_0_rgba(255,255,255,0.8)]"
               style={{ color: accentColor }}
             >
               {part}
@@ -54,7 +54,7 @@ function ContentWithQuotes({ text, accentColor }) {
           );
         }
         return (
-          <span key={i} className="font-medium text-[#334155]">
+          <span key={i} className="font-sans font-medium antialiased text-[#334155]">
             {part}
           </span>
         );
@@ -265,7 +265,10 @@ export function CommunityHighlightsSection() {
   const empty = !loading && activities.length === 0;
 
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-gray-200/90 bg-white p-6 shadow-[0_4px_24px_rgba(26,35,50,0.06)]">
+    <section
+      lang="vi"
+      className="relative overflow-hidden rounded-2xl border border-gray-200/90 bg-white p-6 shadow-[0_4px_24px_rgba(26,35,50,0.06)]"
+    >
       <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-gradient-to-br from-[#FFA500]/15 to-transparent blur-2xl" />
       <div className="pointer-events-none absolute -bottom-12 -left-12 h-32 w-32 rounded-full bg-gradient-to-tr from-[#13EC5B]/10 to-transparent blur-2xl" />
 
@@ -274,10 +277,10 @@ export function CommunityHighlightsSection() {
           <Sparkles className="h-5 w-5 text-white drop-shadow-sm" />
         </div>
         <div>
-          <h2 className="font-['Plus_Jakarta_Sans',sans-serif] text-[24px] font-bold tracking-tight text-[#1A2332]">
+          <h2 className="font-sans text-[24px] font-bold tracking-tight text-[#1A2332] antialiased">
             Hoạt Động Cộng Đồng
           </h2>
-          <p className="mt-0.5 font-['Plus_Jakarta_Sans',sans-serif] text-[14px] font-medium text-[#64748b]">
+          <p className="mt-0.5 font-sans text-[14px] font-medium text-[#64748b] antialiased">
             Truyện mới, chương mới và chương có kiểm tra AI (theo dữ liệu nền tảng)
           </p>
         </div>
@@ -285,15 +288,15 @@ export function CommunityHighlightsSection() {
 
       <div className="relative space-y-3.5">
         {loading ? (
-          <div className="text-center py-10 text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] text-[14px]">
+          <div className="text-center py-10 font-sans text-[14px] text-[#90A1B9] antialiased">
             Đang tải hoạt động...
           </div>
         ) : loadError ? (
-          <div className="text-center py-8 text-red-500 font-['Plus_Jakarta_Sans',sans-serif] text-[13px]">
+          <div className="text-center py-8 font-sans text-[13px] text-red-500 antialiased">
             {loadError}
           </div>
         ) : empty ? (
-          <div className="text-center py-8 text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] text-[14px]">
+          <div className="text-center py-8 font-sans text-[14px] text-[#90A1B9] antialiased">
             Chưa có hoạt động để hiển thị
           </div>
         ) : (
@@ -313,11 +316,11 @@ export function CommunityHighlightsSection() {
                 </div>
                 <div className="min-w-0 flex-1 pt-0.5">
                   <div className="mb-2 flex flex-wrap items-center gap-2 gap-y-1">
-                    <h3 className="truncate font-['Plus_Jakarta_Sans',sans-serif] text-[15px] font-bold text-[#1A2332] transition-colors group-hover:text-[#0f172a]">
+                    <h3 className="truncate font-sans text-[15px] font-bold text-[#1A2332] antialiased transition-colors group-hover:text-[#0f172a]">
                       {item.authorName}
                     </h3>
                     <span
-                      className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 font-['Plus_Jakarta_Sans',sans-serif] text-[10px] font-bold uppercase tracking-wide ${theme.badge}`}
+                      className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide antialiased ${theme.badge}`}
                     >
                       {theme.label}
                     </span>
@@ -329,12 +332,12 @@ export function CommunityHighlightsSection() {
                       <Icon className="h-[18px] w-[18px]" style={{ color: item.color }} strokeWidth={2.25} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="font-['Plus_Jakarta_Sans',sans-serif] text-[14px] leading-snug line-clamp-3">
+                      <p className="font-sans text-[14px] leading-snug line-clamp-3 antialiased">
                         <ContentWithQuotes text={item.content} accentColor={item.color} />
                       </p>
                       <div className="mt-2 flex items-center gap-1.5">
                         <span className="inline-block h-1 w-1 rounded-full bg-[#94a3b8]" aria-hidden />
-                        <span className="font-['Plus_Jakarta_Sans',sans-serif] text-[12px] font-semibold text-[#64748b]">
+                        <span className="font-sans text-[12px] font-semibold text-[#64748b] antialiased">
                           {item.timeLabel}
                         </span>
                       </div>

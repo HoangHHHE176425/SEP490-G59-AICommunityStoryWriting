@@ -56,8 +56,8 @@ export function CommunityStatsWidget({ skipFetch = false, stats: statsProp, load
           Số liệu cộng đồng
         </h3>
       </div>
-      <p className="text-[11px] text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] mb-4">
-        Truyện PUBLISHED, không <span className="lowercase">compliance_hidden</span> — cùng logic danh sách công khai
+      <p className="mb-4 text-[12px] leading-snug text-[#64748b] font-['Plus_Jakarta_Sans',sans-serif]">
+        Thống kê từ các truyện đang được hiển thị công khai trên nền tảng (đã xuất bản, không bị ẩn theo quy định).
       </p>
 
       {loading ? (
@@ -96,16 +96,11 @@ export function CommunityStatsWidget({ skipFetch = false, stats: statsProp, load
       )}
 
       {!loading && !error && stats ? (
-        <p className="mt-3 text-[10px] text-[#90A1B9] font-['Plus_Jakarta_Sans',sans-serif] leading-snug">
-          * Tác giả: số <span className="font-medium text-[#64748b]">author_id</span> khác nhau có ít nhất một truyện thỏa điều
-          kiện trên.
+        <p className="mt-3 text-[11px] leading-snug text-[#94a3b8] font-['Plus_Jakarta_Sans',sans-serif]">
+          * <span className="text-[#64748b]">Tác giả</span> là số người viết khác nhau, mỗi người chỉ tính một lần nếu có ít
+          nhất một truyện thuộc nhóm truyện công khai ở trên.
           {stats?.statsSource === 'stories' ? (
-            <>
-              {' '}
-              <span className="text-[#94a3b8]">
-                (Ước tính từ GET /stories khi /community/stats chưa khả dụng.)
-              </span>
-            </>
+            <span className="text-[#94a3b8]"> Số liệu có thể là ước lượng khi hệ thống đang đồng bộ.</span>
           ) : null}
         </p>
       ) : null}

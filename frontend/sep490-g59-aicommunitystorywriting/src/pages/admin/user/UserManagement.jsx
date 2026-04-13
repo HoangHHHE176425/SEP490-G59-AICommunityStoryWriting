@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { UserList } from '../../../components/admin/user/UserList';
 import { UserDetailModal } from '../../../components/admin/user/UserDetailModal';
 import { Pagination } from '../../../components/pagination/Pagination';
-import { getUsers, getStats, updateUserStatus, deleteUser } from '../../../api/admin/userManagementApi';
-import { Search } from 'lucide-react';
+import { getUsers, getStats, updateUserStatus, deleteUser, getUserDisplayName } from '../../../api/admin/userManagementApi';
+import { Search, Ban, X } from 'lucide-react';
 
 const PAGE_SIZE = 10;
 const FILTER_TABS = [
@@ -26,6 +26,8 @@ export function UserManagement() {
     const [search, setSearch] = useState('');
     const [searchInput, setSearchInput] = useState('');
     const [selectedUser, setSelectedUser] = useState(null);
+    const [blockConfirmUser, setBlockConfirmUser] = useState(null);
+    const [blockConfirmLoading, setBlockConfirmLoading] = useState(false);
 
     const loadUsers = useCallback((page = 1) => {
         setLoading(true);
@@ -79,14 +81,29 @@ export function UserManagement() {
     const handleViewDetail = (user) => setSelectedUser(user);
     const handleCloseDetail = () => setSelectedUser(null);
 
-    const handleBlock = async (user) => {
+    const requestBlockUser = (user) => {
+        if (!user?.id) return;
+        setBlockConfirmUser(user);
+    };
+
+    const cancelBlockConfirm = () => {
+        if (blockConfirmLoading) return;
+        setBlockConfirmUser(null);
+    };
+
+    const confirmBlockUser = async () => {
+        if (!blockConfirmUser?.id) return;
+        setBlockConfirmLoading(true);
         try {
-            await updateUserStatus(user.id, 'BANNED');
+            await updateUserStatus(blockConfirmUser.id, 'BANNED');
             loadUsers(currentPage);
             loadStats();
             setSelectedUser(null);
+            setBlockConfirmUser(null);
         } catch (err) {
             console.error(err);
+        } finally {
+            setBlockConfirmLoading(false);
         }
     };
 
@@ -203,7 +220,7 @@ export function UserManagement() {
                         users={users}
                         loading={loading}
                         onViewDetail={handleViewDetail}
-                        onBlock={handleBlock}
+                        onBlock={requestBlockUser}
                         onUnblock={handleUnblock}
                     />
                     {totalPages > 1 && (
@@ -225,7 +242,7 @@ export function UserManagement() {
                 <UserDetailModal
                     user={selectedUser}
                     onClose={handleCloseDetail}
-                    onBlock={handleBlock}
+                    onBlock={requestBlockUser}
                     onUnblock={handleUnblock}
                     onDeleteUser={handleDeleteUser}
                     onAssignModerator={(newRole) => {
@@ -237,6 +254,71 @@ export function UserManagement() {
                     }}
                 />
             )}
+
+            {blockConfirmUser ? (
+                <div
+                    className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="block-confirm-title"
+                    onClick={cancelBlockConfirm}
+                >
+                    <div
+                        className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-slate-200"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-start gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600">
+                                <Ban className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <h3 id="block-confirm-title" className="text-lg font-bold text-slate-900">
+                                    Xác nhận khóa tài khoản
+                                </h3>
+                                <p className="mt-2 text-sm text-slate-600 leading-relaxed">
+                                    Bạn có chắc muốn <strong className="text-red-700">khóa (ban)</strong> tài khoản{' '}
+                                    <span className="font-semibold text-slate-800">
+                                        {getUserDisplayName(blockConfirmUser)}
+                                    </span>
+                                    {blockConfirmUser.email ? (
+                                        <>
+                                            {' '}
+                                            <span className="text-slate-500">({blockConfirmUser.email})</span>
+                                        </>
+                                    ) : null}
+                                    ? Người dùng sẽ không đăng nhập được cho đến khi được mở khóa.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={cancelBlockConfirm}
+                                className="shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                                aria-label="Đóng"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+                        <div className="mt-6 flex flex-col-reverse sm:flex-row gap-2 sm:justify-end">
+                            <button
+                                type="button"
+                                disabled={blockConfirmLoading}
+                                onClick={cancelBlockConfirm}
+                                className="px-4 py-2.5 rounded-xl border border-slate-300 font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                                Hủy
+                            </button>
+                            <button
+                                type="button"
+                                disabled={blockConfirmLoading}
+                                onClick={confirmBlockUser}
+                                className="px-4 py-2.5 rounded-xl bg-red-600 text-white font-semibold hover:bg-red-700 disabled:opacity-50"
+                            >
+                                {blockConfirmLoading ? 'Đang xử lý…' : 'Khóa tài khoản'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }
