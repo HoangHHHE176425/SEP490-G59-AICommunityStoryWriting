@@ -5,7 +5,13 @@ import { Pagination } from '../../../components/pagination/Pagination';
 import { getStories, getStoryById } from '../../../api/story/storyApi';
 import { getPendingStories, getPendingChapters, getModeratorReviewedStories, getModeratorReviewedChapters, getRejectedChapterVersionsHistory, claimStory, claimChapter, submitReviewEscalation } from '../../../api/moderator/moderatorApi';
 import { getProfileByUserId } from '../../../api/account/accountApi';
-import { reviewDeadlineAfterDaysUtc, worstTimeStatus, pickReviewDeadlineIso } from '../../../utils/moderatorReviewSla';
+import {
+    reviewDeadlineAfterDaysUtc,
+    worstTimeStatus,
+    pickReviewDeadlineIso,
+    MODERATOR_ESCALATION_REASON_MIN_WORDS,
+    countModeratorEscalationReasonWords,
+} from '../../../utils/moderatorReviewSla';
 import { createModeratorHubConnection } from '../../../api/moderator/moderatorHub';
 import { resolveBackendUrl } from '../../../utils/resolveBackendUrl';
 import { getActivePolicy } from '../../../api/policy/policyApi';
@@ -408,7 +414,7 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
     const [releaseConfirmTarget, setReleaseConfirmTarget] = useState(null); // { storyId, storyTitle, chapterCount }
     /** Thông báo sau khi gửi đơn / lỗi. */
     const [releaseResultMessage, setReleaseResultMessage] = useState(null);
-    /** Lý do gửi đơn RELEASE_ASSIGNMENT cấp truyện (tối thiểu 10 ký tự). */
+    /** Lý do gửi đơn RELEASE_ASSIGNMENT cấp truyện (tối thiểu số từ — đồng bộ MODERATOR_ESCALATION_REASON_MIN_WORDS). */
     const [releaseReason, setReleaseReason] = useState('');
     /** Lỗi trong popup gửi đơn (validation / API). */
     const [releaseFormError, setReleaseFormError] = useState('');
@@ -1195,8 +1201,11 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
         const target = releaseConfirmTarget;
         if (!target?.storyId) return;
         const reason = releaseReason.trim();
-        if (reason.length < 10) {
-            setReleaseFormError('Lý do cần ít nhất 10 ký tự (theo quy định hệ thống).');
+        const wc = countModeratorEscalationReasonWords(reason);
+        if (wc < MODERATOR_ESCALATION_REASON_MIN_WORDS) {
+            setReleaseFormError(
+                `Lý do cần ít nhất ${MODERATOR_ESCALATION_REASON_MIN_WORDS} từ (hiện tại: ${wc} từ).`,
+            );
             return;
         }
         setReleaseFormError('');
@@ -1895,10 +1904,10 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                         onClick={(e) => e.stopPropagation()}
                     >
                         <h2 id="release-confirm-title" style={{ margin: '0 0 0.35rem', fontSize: '1.125rem', fontWeight: 700, color: '#0f172a', lineHeight: 1.35 }}>
-                            Trả truyện về hàng đợi kiểm duyệt chung?
+                            Trả truyện về hàng đợi kiểm duyệt chung
                         </h2>
                         <p style={{ margin: '0 0 0.65rem', fontSize: '0.8125rem', fontWeight: 600, color: '#64748b' }}>
-                            Gửi đơn lên quản trị viên — sau khi đơn được <strong>chấp nhận</strong>, hệ thống mới trả các mục về hàng đợi (giống luồng hủy nhận duyệt thông thường).
+                            Gửi đơn lên quản trị viên — sau khi đơn được <strong>chấp nhận</strong>, hệ thống mới trả các mục về hàng đợi.
                         </p>
                         <p style={{ margin: '0 0 0.75rem', fontSize: '0.9375rem', color: '#334155', lineHeight: 1.55 }}>
                             Yêu cầu này áp dụng cho <strong>tất cả chương</strong> bạn đang giữ trong truyện
@@ -1914,12 +1923,12 @@ export function PublicationManagement({ initialFilterStatus = 'pending' }) {
                             </p>
                         ) : null}
                         <label style={{ display: 'block', marginBottom: '0.75rem', fontSize: '0.8125rem', fontWeight: 600, color: '#334155' }}>
-                            Lý do gửi đơn <span style={{ color: '#ef4444' }}>*</span> (tối thiểu 10 ký tự)
+                            Lý do gửi đơn <span style={{ color: '#ef4444' }}>*</span> (tối thiểu {MODERATOR_ESCALATION_REASON_MIN_WORDS} từ)
                             <textarea
                                 value={releaseReason}
                                 onChange={(e) => { setReleaseReason(e.target.value); if (releaseFormError) setReleaseFormError(''); }}
                                 rows={4}
-                                placeholder="Ví dụ: Không đủ thời gian xử lý hết khối chương, đề nghị trả về hàng đợi..."
+                                placeholder={`Trình bày chi tiết (tối thiểu ${MODERATOR_ESCALATION_REASON_MIN_WORDS} từ), ví dụ: không đủ thời gian xử lý hết khối chương, đề nghị trả về hàng đợi chung...`}
                                 disabled={!!releasingAllClaimsStoryId}
                                 style={{
                                     display: 'block',

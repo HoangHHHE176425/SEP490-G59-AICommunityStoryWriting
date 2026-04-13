@@ -6,7 +6,9 @@ using Moq;
 using Services.DTOs.StoryReports;
 using Services.Implementations;
 using Services.Interfaces;
+using Services.StoryReporting;
 using System.ComponentModel.DataAnnotations;
+using System.Linq;
 using System.Reflection;
 using System.Security.Claims;
 using Xunit.Abstractions;
@@ -16,9 +18,10 @@ namespace AIStory.Tests
     /// <summary>
     /// Đối chiếu ma trận / product (CreateStoryReport):
     /// <list type="bullet">
-    /// <item><description>UTCID01, 02, 04, 05, 07, 08, 09, 10 — product có logic tương ứng (hoặc test mock mapping HTTP/exception).</description></item>
+    /// <item><description>UTCID01, 02, 04, 05, 09, 10 — product có logic tương ứng (hoặc test mock mapping HTTP/exception).</description></item>
+    /// <item><description>UTCID07, 08 — thiếu mô tả (null/whitespace) → API <c>400</c> trước service.</description></item>
     /// <item><description>UTCID03 — reporter không xác định (JWT) → 401; <c>Guid.Empty</c> hoặc user không trong DB → <see cref="StoryReportService.CreateStoryReportAsync"/> ném <see cref="InvalidOperationException"/> (<c>USER không tồn tại.</c>), không lưu — xem <see cref="UT05_FunctionCreateStoryReport.UTCID03_CreateStoryReport_Rejects_WhenReporterInvalidOrUserNotInDatabase"/>.</description></item>
-    /// <item><description>UTCID06 — Description &gt; 200 ký tự → không hợp lệ: <see cref="CreateStoryReportRequestDto"/> + <see cref="StoryReportService.CreateStoryReportAsync"/>; test <see cref="UT05_FunctionCreateStoryReport.UTCID06_CreateStoryReport_Rejects_WhenDescriptionExceeds200Characters"/>.</description></item>
+    /// <item><description>UTCID06 — mô tả không đủ 50 từ / vượt <see cref="UserReportDescriptionRules.MaxLength"/> → <see cref="CreateStoryReportRequestDto"/> + <see cref="StoryReportService.CreateStoryReportAsync"/>; test <see cref="UT05_FunctionCreateStoryReport.UTCID06_CreateStoryReport_Rejects_WhenDescriptionInvalid"/>.</description></item>
     /// </list>
     /// </summary>
     public class UT05_FunctionCreateStoryReport
@@ -35,6 +38,9 @@ namespace AIStory.Tests
             foreach (var line in details)
                 _output.WriteLine("  · " + line);
         }
+
+        private static string ReportDescriptionWords(int count) =>
+            string.Join(" ", Enumerable.Range(1, count).Select(i => $"w{i}"));
 
         /// <summary>Chỉ ép chặt <see cref="IStoryReportService"/>; các dependency khác không dùng trong <c>ReportStory</c>.</summary>
         private static StoriesController CreateStoriesControllerSut(out Mock<IStoryReportService> reportMock)
@@ -55,7 +61,7 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID01 — happy path: story tồn tại, user/reporter hợp lệ, chưa từng báo cáo (service trả id khác Empty), ReasonCode hợp lệ, mô tả &lt; 200 ký tự.
+        /// UTCID01 — happy path: story tồn tại, user/reporter hợp lệ, chưa từng báo cáo (service trả id khác Empty), ReasonCode hợp lệ, mô tả đủ 50 từ.
         /// Ma trận: Return True, log &quot;Tạo báo cáo thành công&quot; — product API trả <c>200 OK</c> với <c>id</c> và message &quot;Đã gửi báo cáo.&quot;; không assert đúng từng chữ log/message.
         /// Product nghiệp vụ: <see cref="Services.Implementations.StoryReportService.CreateStoryReportAsync"/> — <c>StoryReportReasonCatalog.TryGet</c>, <c>IUserLookup.Exists(reporterId)</c>, <c>StoryDAO.GetById</c>, trạng thái PUBLISHED, không tự báo cáo chính mình, <c>StoryReportDAO.AppendStoryReportAggregated</c> (trùng user+story → <c>Guid.Empty</c> → controller <c>409</c>).
         /// Unit test tầng API: <see cref="StoriesController.ReportStory"/> + mock service trả <c>Guid</c> khác Empty → <c>Ok</c>; không DB.
@@ -77,7 +83,7 @@ namespace AIStory.Tests
             var request = new CreateStoryReportRequestDto
             {
                 ReasonCode = "OTHER",
-                Description = new string('a', 120)
+                Description = ReportDescriptionWords(50)
             };
 
             reportMock
@@ -166,7 +172,7 @@ namespace AIStory.Tests
             var request = new CreateStoryReportRequestDto
             {
                 ReasonCode = "OTHER",
-                Description = new string('c', 50)
+                Description = ReportDescriptionWords(50)
             };
 
             controller.ControllerContext = new ControllerContext
@@ -293,14 +299,13 @@ namespace AIStory.Tests
         }
 
         /// <summary>
-        /// UTCID06 — ma trận: <c>Description</c> &gt; <b>200</b> ký tự → không hợp lệ, không lưu; message kiểu &quot;ký tự quá dài&quot;.
-        /// Product: <see cref="CreateStoryReportRequestDto.Description"/> <c>[MaxLength(200)]</c> + <see cref="StoryReportService.CreateStoryReportAsync"/> ném <see cref="ArgumentException"/> nếu vượt quá.
+        /// UTCID06 — <c>Description</c> vượt <see cref="UserReportDescriptionRules.MaxLength"/> (DataAnnotations) hoặc &lt; <see cref="UserReportDescriptionRules.MinWords"/> từ / vượt độ dài sau khi đủ từ (service) → không hợp lệ.
         /// </summary>
         [Fact]
-        public async Task UTCID06_CreateStoryReport_Rejects_WhenDescriptionExceeds200Characters()
+        public async Task UTCID06_CreateStoryReport_Rejects_WhenDescriptionInvalid()
         {
-            LogUtcContext("UTCID06 — Description > 200 ký tự",
-                "Kỳ vọng: DataAnnotations + service đều từ chối > 200 ký tự.",
+            LogUtcContext("UTCID06 — mô tả báo cáo không hợp lệ",
+                "Kỳ vọng: MaxLength trên DTO + StoryReportService.ValidateDescription (từ + độ dài).",
                 "Không assert đúng từng chữ message so với ma trận.");
 
             static bool TryValidate(CreateStoryReportRequestDto dto, out List<ValidationResult> results)
@@ -310,47 +315,58 @@ namespace AIStory.Tests
                 return Validator.TryValidateObject(dto, ctx, results, validateAllProperties: true);
             }
 
-            var over201 = new CreateStoryReportRequestDto
+            var overMax = new CreateStoryReportRequestDto
+            {
+                ReasonCode = "OTHER",
+                Description = new string('x', UserReportDescriptionRules.MaxLength + 1)
+            };
+            Assert.False(TryValidate(overMax, out var errorsOver));
+            Assert.Contains(errorsOver, e => e.MemberNames.Contains(nameof(CreateStoryReportRequestDto.Description)));
+
+            var twoHundredOneCharsOneWord = new CreateStoryReportRequestDto
             {
                 ReasonCode = "OTHER",
                 Description = new string('g', 201)
             };
-            Assert.False(TryValidate(over201, out var errors201));
-            Assert.Contains(errors201, e => e.MemberNames.Contains(nameof(CreateStoryReportRequestDto.Description)));
-
-            var wayOver = new CreateStoryReportRequestDto
-            {
-                ReasonCode = "OTHER",
-                Description = new string('f', 4001)
-            };
-            Assert.False(TryValidate(wayOver, out var errorsLong));
-            Assert.Contains(errorsLong, e => e.MemberNames.Contains(nameof(CreateStoryReportRequestDto.Description)));
+            Assert.True(TryValidate(twoHundredOneCharsOneWord, out _), "201 ký tự liền một từ vẫn pass DataAnnotations MaxLength.");
 
             var userLookup = new Mock<IUserLookup>(MockBehavior.Strict);
             var activityLookup = new Mock<IUserActivityLookup>(MockBehavior.Loose);
             var sut = new StoryReportService(userLookup.Object, activityLookup.Object, notificationHubNotifier: null);
-            var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
-                sut.CreateStoryReportAsync(Guid.NewGuid(), Guid.NewGuid(), over201));
-            Assert.Contains("quá dài", ex.Message, StringComparison.OrdinalIgnoreCase);
+
+            var tooFewWords = new CreateStoryReportRequestDto
+            {
+                ReasonCode = "OTHER",
+                Description = ReportDescriptionWords(49)
+            };
+            var exMin = await Assert.ThrowsAsync<ArgumentException>(() =>
+                sut.CreateStoryReportAsync(Guid.NewGuid(), Guid.NewGuid(), tooFewWords));
+            Assert.Contains("50", exMin.Message, StringComparison.Ordinal);
+
+            var overMaxManyWords = new CreateStoryReportRequestDto
+            {
+                ReasonCode = "OTHER",
+                Description = string.Join(" ", Enumerable.Repeat(new string('z', 200), 51))
+            };
+            var exMax = await Assert.ThrowsAsync<ArgumentException>(() =>
+                sut.CreateStoryReportAsync(Guid.NewGuid(), Guid.NewGuid(), overMaxManyWords));
+            Assert.Contains("8000", exMax.Message, StringComparison.Ordinal);
+
             userLookup.Verify(x => x.Exists(It.IsAny<Guid>()), Times.Never);
         }
 
         /// <summary>
-        /// UTCID07 — spec: <c>Description</c> null (không nhập mô tả) — không bắt buộc → vẫn tạo báo cáo thành công; ma trận Return True, log &quot;Tạo báo cáo thành công&quot; (không assert đúng từng chữ).
-        /// Product: <see cref="CreateStoryReportRequestDto.Description"/> là <c>string?</c>, không <c>[Required]</c>; <see cref="Services.Implementations.StoryReportService.CreateStoryReportAsync"/> truyền <c>null</c> xuống DAO (trim/optional trong DAO).
-        /// API: <see cref="StoriesController.ReportStory"/> + mock <see cref="IStoryReportService.CreateStoryReportAsync"/> trả id khác Empty → <c>200 OK</c> (&quot;Đã gửi báo cáo.&quot;).
+        /// UTCID07 — <c>Description</c> null → API <see cref="StoriesController.ReportStory"/> trả <c>400 BadRequest</c>, không gọi service.
         /// </summary>
         [Fact]
-        public async Task UTCID07_CreateStoryReport_Succeeds_WhenDescriptionIsNull_OptionalField()
+        public async Task UTCID07_CreateStoryReport_ReturnsBadRequest_WhenDescriptionIsNull()
         {
             LogUtcContext("UTCID07",
-                "Spec: Description null — không bắt buộc → tạo báo cáo OK (ma trận: Return True).",
-                "API: POST reports với ReasonCode, không mô tả.",
-                "Kỳ vọng: 200 OK + id; CreateStoryReportAsync gọi đúng 1 lần. Không assert log từng chữ.");
+                "Spec: Description null — bắt buộc có mô tả.",
+                "Kỳ vọng: 400 BadRequest; CreateStoryReportAsync không gọi.");
 
             var storyId = Guid.NewGuid();
             var reporterId = Guid.NewGuid();
-            var returnedReportId = Guid.NewGuid();
             var controller = CreateStoriesControllerSut(out var reportMock);
 
             var request = new CreateStoryReportRequestDto
@@ -359,10 +375,6 @@ namespace AIStory.Tests
                 Description = null
             };
 
-            reportMock
-                .Setup(s => s.CreateStoryReportAsync(storyId, reporterId, request))
-                .ReturnsAsync(returnedReportId);
-
             var identity = new ClaimsIdentity(
                 new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
                 authenticationType: "Test");
@@ -373,31 +385,25 @@ namespace AIStory.Tests
 
             var result = await controller.ReportStory(storyId, request);
 
-            var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Equal(StatusCodes.Status200OK, ok.StatusCode);
-            Assert.NotNull(ok.Value);
-            var idProp = ok.Value.GetType().GetProperty("id", BindingFlags.Public | BindingFlags.Instance);
-            Assert.NotNull(idProp);
-            Assert.Equal(returnedReportId, idProp.GetValue(ok.Value));
-            reportMock.Verify(s => s.CreateStoryReportAsync(storyId, reporterId, request), Times.Once);
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+            reportMock.Verify(
+                s => s.CreateStoryReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CreateStoryReportRequestDto>()),
+                Times.Never);
         }
 
         /// <summary>
-        /// UTCID08 — spec: <c>Description</c> chỉ khoảng trắng — không bắt buộc → vẫn tạo báo cáo thành công; ma trận Return True, log &quot;Tạo báo cáo thành công&quot; (không assert đúng từng chữ).
-        /// Product: <see cref="StoriesController.ReportStory"/> không kiểm tra <c>IsNullOrWhiteSpace</c> trên <c>Description</c> (chỉ <c>ReasonCode</c>). <see cref="Services.Implementations.StoryReportService.CreateStoryReportAsync"/> / DAO dùng <c>string.IsNullOrWhiteSpace</c> khi lưu → coi như không có mô tả chi tiết, vẫn ghi báo cáo.
-        /// API: mock <see cref="IStoryReportService.CreateStoryReportAsync"/> trả id khác Empty → <c>200 OK</c>.
+        /// UTCID08 — <c>Description</c> chỉ khoảng trắng → <c>400 BadRequest</c>, không gọi service.
         /// </summary>
         [Fact]
-        public async Task UTCID08_CreateStoryReport_Succeeds_WhenDescriptionIsWhitespaceOnly()
+        public async Task UTCID08_CreateStoryReport_ReturnsBadRequest_WhenDescriptionIsWhitespaceOnly()
         {
             LogUtcContext("UTCID08",
-                "Spec: Description chỉ whitespace — không bắt buộc → tạo báo cáo OK (ma trận: Return True).",
-                "Product: controller không chặn; service/DAO trim/coalesce whitespace.",
-                "Kỳ vọng: 200 OK + id; CreateStoryReportAsync gọi đúng 1 lần. Không assert log từng chữ.");
+                "Spec: Description chỉ whitespace — không được coi là đã nhập mô tả.",
+                "Kỳ vọng: 400 BadRequest; CreateStoryReportAsync không gọi.");
 
             var storyId = Guid.NewGuid();
             var reporterId = Guid.NewGuid();
-            var returnedReportId = Guid.NewGuid();
             var controller = CreateStoriesControllerSut(out var reportMock);
 
             var request = new CreateStoryReportRequestDto
@@ -406,10 +412,6 @@ namespace AIStory.Tests
                 Description = "   \t  \n  "
             };
 
-            reportMock
-                .Setup(s => s.CreateStoryReportAsync(storyId, reporterId, request))
-                .ReturnsAsync(returnedReportId);
-
             var identity = new ClaimsIdentity(
                 new[] { new Claim(ClaimTypes.NameIdentifier, reporterId.ToString()) },
                 authenticationType: "Test");
@@ -420,13 +422,11 @@ namespace AIStory.Tests
 
             var result = await controller.ReportStory(storyId, request);
 
-            var ok = Assert.IsType<OkObjectResult>(result);
-            Assert.Equal(StatusCodes.Status200OK, ok.StatusCode);
-            Assert.NotNull(ok.Value);
-            var idProp = ok.Value.GetType().GetProperty("id", BindingFlags.Public | BindingFlags.Instance);
-            Assert.NotNull(idProp);
-            Assert.Equal(returnedReportId, idProp.GetValue(ok.Value));
-            reportMock.Verify(s => s.CreateStoryReportAsync(storyId, reporterId, request), Times.Once);
+            var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal(StatusCodes.Status400BadRequest, badRequest.StatusCode);
+            reportMock.Verify(
+                s => s.CreateStoryReportAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CreateStoryReportRequestDto>()),
+                Times.Never);
         }
 
         /// <summary>
