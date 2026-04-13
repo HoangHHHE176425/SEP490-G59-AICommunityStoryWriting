@@ -6,14 +6,66 @@ import {
 } from '../../utils/moderatorReviewSla';
 
 const REASON_OPTIONS = [
-    { value: 'spam', label: 'Spam' },
-    { value: 'abusive', label: 'Ngôn từ xúc phạm' },
-    { value: 'inappropriate', label: 'Nội dung không phù hợp' },
-    { value: 'copyright', label: 'Vi phạm bản quyền' },
-    { value: 'violence', label: 'Bạo lực' },
-    { value: 'sexual', label: 'Nội dung 18+' },
-    { value: 'other', label: 'Khác' },
+    { value: 'COPYRIGHT', label: 'Xâm phạm bản quyền nội dung' },
+    { value: 'SEXUAL_EXPLICIT', label: 'Nội dung khiêu dâm / 18+' },
+    { value: 'VIOLENCE_THREATS', label: 'Nội dung bạo lực hoặc đe dọa' },
+    { value: 'HATE_SPEECH', label: 'Ngôn từ thù ghét / phân biệt đối xử' },
+    { value: 'HARASSMENT', label: 'Quấy rối hoặc bắt nạt' },
+    { value: 'MISINFORMATION', label: 'Thông tin sai sự thật / gây hiểu lầm' },
+    { value: 'SPAM_AD', label: 'Spam / quảng cáo trái phép' },
+    { value: 'OTHER', label: 'Lý do khác' },
 ];
+
+const REASON_SEVERITY_ORDER = {
+    copyright: 100,
+    sexual: 95,
+    sexual_explicit: 95,
+    'sexual-content': 95,
+    'adult-content': 95,
+    violence: 90,
+    threat: 88,
+    'hate-speech': 85,
+    hate_speech: 85,
+    hateful: 85,
+    harassment: 80,
+    bullying: 80,
+    abusive: 75,
+    misinformation: 70,
+    false_information: 70,
+    spam: 60,
+    spam_ad: 60,
+    advertisement: 55,
+    ads: 55,
+    other: 10,
+};
+
+function getReasonSeverity(option) {
+    const value = String(option?.value ?? '').trim().toLowerCase();
+    const label = String(option?.label ?? '').trim().toLowerCase();
+
+    if (REASON_SEVERITY_ORDER[value] != null) return REASON_SEVERITY_ORDER[value];
+
+    if (label.includes('bản quyền')) return 100;
+    if (label.includes('tình dục') || label.includes('18+')) return 95;
+    if (label.includes('bạo lực') || label.includes('đe dọa')) return 90;
+    if (label.includes('thù ghét') || label.includes('phân biệt')) return 85;
+    if (label.includes('quấy rối') || label.includes('bắt nạt')) return 80;
+    if (label.includes('xúc phạm')) return 75;
+    if (label.includes('thông tin sai')) return 70;
+    if (label.includes('spam') || label.includes('quảng cáo')) return 60;
+    if (label.includes('khác')) return 10;
+
+    return 50;
+}
+
+function sortReasonOptionsBySeverity(options) {
+    return [...options].sort((a, b) => {
+        const sa = getReasonSeverity(a);
+        const sb = getReasonSeverity(b);
+        if (sa !== sb) return sb - sa;
+        return String(a?.label ?? '').localeCompare(String(b?.label ?? ''), 'vi');
+    });
+}
 
 /**
  * Chuẩn payload báo cáo khớp với màn Quản lý vi phạm:
@@ -48,11 +100,12 @@ export function ReportModal({
     const normalizedReasonOptions = Array.isArray(reasonOptions) && reasonOptions.length > 0
         ? reasonOptions
         : REASON_OPTIONS;
+    const sortedReasonOptions = sortReasonOptionsBySeverity(normalizedReasonOptions);
 
     const handleSubmit = async () => {
         if (!reportReason || !descriptionMeetsMinWords) return;
 
-        const reasonLabel = REASON_OPTIONS.find((o) => o.value === reportReason)?.label ?? reportReason;
+        const reasonLabel = normalizedReasonOptions.find((o) => o.value === reportReason)?.label ?? reportReason;
         const payload = {
             reason: reasonLabel,
             reasonCode: reportReason,
@@ -107,7 +160,7 @@ export function ReportModal({
                             className="w-full h-11 px-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-900 dark:text-slate-100 outline-none focus:border-red-400 dark:focus:border-red-500 focus:ring-2 focus:ring-red-300/60 dark:focus:ring-red-500/30"
                         >
                             <option value="">Chọn lý do</option>
-                            {normalizedReasonOptions.map((opt) => (
+                            {sortedReasonOptions.map((opt) => (
                                 <option key={opt.value} value={opt.value}>{opt.label}</option>
                             ))}
                         </select>
