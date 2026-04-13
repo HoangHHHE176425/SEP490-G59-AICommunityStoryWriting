@@ -55,9 +55,10 @@ namespace AIStory.API
             // Đăng ký DbContext, để OnConfiguring trong StoryPlatformDbContext tự cấu hình connection string.
             builder.Services.AddDbContext<StoryPlatformDbContext>();
 
-            var corsExtraOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+            var corsAllowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
                 ?? Array.Empty<string>();
-            var corsExtraSet = new HashSet<string>(corsExtraOrigins, StringComparer.OrdinalIgnoreCase);
+            var corsAllowedSet = new HashSet<string>(corsAllowedOrigins, StringComparer.OrdinalIgnoreCase);
+            var corsAllowLocalhost = builder.Environment.IsDevelopment();
 
             // CORS Configuration
             builder.Services.AddCors(options =>
@@ -67,18 +68,14 @@ namespace AIStory.API
                     policy.SetIsOriginAllowed(origin =>
                     {
                         if (string.IsNullOrWhiteSpace(origin)) return false;
-                        if (corsExtraSet.Contains(origin)) return true;
+                        if (corsAllowedSet.Contains(origin)) return true;
                         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
-
-                        var isConfiguredOrigin = Array.Exists(
-                            corsAllowedOrigins,
-                            allowedOrigin => string.Equals(allowedOrigin, origin, StringComparison.OrdinalIgnoreCase));
 
                         var isLocalhost = corsAllowLocalhost &&
                                           (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
                                            || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase));
 
-                        return isConfiguredOrigin || isLocalhost;
+                        return isLocalhost;
                     })
                         .AllowAnyMethod()
                         .AllowAnyHeader()
