@@ -58,8 +58,7 @@ namespace AIStory.API
             var corsExtraOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
                 ?? Array.Empty<string>();
             var corsExtraSet = new HashSet<string>(corsExtraOrigins, StringComparer.OrdinalIgnoreCase);
-            var corsAllowedOrigins = corsExtraOrigins;
-            var corsAllowLocalhost = builder.Environment.IsDevelopment();
+            var corsAllowLocalhost = builder.Configuration.GetValue("Cors:AllowLocalhost", builder.Environment.IsDevelopment());
 
             // CORS Configuration
             builder.Services.AddCors(options =>
@@ -72,15 +71,11 @@ namespace AIStory.API
                         if (corsExtraSet.Contains(origin)) return true;
                         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
 
-                        var isConfiguredOrigin = Array.Exists(
-                            corsAllowedOrigins,
-                            allowedOrigin => string.Equals(allowedOrigin, origin, StringComparison.OrdinalIgnoreCase));
-
                         var isLocalhost = corsAllowLocalhost &&
                                           (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
                                            || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase));
 
-                        return isConfiguredOrigin || isLocalhost;
+                        return isLocalhost;
                     })
                         .AllowAnyMethod()
                         .AllowAnyHeader()
