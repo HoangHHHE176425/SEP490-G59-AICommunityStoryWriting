@@ -1887,7 +1887,7 @@ export default function ViolationManagement() {
                         <tbody>
                             {rows.length === 0 && (
                                 <tr>
-                                    <td colSpan={7} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                                    <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
                             {rows.map((r) => (
@@ -1918,7 +1918,6 @@ export default function ViolationManagement() {
                                                         return unique.size;
                                                     })()}
                                                 </td>
-                                                <td style={td}><span className="text-sm text-slate-700 whitespace-nowrap" title={r.oldestReportAtUtc ? String(r.oldestReportAtUtc) : undefined}>{formatDate(r.oldestReportAtUtc)}</span></td>
                                                 <td style={{ ...td, minWidth: 260 }}>
                                                     <div style={{ display: 'inline-flex', gap: 6, position: 'relative', flexWrap: 'nowrap' }}>
                                                         <button type="button" style={btn} onClick={() => handleStoryRowActionSelect(r, 'detail', storyFlags)}>
@@ -2051,13 +2050,12 @@ export default function ViolationManagement() {
                             <th style={th}>Truyện</th>
                             <th style={th}>Người bình luận</th>
                             <th style={th}>Số người báo cáo</th>
-                            <th style={th}>Thời điểm báo cáo</th>
                             <th style={th}>Thao tác</th>
                         </tr></thead>
                         <tbody>
                             {rows.length === 0 && (
                                 <tr>
-                                    <td colSpan={7} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
+                                    <td colSpan={6} className="p-6 text-center text-sm text-slate-500">Không có dữ liệu hiển thị theo bộ lọc hiện tại.</td>
                                 </tr>
                             )}
                             {rows.map((r) => (
@@ -2079,7 +2077,6 @@ export default function ViolationManagement() {
                                                 <td style={td}><div style={{ fontWeight: 600 }}>{r.storyTitle || '—'}</div><div style={{ color: '#64748b', fontSize: 12 }}>{r.storyId}</div></td>
                                                 <td style={td}>{r.commentUserDisplayName || '—'}</td>
                                                 <td style={td}>{reporterCount > 0 ? reporterCount : '—'}</td>
-                                                <td style={td}><span className="text-sm text-slate-700 whitespace-nowrap" title={r.createdAtUtc ? String(r.createdAtUtc) : undefined}>{formatDate(r.createdAtUtc)}</span></td>
                                                 <td style={{ ...td, minWidth: 260 }}>
                                                     <div style={{ display: 'inline-flex', gap: 6, position: 'relative', flexWrap: 'nowrap' }}>
                                                         <button
