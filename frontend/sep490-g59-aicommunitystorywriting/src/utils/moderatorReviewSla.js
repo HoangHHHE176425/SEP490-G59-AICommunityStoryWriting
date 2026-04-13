@@ -283,3 +283,12 @@ export function localDateTimeInputToIsoUtc(value) {
     if (Number.isNaN(dt.getTime())) return null;
     return dt.toISOString();
 }
+
+/** Đồng bộ với ReviewEscalationService (BE): lý do gửi đơn escalation (gia hạn / trả về hàng đợi). */
+export const MODERATOR_ESCALATION_REASON_MIN_WORDS = 50;
+
+export function countModeratorEscalationReasonWords(text) {
+    const t = String(text ?? '').trim();
+    if (!t) return 0;
+    return t.split(/\s+/).filter(Boolean).length;
+}

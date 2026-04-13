@@ -59,8 +59,8 @@ public class StoryReportService : IStoryReportService
         if (!StoryReportReasonCatalog.TryGet(request.ReasonCode, out _))
             throw new ArgumentException("Invalid reason code.");
 
-        if (request.Description != null && request.Description.Length > 200)
-            throw new ArgumentException("Ký tự quá dài: mô tả báo cáo tối đa 200 ký tự.");
+        UserReportDescriptionRules.ValidateDescription(request.Description);
+        var descriptionTrimmed = (request.Description ?? "").Trim();
 
         if (reporterId == Guid.Empty || !_userLookup.Exists(reporterId))
             throw new InvalidOperationException("USER không tồn tại.");
@@ -84,10 +84,10 @@ public class StoryReportService : IStoryReportService
             storyId,
             reporterId,
             code,
-            request.Description);
+            descriptionTrimmed);
         // Mỗi người báo cáo mới (1 lần / truyện / user) = 1 thông báo cho tác giả; trùng trả về Guid.Empty.
         if (id != Guid.Empty)
-            _ = NotifyStoryAuthorReportedAsync(story, reporterId, request.ReasonCode, request.Description);
+            _ = NotifyStoryAuthorReportedAsync(story, reporterId, request.ReasonCode, descriptionTrimmed);
         return Task.FromResult(id);
     }
 

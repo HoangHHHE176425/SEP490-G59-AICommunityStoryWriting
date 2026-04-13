@@ -249,6 +249,8 @@ namespace AIStory.API.Controllers
         {
             if (request == null || string.IsNullOrWhiteSpace(request.ReasonCode))
                 return BadRequest(new { message = "ReasonCode is required." });
+            if (string.IsNullOrWhiteSpace(request.Description))
+                return BadRequest(new { message = "Vui lòng nhập mô tả báo cáo (tối thiểu 50 từ)." });
             var userId = GetCurrentUserId();
             if (!userId.HasValue)
                 return Unauthorized(new { message = "Cần đăng nhập để báo cáo." });
