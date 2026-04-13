@@ -1968,7 +1968,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                     borderBottom: '1px solid #e0e0e0',
                     position: 'sticky',
                     top: 0,
-                    zIndex: 100
+                    /* Dưới Header (z-50) để dropdown thông báo / menu không bị thanh này đè */
+                    zIndex: 40
                 }}>
                     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '1rem 2rem' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
