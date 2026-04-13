@@ -669,11 +669,7 @@ namespace Services.Implementations
             return new CommunityStatsDto
             {
                 PublishedStoriesCount = publishedVisibleStories.Count(),
-                AuthorsCount = publishedVisibleStories
-                    .Where(s => s.author_id.HasValue)
-                    .Select(s => s.author_id!.Value)
-                    .Distinct()
-                    .Count(),
+                AuthorsCount = _userLookup.CountAuthorsExcludingBanned(),
                 TotalViews = publishedVisibleStories.Sum(s => (long?)(s.total_views ?? 0)) ?? 0
             };
         }
