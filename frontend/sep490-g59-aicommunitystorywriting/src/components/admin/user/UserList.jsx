@@ -20,7 +20,7 @@ function formatDate(value) {
 export function UserList({ users, onViewDetail, onBlock, onUnblock, loading }) {
     if (loading) {
         return (
-            <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
+            <div className="rounded-xl border border-[#c9f0d8] bg-white p-12 text-center">
                 <div className="text-4xl mb-4">⏳</div>
                 <p className="text-slate-500 text-sm">Đang tải danh sách...</p>
             </div>
@@ -29,7 +29,7 @@ export function UserList({ users, onViewDetail, onBlock, onUnblock, loading }) {
 
     if (!users?.length) {
         return (
-            <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
+            <div className="rounded-xl border border-[#c9f0d8] bg-white p-12 text-center">
                 <div className="text-4xl mb-4">👥</div>
                 <h3 className="text-lg font-semibold text-slate-800 mb-1">Chưa có người dùng</h3>
                 <p className="text-slate-500 text-sm">Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm</p>
@@ -38,19 +38,19 @@ export function UserList({ users, onViewDetail, onBlock, onUnblock, loading }) {
     }
 
     return (
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <div className="rounded-xl border border-[#c9f0d8] bg-white overflow-hidden">
             <div className="overflow-x-auto">
-                <table className="w-full text-left">
+                <table className="w-full border-collapse text-left text-slate-800">
                     <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 text-xs font-semibold uppercase tracking-wider">
-                            <th className="px-4 py-3">Người dùng / Biệt danh</th>
-                            <th className="px-4 py-3">Email</th>
-                            <th className="px-4 py-3">SĐT</th>
-                            <th className="px-4 py-3">Vai trò</th>
-                            <th className="px-4 py-3">Trạng thái</th>
-                            <th className="px-4 py-3">Xác thực email</th>
-                            <th className="px-4 py-3">Đăng ký</th>
-                            <th className="px-4 py-3 text-right">Thao tác</th>
+                        <tr className="border-b border-[#c9f0d8] bg-[#f0faf5]">
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Người dùng / Biệt danh</th>
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Email</th>
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">SĐT</th>
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Vai trò</th>
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Trạng thái</th>
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Xác thực email</th>
+                            <th className="px-4 py-3 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Đăng ký</th>
+                            <th className="px-4 py-3 text-right text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">Thao tác</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -60,7 +60,7 @@ export function UserList({ users, onViewDetail, onBlock, onUnblock, loading }) {
                             return (
                                 <tr
                                     key={user.id}
-                                    className="border-b border-slate-100 hover:bg-emerald-50/50 transition-colors"
+                                    className="border-t border-[#c9f0d8] bg-white transition-colors first:border-t-0 hover:bg-[#f7fcf9]"
                                 >
                                     <td className="px-4 py-3">
                                         <div className="flex items-center gap-3">

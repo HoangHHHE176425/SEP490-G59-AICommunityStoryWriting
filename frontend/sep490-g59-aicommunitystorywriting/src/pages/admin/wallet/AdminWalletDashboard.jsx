@@ -69,7 +69,7 @@ function IdLine({ roleLabel, id }) {
         <div className="flex min-w-0 items-center gap-1">
             <span className="w-[4.5rem] shrink-0 text-[11px] font-medium uppercase tracking-wide text-slate-500">{roleLabel}</span>
             <code
-                className="min-w-0 flex-1 truncate rounded border-l-2 border-slate-300 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-800"
+                className="min-w-0 flex-1 truncate rounded border-l-2 border-[#86efac] bg-[#f7fcf9] px-1.5 py-0.5 text-[11px] text-slate-800"
                 title={full}
             >
                 {shortenGuidLike(full)}
@@ -202,10 +202,10 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
     };
     const getTypeBadgeClass = (type) => {
         const map = {
-            UNLOCK: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80',
-            DONATE: 'bg-fuchsia-100 text-fuchsia-800 ring-1 ring-fuchsia-200/80',
+            UNLOCK: 'bg-[#ecfdf5] text-[#047857] ring-1 ring-[#c9f0d8]',
+            DONATE: 'bg-[#fdf4ff] text-[#86198f] ring-1 ring-[#f5d0fe]',
         };
-        return map[type] || 'bg-slate-100 text-slate-600 ring-1 ring-slate-200/80';
+        return map[type] || 'bg-slate-50 text-slate-600 ring-1 ring-[#c9f0d8]';
     };
 
     const exportHistoryCsv = () => {
@@ -637,9 +637,9 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
             )}
 
             {activeTab === 'history' && (
-                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="overflow-hidden rounded-2xl border border-[#c9f0d8] bg-white shadow-sm">
                     {/* Phạm vi dữ liệu */}
-                    <div className="border-b border-slate-200 bg-slate-50/70 px-5 py-4 sm:px-6">
+                    <div className="border-b border-[#c9f0d8] bg-[#f0faf5]/60 px-5 py-4 sm:px-6">
                         <div className="flex gap-3">
                             <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-200 text-slate-700">
                                 <Info className="h-4 w-4" aria-hidden />
@@ -660,7 +660,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                     </div>
 
                     {/* Filters */}
-                    <div className="border-b border-slate-200 bg-slate-50/40 px-4 py-4 sm:px-6">
+                    <div className="border-b border-[#c9f0d8] bg-[#f8fdfb] px-4 py-4 sm:px-6">
                         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 lg:items-end">
                             <label className="block min-w-0 lg:col-span-4">
                                 <span className="mb-1.5 block text-xs font-semibold text-slate-500">Tìm kiếm</span>
@@ -739,34 +739,55 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                         </div>
                     </div>
 
-                    {/* Table */}
+                    {/* Table — palette giống bảng Compliance (mint header, viền #c9f0d8) */}
                     <div className="overflow-x-auto">
-                        <table className="w-full min-w-[920px] table-fixed border-collapse text-left text-sm text-slate-700">
+                        <table className="w-full min-w-[920px] table-fixed border-collapse text-left text-sm text-slate-800">
                             <thead>
-                                <tr className="border-b border-slate-200 bg-slate-50/90">
-                                    <th className="w-[11%] px-4 py-3.5 text-xs font-semibold text-slate-600" title="Thời điểm ghi nhận">
+                                <tr className="border-b border-[#c9f0d8] bg-[#f0faf5]">
+                                    <th
+                                        className="w-[11%] px-4 py-3.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]"
+                                        title="Thời điểm ghi nhận"
+                                    >
                                         Thời gian
                                     </th>
-                                    <th className="w-[12%] px-4 py-3.5 text-xs font-semibold text-slate-600">Loại</th>
-                                    <th className="w-[9%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Thay đổi ví nền tảng">
+                                    <th className="w-[12%] px-4 py-3.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                        Loại
+                                    </th>
+                                    <th
+                                        className="w-[9%] px-0 py-3.5 text-center text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]"
+                                        title="Thay đổi ví nền tảng"
+                                    >
                                         Ví HT
                                     </th>
-                                    <th className="w-[9%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Thay đổi ví độc giả">
+                                    <th
+                                        className="w-[9%] px-0 py-3.5 text-center text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]"
+                                        title="Thay đổi ví độc giả"
+                                    >
                                         Độc giả
                                     </th>
-                                    <th className="w-[9%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Thu nhập tác giả">
+                                    <th
+                                        className="w-[9%] px-0 py-3.5 text-center text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]"
+                                        title="Thu nhập tác giả"
+                                    >
                                         Tác giả
                                     </th>
-                                    <th className="w-[8%] px-0 py-3.5 text-center text-xs font-semibold text-slate-600" title="Coin khóa">
+                                    <th
+                                        className="w-[8%] px-0 py-3.5 text-center text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]"
+                                        title="Coin khóa"
+                                    >
                                         Khóa
                                     </th>
-                                    <th className="w-[32%] min-w-[240px] px-4 py-3.5 text-xs font-semibold text-slate-600">Chi tiết</th>
+                                    <th className="w-[32%] min-w-[240px] px-4 py-3.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                        Chi tiết
+                                    </th>
                                     {hasAnyNote ? (
-                                        <th className="w-[10%] px-4 py-3.5 text-xs font-semibold text-slate-600">Ghi chú</th>
+                                        <th className="w-[10%] px-4 py-3.5 text-left text-[0.72rem] font-bold uppercase tracking-wide text-[#047857]">
+                                            Ghi chú
+                                        </th>
                                     ) : null}
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100">
+                            <tbody>
                                 {paginatedTransactions.length === 0 ? (
                                     <tr>
                                         <td
@@ -789,7 +810,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                     paginatedTransactions.map((tx) => (
                                         <tr
                                             key={`${tx.eventType}-${tx.eventTime}-${tx.adminId || ''}-${tx.authorUserId || ''}-${tx.buyerUserId || ''}`}
-                                            className="align-top transition-colors hover:bg-slate-50/80"
+                                            className="align-top border-t border-[#c9f0d8] bg-white transition-colors first:border-t-0 hover:bg-[#f7fcf9]"
                                         >
                                             <td className="px-4 py-3.5">
                                                 <span className="font-medium text-slate-800">{formatDate(tx.eventTime)}</span>
@@ -857,10 +878,10 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
 
                     {/* Pagination */}
                     {filteredTransactions.length > 0 && (
-                        <div className="flex flex-col gap-3 border-t border-slate-200 bg-slate-50/30 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                        <div className="flex flex-col gap-3 border-t border-[#c9f0d8] bg-[#f8fdfb] px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                             <p className="text-xs text-slate-600">
                                 Hiển thị{' '}
-                                <span className="font-semibold text-slate-700">
+                                <span className="font-semibold text-[#047857]">
                                     {(historyPage - 1) * historyPageSize + 1}–{Math.min(historyPage * historyPageSize, historyTotalCount)}
                                 </span>{' '}
                                 / <span className="font-semibold text-slate-700">{historyTotalCount}</span> bản ghi
@@ -870,19 +891,19 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                     type="button"
                                     onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
                                     disabled={historyPage <= 1}
-                                    className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                    className="rounded-lg border border-[#cbd5e1] bg-white p-2 text-slate-700 shadow-sm transition hover:bg-[#f7fcf9] disabled:cursor-not-allowed disabled:opacity-40"
                                     aria-label="Trang trước"
                                 >
                                     <ChevronLeft className="h-4 w-4" />
                                 </button>
-                                <span className="min-w-[7rem] px-2 text-center text-sm font-semibold text-slate-700">
+                                <span className="min-w-[7rem] rounded-lg border border-[#22c55e] bg-[#22c55e] px-2 py-1.5 text-center text-sm font-semibold text-white">
                                     Trang {historyPage} / {totalHistoryPages}
                                 </span>
                                 <button
                                     type="button"
                                     onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages, p + 1))}
                                     disabled={historyPage >= totalHistoryPages}
-                                    className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                    className="rounded-lg border border-[#cbd5e1] bg-white p-2 text-slate-700 shadow-sm transition hover:bg-[#f7fcf9] disabled:cursor-not-allowed disabled:opacity-40"
                                     aria-label="Trang sau"
                                 >
                                     <ChevronRight className="h-4 w-4" />
@@ -891,7 +912,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                         </div>
                     )}
 
-                    <div className="border-t border-slate-200 bg-slate-50/20 p-4 sm:p-6">
+                    <div className="border-t border-[#c9f0d8] bg-[#f8fdfb] p-4 sm:p-6">
                         <AdminTransactions />
                     </div>
                 </div>

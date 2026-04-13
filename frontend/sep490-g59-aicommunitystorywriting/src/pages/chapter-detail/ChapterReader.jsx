@@ -343,6 +343,8 @@ export function ChapterReader({ onBack }) {
         try {
             await unlockPaidChapter(urlChapterId);
             showToast('Mở khóa chương thành công!', 'success');
+            // Đồng bộ số coin trên Header / Wallet / Profile (cùng listener `wallet:changed`).
+            window.dispatchEvent(new Event('wallet:changed'));
             await refreshChapterUnlockedState();
         } catch (err) {
             const msg = err?.response?.data?.message ?? err?.message ?? 'Không thể mở khóa chương.';
