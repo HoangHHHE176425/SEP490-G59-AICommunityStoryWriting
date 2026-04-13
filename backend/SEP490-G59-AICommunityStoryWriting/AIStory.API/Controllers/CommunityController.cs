@@ -16,7 +16,8 @@ namespace AIStory.API.Controllers
         }
 
         /// <summary>
-        /// Thống kê công khai: truyện PUBLISHED và không bị ẩn compliance (cùng logic danh sách công khai).
+        /// Thống kê công khai: truyện PUBLISHED và không bị ẩn compliance (cùng logic danh sách công khai);
+        /// authorsCount = số user role AUTHOR, không tính BANNED (không yêu cầu có truyện publish).
         /// </summary>
         [HttpGet("stats")]
         [AllowAnonymous]

@@ -9,14 +9,14 @@ public static class StoryReportReasonCatalog
 
     public static readonly IReadOnlyList<StoryReportReasonDefinition> All = new List<StoryReportReasonDefinition>
     {
-        new("HATE_SPEECH", "Hate speech or discrimination", "Phát ngôn thù ghét / phân biệt", "HIGH", 70),
-        new("HARASSMENT", "Harassment or bullying", "Quấy rối / bắt nạt", "HIGH", 70),
+        new("COPYRIGHT", "Copyright violation", "Vi phạm bản quyền", "CRITICAL", 100),
+        new("SEXUAL_EXPLICIT", "Sexual or explicit content", "Nội dung tình dục / 18+", "CRITICAL", 90),
         new("VIOLENCE_THREATS", "Violence or threats", "Bạo lực / đe dọa", "CRITICAL", 90),
-        new("SEXUAL_EXPLICIT", "Sexual or explicit content", "Nội dung tình dục / 18+", "HIGH", 70),
-        new("SPAM_AD", "Spam or advertisement", "Spam / quảng cáo", "MEDIUM", 40),
-        new("COPYRIGHT", "Copyright violation", "Vi phạm bản quyền", "MEDIUM", 40),
-        new("MISINFORMATION", "Misinformation", "Thông tin sai", "MEDIUM", 40),
-        new("OTHER", "Other", "Khác", "LOW", 20)
+        new("HARASSMENT", "Harassment or bullying", "Quấy rối / bắt nạt", "HIGH", 80),
+        new("MISINFORMATION", "Misinformation", "Thông tin sai", "HIGH", 80),
+        new("HATE_SPEECH", "Hate speech or discrimination", "Phát ngôn thù ghét / phân biệt", "HIGH", 70),
+        new("SPAM_AD", "Spam or advertisement", "Spam / quảng cáo", "HIGH", 70),
+        new("OTHER", "Other", "Khác", "MEDIUM", 60)
     };
 
     private static readonly Dictionary<string, StoryReportReasonDefinition> ByCode =

@@ -5,14 +5,14 @@ public static class StoryReportReasonScores
 {
     private static readonly Dictionary<string, int> ByCode = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["HATE_SPEECH"] = 70,
-        ["HARASSMENT"] = 70,
+        ["COPYRIGHT"] = 100,
+        ["SEXUAL_EXPLICIT"] = 90,
         ["VIOLENCE_THREATS"] = 90,
-        ["SEXUAL_EXPLICIT"] = 70,
-        ["SPAM_AD"] = 40,
-        ["COPYRIGHT"] = 40,
-        ["MISINFORMATION"] = 40,
-        ["OTHER"] = 20
+        ["HARASSMENT"] = 80,
+        ["MISINFORMATION"] = 80,
+        ["HATE_SPEECH"] = 70,
+        ["SPAM_AD"] = 70,
+        ["OTHER"] = 60
     };
 
     public static int GetScore(string? code)

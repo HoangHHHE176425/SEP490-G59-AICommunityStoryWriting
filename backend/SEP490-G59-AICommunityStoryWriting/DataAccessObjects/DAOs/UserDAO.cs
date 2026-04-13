@@ -393,6 +393,15 @@ namespace DataAccessObjects.DAOs
             return u.author_writing_suspended_until > DateTime.UtcNow;
         }
 
+        /// <summary>Số user có role AUTHOR, không tính tài khoản đã ban (thống kê công khai /community/stats).</summary>
+        public static int CountAuthorsExcludingBanned()
+        {
+            using var context = new StoryPlatformDbContext();
+            return context.users.AsNoTracking().Count(u =>
+                (u.role ?? "").ToUpper() == "AUTHOR" &&
+                (u.status ?? "").ToUpper() != "BANNED");
+        }
+
         /// <summary>Kiểm tra users.status == BANNED (thư viện / lọc danh sách công khai).</summary>
         public static bool IsAccountBanned(Guid userId)
         {

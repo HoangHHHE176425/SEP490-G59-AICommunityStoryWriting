@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.EntityFrameworkCore;
@@ -28,18 +27,10 @@ public class CommentReportService : ICommentReportService
         _notificationHubNotifier = notificationHubNotifier;
     }
 
-    private static readonly Regex CommentReportAdminMessageTagRegex = new(
-        @"\[COMMENT_REPORT:([0-9a-fA-F-]{36})\]",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-
     private static void AddCommentIdsFromComplianceAdminMessage(string? message, HashSet<Guid> sink)
     {
-        if (string.IsNullOrEmpty(message)) return;
-        foreach (Match m in CommentReportAdminMessageTagRegex.Matches(message))
-        {
-            if (Guid.TryParse(m.Groups[1].Value, out var id) && id != Guid.Empty)
-                sink.Add(id);
-        }
+        foreach (var id in ComplianceAdminActionRequestDAO.ParseCommentIdsFromMessage(message))
+            sink.Add(id);
     }
 
     private static bool HasPendingAdminActionForCommentThread(Guid commentId) =>
