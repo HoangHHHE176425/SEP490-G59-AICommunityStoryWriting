@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { UserList } from '../../../components/admin/user/UserList';
 import { UserDetailModal } from '../../../components/admin/user/UserDetailModal';
+import { CreateUserModal } from '../../../components/admin/user/CreateUserModal';
 import { Pagination } from '../../../components/pagination/Pagination';
-import { getUsers, getStats, updateUserStatus, deleteUser, getUserDisplayName } from '../../../api/admin/userManagementApi';
-import { Search, Ban, X } from 'lucide-react';
+import { createUser, getUsers, getStats, updateUserStatus, deleteUser, getUserDisplayName } from '../../../api/admin/userManagementApi';
+import { Search, Ban, X, UserPlus } from 'lucide-react';
 
 const PAGE_SIZE = 10;
 const FILTER_TABS = [
@@ -28,6 +29,8 @@ export function UserManagement() {
     const [selectedUser, setSelectedUser] = useState(null);
     const [blockConfirmUser, setBlockConfirmUser] = useState(null);
     const [blockConfirmLoading, setBlockConfirmLoading] = useState(false);
+    const [createModalOpen, setCreateModalOpen] = useState(false);
+    const [createMessage, setCreateMessage] = useState(null);
 
     const loadUsers = useCallback((page = 1) => {
         setLoading(true);
@@ -127,19 +130,46 @@ export function UserManagement() {
         return res;
     };
 
-    const getStatByFilter = () => {
-        if (!filterStatus) return stats.total;
-        if (filterStatus === 'ACTIVE') return stats.active;
-        if (filterStatus === 'INACTIVE') return stats.inactive;
-        return stats.banned;
+    const handleCreateUser = async (payload) => {
+        const created = await createUser(payload);
+        setCreateMessage({
+            type: 'success',
+            text: `Đã tạo tài khoản ${created?.email || payload.email} thành công.`,
+        });
+        setCurrentPage(1);
+        loadUsers(1);
+        loadStats();
     };
 
     return (
         <div className="p-8">
-            <div className="mb-8">
-                <h1 className="text-2xl font-bold text-slate-900 mb-1">Quản lý người dùng</h1>
-                <p className="text-sm text-slate-500">Xem và quản lý tài khoản người dùng, tác giả</p>
+            <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div>
+                    <h1 className="text-2xl font-bold text-slate-900 mb-1">Quản lý người dùng</h1>
+                    <p className="text-sm text-slate-500">Xem và quản lý tài khoản người dùng, tác giả</p>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => setCreateModalOpen(true)}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-lg font-semibold text-sm hover:bg-emerald-700"
+                >
+                    <UserPlus className="w-4 h-4" />
+                    Tạo user mới
+                </button>
             </div>
+
+            {createMessage ? (
+                <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 flex items-start justify-between gap-3">
+                    <span>{createMessage.text}</span>
+                    <button
+                        type="button"
+                        onClick={() => setCreateMessage(null)}
+                        className="shrink-0 rounded-md px-2 py-1 text-emerald-700 hover:bg-emerald-100"
+                    >
+                        Đóng
+                    </button>
+                </div>
+            ) : null}
 
             {/* Thống kê */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4 mb-8">
@@ -254,6 +284,12 @@ export function UserManagement() {
                     }}
                 />
             )}
+
+            <CreateUserModal
+                open={createModalOpen}
+                onClose={() => setCreateModalOpen(false)}
+                onSubmit={handleCreateUser}
+            />
 
             {blockConfirmUser ? (
                 <div
