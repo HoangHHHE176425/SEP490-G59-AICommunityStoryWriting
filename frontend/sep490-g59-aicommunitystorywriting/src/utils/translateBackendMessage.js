@@ -17,6 +17,12 @@ export function translateBackendMessage(message) {
   const lower = raw.toLowerCase();
 
   const MAP = [
+    // Policy delete constraints
+    {
+      test: /cannot delete policy that has acceptance records\. deactivate it instead\./i,
+      out: 'Không thể xóa policy đã có bản ghi chấp nhận. Hãy tắt (deactivate) policy thay vì xóa.',
+    },
+
     // Auth
     { test: /missing refresh token/i, out: 'Thiếu refresh token. Vui lòng đăng nhập lại.' },
     { test: /unauthorized/i, out: 'Bạn chưa đăng nhập hoặc phiên đăng nhập đã hết hạn.' },

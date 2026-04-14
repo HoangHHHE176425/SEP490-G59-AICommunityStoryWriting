@@ -57,7 +57,7 @@ namespace AIStory.API
             // Đăng ký DbContext, để OnConfiguring trong StoryPlatformDbContext tự cấu hình connection string.
             builder.Services.AddDbContext<StoryPlatformDbContext>();
 
-            var corsAllowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+            var corsExtraOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
                 ?? Array.Empty<string>();
             var corsExtraSet = new HashSet<string>(corsExtraOrigins, StringComparer.OrdinalIgnoreCase);
             var corsAllowLocalhost = builder.Configuration.GetValue("Cors:AllowLocalhost", builder.Environment.IsDevelopment());
@@ -70,7 +70,7 @@ namespace AIStory.API
                     policy.SetIsOriginAllowed(origin =>
                     {
                         if (string.IsNullOrWhiteSpace(origin)) return false;
-                        if (corsAllowedSet.Contains(origin)) return true;
+                        if (corsExtraSet.Contains(origin)) return true;
                         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
 
                         var isLocalhost = corsAllowLocalhost &&
@@ -370,7 +370,7 @@ namespace AIStory.API
                             user_id = user.id, // FK chuẩn theo DB
                             nickname = nickname,
                             bio = bio,
-                            updated_at = DateTime.Now   
+                            updated_at = DateTime.Now
                         });
                     }
                 }

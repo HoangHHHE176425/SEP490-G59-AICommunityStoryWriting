@@ -34,12 +34,13 @@ namespace Services.Implementations
             if (active == null) return null;
 
             var acceptance = await _acceptRepo.GetAcceptanceAsync(userId, active.id);
+            var hasAcceptedCurrent = IsAcceptanceValidForPolicy(acceptance, active);
 
             return new AuthorPolicyStatusDto
             {
                 Policy = Map(active),
-                HasAccepted = acceptance != null,
-                AcceptedAt = acceptance?.accepted_at
+                HasAccepted = hasAcceptedCurrent,
+                AcceptedAt = hasAcceptedCurrent ? acceptance?.accepted_at : null
             };
         }
 
@@ -52,7 +53,8 @@ namespace Services.Implementations
                 throw new Exception("Chỉ có thể chấp nhận policy loại AUTHOR trong luồng này.");
 
             var existing = await _acceptRepo.GetAcceptanceAsync(userId, policyId);
-            if (existing != null)
+            var hasAcceptedCurrent = IsAcceptanceValidForPolicy(existing, policy);
+            if (hasAcceptedCurrent)
             {
                 var acceptedUser = await _userRepo.GetUserById(userId);
                 if (acceptedUser != null && acceptedUser.must_resign_policy == true)
@@ -64,18 +66,29 @@ namespace Services.Implementations
                 return false; // already accepted
             }
 
-            var row = new author_policy_acceptances
+            var acceptedAt = DateTime.UtcNow;
+            if (existing != null)
             {
-                id = Guid.NewGuid(),
-                user_id = userId,
-                policy_id = policyId,
-                accepted_at = DateTime.UtcNow,
-                ip_address = ipAddress,
-                user_agent = userAgent,
-                accepted_for = "AUTHOR"
-            };
-
-            await _acceptRepo.AddAcceptanceAsync(row);
+                existing.accepted_at = acceptedAt;
+                existing.ip_address = ipAddress;
+                existing.user_agent = userAgent;
+                existing.accepted_for = "AUTHOR";
+                await _acceptRepo.UpdateAcceptanceAsync(existing);
+            }
+            else
+            {
+                var row = new author_policy_acceptances
+                {
+                    id = Guid.NewGuid(),
+                    user_id = userId,
+                    policy_id = policyId,
+                    accepted_at = acceptedAt,
+                    ip_address = ipAddress,
+                    user_agent = userAgent,
+                    accepted_for = "AUTHOR"
+                };
+                await _acceptRepo.AddAcceptanceAsync(row);
+            }
             var user = await _userRepo.GetUserById(userId);
             if (user != null && user.must_resign_policy == true)
             {
@@ -84,6 +97,13 @@ namespace Services.Implementations
                 await _userRepo.UpdateUser(user);
             }
             return true;
+        }
+
+        private static bool IsAcceptanceValidForPolicy(author_policy_acceptances? acceptance, system_policies policy)
+        {
+            if (acceptance == null) return false;
+            var effectiveFrom = policy.activated_at ?? policy.created_at ?? DateTime.MinValue;
+            return acceptance.accepted_at >= effectiveFrom;
         }
 
         private static PolicyResponseDto Map(system_policies p)

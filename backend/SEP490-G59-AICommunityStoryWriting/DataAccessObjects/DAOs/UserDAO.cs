@@ -196,9 +196,15 @@ namespace DataAccessObjects.DAOs
         /// </summary>
         public async Task<int> MarkAuthorsMustResignPolicyAsync(StoryPlatformDbContext context, Guid activeAuthorPolicyId)
         {
+            var policyEffectiveFrom = await context.system_policies
+                .AsNoTracking()
+                .Where(p => p.id == activeAuthorPolicyId)
+                .Select(p => p.activated_at ?? p.created_at)
+                .FirstOrDefaultAsync() ?? DateTime.MinValue;
+
             var acceptedAuthorIds = await context.author_policy_acceptances
                 .AsNoTracking()
-                .Where(a => a.policy_id == activeAuthorPolicyId)
+                .Where(a => a.policy_id == activeAuthorPolicyId && a.accepted_at >= policyEffectiveFrom)
                 .Select(a => a.user_id)
                 .Distinct()
                 .ToListAsync();
