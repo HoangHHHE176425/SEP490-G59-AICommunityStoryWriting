@@ -1,4 +1,5 @@
 using AIStory.API.BackgroundServices;
+using AIStory.API.Authorization;
 using AIStory.API.Configurations;
 using AIStory.API.Hubs;
 using AIStory.API.Services;
@@ -7,6 +8,7 @@ using AIStory.Services.Implementations;
 using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
@@ -126,6 +128,7 @@ namespace AIStory.API
             builder.Services.AddSingleton<IUserIdProvider, SignalRUserIdProvider>();
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
+            builder.Services.AddScoped<IAuthorizationHandler, AuthorMustResignPolicyHandler>();
 
             // AI: Story Memory Engine (RAG khi đã index) + các agent gợi ý/đồng sáng tác
             builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
@@ -203,7 +206,13 @@ namespace AIStory.API
 
                 options.AddPolicy("AuthorOnly", policy =>
                     policy.RequireAuthenticatedUser()
-                          .RequireRole("AUTHOR", "ADMIN"));
+                          .RequireRole("AUTHOR", "ADMIN")
+                          .AddRequirements(new AuthorMustResignPolicyRequirement()));
+
+                options.AddPolicy("AuthorStrict", policy =>
+                    policy.RequireAuthenticatedUser()
+                          .RequireRole("AUTHOR")
+                          .AddRequirements(new AuthorMustResignPolicyRequirement()));
 
                 options.AddPolicy("AdminOnly", policy =>
                     policy.RequireAuthenticatedUser()

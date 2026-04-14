@@ -12,11 +12,16 @@ namespace Services.Implementations
     {
         private readonly IPolicyRepository _policyRepo;
         private readonly IAuthorPolicyAcceptanceRepository _acceptRepo;
+        private readonly IUserRepository _userRepo;
 
-        public AdminPolicyService(IPolicyRepository policyRepo, IAuthorPolicyAcceptanceRepository acceptRepo)
+        public AdminPolicyService(
+            IPolicyRepository policyRepo,
+            IAuthorPolicyAcceptanceRepository acceptRepo,
+            IUserRepository userRepo)
         {
             _policyRepo = policyRepo;
             _acceptRepo = acceptRepo;
+            _userRepo = userRepo;
         }
 
         public async Task<PagedResultDto<AdminPolicyListItemDto>> GetPoliciesAsync(AdminPolicyQueryDto query)
@@ -86,6 +91,8 @@ namespace Services.Implementations
                 await _policyRepo.DeactivateOtherPoliciesOfTypeAsync(type, policy.id);
             }
 
+            await SyncAuthorResignFlagsAsync();
+
             return MapDetail(policy);
         }
 
@@ -117,6 +124,8 @@ namespace Services.Implementations
             {
                 await _policyRepo.DeactivateOtherPoliciesOfTypeAsync(type, policy.id);
             }
+
+            await SyncAuthorResignFlagsAsync();
 
             return true;
         }
@@ -150,6 +159,8 @@ namespace Services.Implementations
                 await _policyRepo.DeactivateOtherPoliciesOfTypeAsync(policy.type, policy.id);
             }
 
+            await SyncAuthorResignFlagsAsync();
+
             return true;
         }
 
@@ -160,7 +171,27 @@ namespace Services.Implementations
 
             policy.is_active = false;
             await _policyRepo.UpdatePolicyAsync(policy);
+
+            await SyncAuthorResignFlagsAsync();
             return true;
+        }
+
+        private async Task SyncAuthorResignFlagsAsync()
+        {
+            var activeAuthorPolicy = await _policyRepo.GetActivePolicyByTypeAsync("AUTHOR");
+            if (activeAuthorPolicy == null)
+            {
+                await _userRepo.ClearAuthorMustResignPolicyFlagAsync();
+                return;
+            }
+
+            if (activeAuthorPolicy.require_resign == true)
+            {
+                await _userRepo.MarkAuthorsMustResignPolicyAsync(activeAuthorPolicy.id);
+                return;
+            }
+
+            await _userRepo.ClearAuthorMustResignPolicyFlagAsync();
         }
 
         private static AdminPolicyListItemDto MapListItem(system_policies p)

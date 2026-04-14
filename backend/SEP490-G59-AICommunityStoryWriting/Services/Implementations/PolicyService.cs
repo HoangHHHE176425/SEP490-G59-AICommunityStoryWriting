@@ -10,11 +10,16 @@ namespace Services.Implementations
     {
         private readonly IPolicyRepository _policyRepo;
         private readonly IAuthorPolicyAcceptanceRepository _acceptRepo;
+        private readonly IUserRepository _userRepo;
 
-        public PolicyService(IPolicyRepository policyRepo, IAuthorPolicyAcceptanceRepository acceptRepo)
+        public PolicyService(
+            IPolicyRepository policyRepo,
+            IAuthorPolicyAcceptanceRepository acceptRepo,
+            IUserRepository userRepo)
         {
             _policyRepo = policyRepo;
             _acceptRepo = acceptRepo;
+            _userRepo = userRepo;
         }
 
         public async Task<PolicyResponseDto?> GetActivePolicyAsync(string type)
@@ -47,7 +52,17 @@ namespace Services.Implementations
                 throw new Exception("Chỉ có thể chấp nhận policy loại AUTHOR trong luồng này.");
 
             var existing = await _acceptRepo.GetAcceptanceAsync(userId, policyId);
-            if (existing != null) return false; // already accepted
+            if (existing != null)
+            {
+                var acceptedUser = await _userRepo.GetUserById(userId);
+                if (acceptedUser != null && acceptedUser.must_resign_policy == true)
+                {
+                    acceptedUser.must_resign_policy = false;
+                    acceptedUser.updated_at = DateTime.UtcNow;
+                    await _userRepo.UpdateUser(acceptedUser);
+                }
+                return false; // already accepted
+            }
 
             var row = new author_policy_acceptances
             {
@@ -61,6 +76,13 @@ namespace Services.Implementations
             };
 
             await _acceptRepo.AddAcceptanceAsync(row);
+            var user = await _userRepo.GetUserById(userId);
+            if (user != null && user.must_resign_policy == true)
+            {
+                user.must_resign_policy = false;
+                user.updated_at = DateTime.UtcNow;
+                await _userRepo.UpdateUser(user);
+            }
             return true;
         }
 

@@ -190,6 +190,63 @@ namespace DataAccessObjects.DAOs
             context.auth_tokens.RemoveRange(tokens);
             await context.SaveChangesAsync();
         }
+
+        /// <summary>
+        /// Bật cờ must_resign_policy cho các AUTHOR chưa ký policy AUTHOR đang active.
+        /// </summary>
+        public async Task<int> MarkAuthorsMustResignPolicyAsync(StoryPlatformDbContext context, Guid activeAuthorPolicyId)
+        {
+            var acceptedAuthorIds = await context.author_policy_acceptances
+                .AsNoTracking()
+                .Where(a => a.policy_id == activeAuthorPolicyId)
+                .Select(a => a.user_id)
+                .Distinct()
+                .ToListAsync();
+
+            var targetAuthors = await context.users
+                .Where(u =>
+                    (u.role ?? "").ToUpper() == "AUTHOR" &&
+                    (u.status ?? "").ToUpper() == "ACTIVE" &&
+                    !acceptedAuthorIds.Contains(u.id))
+                .ToListAsync();
+
+            if (targetAuthors.Count == 0) return 0;
+
+            var now = DateTime.UtcNow;
+            foreach (var author in targetAuthors)
+            {
+                author.must_resign_policy = true;
+                author.updated_at = now;
+            }
+
+            await context.SaveChangesAsync();
+            return targetAuthors.Count;
+        }
+
+        /// <summary>
+        /// Xóa cờ must_resign_policy cho tất cả AUTHOR (dùng khi policy active không bắt buộc ký lại).
+        /// </summary>
+        public async Task<int> ClearAuthorMustResignPolicyFlagAsync(StoryPlatformDbContext context)
+        {
+            var authors = await context.users
+                .Where(u =>
+                    (u.role ?? "").ToUpper() == "AUTHOR" &&
+                    u.must_resign_policy == true)
+                .ToListAsync();
+
+            if (authors.Count == 0) return 0;
+
+            var now = DateTime.UtcNow;
+            foreach (var author in authors)
+            {
+                author.must_resign_policy = false;
+                author.updated_at = now;
+            }
+
+            await context.SaveChangesAsync();
+            return authors.Count;
+        }
+
         public async Task<bool> IsNicknameExist(StoryPlatformDbContext context, string nickname, Guid currentUserId)
         {
             return await context.user_profiles
