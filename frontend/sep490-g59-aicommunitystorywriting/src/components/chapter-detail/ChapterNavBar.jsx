@@ -26,7 +26,8 @@ export function ChapterNavBar({
                 top: 0,
                 backgroundColor: '#ffffff',
                 borderBottom: '1px solid #e2e8f0',
-                zIndex: 100,
+                /* Dưới Header toàn site (z-50) để thông báo / menu không bị che */
+                zIndex: 40,
                 boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
             }}
         >
