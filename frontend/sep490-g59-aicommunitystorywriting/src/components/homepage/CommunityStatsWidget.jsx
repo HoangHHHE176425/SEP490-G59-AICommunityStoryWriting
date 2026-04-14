@@ -57,7 +57,8 @@ export function CommunityStatsWidget({ skipFetch = false, stats: statsProp, load
         </h3>
       </div>
       <p className="mb-4 text-[12px] leading-snug text-[#64748b] font-['Plus_Jakarta_Sans',sans-serif]">
-        Thống kê từ các truyện đang được hiển thị công khai trên nền tảng (đã xuất bản, không bị ẩn theo quy định).
+        Thống kê từ các truyện đang được hiển thị công khai trên nền tảng (đã xuất bản, không bị ẩn theo quy định; không tính
+        truyện của tác giả đã bị cấm tài khoản).
       </p>
 
       {loading ? (
