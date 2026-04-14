@@ -60,6 +60,12 @@ namespace Repositories.Implementations
         public async Task DeleteRefreshTokensByUserId(Guid userId)
             => await UserDAO.Instance.DeleteRefreshTokensByUserId(_context, userId);
 
+        public Task<int> MarkAuthorsMustResignPolicyAsync(Guid activeAuthorPolicyId)
+            => UserDAO.Instance.MarkAuthorsMustResignPolicyAsync(_context, activeAuthorPolicyId);
+
+        public Task<int> ClearAuthorMustResignPolicyFlagAsync()
+            => UserDAO.Instance.ClearAuthorMustResignPolicyFlagAsync(_context);
+
         public Task<(IEnumerable<users> Items, int TotalCount)> GetUsersAsync(AdminUserQuery query)
             => UserDAO.Instance.GetUsersAsync(_context, query);
 

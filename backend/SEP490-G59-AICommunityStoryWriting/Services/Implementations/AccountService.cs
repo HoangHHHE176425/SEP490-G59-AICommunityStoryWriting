@@ -171,6 +171,7 @@ namespace Services.Implementations
             var acceptance = activePolicy == null
                 ? null
                 : await _authorPolicyAcceptanceRepo.GetAcceptanceAsync(userId, activePolicy.id);
+            var hasAcceptedActivePolicy = activePolicy != null && IsAcceptanceValidForPolicy(acceptance, activePolicy);
 
             var isAuthor = role == "AUTHOR";
             var missingRequirements = isAuthor
@@ -184,8 +185,8 @@ namespace Services.Implementations
                 HasActiveAuthorPolicy = activePolicy != null,
                 ActiveAuthorPolicyId = activePolicy?.id,
                 ActiveAuthorPolicyVersion = activePolicy?.version,
-                HasAcceptedActivePolicy = acceptance != null,
-                AcceptedAt = acceptance?.accepted_at,
+                HasAcceptedActivePolicy = hasAcceptedActivePolicy,
+                AcceptedAt = hasAcceptedActivePolicy ? acceptance?.accepted_at : null,
                 CanBecomeAuthor = !isAuthor && missingRequirements.Count == 0,
                 MissingRequirements = missingRequirements
             };
@@ -220,22 +221,35 @@ namespace Services.Implementations
 
             var acceptedNow = false;
             var acceptedAt = acceptance?.accepted_at ?? DateTime.UtcNow;
-
-            if (acceptance == null)
+            var hasAcceptedCurrent = IsAcceptanceValidForPolicy(acceptance, activePolicy);
+            if (!hasAcceptedCurrent)
             {
-                var row = new author_policy_acceptances
-                {
-                    id = Guid.NewGuid(),
-                    user_id = userId,
-                    policy_id = activePolicy.id,
-                    accepted_at = acceptedAt,
-                    ip_address = ipAddress,
-                    user_agent = userAgent,
-                    accepted_for = "AUTHOR"
-                };
-
-                await _authorPolicyAcceptanceRepo.AddAcceptanceAsync(row);
                 acceptedNow = true;
+                acceptedAt = DateTime.UtcNow;
+
+                if (acceptance != null)
+                {
+                    acceptance.accepted_at = acceptedAt;
+                    acceptance.ip_address = ipAddress;
+                    acceptance.user_agent = userAgent;
+                    acceptance.accepted_for = "AUTHOR";
+                    await _authorPolicyAcceptanceRepo.UpdateAcceptanceAsync(acceptance);
+                }
+                else
+                {
+                    var row = new author_policy_acceptances
+                    {
+                        id = Guid.NewGuid(),
+                        user_id = userId,
+                        policy_id = activePolicy.id,
+                        accepted_at = acceptedAt,
+                        ip_address = ipAddress,
+                        user_agent = userAgent,
+                        accepted_for = "AUTHOR"
+                    };
+
+                    await _authorPolicyAcceptanceRepo.AddAcceptanceAsync(row);
+                }
             }
 
             if (role != "AUTHOR")
@@ -292,6 +306,13 @@ namespace Services.Implementations
                 missing.Add("Chưa có điều khoản tác giả đang hiệu lực.");
 
             return missing;
+        }
+
+        private static bool IsAcceptanceValidForPolicy(author_policy_acceptances? acceptance, system_policies policy)
+        {
+            if (acceptance == null) return false;
+            var effectiveFrom = policy.activated_at ?? policy.created_at ?? DateTime.MinValue;
+            return acceptance.accepted_at >= effectiveFrom;
         }
     }
 }
