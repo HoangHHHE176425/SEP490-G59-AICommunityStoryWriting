@@ -187,9 +187,17 @@ export function StoryEditor({ story, onSave, onCancel }) {
             showToast(`Cần ít nhất ${minChapters} chương để tiếp tục`, 'error');
             return false;
         }
-        const invalidChapters = chapters.filter((ch) => !ch.title.trim() || !stripHtmlToText(ch.content));
-        if (invalidChapters.length > 0) {
-            showToast(`Có ${invalidChapters.length} chương chưa hoàn thành`, 'error');
+        const chapterMissingTitle = chapters.find((ch) => !String(ch?.title ?? '').trim());
+        if (chapterMissingTitle) {
+            const chapterNo = Number(chapterMissingTitle?.number ?? 0) > 0 ? chapterMissingTitle.number : null;
+            showToast(chapterNo ? `Chương ${chapterNo}: Chưa nhập tên chương` : 'Chưa nhập tên chương', 'error');
+            return false;
+        }
+
+        const chapterMissingContent = chapters.find((ch) => !stripHtmlToText(ch?.content ?? ''));
+        if (chapterMissingContent) {
+            const chapterNo = Number(chapterMissingContent?.number ?? 0) > 0 ? chapterMissingContent.number : null;
+            showToast(chapterNo ? `Chương ${chapterNo}: Chưa nhập nội dung` : 'Chưa nhập nội dung', 'error');
             return false;
         }
         const chaptersWithLongTitle = chapters.filter((ch) => (ch.title ?? '').trim().length > 50);
@@ -198,8 +206,20 @@ export function StoryEditor({ story, onSave, onCancel }) {
             return false;
         }
         // Validate minimum 500 words per chapter
-        const chaptersWithInsufficientWords = chapters.filter(ch => countWords(ch.content) < 500);
+        const chaptersWithInsufficientWords = chapters
+            .map((ch) => ({
+                ...ch,
+                _wordCount: countWords(ch?.content ?? ''),
+            }))
+            .filter((ch) => ch._wordCount < 500);
         if (chaptersWithInsufficientWords.length > 0) {
+            if (chaptersWithInsufficientWords.length === 1) {
+                const ch = chaptersWithInsufficientWords[0];
+                const chapterNo = Number(ch?.number ?? 0) > 0 ? ch.number : null;
+                const msgPrefix = chapterNo ? `Chương ${chapterNo}` : 'Chương hiện tại';
+                showToast(`${msgPrefix}: Chưa đủ 500 từ (hiện có ${ch._wordCount} từ)`, 'error');
+                return false;
+            }
             showToast(`Có ${chaptersWithInsufficientWords.length} chương chưa đủ 500 từ`, 'error');
             return false;
         }

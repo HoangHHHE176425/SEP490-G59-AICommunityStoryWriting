@@ -660,11 +660,17 @@ namespace Services.Implementations
 
         public CommunityStatsDto GetPublicCommunityStats()
         {
+            // Khớp danh sách truyện công khai (GET /stories): không tính truyện tác giả BANNED —
+            // số truyện / lượt xem / tác giả phải đồng bộ với nội dung khách thực sự thấy.
             var publishedVisibleStories = _storyRepository
                 .GetAll()
                 // EF Core không dịch được string.Equals(..., StringComparison) sang SQL.
                 .Where(s => s.status != null && s.status.ToUpper() == "PUBLISHED")
-                .Where(s => !s.compliance_hidden);
+                .Where(s => !s.compliance_hidden)
+                .Where(s =>
+                    s.author == null
+                    || s.author.status == null
+                    || s.author.status.ToUpper() != "BANNED");
 
             return new CommunityStatsDto
             {

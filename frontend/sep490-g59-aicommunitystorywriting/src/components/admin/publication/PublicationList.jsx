@@ -1,6 +1,6 @@
 import { Clock, CheckCircle, XCircle, Eye, FileText, BookOpen, UserCheck, AlertCircle, RotateCcw } from 'lucide-react';
 import { getSlaBadgeStyle, getReviewDeadlineBadge, normalizeTimeStatus, pickReviewDeadlineIso } from '../../../utils/moderatorReviewSla';
-import { formatApiDateTimeLocalVi } from '../../../utils/apiDateTime';
+import { formatApiDateTimeLocalVi, formatLogTimestampVi } from '../../../utils/apiDateTime';
 
 export function PublicationList({
     publications,
@@ -480,20 +480,18 @@ export function PublicationList({
                                     </div>
                                 )}
 
-                                {!(showModeratorSla && pub.status === 'pending') && (
-                                    <div>
-                                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
-                                            Nộp lúc
-                                        </div>
-                                        <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
-                                            {formatDate(
-                                                pub.type === 'story_group' && pub.representativePublication
-                                                    ? pub.representativePublication.submittedAt
-                                                    : pub.submittedAt
-                                            )}
-                                        </div>
+                                <div>
+                                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.25rem' }}>
+                                        Thời gian gửi xuất bản
                                     </div>
-                                )}
+                                    <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#1e293b' }}>
+                                        {formatLogTimestampVi(
+                                            (pub.type === 'story_group' && pub.representativePublication
+                                                ? (pub.submittedAt ?? pub.representativePublication.submittedAt)
+                                                : pub.submittedAt) ?? null
+                                        )}
+                                    </div>
+                                </div>
 
                                 {pub.reviewedAt && (
                                     <div>
