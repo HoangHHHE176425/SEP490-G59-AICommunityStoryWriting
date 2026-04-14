@@ -343,6 +343,16 @@ export function ChapterListManager({
         ? 'Truyện đang ở trạng thái Hoàn thành, không thể tạo/chỉnh sửa/xóa chương hoặc gửi xuất bản.'
         : 'Truyện đang ở trạng thái Tạm dừng, không thể tạo/chỉnh sửa/xóa chương hoặc gửi xuất bản.';
 
+    /** Chỉ được xóa chương cuối cùng theo thứ tự (ví dụ có chương 1–3 thì phải xóa 3 → 2 → 1). */
+    const canDeleteChapterSequential = (chapter) => {
+        const total = Number(totalCount);
+        const n = Number(chapter?.number);
+        return Number.isFinite(total) && total > 0 && Number.isFinite(n) && n === total;
+    };
+
+    const deleteChapterOrderHint =
+        'Chỉ được xóa lần lượt từ chương cuối về đầu (ví dụ còn chương 1, 2, 3 thì phải xóa chương 3 trước), để không đứt mạch truyện.';
+
     const handleDeleteChapter = (chapterId) => {
         if (storyProgressLocked) {
             setMessageModal({ open: true, title: 'Thao tác bị chặn', message: storyProgressLockTitle });
@@ -369,6 +379,15 @@ export function ChapterListManager({
         setConfirmDialog({ open: true, action: 'unpublish', chapterId, versionId: null, versionTitle: null });
     };
     const openDeleteConfirm = (chapterId) => {
+        const ch = chapters.find((c) => c.id === chapterId);
+        if (ch && !canDeleteChapterSequential(ch)) {
+            setMessageModal({
+                open: true,
+                title: 'Không thể xóa chương này',
+                message: `${deleteChapterOrderHint} Hiện chỉ có thể xóa chương ${Number(totalCount) || '—'} (chương cuối).`,
+            });
+            return;
+        }
         setConfirmDialog({ open: true, action: 'delete', chapterId, versionId: null, versionTitle: null });
     };
     const openVersionSubmitConfirm = (chapterId, versionId, versionTitle) => {
@@ -380,6 +399,7 @@ export function ChapterListManager({
     const openVersionDeleteConfirm = (chapterId, versionId, versionTitle) => {
         setConfirmDialog({ open: true, action: 'version_delete', chapterId, versionId, versionTitle });
     };
+
     /** Hủy xuất bản theo thứ tự ngược: chỉ được hủy chương N nếu không còn chương nào có thứ tự > N đang xuất bản hoặc chờ duyệt (chapter hoặc version). */
     const canUnpublishChapter = (chapter) => {
         const orderIndex = chapter.number - 1;
@@ -503,6 +523,15 @@ export function ChapterListManager({
                 })
                 .finally(() => setActioningChapterId(null));
         } else if (action === 'delete') {
+            if (chapterFromList && !canDeleteChapterSequential(chapterFromList)) {
+                setMessageModal({
+                    open: true,
+                    title: 'Không thể xóa chương này',
+                    message: `${deleteChapterOrderHint} Hiện chỉ có thể xóa chương ${Number(totalCount) || '—'} (chương cuối).`,
+                });
+                setActioningChapterId(null);
+                return;
+            }
             handleDeleteChapter(chapterId);
         } else if (action === 'version_submit' && confirmDialog.versionId) {
             const versionId = confirmDialog.versionId;
@@ -1056,27 +1085,27 @@ export function ChapterListManager({
                                                             Chỉnh sửa
                                                         </button>
                                                         <button
-                                                            onClick={() => !isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft' && openDeleteConfirm(chapter.id)}
-                                                            disabled={isAuthorWritingSuspended || storyProgressLocked || chapter.status !== 'draft'}
-                                                            title={isAuthorWritingSuspended ? suspendedWriteTitle : storyProgressLocked ? storyProgressLockTitle : chapter.status === 'draft' ? 'Xóa chương' : 'Chỉ được xóa chương khi ở trạng thái Bản nháp'}
+                                                            onClick={() => !isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft' && canDeleteChapterSequential(chapter) && openDeleteConfirm(chapter.id)}
+                                                            disabled={isAuthorWritingSuspended || storyProgressLocked || chapter.status !== 'draft' || !canDeleteChapterSequential(chapter)}
+                                                            title={isAuthorWritingSuspended ? suspendedWriteTitle : storyProgressLocked ? storyProgressLockTitle : chapter.status !== 'draft' ? 'Chỉ xóa được bản nháp' : !canDeleteChapterSequential(chapter) ? `Chỉ xóa được chương cuối (chương ${Number(totalCount) || '—'})` : 'Xóa chương'}
                                                             style={{
                                                                 display: 'inline-flex',
                                                                 alignItems: 'center',
                                                                 gap: '0.25rem',
                                                                 padding: '0.4rem 0.75rem',
-                                                                backgroundColor: (!isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft') ? '#fff' : '#f1f5f9',
-                                                                border: `1px solid ${(!isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft') ? '#fecaca' : '#e2e8f0'}`,
+                                                                backgroundColor: (!isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft' && canDeleteChapterSequential(chapter)) ? '#fff' : '#f1f5f9',
+                                                                border: `1px solid ${(!isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft' && canDeleteChapterSequential(chapter)) ? '#fecaca' : '#e2e8f0'}`,
                                                                 borderRadius: '9999px',
                                                                 fontSize: '0.75rem',
                                                                 fontWeight: 600,
-                                                                color: (!isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft') ? '#dc2626' : '#94a3b8',
-                                                                cursor: (!isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft') ? 'pointer' : 'not-allowed',
+                                                                color: (!isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft' && canDeleteChapterSequential(chapter)) ? '#dc2626' : '#94a3b8',
+                                                                cursor: (!isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft' && canDeleteChapterSequential(chapter)) ? 'pointer' : 'not-allowed',
                                                                 transition: 'all 0.2s',
                                                                 whiteSpace: 'nowrap',
-                                                                opacity: (!isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft') ? 1 : 0.8
+                                                                opacity: (!isAuthorWritingSuspended && !storyProgressLocked && chapter.status === 'draft' && canDeleteChapterSequential(chapter)) ? 1 : 0.8
                                                             }}
-                                                            onMouseEnter={(e) => { if (!isAuthorWritingSuspended && chapter.status === 'draft') e.currentTarget.style.backgroundColor = '#fef2f2'; }}
-                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = (!isAuthorWritingSuspended && chapter.status === 'draft') ? '#fff' : '#f1f5f9'; }}
+                                                            onMouseEnter={(e) => { if (!isAuthorWritingSuspended && chapter.status === 'draft' && canDeleteChapterSequential(chapter)) e.currentTarget.style.backgroundColor = '#fef2f2'; }}
+                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = (!isAuthorWritingSuspended && chapter.status === 'draft' && canDeleteChapterSequential(chapter)) ? '#fff' : '#f1f5f9'; }}
                                                         >
                                                             <Trash2 size={12} />
                                                             Xóa
@@ -1642,7 +1671,7 @@ export function ChapterListManager({
                         <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0 0 1.5rem 0', lineHeight: 1.5 }}>
                             {confirmDialog.action === 'publish' && 'Bạn có chắc chắn muốn gửi chương này lên để duyệt xuất bản?'}
                             {confirmDialog.action === 'unpublish' && 'Bạn có chắc chắn muốn hủy xuất bản và đưa chương về bản nháp?'}
-                            {confirmDialog.action === 'delete' && 'Bạn có chắc chắn muốn xóa chương này? Hành động này không thể hoàn tác.'}
+                            {confirmDialog.action === 'delete' && 'Bạn có chắc chắn muốn xóa chương này? Hành động này không thể hoàn tác. Chỉ được xóa lần lượt từ chương cuối về đầu; sau khi xóa, bạn có thể xóa chương tiếp theo phía trước.'}
                             {confirmDialog.action === 'version_submit' && 'Bạn có chắc chắn muốn gửi phiên bản này lên để duyệt xuất bản?'}
                             {confirmDialog.action === 'version_unsubmit' && 'Bạn có chắc chắn muốn hủy gửi duyệt? Phiên bản và chương sẽ về trạng thái Bản nháp.'}
                             {confirmDialog.action === 'version_delete' && 'Bạn có chắc chắn muốn xóa phiên bản này? Hành động này không thể hoàn tác.'}
