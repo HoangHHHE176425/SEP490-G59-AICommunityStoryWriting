@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Sparkles, Settings, X, Lock, Unlock, Coins, Copy, Check } from 'lucide-react';
 import { useToast } from './Toast';
 import { indexRag, suggestNextChapter, coCreate, getAiUsageLimit, pickAiContextWarning } from '../../../api/ai/aiApi';
+import { getChapters } from '../../../api/chapter/chapterApi';
 import { translateCoCreateOutlineLabels } from '../../../utils/coCreateOutlineLabelsVi';
 import { RichTextEditor } from '../../common/RichTextEditor';
 import { stripHtmlToText } from '../../../utils/richText';
@@ -145,6 +146,9 @@ const NO_STORY_MESSAGE = 'Tính năng AI chỉ khả dụng sau khi tạo truy�
 const AI_DISABLED_BEFORE_STORY_SAVED =
     'Bạn phải hoàn tất tạo truyện (lưu nháp hoặc gửi duyệt) trước. Sau đó mở truyện → Thêm/Sửa chương để dùng gợi ý AI.';
 
+const AI_REQUIRES_CHAPTER1_PUBLISHED =
+    'Chương 1 phải được xuất bản (công khai) trước khi dùng AI gợi ý hoặc AI gợi ý chương.';
+
 export function ChapterEditor({
     chapter,
     onChange,
@@ -187,6 +191,40 @@ export function ChapterEditor({
     const chapterIdForAi = isGuid(chapterIdRaw) ? String(chapterIdRaw) : draftChapterIdForAi;
     /** Bước 2 tạo truyện mới: chưa có storyId → không gọi API AI; hiển thị nút giống màn chương nhưng khóa. */
     const aiLocked = !storyId;
+    const [firstChapterPublishedForAi, setFirstChapterPublishedForAi] = useState({ loaded: false, ok: false });
+
+    useEffect(() => {
+        if (!storyId) {
+            setFirstChapterPublishedForAi({ loaded: false, ok: false });
+            return undefined;
+        }
+        let cancelled = false;
+        setFirstChapterPublishedForAi({ loaded: false, ok: false });
+        getChapters({ storyId, page: 1, pageSize: 500 })
+            .then((res) => {
+                if (cancelled) return;
+                const items = res?.items ?? res?.Items ?? [];
+                const arr = Array.isArray(items) ? items : [];
+                const ch1 = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === 0);
+                const ok = ch1 && String(ch1.status ?? ch1.Status ?? '').toLowerCase() === 'published';
+                setFirstChapterPublishedForAi({ loaded: true, ok: Boolean(ok) });
+            })
+            .catch(() => {
+                if (!cancelled) setFirstChapterPublishedForAi({ loaded: true, ok: false });
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [storyId]);
+
+    const canUseStoryAiFeatures = Boolean(storyId && firstChapterPublishedForAi.loaded && firstChapterPublishedForAi.ok);
+    const aiSuggestButtonsDisabled = aiLocked || !canUseStoryAiFeatures;
+    const aiChapterGateNotice =
+        storyId && firstChapterPublishedForAi.loaded && !firstChapterPublishedForAi.ok
+            ? AI_REQUIRES_CHAPTER1_PUBLISHED
+            : storyId && !firstChapterPublishedForAi.loaded
+                ? 'Đang kiểm tra điều kiện chương 1...'
+                : null;
 
     // Backend: chương PAID chỉ hợp lệ khi story.total_views >= 500.
     // Tuy nhiên khi chương đã là PAID sẵn thì BE không chặn theo rule “chuyển từ FREE sang PAID”.
@@ -265,6 +303,13 @@ export function ChapterEditor({
             showToast(AI_DISABLED_BEFORE_STORY_SAVED, 'info');
             return;
         }
+        if (!canUseStoryAiFeatures) {
+            showToast(
+                !firstChapterPublishedForAi.loaded ? 'Đang kiểm tra điều kiện chương 1...' : AI_REQUIRES_CHAPTER1_PUBLISHED,
+                'info',
+            );
+            return;
+        }
         if (type === 'paragraph') {
             setSuggestions([]);
             setSuggestWarning(null);
@@ -304,6 +349,13 @@ export function ChapterEditor({
     const handleCoCreateSubmit = async () => {
         if (!storyId) {
             showToast(NO_STORY_MESSAGE, 'info');
+            return;
+        }
+        if (!canUseStoryAiFeatures) {
+            showToast(
+                !firstChapterPublishedForAi.loaded ? 'Đang kiểm tra điều kiện chương 1...' : AI_REQUIRES_CHAPTER1_PUBLISHED,
+                'info',
+            );
             return;
         }
         const idea = (coCreateIdea || '').trim();
@@ -447,8 +499,8 @@ export function ChapterEditor({
                                                     }}
                                                     title={copiedSuggestionIndex === index ? 'Đã copy' : 'Copy nhanh'}
                                                     className={`absolute top-2 right-2 p-1 rounded-lg transition-colors duration-200 ${copiedSuggestionIndex === index
-                                                            ? 'bg-emerald-100 text-emerald-700'
-                                                            : 'text-slate-600 hover:bg-slate-200'
+                                                        ? 'bg-emerald-100 text-emerald-700'
+                                                        : 'text-slate-600 hover:bg-slate-200'
                                                         }`}
                                                 >
                                                     {copiedSuggestionIndex === index ? (
@@ -925,7 +977,7 @@ export function ChapterEditor({
                         style={{
                             display: 'flex',
                             flexDirection: 'column',
-                            gap: aiLocked ? '0.75rem' : '0',
+                            gap: aiLocked || aiChapterGateNotice ? '0.75rem' : '0',
                         }}
                     >
                         <div
@@ -973,7 +1025,9 @@ export function ChapterEditor({
                                         <button
                                             type="button"
                                             onClick={() => handleAISuggestion('paragraph')}
-                                            className="flex items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary transition-all hover:bg-primary/20"
+                                            disabled={aiSuggestButtonsDisabled}
+                                            title={aiSuggestButtonsDisabled ? (aiChapterGateNotice ?? AI_REQUIRES_CHAPTER1_PUBLISHED) : undefined}
+                                            className="flex items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary transition-all hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-primary/10"
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
                                             AI gợi ý
@@ -982,7 +1036,9 @@ export function ChapterEditor({
                                         <button
                                             type="button"
                                             onClick={() => handleAISuggestion('chapter')}
-                                            className="flex items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary transition-all hover:bg-primary/20"
+                                            disabled={aiSuggestButtonsDisabled}
+                                            title={aiSuggestButtonsDisabled ? (aiChapterGateNotice ?? AI_REQUIRES_CHAPTER1_PUBLISHED) : undefined}
+                                            className="flex items-center gap-2 rounded-full border-0 bg-primary/10 px-4 py-2 text-sm font-bold text-primary transition-all hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-primary/10"
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
                                             AI gợi ý chương
@@ -1022,6 +1078,14 @@ export function ChapterEditor({
                                 {AI_DISABLED_BEFORE_STORY_SAVED}
                             </p>
                         )}
+                        {!aiLocked && aiChapterGateNotice ? (
+                            <p
+                                className="m-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-950"
+                                role="status"
+                            >
+                                {aiChapterGateNotice}
+                            </p>
+                        ) : null}
                     </div>
 
                     {/* Settings Panel */}

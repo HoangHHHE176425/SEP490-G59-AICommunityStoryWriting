@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Linq;
-using System.Text.RegularExpressions;
 using BusinessObjects.Entities;
 using DataAccessObjects.DAOs;
 using Microsoft.EntityFrameworkCore;
@@ -28,18 +27,10 @@ public class CommentReportService : ICommentReportService
         _notificationHubNotifier = notificationHubNotifier;
     }
 
-    private static readonly Regex CommentReportAdminMessageTagRegex = new(
-        @"\[COMMENT_REPORT:([0-9a-fA-F-]{36})\]",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-
     private static void AddCommentIdsFromComplianceAdminMessage(string? message, HashSet<Guid> sink)
     {
-        if (string.IsNullOrEmpty(message)) return;
-        foreach (Match m in CommentReportAdminMessageTagRegex.Matches(message))
-        {
-            if (Guid.TryParse(m.Groups[1].Value, out var id) && id != Guid.Empty)
-                sink.Add(id);
-        }
+        foreach (var id in ComplianceAdminActionRequestDAO.ParseCommentIdsFromMessage(message))
+            sink.Add(id);
     }
 
     private static bool HasPendingAdminActionForCommentThread(Guid commentId) =>
@@ -141,8 +132,7 @@ public class CommentReportService : ICommentReportService
         if (!CommentReportReasonCatalog.TryGet(request.ReasonCode, out _))
             throw new ArgumentException("Invalid reason code.");
 
-        if (request.Description != null && request.Description.Length > 200)
-            throw new ArgumentException("Ký tự quá dài: mô tả báo cáo tối đa 200 ký tự.");
+        UserReportDescriptionRules.ValidateDescription(request.Description);
 
         if (reporterId == Guid.Empty || !_userLookup.Exists(reporterId))
             throw new InvalidOperationException("USER không tồn tại.");
@@ -183,7 +173,7 @@ public class CommentReportService : ICommentReportService
         await using var context = new StoryPlatformDbContext();
 
         var code = request.ReasonCode.Trim().ToUpperInvariant();
-        var desc = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+        var desc = (request.Description ?? "").Trim();
 
         var reporterIdStr = reporterId.ToString();
 
@@ -240,7 +230,7 @@ public class CommentReportService : ICommentReportService
         else
         {
             row.reporter_id = reporterId; // lưu reporter mới nhất để hiển thị
-            if (desc != null) row.description = desc; // cập nhật mô tả mới nhất nếu có
+            row.description = desc;
             row.contributor_count += 1;
         }
 
@@ -254,7 +244,7 @@ public class CommentReportService : ICommentReportService
         });
 
         await context.SaveChangesAsync();
-        _ = NotifyCommentOwnerReportedAsync(comment, reporterId, request.ReasonCode, request.Description);
+        _ = NotifyCommentOwnerReportedAsync(comment, reporterId, request.ReasonCode, desc);
         return row.id;
     }
 

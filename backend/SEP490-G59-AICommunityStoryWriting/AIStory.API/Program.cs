@@ -1,3 +1,4 @@
+using AIStory.API.BackgroundServices;
 using AIStory.API.Configurations;
 using AIStory.API.Hubs;
 using AIStory.API.Services;
@@ -6,6 +7,7 @@ using AIStory.Services.Implementations;
 using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +16,6 @@ using Microsoft.OpenApi.Models;
 using Repositories;
 using Repositories.Implementations;
 using Repositories.Interfaces;
-using AIStory.API.BackgroundServices;
 using Services.Implementations;
 using Services.Implementations.Lookups;
 using Services.Integrations.PayOS;
@@ -57,6 +58,7 @@ namespace AIStory.API
             var corsExtraOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
                 ?? Array.Empty<string>();
             var corsExtraSet = new HashSet<string>(corsExtraOrigins, StringComparer.OrdinalIgnoreCase);
+            var corsAllowLocalhost = builder.Configuration.GetValue("Cors:AllowLocalhost", builder.Environment.IsDevelopment());
 
             // CORS Configuration
             builder.Services.AddCors(options =>
@@ -69,15 +71,11 @@ namespace AIStory.API
                         if (corsExtraSet.Contains(origin)) return true;
                         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
 
-                        var isConfiguredOrigin = Array.Exists(
-                            corsAllowedOrigins,
-                            allowedOrigin => string.Equals(allowedOrigin, origin, StringComparison.OrdinalIgnoreCase));
-
                         var isLocalhost = corsAllowLocalhost &&
                                           (uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
                                            || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase));
 
-                        return isConfiguredOrigin || isLocalhost;
+                        return isLocalhost;
                     })
                         .AllowAnyMethod()
                         .AllowAnyHeader()

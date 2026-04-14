@@ -81,6 +81,33 @@ export async function getUsers(params = {}) {
 }
 
 /**
+ * Tạo người dùng mới từ màn Admin.
+ * @param {{
+ *  email: string,
+ *  password: string,
+ *  role?: string,
+ *  status?: string,
+ *  nickname?: string,
+ *  phone?: string,
+ *  idNumber?: string,
+ * }} payload
+ * @returns {Promise<Object>}
+ */
+export async function createUser(payload) {
+    const body = {
+        email: String(payload?.email ?? '').trim(),
+        password: String(payload?.password ?? ''),
+        role: String(payload?.role ?? 'USER').trim().toUpperCase(),
+        status: String(payload?.status ?? 'ACTIVE').trim().toUpperCase(),
+        nickname: payload?.nickname ? String(payload.nickname).trim() : undefined,
+        phone: payload?.phone ? String(payload.phone).trim() : undefined,
+        idNumber: payload?.idNumber ? String(payload.idNumber).trim() : undefined,
+    };
+    const res = await axiosInstance.post('/admin/users', body);
+    return normalizeUser(res.data ?? {});
+}
+
+/**
  * Thống kê nhanh (tổng user, active, inactive, banned, authors)
  * @returns {Promise<{ total: number, active: number, inactive: number, banned: number, authors: number }>}
  */

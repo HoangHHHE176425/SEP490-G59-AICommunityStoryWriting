@@ -177,6 +177,9 @@ function contentOnlyForChapter(raw) {
     return s.replace(/\n{3,}/g, '\n\n').trim();
 }
 
+const AI_REQUIRES_CHAPTER1_PUBLISHED =
+    'Chương 1 phải được xuất bản (công khai) trước khi dùng AI gợi ý hoặc AI gợi ý chương.';
+
 export function ChapterEditorPage({ story, chapter, isCreateMode = false, sourceChapterForVersion, editingVersion, readOnly = false, onSave, onNavigateAfterSave, onCancel }) {
     const { showToast, ToastContainer } = useToast();
     const storyId = story?.id ?? story?.Id;
@@ -259,6 +262,8 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         prevSequentialOk: true,
         selfHasPendingVersion: false,
     });
+    /** Chương có orderIndex 0 phải PUBLISHED mới cho gọi AI gợi ý / đồng sáng tác. */
+    const [firstChapterPublishedForAi, setFirstChapterPublishedForAi] = useState({ loaded: false, ok: false });
 
     const [showSettings, setShowSettings] = useState(false);
     const [editorSettings, setEditorSettings] = useState({
@@ -511,12 +516,17 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         if (!storyId) {
             setExistingChapterNumbers(new Set());
             setExistingChapterTitles(new Set());
+            setFirstChapterPublishedForAi({ loaded: false, ok: false });
             return;
         }
+        setFirstChapterPublishedForAi({ loaded: false, ok: false });
         getChapters({ storyId, page: 1, pageSize: 500 })
             .then((res) => {
                 const items = res?.items ?? res?.Items ?? [];
                 const arr = Array.isArray(items) ? items : [];
+                const ch1 = arr.find((c) => Number(c.orderIndex ?? c.OrderIndex ?? 0) === 0);
+                const ch1Pub = ch1 && String(ch1.status ?? ch1.Status ?? '').toLowerCase() === 'published';
+                setFirstChapterPublishedForAi({ loaded: true, ok: Boolean(ch1Pub) });
                 const numbers = new Set(arr.map((c) => Number((c.orderIndex ?? c.OrderIndex ?? 0) + 1)));
                 const currentChapterId = chapter?.id ?? chapter?.Id ?? null;
                 const titles = new Set(
@@ -537,8 +547,9 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             .catch(() => {
                 setExistingChapterNumbers(new Set());
                 setExistingChapterTitles(new Set());
+                setFirstChapterPublishedForAi({ loaded: true, ok: false });
             });
-    }, [storyId, isNewChapter, sourceChapterForVersion, chapter?.id, chapter?.Id]);
+    }, [storyId, isNewChapter, sourceChapterForVersion, chapter?.id, chapter?.Id, chapter?.status, chapter?.Status]);
 
     // Reload chapter data when chapter prop changes (chỉnh sửa chương). Khi chapter=null mà đang ở chế độ version (sourceChapterForVersion) thì không xóa form.
     useEffect(() => {
@@ -581,10 +592,32 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         { name: 'Be', value: '#f5f5dc' },
     ];
 
+    const canUseStoryAiFeatures = Boolean(storyId && firstChapterPublishedForAi.loaded && firstChapterPublishedForAi.ok);
+    const storyAiDisabledTooltip = !canUseStoryAiFeatures && storyId
+        ? (!firstChapterPublishedForAi.loaded
+            ? 'Đang kiểm tra điều kiện chương 1...'
+            : AI_REQUIRES_CHAPTER1_PUBLISHED)
+        : undefined;
+    const storyAiGateBanner =
+        !readOnly && storyId && !canUseStoryAiFeatures
+            ? (!firstChapterPublishedForAi.loaded
+                ? 'Đang kiểm tra điều kiện chương 1...'
+                : AI_REQUIRES_CHAPTER1_PUBLISHED)
+            : null;
+
     const runSuggestIdeas = async () => {
         const storyId = story?.id ?? story?.Id;
         if (!storyId) {
             showToast('Không xác định được truyện. Vui lòng thử lại.', 'error');
+            return;
+        }
+        if (!canUseStoryAiFeatures) {
+            showToast(
+                !firstChapterPublishedForAi.loaded
+                    ? 'Đang kiểm tra điều kiện chương 1...'
+                    : AI_REQUIRES_CHAPTER1_PUBLISHED,
+                'info',
+            );
             return;
         }
 
@@ -664,6 +697,15 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 showToast('Không xác định được truyện. Vui lòng thử lại.', 'error');
                 return;
             }
+            if (!canUseStoryAiFeatures) {
+                showToast(
+                    !firstChapterPublishedForAi.loaded
+                        ? 'Đang kiểm tra điều kiện chương 1...'
+                        : AI_REQUIRES_CHAPTER1_PUBLISHED,
+                    'info',
+                );
+                return;
+            }
             setUseCoCreatePrompt(false);
             setCoCreateIdea('');
             setCoCreateResult(null);
@@ -680,6 +722,15 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     const handleCoCreateSubmit = async () => {
         const storyId = story?.id ?? story?.Id;
         if (!storyId) return;
+        if (!canUseStoryAiFeatures) {
+            showToast(
+                !firstChapterPublishedForAi.loaded
+                    ? 'Đang kiểm tra điều kiện chương 1...'
+                    : AI_REQUIRES_CHAPTER1_PUBLISHED,
+                'info',
+            );
+            return;
+        }
         const idea = useCoCreatePrompt ? (coCreateIdea || '').trim() : '';
         setCoCreateContextWarning(null);
         setCoCreateLoading(true);
@@ -2425,7 +2476,13 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         </>
                                     ) : (
                                         <>
-                                            <button type="button" onClick={() => handleAISuggestion('paragraph')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleAISuggestion('paragraph')}
+                                                disabled={!canUseStoryAiFeatures}
+                                                title={storyAiDisabledTooltip}
+                                                className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-primary/10"
+                                            >
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
                                                 AI gợi ý{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                             </button>
@@ -2441,7 +2498,13 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
                                                 Xem lại gợi ý gần nhất
                                             </button>
-                                            <button type="button" onClick={() => handleAISuggestion('chapter')} className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all">
+                                            <button
+                                                type="button"
+                                                onClick={() => handleAISuggestion('chapter')}
+                                                disabled={!canUseStoryAiFeatures}
+                                                title={storyAiDisabledTooltip}
+                                                className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-primary/10"
+                                            >
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
                                                 AI gợi ý chương{aiUsageLimit
                                                     ? (aiUsageLimit.coCreateAvailable
@@ -2480,6 +2543,23 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                     </button>
                                 )}
                             </div>
+                            {storyAiGateBanner ? (
+                                <div
+                                    role="status"
+                                    style={{
+                                        marginTop: '0.5rem',
+                                        padding: '0.75rem 1rem',
+                                        backgroundColor: '#fffbeb',
+                                        border: '1px solid #fde68a',
+                                        borderRadius: '8px',
+                                        fontSize: '0.8125rem',
+                                        color: '#92400e',
+                                        lineHeight: 1.5,
+                                    }}
+                                >
+                                    {storyAiGateBanner}
+                                </div>
+                            ) : null}
                             {readOnly && (
                                 <div style={{ padding: '0.75rem 1rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.8125rem', color: '#64748b' }}>
                                     Cỡ chữ: {editorSettings.fontSize}px · Font: {fontFamilies.find(f => f.value === editorSettings.fontFamily)?.name ?? editorSettings.fontFamily} · Nền: {backgroundColors.find(b => b.value === editorSettings.backgroundColor)?.name ?? editorSettings.backgroundColor}

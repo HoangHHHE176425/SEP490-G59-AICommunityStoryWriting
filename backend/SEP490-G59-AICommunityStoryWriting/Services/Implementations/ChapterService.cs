@@ -619,6 +619,22 @@ namespace Services.Implementations
             if (statusUpper != "DRAFT")
                 throw new InvalidOperationException("Chỉ được xóa chương khi ở trạng thái Bản nháp. Chương hiện tại: " + (chapter.status ?? "—"));
 
+            if (chapter.story_id.HasValue)
+            {
+                var storyChapters = _chapterRepository.GetByStoryId(chapter.story_id.Value).ToList();
+                if (storyChapters.Count > 0)
+                {
+                    var maxOrder = storyChapters.Max(c => c.order_index);
+                    if (chapter.order_index != maxOrder)
+                        throw new InvalidOperationException(
+                            "Chỉ được xóa chương theo thứ tự từ cuối truyện về đầu (chương "
+                            + (maxOrder + 1)
+                            + " trước), để không đứt mạch truyện. Hiện chỉ có thể xóa chương "
+                            + (maxOrder + 1)
+                            + ".");
+                }
+            }
+
             var versionCount = _versionRepository.GetByChapterId(id).Count();
             if (versionCount > 0 && !deleteIncludingVersions)
                 ThrowRequiresVersionsDeleteConfirmation(versionCount);

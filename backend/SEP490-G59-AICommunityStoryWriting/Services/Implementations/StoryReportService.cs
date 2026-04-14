@@ -59,8 +59,8 @@ public class StoryReportService : IStoryReportService
         if (!StoryReportReasonCatalog.TryGet(request.ReasonCode, out _))
             throw new ArgumentException("Invalid reason code.");
 
-        if (request.Description != null && request.Description.Length > 200)
-            throw new ArgumentException("Ký tự quá dài: mô tả báo cáo tối đa 200 ký tự.");
+        UserReportDescriptionRules.ValidateDescription(request.Description);
+        var descriptionTrimmed = (request.Description ?? "").Trim();
 
         if (reporterId == Guid.Empty || !_userLookup.Exists(reporterId))
             throw new InvalidOperationException("USER không tồn tại.");
@@ -84,10 +84,10 @@ public class StoryReportService : IStoryReportService
             storyId,
             reporterId,
             code,
-            request.Description);
+            descriptionTrimmed);
         // Mỗi người báo cáo mới (1 lần / truyện / user) = 1 thông báo cho tác giả; trùng trả về Guid.Empty.
         if (id != Guid.Empty)
-            _ = NotifyStoryAuthorReportedAsync(story, reporterId, request.ReasonCode, request.Description);
+            _ = NotifyStoryAuthorReportedAsync(story, reporterId, request.ReasonCode, descriptionTrimmed);
         return Task.FromResult(id);
     }
 
@@ -1132,7 +1132,12 @@ public class StoryReportService : IStoryReportService
                 dto.AdminNote ?? row.message, "ADMIN_APPROVE_COMPLIANCE_REQUEST");
             ComplianceAdminActionRequestDAO.MarkResolved(requestId, adminId,
                 ComplianceAdminActionRequestDAO.StatusApproved, dto.AdminNote, "BAN_USER");
-            await TrySendAccountBannedByAdminApprovalEmailAsync(row.target_user_id, story.title);
+            await TrySendAccountBannedByAdminApprovalEmailAsync(
+                row.target_user_id,
+                story.title,
+                story.summary,
+                row.message,
+                row.story_id);
             return;
         }
 
@@ -1158,7 +1163,12 @@ public class StoryReportService : IStoryReportService
     }
 
     /// <summary>Sau khi admin duyệt đơn BAN_USER — gửi email best-effort, không làm fail nghiệp vụ cấm.</summary>
-    private async Task TrySendAccountBannedByAdminApprovalEmailAsync(Guid targetUserId, string? storyTitle)
+    private async Task TrySendAccountBannedByAdminApprovalEmailAsync(
+        Guid targetUserId,
+        string? storyTitle,
+        string? storySummary,
+        string? complianceMessage,
+        Guid storyId)
     {
         if (_emailService == null) return;
         try
@@ -1166,16 +1176,22 @@ public class StoryReportService : IStoryReportService
             var to = UserDAO.GetUserEmail(targetUserId);
             if (string.IsNullOrWhiteSpace(to)) return;
 
-            var safeTitle = string.IsNullOrWhiteSpace(storyTitle)
-                ? "truyện liên quan"
-                : WebUtility.HtmlEncode(storyTitle.Trim());
+            var isCommentFlow = IsCommentThreadComplianceAdminRequest(complianceMessage);
+            var relatedContextBlock = BuildBanEmailRelatedContextHtml(isCommentFlow, storyTitle, storySummary, complianceMessage);
+
+            var verifiedLines = LoadComplianceVerifiedUserReportLines(storyId, complianceMessage);
+            var verifiedBlock = BuildVerifiedUserReportsViolationHtml(verifiedLines, isCommentFlow);
 
             var body =
                 "<p>Xin chào,</p>" +
-                "<p>Quản trị viên đã <b>phê duyệt</b> yêu cầu xử lý vi phạm từ bộ phận tuân thủ; " +
-                "<b>tài khoản của bạn đã bị cấm</b> sử dụng nền tảng AICommunityStoryWriting.</p>" +
-                $"<p>Nội dung liên quan: truyện «{safeTitle}».</p>" +
-                "<p>Nếu bạn cho rằng đây là nhầm lẫn, vui lòng liên hệ bộ phận hỗ trợ qua kênh chính thức của nền tảng.</p>" +
+                "<p><b>Tài khoản của bạn đã bị cấm</b> sử dụng nền tảng AICommunityStoryWriting.</p>" +
+                relatedContextBlock +
+                verifiedBlock +
+                "<p>Nếu bạn cho rằng đây là nhầm lẫn, vui lòng liên hệ hỗ trợ:</p>" +
+                "<ul style=\"margin-top:0\">" +
+                "<li>Email: <a href=\"mailto:aicommunitystorywriting@gmail.com\">aicommunitystorywriting@gmail.com</a></li>" +
+                "<li>Điện thoại: <a href=\"tel:+84969908341\">0969908341</a></li>" +
+                "</ul>" +
                 "<p>Trân trọng,<br/>AICommunityStoryWriting</p>";
 
             await _emailService.SendEmailAsync(to.Trim(), "Thông báo: tài khoản đã bị cấm", body);
@@ -1184,6 +1200,129 @@ public class StoryReportService : IStoryReportService
         {
             // best effort
         }
+    }
+
+    private static bool IsCommentThreadComplianceAdminRequest(string? complianceRequestMessage) =>
+        !string.IsNullOrEmpty(complianceRequestMessage)
+        && complianceRequestMessage.Contains(ComplianceAdminActionRequestDAO.CommentReportMessageTagPrefix, StringComparison.Ordinal);
+
+    private const int BanEmailMaxBodyChars = 4000;
+
+    /// <summary>Luồng comment: nội dung bình luận bị báo cáo. Luồng truyện: tiêu đề + tóm tắt.</summary>
+    private static string BuildBanEmailRelatedContextHtml(
+        bool commentFlow,
+        string? storyTitle,
+        string? storySummary,
+        string? complianceMessage)
+    {
+        var safeTitle = string.IsNullOrWhiteSpace(storyTitle)
+            ? "truyện liên quan"
+            : WebUtility.HtmlEncode(storyTitle.Trim());
+
+        if (commentFlow)
+        {
+            var ids = ComplianceAdminActionRequestDAO.ParseCommentIdsFromMessage(complianceMessage);
+            if (ids.Count == 0)
+                return BuildBanEmailStoryContextHtml(safeTitle, storySummary);
+
+            var sb = new System.Text.StringBuilder();
+            sb.Append("<p>Vi phạm liên quan đến <b>bình luận</b> của bạn");
+            sb.Append($" (trong truyện «{safeTitle}»):</p>");
+            foreach (var cid in ids)
+            {
+                var c = CommentDAO.GetById(cid);
+                var raw = c?.content?.Trim();
+                if (string.IsNullOrEmpty(raw))
+                {
+                    sb.Append("<p><i>Nội dung bình luận không còn khả dụng (đã xóa hoặc ẩn).</i></p>");
+                    continue;
+                }
+
+                var clipped = raw.Length > BanEmailMaxBodyChars ? raw[..BanEmailMaxBodyChars] + "…" : raw;
+                sb.Append(
+                    "<blockquote style=\"margin:8px 0;padding:10px 14px;border-left:4px solid #ccc;background:#f9f9f9;\">");
+                sb.Append(HtmlEncodeWithLineBreaks(clipped));
+                sb.Append("</blockquote>");
+            }
+
+            return sb.ToString();
+        }
+
+        return BuildBanEmailStoryContextHtml(safeTitle, storySummary);
+    }
+
+    private static string BuildBanEmailStoryContextHtml(string safeTitleHtmlEncoded, string? storySummary)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<p>Vi phạm liên quan đến <b>truyện</b> của bạn:</p>");
+        sb.Append("<p><b>Tiêu đề:</b> «").Append(safeTitleHtmlEncoded).Append("»</p>");
+        var sum = (storySummary ?? "").Trim();
+        if (sum.Length > 0)
+        {
+            var clipped = sum.Length > BanEmailMaxBodyChars ? sum[..BanEmailMaxBodyChars] + "…" : sum;
+            sb.Append("<p><b>Giới thiệu / tóm tắt truyện:</b><br/>");
+            sb.Append(HtmlEncodeWithLineBreaks(clipped));
+            sb.Append("</p>");
+        }
+
+        return sb.ToString();
+    }
+
+    private static List<ComplianceVerifiedUserReportLine> LoadComplianceVerifiedUserReportLines(
+        Guid storyId,
+        string? complianceRequestMessage)
+    {
+        if (IsCommentThreadComplianceAdminRequest(complianceRequestMessage))
+        {
+            var commentIds = ComplianceAdminActionRequestDAO.ParseCommentIdsFromMessage(complianceRequestMessage);
+            return VerifiedReporterReasonDAO.ListComplianceVerifiedReportLinesForCommentThreads(commentIds);
+        }
+
+        return VerifiedReporterReasonDAO.ListComplianceVerifiedReportLinesForStory(storyId);
+    }
+
+    /// <summary>Mỗi mã lý do đã xác minh chỉ một dòng: nhãn tiếng Việt từ catalog, không mã CODE, không mô tả từng báo cáo.</summary>
+    private static string BuildVerifiedUserReportsViolationHtml(
+        IReadOnlyList<ComplianceVerifiedUserReportLine> lines,
+        bool useCommentCatalog)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<p><b>Lý do vi phạm</b></p>");
+
+        if (lines == null || lines.Count == 0)
+        {
+            sb.Append("<p><i>Không có báo cáo nào được đánh dấu xác minh trong hệ thống; nếu cần làm rõ, vui lòng liên hệ hỗ trợ bên dưới.</i></p>");
+            return sb.ToString();
+        }
+
+        // Mỗi mã lý do chỉ hiển thị một lần; chỉ nhãn tiếng Việt, không mã CODE và không mô tả kèm báo cáo.
+        var seenCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var labelsInOrder = new List<string>();
+        foreach (var line in lines)
+        {
+            var code = line.ReasonCode;
+            if (!seenCodes.Add(code)) continue;
+            string labelVi;
+            if (useCommentCatalog)
+                labelVi = CommentReportReasonCatalog.TryGet(code, out var cd) ? cd.LabelVi : code;
+            else
+                labelVi = StoryReportReasonCatalog.TryGet(code, out var sd) ? sd.LabelVi : code;
+            labelsInOrder.Add(labelVi);
+        }
+
+        sb.Append("<ul style=\"margin-top:0;padding-left:20px\">");
+        foreach (var labelVi in labelsInOrder)
+        {
+            sb.Append("<li>").Append(WebUtility.HtmlEncode(labelVi)).Append("</li>");
+        }
+        sb.Append("</ul>");
+        return sb.ToString();
+    }
+
+    private static string HtmlEncodeWithLineBreaks(string text)
+    {
+        var enc = WebUtility.HtmlEncode(text);
+        return enc.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\n", "<br/>", StringComparison.Ordinal);
     }
 
     private static ComplianceAdminActionRequestListItemDto MapComplianceAdminActionRequest(compliance_admin_action_requests x)

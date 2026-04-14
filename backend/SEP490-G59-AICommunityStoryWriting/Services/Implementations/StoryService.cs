@@ -189,14 +189,14 @@ namespace Services.Implementations
                 var ps = query.StoryProgressStatus.Trim().ToUpperInvariant();
                 storiesQuery = storiesQuery.Where(s =>
                     s.story_progress_status != null &&
-                    string.Equals(s.story_progress_status.Trim(), ps, StringComparison.OrdinalIgnoreCase));
+                    s.story_progress_status.Trim().ToUpper() == ps);
             }
 
             if (!string.IsNullOrWhiteSpace(query.AgeRating))
             {
                 var ar = query.AgeRating.Trim().ToUpperInvariant();
                 storiesQuery = storiesQuery.Where(s =>
-                    string.Equals((s.age_rating ?? "ALL").Trim(), ar, StringComparison.OrdinalIgnoreCase));
+                    (s.age_rating ?? "ALL").Trim().ToUpper() == ar);
             }
 
             if (query.MinTotalChapters.HasValue)
@@ -675,11 +675,7 @@ namespace Services.Implementations
             return new CommunityStatsDto
             {
                 PublishedStoriesCount = publishedVisibleStories.Count(),
-                AuthorsCount = publishedVisibleStories
-                    .Where(s => s.author_id.HasValue)
-                    .Select(s => s.author_id!.Value)
-                    .Distinct()
-                    .Count(),
+                AuthorsCount = _userLookup.CountAuthorsExcludingBanned(),
                 TotalViews = publishedVisibleStories.Sum(s => (long?)(s.total_views ?? 0)) ?? 0
             };
         }

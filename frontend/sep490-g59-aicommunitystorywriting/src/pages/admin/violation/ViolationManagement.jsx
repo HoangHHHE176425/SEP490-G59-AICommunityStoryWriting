@@ -302,6 +302,7 @@ function normalizeStoryQueueItem(x) {
         hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
         authorAccountStatus: pick(x, 'authorAccountStatus', 'AuthorAccountStatus') ?? null,
         authorWritingSuspendedUntilUtc: pick(x, 'authorWritingSuspendedUntilUtc', 'AuthorWritingSuspendedUntilUtc') ?? null,
+        oldestReportAtUtc: pick(x, 'oldestReportAtUtc', 'OldestReportAtUtc') ?? null,
     };
 }
 
@@ -355,6 +356,7 @@ function groupStoryRows(rawRows) {
             hasApprovedAdminBanRequest: false,
             authorAccountStatus: null,
             authorWritingSuspendedUntilUtc: null,
+            oldestReportAtUtc: null,
         };
         prev.reportCount += 1;
         prev.priorityScore = Math.max(prev.priorityScore, row.severityScore || 0);
@@ -376,6 +378,17 @@ function groupStoryRows(rawRows) {
             const tPrev = prev.authorWritingSuspendedUntilUtc ? new Date(prev.authorWritingSuspendedUntilUtc).getTime() : 0;
             const tRow = row.authorWritingSuspendedUntilUtc ? new Date(row.authorWritingSuspendedUntilUtc).getTime() : 0;
             if (tRow > tPrev) prev.authorWritingSuspendedUntilUtc = row.authorWritingSuspendedUntilUtc;
+        }
+        if (row.createdAtUtc) {
+            const tRow = new Date(row.createdAtUtc).getTime();
+            if (Number.isFinite(tRow)) {
+                if (!prev.oldestReportAtUtc) {
+                    prev.oldestReportAtUtc = row.createdAtUtc;
+                } else {
+                    const tPrev = new Date(prev.oldestReportAtUtc).getTime();
+                    if (Number.isFinite(tPrev) && tRow < tPrev) prev.oldestReportAtUtc = row.createdAtUtc;
+                }
+            }
         }
         m.set(storyId, prev);
     }
@@ -414,6 +427,8 @@ function normalizeCommentQueueItem(x) {
         storyComplianceHidden: coerceBool(pick(x, 'storyComplianceHidden', 'StoryComplianceHidden')),
         storyAuthorWritingSuspendedUntilUtc: pick(x, 'storyAuthorWritingSuspendedUntilUtc', 'StoryAuthorWritingSuspendedUntilUtc') ?? null,
         hasApprovedAdminBanRequest: coerceBool(pick(x, 'hasApprovedAdminBanRequest', 'HasApprovedAdminBanRequest')),
+        /** BE gán = thời điểm báo cáo sớm nhất trong nhóm bình luận. */
+        createdAtUtc: pick(x, 'createdAtUtc', 'CreatedAtUtc') ?? null,
     };
 }
 
