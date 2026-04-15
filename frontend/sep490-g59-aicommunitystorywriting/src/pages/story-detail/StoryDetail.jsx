@@ -234,6 +234,7 @@ export function StoryDetail() {
                         lastReadChapterTitle: storyRes?.lastReadChapterTitle ?? storyRes?.LastReadChapterTitle ?? null,
                         lastReadAt: (storyRes?.lastReadAt ?? storyRes?.LastReadAt) ? formatTimeAgo(storyRes?.lastReadAt ?? storyRes?.LastReadAt) : null,
                         categoryIds,
+                        commentsDisabled: !!(storyRes?.commentsDisabled ?? storyRes?.CommentsDisabled),
                     };
                     const newCount = 3; // số chương mới nhất được gắn nhãn MỚI
                     setChapters(rawItems.map((ch, idx) => {
@@ -457,6 +458,10 @@ export function StoryDetail() {
 
     const handleAddComment = async (content, parentId) => {
         if (!storyId) return;
+        if (story?.commentsDisabled) {
+            setCommentError('Truyện này đang trong quá trình xử lý vi phạm nên hiện không thể bình luận.');
+            return;
+        }
         setCommentError(null);
         try {
             await addStoryComment(storyId, { content: content.trim(), parentId: parentId || undefined });
@@ -737,6 +742,7 @@ export function StoryDetail() {
                                         storyId={storyId}
                                         comments={comments}
                                         isLoggedIn={!!user?.id}
+                                        commentsDisabled={!!story?.commentsDisabled}
                                         commentError={commentError}
                                         commentsLoading={commentsLoading}
                                         onSubmitComment={handleAddComment}
