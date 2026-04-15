@@ -21,6 +21,8 @@ namespace Repositories.Interfaces
         Task<auth_tokens?> GetRefreshToken(string refreshToken);
         Task DeleteRefreshToken(string refreshToken);
         Task DeleteRefreshTokensByUserId(Guid userId);
+        Task<int> MarkAuthorsMustResignPolicyAsync(Guid activeAuthorPolicyId);
+        Task<int> ClearAuthorMustResignPolicyFlagAsync();
 
         // Admin
         Task<(IEnumerable<users> Items, int TotalCount)> GetUsersAsync(AdminUserQuery query);

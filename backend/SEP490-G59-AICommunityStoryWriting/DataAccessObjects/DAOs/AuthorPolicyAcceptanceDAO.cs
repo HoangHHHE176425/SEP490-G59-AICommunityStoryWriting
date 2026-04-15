@@ -26,6 +26,12 @@ namespace DataAccessObjects.DAOs
             await context.SaveChangesAsync();
         }
 
+        public async Task UpdateAcceptanceAsync(StoryPlatformDbContext context, author_policy_acceptances row)
+        {
+            context.author_policy_acceptances.Update(row);
+            await context.SaveChangesAsync();
+        }
+
         public async Task<int> CountByPolicyAsync(StoryPlatformDbContext context, Guid policyId)
         {
             return await context.author_policy_acceptances.CountAsync(x => x.policy_id == policyId);

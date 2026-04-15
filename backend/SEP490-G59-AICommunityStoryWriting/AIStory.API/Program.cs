@@ -1,4 +1,5 @@
 using AIStory.API.BackgroundServices;
+using AIStory.API.Authorization;
 using AIStory.API.Configurations;
 using AIStory.API.Hubs;
 using AIStory.API.Services;
@@ -7,6 +8,7 @@ using AIStory.Services.Implementations;
 using BusinessObjects;
 using BusinessObjects.Entities;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.SignalR;
@@ -55,7 +57,7 @@ namespace AIStory.API
             // Đăng ký DbContext, để OnConfiguring trong StoryPlatformDbContext tự cấu hình connection string.
             builder.Services.AddDbContext<StoryPlatformDbContext>();
 
-            var corsAllowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+            var corsExtraOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
                 ?? Array.Empty<string>();
             var corsExtraSet = new HashSet<string>(corsExtraOrigins, StringComparer.OrdinalIgnoreCase);
             var corsAllowLocalhost = builder.Configuration.GetValue("Cors:AllowLocalhost", builder.Environment.IsDevelopment());
@@ -68,7 +70,7 @@ namespace AIStory.API
                     policy.SetIsOriginAllowed(origin =>
                     {
                         if (string.IsNullOrWhiteSpace(origin)) return false;
-                        if (corsAllowedSet.Contains(origin)) return true;
+                        if (corsExtraSet.Contains(origin)) return true;
                         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
 
                         var isLocalhost = corsAllowLocalhost &&
@@ -126,6 +128,7 @@ namespace AIStory.API
             builder.Services.AddSingleton<IUserIdProvider, SignalRUserIdProvider>();
             builder.Services.AddScoped<IModerationHubNotifier, ModerationHubNotifier>();
             builder.Services.AddScoped<INotificationHubNotifier, NotificationHubNotifier>();
+            builder.Services.AddScoped<IAuthorizationHandler, AuthorMustResignPolicyHandler>();
 
             // AI: Story Memory Engine (RAG khi đã index) + các agent gợi ý/đồng sáng tác
             builder.Services.AddScoped<IStoryContextBuilder, StoryContextBuilder>();
@@ -203,7 +206,13 @@ namespace AIStory.API
 
                 options.AddPolicy("AuthorOnly", policy =>
                     policy.RequireAuthenticatedUser()
-                          .RequireRole("AUTHOR", "ADMIN"));
+                          .RequireRole("AUTHOR", "ADMIN")
+                          .AddRequirements(new AuthorMustResignPolicyRequirement()));
+
+                options.AddPolicy("AuthorStrict", policy =>
+                    policy.RequireAuthenticatedUser()
+                          .RequireRole("AUTHOR")
+                          .AddRequirements(new AuthorMustResignPolicyRequirement()));
 
                 options.AddPolicy("AdminOnly", policy =>
                     policy.RequireAuthenticatedUser()
@@ -361,7 +370,7 @@ namespace AIStory.API
                             user_id = user.id, // FK chuẩn theo DB
                             nickname = nickname,
                             bio = bio,
-                            updated_at = DateTime.Now   
+                            updated_at = DateTime.Now
                         });
                     }
                 }

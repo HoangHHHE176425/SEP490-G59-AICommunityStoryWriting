@@ -49,7 +49,7 @@ namespace AIStory.API.Controllers
     /// <summary>API AI: gợi ý chương tiếp theo, đồng sáng tác (dàn ý + viết + guardrail).</summary>
     [ApiController]
     [Route("api/ai")]
-    [Authorize(Roles = "AUTHOR,ADMIN")]
+    [Authorize(Policy = "AuthorOnly")]
     public class AIController : ControllerBase
     {
         private readonly IAINextChapterService _aiNextChapterService;
