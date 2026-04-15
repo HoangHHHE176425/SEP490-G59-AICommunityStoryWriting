@@ -6,6 +6,7 @@ export function ChapterComments({
     commentsLoading = false,
     commentError = null,
     isLoggedIn = false,
+    commentsDisabled = false,
     onSubmitComment,
     onLikeComment,
     onReportComment,
@@ -23,6 +24,7 @@ export function ChapterComments({
                     commentsLoading={commentsLoading}
                     commentError={commentError}
                     isLoggedIn={isLoggedIn}
+                    commentsDisabled={commentsDisabled}
                     onSubmitComment={onSubmitComment}
                     onLikeComment={onLikeComment}
                     onReportComment={onReportComment}

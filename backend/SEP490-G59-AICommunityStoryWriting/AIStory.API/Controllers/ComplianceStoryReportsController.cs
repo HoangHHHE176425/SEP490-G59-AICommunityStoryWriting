@@ -79,6 +79,7 @@ public class ComplianceStoryReportsController : ControllerBase
             {
                 Source = SrcReportResolution,
                 RowId = r.id,
+                ReportId = r.id,
                 TargetType = r.target_type,
                 TargetId = r.target_id,
                 Status = r.status,
@@ -125,6 +126,16 @@ public class ComplianceStoryReportsController : ControllerBase
             {
                 Source = SrcViolationAction,
                 RowId = v.id,
+                ReportId = db.reports.AsNoTracking()
+                    .Where(r =>
+                        r.compliance_resolved_by == uid.Value
+                        && r.resolved_at != null
+                        && r.target_type == v.target_type
+                        && r.target_id == (v.target_id ?? Guid.Empty)
+                        && r.resolved_at <= v.created_at)
+                    .OrderByDescending(r => r.resolved_at)
+                    .Select(r => (Guid?)r.id)
+                    .FirstOrDefault(),
                 TargetType = v.target_type,
                 TargetId = v.target_id,
                 Status = "DONE",
