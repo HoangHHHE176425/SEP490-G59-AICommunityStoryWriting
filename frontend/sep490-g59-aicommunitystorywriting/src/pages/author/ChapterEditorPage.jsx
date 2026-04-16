@@ -2426,7 +2426,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                 <ul style={{ margin: '0.25rem 0 0 1rem', paddingLeft: 0 }}>
                                                     <li>Người đọc cần có đủ xu để mở khóa chương</li>
                                                     <li>Sau khi mua, chương sẽ được lưu vĩnh viễn trong tài khoản</li>
-                                                    <li>Bạn sẽ nhận 70% số xu, nền tảng giữ lại 30%</li>
+                                                    <li>Bạn sẽ nhận 30% số xu, nền tảng giữ lại 70%</li>
                                                 </ul>
                                             </div>
                                         </div>

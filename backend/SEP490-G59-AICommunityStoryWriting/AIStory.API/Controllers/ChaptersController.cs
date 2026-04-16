@@ -250,7 +250,7 @@ namespace AIStory.API.Controllers
             }
         }
 
-        /// <summary>Unlock chapter trả phí: trừ coin người mua + chia 30% platform / 70% author.</summary>
+        /// <summary>Unlock chapter trả phí: trừ coin người mua + chia 70% platform / 30% author.</summary>
         [HttpPost("{id:guid}/unlock")]
         [Authorize]
         public async Task<IActionResult> UnlockPaidChapter(Guid id, CancellationToken cancellationToken)
@@ -282,8 +282,8 @@ namespace AIStory.API.Controllers
             if (isAuthor)
                 return Ok(new { unlocked = true, message = "Tác giả có quyền đọc miễn phí." });
 
-            // Platform fee: 30% system, 70% author.
-            var platformFee = (int)Math.Floor(coinPrice * 0.30m);
+            // Platform fee: 70% system, 30% author.
+            var platformFee = (int)Math.Floor(coinPrice * 0.70m);
             platformFee = Math.Clamp(platformFee, 0, coinPrice);
             var authorNet = coinPrice - platformFee;
 
@@ -388,7 +388,7 @@ namespace AIStory.API.Controllers
                         escrow_status = "RELEASED",
                         released_at = DateTime.UtcNow,
                         // DB type is decimal(5,2); store platform fee as percent with 2 decimals.
-                        platform_fee_ratio = 30.00m,
+                        platform_fee_ratio = 70.00m,
                         created_at = DateTime.UtcNow
                     };
                     db.purchases.Add(purchase);

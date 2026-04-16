@@ -132,7 +132,7 @@ public class UT08_FunctionDonateAuthor
     }
 
     [Fact]
-    public async Task UTCID06_Donate_Succeeds_WhenInputValid_AndSplitsThirtySeventy()
+    public async Task UTCID06_Donate_Succeeds_WhenInputValid_AndSplitsSeventyThirty()
     {
         LogUtcContext("UTCID06",
             "Happy path: donate thành công, trừ coin sender, cộng income receiver, cộng fee vào platform.",
@@ -159,11 +159,11 @@ public class UT08_FunctionDonateAuthor
         var notification = scope.DbContext.notifications.Single(x => x.user_id == receiver.id);
 
         Assert.Equal(400, savedSenderWallet.balance_coin);
-        Assert.Equal(70m, savedReceiverWallet.income_balance);
-        Assert.Equal(30, platformWallet.balance_coin);
+        Assert.Equal(30m, savedReceiverWallet.income_balance);
+        Assert.Equal(70, platformWallet.balance_coin);
         Assert.Equal(100, donation.amount);
-        Assert.Equal(70m, incomeLog.net_amount);
-        Assert.Equal(30m, incomeLog.platform_fee);
+        Assert.Equal(30m, incomeLog.net_amount);
+        Assert.Equal(70m, incomeLog.platform_fee);
         Assert.Contains("Reader One", notification.content);
         scope.NotificationHubNotifierMock.Verify(x => x.NotifyUserAsync(receiver.id, It.Is<NotificationDto>(n =>
             n.Type == "DONATION" &&
@@ -219,7 +219,7 @@ public class UT08_FunctionDonateAuthor
         var savedSenderWallet = scope.DbContext.wallets.Single(x => x.user_id == sender.id);
         var savedReceiverWallet = scope.DbContext.wallets.Single(x => x.user_id == receiver.id);
         Assert.Equal(150, savedSenderWallet.balance_coin);
-        Assert.Equal(35m, savedReceiverWallet.income_balance);
+        Assert.Equal(15m, savedReceiverWallet.income_balance);
         Assert.Equal(1, scope.DbContext.donations.Count());
         Assert.Equal(1, scope.DbContext.notifications.Count());
         LogActualReturn(result);

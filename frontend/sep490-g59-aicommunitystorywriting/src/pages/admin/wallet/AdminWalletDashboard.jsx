@@ -25,7 +25,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 // - GET /api/admin/wallet/top-authors, top-spenders
 // - GET /api/admin/wallet/transactions (phân trang, lọc)
 
-/** Tab lịch sử ví hệ thống: chỉ donate + mở khóa chương (phí nền tảng 30%). API: type=UNLOCK_AND_DONATE | UNLOCK | DONATE */
+/** Tab lịch sử ví hệ thống: chỉ donate + mở khóa chương (phí nền tảng 70%). API: type=UNLOCK_AND_DONATE | UNLOCK | DONATE */
 const LEDGER_EVENT_TYPES = [
     { value: 'UNLOCK_AND_DONATE', label: 'Tất cả (donate + mở khóa)' },
     { value: 'UNLOCK', label: 'Mở khóa chương' },
@@ -461,7 +461,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                             : '—'}
                                 </p>
                                 <p className="mt-1 text-xs text-slate-400">
-                                    Tổng phí nền tảng thu được (30%) quy đổi theo tỷ giá cố định.
+                                    Tổng phí nền tảng thu được (70%) quy đổi theo tỷ giá cố định.
                                 </p>
                             </div>
                         </div>
@@ -648,7 +648,7 @@ export function AdminWalletDashboard({ initialActiveTab } = {}) {
                                 <p className="text-sm font-semibold text-slate-900">Phạm vi bảng này</p>
                                 <p className="text-sm leading-relaxed text-slate-600">
                                     Chỉ <span className="font-semibold text-slate-800">ủng hộ (donate)</span> và{' '}
-                                    <span className="font-semibold text-slate-800">mở khóa chương</span> (phí nền tảng 30% / thu nhập tác giả).
+                                    <span className="font-semibold text-slate-800">mở khóa chương</span> (phí nền tảng 70% / thu nhập tác giả).
                                     Lịch <span className="font-medium text-slate-800">nạp coin / rút tiền</span> nằm ở khối{' '}
                                     <span className="rounded-md bg-white px-1.5 py-0.5 font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200">
                                         Lịch sử giao dịch (Nạp / Rút)
