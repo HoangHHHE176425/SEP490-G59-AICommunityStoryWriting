@@ -85,11 +85,8 @@ public class StoryMemoryEngine : IStoryMemoryEngine
             return string.Empty;
 
         var ragStatusSuggest = _ragService.GetRagStatus(storyId);
-        if (!ragStatusSuggest.EmbeddingConfigured)
-            throw new InvalidOperationException(
-                "Chưa cấu hình embedding: AI:EmbeddingBaseUrl, AI:EmbeddingModel và API key (AI:ApiKey hoặc AI:EmbeddingApiKey). Với OpenRouter: BaseUrl https://openrouter.ai/api/v1, model openai/text-embedding-3-small.");
-        if (!_ragService.IsRagAvailableForStory(storyId))
-            throw new InvalidOperationException("Truyện chưa được index RAG. Gọi POST /api/ai/index-rag (hoặc thử lại gợi ý) sau khi có chương PUBLISHED có nội dung.");
+        if (!ragStatusSuggest.EmbeddingConfigured || !_ragService.IsRagAvailableForStory(storyId))
+            return BuildPublishedChaptersFallbackBlock(storyId, story);
 
         int ragMaxChars = _configuration.GetValue("AI:CoCreateRagMaxChars", DefaultRagMaxChars);
         int ragTopK = _configuration.GetValue("AI:CoCreateRagTopK", DefaultRagTopK);
@@ -98,12 +95,57 @@ public class StoryMemoryEngine : IStoryMemoryEngine
         var query = ragQuery?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(query))
             query = story.summary ?? story.title ?? "";
-        var ragBlock = await _ragService.RetrieveContextAsync(storyId, query, maxChars: ragMaxChars, topK: ragTopK, cancellationToken);
+        string? ragBlock;
+        try
+        {
+            ragBlock = await _ragService.RetrieveContextAsync(storyId, query, maxChars: ragMaxChars, topK: ragTopK, cancellationToken);
+        }
+        catch
+        {
+            // Nếu provider embedding lỗi (vd OpenRouter không có provider sẵn), fallback về context chương đã xuất bản.
+            return BuildPublishedChaptersFallbackBlock(storyId, story);
+        }
 
         if (string.IsNullOrWhiteSpace(ragBlock))
-            throw new InvalidOperationException("Không lấy được ngữ cảnh từ RAG. Đảm bảo truyện đã có chương có nội dung và đã index RAG.");
+            return BuildPublishedChaptersFallbackBlock(storyId, story);
 
         var storyContextBlock = BuildRagStoryBlock(story, ragBlock);
+        var characterBlock = BuildCharacterMemoryBlock(storyId);
+        var eventBlock = BuildEventMemoryBlock(storyId);
+        var stateBlock = BuildStoryStateBlock(storyId);
+
+        var parts = new List<string> { storyContextBlock };
+        if (!string.IsNullOrWhiteSpace(characterBlock)) parts.Add(characterBlock);
+        if (!string.IsNullOrWhiteSpace(eventBlock)) parts.Add(eventBlock);
+        if (!string.IsNullOrWhiteSpace(stateBlock)) parts.Add(stateBlock);
+        return string.Join("\n\n", parts.Where(s => !string.IsNullOrWhiteSpace(s)));
+    }
+
+    private string BuildPublishedChaptersFallbackBlock(Guid storyId, stories story)
+    {
+        var published = _chapterRepository
+            .GetPublishedByStoryId(storyId)
+            .OrderBy(c => c.order_index)
+            .Where(c => !string.IsNullOrWhiteSpace(c.content))
+            .TakeLast(5)
+            .ToList();
+
+        var chapterBlocks = published.Select(c =>
+        {
+            var title = string.IsNullOrWhiteSpace(c.title) ? $"Chương {c.order_index}" : c.title;
+            var raw = c.content ?? string.Empty;
+            var snippet = raw.Length > 2200 ? raw[..2200] + "..." : raw;
+            return $"[Chương {c.order_index}: {title}]\n{snippet}";
+        });
+
+        var storyContextBlock = string.Join("\n\n", new[]
+        {
+            $"## Truyện: {story.title}",
+            string.IsNullOrWhiteSpace(story.summary) ? "" : $"Tóm tắt: {story.summary}",
+            "## Các đoạn gần nhất từ chương đã xuất bản (fallback, không dùng RAG)",
+            string.Join("\n\n", chapterBlocks)
+        }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
         var characterBlock = BuildCharacterMemoryBlock(storyId);
         var eventBlock = BuildEventMemoryBlock(storyId);
         var stateBlock = BuildStoryStateBlock(storyId);

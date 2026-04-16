@@ -121,11 +121,19 @@ public static class EmbeddingHelper
         var results = new List<float[]>(data.GetArrayLength());
         foreach (var item in data.EnumerateArray())
         {
-            var embedding = item.GetProperty("embedding");
+            if (!item.TryGetProperty("embedding", out var embedding) || embedding.ValueKind != JsonValueKind.Array)
+                continue;
             var vec = new List<float>();
             foreach (var e in embedding.EnumerateArray())
                 vec.Add((float)e.GetDouble());
-            results.Add(vec.ToArray());
+            if (vec.Count > 0)
+                results.Add(vec.ToArray());
+        }
+        if (results.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Embedding API không trả về vector hợp lệ trong trường 'data.embedding'. " +
+                $"BaseUrl={baseUrl}, Model={model}.");
         }
         return results;
     }

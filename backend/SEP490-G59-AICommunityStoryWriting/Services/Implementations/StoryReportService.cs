@@ -517,6 +517,7 @@ public class StoryReportService : IStoryReportService
     private static void MaybeCompleteComplianceLockWhenNoOpenReports(Guid storyId)
     {
         if (StoryReportDAO.CountOpenStoryReports(storyId) > 0) return;
+        StoryReportDAO.ClearContributorsIfNoOpenReports(storyId);
         ReviewAssignmentDAO.CompleteAssignment(ComplianceTargetType, storyId);
     }
 

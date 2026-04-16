@@ -131,7 +131,11 @@ public partial class StoryPlatformDbContext : DbContext
             var connectionString =
                 Environment.GetEnvironmentVariable("ConnectionStrings__StoryPlatformDb")
                 ?? Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+<<<<<<< HEAD
                 ?? "Server= QUANGMANH;uid=sa;password=123;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;";
+=======
+                ?? "Server= localhost,1433;uid=sa;password=admin;database=story_platform_v13;Encrypt=True;TrustServerCertificate=True;";
+>>>>>>> 4fd7888bd074c762a6fd1ee7cfbc65a9f0a21310
             optionsBuilder.UseSqlServer(
                 connectionString,
                 sqlServerOptions => sqlServerOptions.EnableRetryOnFailure(
