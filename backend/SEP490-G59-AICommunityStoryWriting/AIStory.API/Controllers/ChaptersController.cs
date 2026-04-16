@@ -511,6 +511,11 @@ namespace AIStory.API.Controllers
                 var story = StoryDAO.GetById(storyId);
                 if (story == null || !string.Equals(story.status, "PUBLISHED", StringComparison.OrdinalIgnoreCase))
                     return BadRequest(new { message = "Chỉ có thể comment chapter của truyện đã PUBLISHED." });
+                if (story.comments_disabled)
+                    return BadRequest(new
+                    {
+                        message = "Truyện này đang trong quá trình xử lý vi phạm nên hiện không thể bình luận."
+                    });
                 if (!UserActivityLogDAO.HasReadAnyChapterOfStory(userId.Value, storyId))
                     return BadRequest(new { message = "Bạn cần đọc ít nhất một chapter của truyện trước khi comment." });
 

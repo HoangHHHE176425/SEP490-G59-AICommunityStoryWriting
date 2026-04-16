@@ -714,6 +714,15 @@ function complianceHistoryMessageVi(item) {
     return item?.message || '—';
 }
 
+function complianceHistoryOrderCode(item) {
+    const targetType = String(item?.targetType ?? item?.TargetType ?? '').trim().toUpperCase();
+    const targetId = item?.targetId ?? item?.TargetId;
+    if ((targetType === 'STORY' || targetType === 'COMMENT') && targetId) return targetId;
+    const reportId = item?.reportId ?? item?.ReportId;
+    if (reportId) return reportId;
+    return item?.rowId ?? item?.RowId ?? item?.id ?? item?.Id ?? null;
+}
+
 function complianceAdminActionKindVi(k) {
     const u = String(k ?? '').trim().toUpperCase();
     if (u === 'BAN_USER') return 'Chặn tài khoản';
@@ -1075,7 +1084,7 @@ export default function ViolationManagement() {
                         || String(x.status ?? '').toLowerCase().includes(q)
                         || String(x.message ?? '').toLowerCase().includes(q)
                         || String(x.targetType ?? '').toLowerCase().includes(q)
-                        || String(x.rowId ?? x.reportId ?? x.id ?? '').toLowerCase().includes(q)
+                        || String(x.reportId ?? x.rowId ?? x.id ?? '').toLowerCase().includes(q)
                         || String(x.targetId ?? '').toLowerCase().includes(q));
                     const from = (historyPage - 1) * REPORT_PAGE_SIZE;
                     setRows(filtered.slice(from, from + REPORT_PAGE_SIZE));
@@ -2279,7 +2288,7 @@ export default function ViolationManagement() {
                             )}
                             {rows.map((r) => (
                                 <tr key={r.rowId || r.reportId || r.id} className="border-t border-[#c9f0d8] hover:bg-[#f7fcf9]">
-                                    <td style={td}><span className="text-xs text-slate-700 break-all">{r.rowId || r.reportId || r.id || '—'}</span></td>
+                                    <td style={td}><span className="text-xs text-slate-700 break-all">{complianceHistoryOrderCode(r) || '—'}</span></td>
                                     <td style={td}>{formatDate(r.createdAtUtc || r.resolvedAtUtc)}</td>
                                     <td style={td}>{complianceHistorySourceVi(r.source)}</td>
                                     <td style={td}>{complianceHistoryActionVi(r.action, r.source)}</td>
