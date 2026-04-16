@@ -659,6 +659,7 @@ namespace AIStory.API.Controllers
                 ParentId = c.parent_id,
                 UserId = c.user_id ?? Guid.Empty,
                 UserDisplayName = display,
+                UserAvatarUrl = c.userNavigation?.user_profiles?.avatar_url,
                 UserRole = ResolveCommentDisplayUserRole(c.userNavigation?.role, c.user_id, storyAuthorId),
                 UserCreatedAt = c.userNavigation?.created_at,
                 Content = content,

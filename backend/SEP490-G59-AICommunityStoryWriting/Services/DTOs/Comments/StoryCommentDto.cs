@@ -1,4 +1,4 @@
-﻿namespace Services.DTOs.Comments
+namespace Services.DTOs.Comments
 {
     public class StoryCommentDto
     {
@@ -7,6 +7,8 @@
         public Guid? ParentId { get; set; }
         public Guid UserId { get; set; }
         public string? UserDisplayName { get; set; }
+        /// <summary>Đường dẫn avatar người bình luận (user_profiles.avatar_url).</summary>
+        public string? UserAvatarUrl { get; set; }
         /// <summary>Role hiển thị trên comment: ADMIN/MODERATOR/USER như tài khoản; AUTHOR chỉ khi user là tác giả của truyện (story) chứa comment.</summary>
         public string? UserRole { get; set; }
         /// <summary>Thời điểm user tham gia hệ thống (users.created_at) để phân loại tag theo “tuổi tài khoản”.</summary>
