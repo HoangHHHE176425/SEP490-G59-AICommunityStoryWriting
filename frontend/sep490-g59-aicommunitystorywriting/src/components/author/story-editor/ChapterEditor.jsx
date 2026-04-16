@@ -13,6 +13,9 @@ const countWords = (text) => {
     return plain.split(/\s+/).filter(word => word.length > 0).length;
 };
 
+const MIN_PAID_COIN_PRICE = 10;
+const MAX_PAID_COIN_PRICE = 100;
+
 function extractOutlineJson(raw) {
     if (!raw || !raw.trim()) return raw;
     const s = raw.trim();
@@ -877,6 +880,9 @@ export function ChapterEditor({
                                     const paidBlocked = !canEnablePaidMode && chapter.accessType !== 'paid';
                                     if (paidBlocked) return;
                                     onChange('accessType', 'paid');
+                                    if (!chapter.price || Number(chapter.price) < MIN_PAID_COIN_PRICE) {
+                                        onChange('price', MIN_PAID_COIN_PRICE);
+                                    }
                                 }}
                                 disabled={!canEnablePaidMode && chapter.accessType !== 'paid'}
                                 title={!canEnablePaidMode && chapter.accessType !== 'paid'
@@ -925,11 +931,14 @@ export function ChapterEditor({
                                     </label>
                                     <div style={{ position: 'relative' }}>
                                         <input
-                                            type="number"
-                                            value={chapter.price || 0}
-                                            onChange={(e) => onChange('price', Number(e.target.value) || 0)}
-                                            min="1"
-                                            placeholder="0"
+                                            type="text"
+                                            inputMode="numeric"
+                                            value={chapter.price || ''}
+                                            onChange={(e) => {
+                                                const digitsOnly = String(e.target.value || '').replace(/\D/g, '');
+                                                onChange('price', digitsOnly === '' ? 0 : Number(digitsOnly));
+                                            }}
+                                            placeholder={`${MIN_PAID_COIN_PRICE}-${MAX_PAID_COIN_PRICE}`}
                                             style={{
                                                 width: '100%',
                                                 padding: '0.75rem 0.75rem 0.75rem 2.5rem',
@@ -952,7 +961,14 @@ export function ChapterEditor({
                                             color: '#f59e0b',
                                         }} />
                                     </div>
-                                    <p style={{ fontSize: '0.625rem', color: '#92400e', marginTop: '0.25rem', margin: 0 }}>Đơn vị: Xu</p>
+                                    <p style={{ fontSize: '0.625rem', color: '#92400e', marginTop: '0.25rem', margin: 0 }}>
+                                        Đơn vị: Coin (tối thiểu {MIN_PAID_COIN_PRICE}, tối đa {MAX_PAID_COIN_PRICE})
+                                    </p>
+                                    {(Number(chapter.price) < MIN_PAID_COIN_PRICE || Number(chapter.price) > MAX_PAID_COIN_PRICE) && (
+                                        <p style={{ fontSize: '0.625rem', color: '#dc2626', marginTop: '0.25rem', margin: 0 }}>
+                                            Giá phải trong khoảng {MIN_PAID_COIN_PRICE} đến {MAX_PAID_COIN_PRICE} coin.
+                                        </p>
+                                    )}
                                 </div>
                             )}
                         </div>

@@ -1,6 +1,7 @@
 import { ThumbsUp, Flag } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getCommentRoleBadge } from '../../utils/commentRoleBadge';
+import { resolveBackendUrl } from '../../utils/resolveBackendUrl';
 
 /** Chuẩn hóa 1 comment từ API (id, content, userDisplayName, userRole, userCreatedAt, …). */
 function norm(c) {
@@ -8,6 +9,7 @@ function norm(c) {
         id: c.id ?? c.Id,
         parentId: c.parentId ?? c.ParentId ?? null,
         userDisplayName: c.userDisplayName ?? c.UserDisplayName ?? 'Ẩn danh',
+        userAvatarUrl: c.userAvatarUrl ?? c.UserAvatarUrl ?? c.avatarUrl ?? c.AvatarUrl ?? null,
         userRole: c.userRole ?? c.UserRole ?? null,
         userCreatedAt: c.userCreatedAt ?? c.UserCreatedAt ?? null,
         content: c.content ?? c.Content ?? '',
@@ -63,11 +65,23 @@ function CommentBlock({
 }) {
     const timeStr = node.createdAt ? (formatTimeAgo ? formatTimeAgo(node.createdAt) : new Date(node.createdAt).toLocaleString()) : '';
     const roleBadge = getCommentRoleBadge(node.userRole, node.userCreatedAt);
+    const [avatarFailed, setAvatarFailed] = useState(false);
+    const avatarSrc = !avatarFailed && node.userAvatarUrl ? resolveBackendUrl(node.userAvatarUrl) : '';
+    const avatarFallback = (node.userDisplayName || '?').charAt(0).toUpperCase();
     return (
         <div id={node.id ? `comment-${node.id}` : undefined} className={isReply ? 'ml-10 mt-2' : ''}>
             <div className="flex gap-3">
                 <div className="w-10 h-10 rounded-full bg-primary/20 shrink-0 flex items-center justify-center text-primary font-bold text-sm">
-                    {(node.userDisplayName || '?').charAt(0).toUpperCase()}
+                    {avatarSrc ? (
+                        <img
+                            src={avatarSrc}
+                            alt={node.userDisplayName || 'Avatar'}
+                            className="w-full h-full rounded-full object-cover"
+                            onError={() => setAvatarFailed(true)}
+                        />
+                    ) : (
+                        avatarFallback
+                    )}
                 </div>
                 <div className="flex-1 min-w-0">
                     <div className="bg-slate-50 dark:bg-slate-800 rounded-lg p-4">

@@ -17,6 +17,9 @@ const countWords = (text) => {
     return plain.split(/\s+/).filter(word => word.length > 0).length;
 };
 
+const MIN_PAID_COIN_PRICE = 10;
+const MAX_PAID_COIN_PRICE = 100;
+
 /** Lấy chuỗi JSON dàn ý thực từ outline (bỏ hướng dẫn + ví dụ mẫu). Ưu tiên khối có "scenes" ở cuối chuỗi. */
 function extractOutlineJson(raw) {
     if (!raw || !raw.trim()) return raw;
@@ -919,8 +922,16 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             showToast('Truyện cần tối thiểu 500 lượt xem mới được bật chế độ trả phí cho chương.', 'error');
             return;
         }
-        if (!isVersionMode && chapterData.accessType === 'paid' && (!chapterData.price || chapterData.price <= 0)) {
-            showToast('Vui lòng nhập giá cho chương trả phí', 'error');
+        if (
+            !isVersionMode &&
+            chapterData.accessType === 'paid' &&
+            (
+                !Number.isFinite(Number(chapterData.price))
+                || Number(chapterData.price) < MIN_PAID_COIN_PRICE
+                || Number(chapterData.price) > MAX_PAID_COIN_PRICE
+            )
+        ) {
+            showToast(`Giá chương trả phí phải từ ${MIN_PAID_COIN_PRICE} đến ${MAX_PAID_COIN_PRICE} coin.`, 'error');
             return;
         }
 
@@ -2337,7 +2348,13 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                         showToast('Truyện cần tối thiểu 500 lượt xem mới được bật chế độ trả phí cho chương.', 'error');
                                                         return;
                                                     }
-                                                    setChapterData({ ...chapterData, accessType: 'paid' });
+                                                    setChapterData({
+                                                        ...chapterData,
+                                                        accessType: 'paid',
+                                                        price: Number(chapterData.price) >= MIN_PAID_COIN_PRICE
+                                                            ? Math.min(MAX_PAID_COIN_PRICE, Number(chapterData.price))
+                                                            : MIN_PAID_COIN_PRICE,
+                                                    });
                                                 }}
                                                 disabled={!canEnablePaidMode && chapterData.accessType !== 'paid'}
                                                 title={!canEnablePaidMode && chapterData.accessType !== 'paid' ? 'Truyện cần tối thiểu 500 lượt xem để bật trả phí.' : undefined}
@@ -2371,11 +2388,14 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                         </div>
                                                     ) : (
                                                         <input
-                                                            type="number"
-                                                            value={chapterData.price}
-                                                            onChange={(e) => setChapterData({ ...chapterData, price: Number(e.target.value) })}
-                                                            min="1"
-                                                            placeholder="0"
+                                                            type="text"
+                                                            inputMode="numeric"
+                                                            value={chapterData.price ?? ''}
+                                                            onChange={(e) => {
+                                                                const digitsOnly = String(e.target.value || '').replace(/\D/g, '');
+                                                                setChapterData({ ...chapterData, price: digitsOnly === '' ? 0 : Number(digitsOnly) });
+                                                            }}
+                                                            placeholder={`${MIN_PAID_COIN_PRICE}-${MAX_PAID_COIN_PRICE}`}
                                                             style={{
                                                                 width: '100%',
                                                                 padding: '0.75rem 0.75rem 0.75rem 2.5rem',
@@ -2400,8 +2420,13 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                     }} />}
                                                 </div>
                                                 <p style={{ fontSize: '0.625rem', color: '#92400e', marginTop: '0.25rem' }}>
-                                                    Đơn vị: Xu
+                                                    Đơn vị: Coin (tối thiểu {MIN_PAID_COIN_PRICE}, tối đa {MAX_PAID_COIN_PRICE})
                                                 </p>
+                                                {(Number(chapterData.price) < MIN_PAID_COIN_PRICE || Number(chapterData.price) > MAX_PAID_COIN_PRICE) && (
+                                                    <p style={{ fontSize: '0.625rem', color: '#dc2626', marginTop: '0.25rem' }}>
+                                                        Giá phải trong khoảng {MIN_PAID_COIN_PRICE} đến {MAX_PAID_COIN_PRICE} coin.
+                                                    </p>
+                                                )}
                                             </div>
                                         )}
                                     </div>
