@@ -346,6 +346,8 @@ namespace Services.Implementations
                 return dto;
             }).ToList();
 
+            EnrichAiSimilarityFromChapterVersions(items);
+
             ApplyChapterCommentCounts(items, chapterList.Select(c => c.id));
 
             EnrichChapterListItemsWithReviewSla(chapterList, items);
@@ -365,6 +367,12 @@ namespace Services.Implementations
             var chapter = _chapterRepository.GetById(id);
             if (chapter == null) return null;
             var dto = MapToResponseDto(chapter);
+            if (!(dto.AiSimilarityPercent > 0) && !(dto.AiContributionRatio > 0))
+            {
+                var aiFallback = ChapterVersionDAO.GetLatestAiSimilarityPercentByChapterIds(new List<Guid> { id });
+                if (aiFallback.TryGetValue(id, out var ai) && ai > 0)
+                    dto.AiSimilarityPercent = ai;
+            }
             if (chapter.status == "REJECTED")
             {
                 var (reason, rejectedAt) = DataAccessObjects.DAOs.ModerationLogDAO.GetLatestRejection("CHAPTER", id);
@@ -397,6 +405,7 @@ namespace Services.Implementations
                 }
                 return dto;
             }).ToList();
+            EnrichAiSimilarityFromChapterVersions(items);
             ApplyChapterCommentCounts(items, chapterList.Select(c => c.id));
             EnrichChapterListItemsWithReviewSla(chapterList, items);
             EnrichModeratorRejectionHistoryForChapterList(chapterList, items);
@@ -951,6 +960,26 @@ namespace Services.Implementations
                 CreatedAt = chapter.created_at,
                 UpdatedAt = chapter.updated_at
             };
+        }
+
+        private static void EnrichAiSimilarityFromChapterVersions(List<ChapterListItemDto> items)
+        {
+            if (items.Count == 0) return;
+            var needFallbackIds = items
+                .Where(i => !(i.AiSimilarityPercent > 0) && !(i.AiContributionRatio > 0))
+                .Select(i => i.Id)
+                .Distinct()
+                .ToList();
+            if (needFallbackIds.Count == 0) return;
+
+            var aiByChapterId = ChapterVersionDAO.GetLatestAiSimilarityPercentByChapterIds(needFallbackIds);
+            foreach (var item in items)
+            {
+                if ((item.AiSimilarityPercent > 0) || (item.AiContributionRatio > 0))
+                    continue;
+                if (aiByChapterId.TryGetValue(item.Id, out var ai) && ai > 0)
+                    item.AiSimilarityPercent = ai;
+            }
         }
 
         /// <summary>
