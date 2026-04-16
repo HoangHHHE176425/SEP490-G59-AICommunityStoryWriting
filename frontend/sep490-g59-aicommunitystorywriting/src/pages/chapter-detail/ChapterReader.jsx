@@ -122,6 +122,7 @@ export function ChapterReader({ onBack }) {
                     setStory({
                         title: storyRes?.title ?? storyRes?.Title ?? '',
                         author: storyRes?.authorName ?? storyRes?.AuthorName ?? 'Ẩn danh',
+                        commentsDisabled: !!(storyRes?.commentsDisabled ?? storyRes?.CommentsDisabled),
                     });
                     const orderIndex = chapterRes?.orderIndex ?? chapterRes?.OrderIndex ?? 0;
                     const accessType = (chapterRes?.accessType ?? chapterRes?.AccessType ?? 'FREE').toUpperCase();
@@ -216,6 +217,10 @@ export function ChapterReader({ onBack }) {
 
     const handleSubmitComment = useCallback(async (content, parentId) => {
         if (!urlChapterId) return;
+        if (story?.commentsDisabled) {
+            setCommentError('Truyện này đang trong quá trình xử lý vi phạm nên hiện không thể bình luận.');
+            return;
+        }
         if (chapter?.isPaidLocked) {
             setCommentError('Bạn cần mở khóa chương để bình luận.');
             return;
@@ -228,7 +233,7 @@ export function ChapterReader({ onBack }) {
             const msg = err?.response?.data?.message ?? err?.message ?? 'Không gửi được bình luận.';
             setCommentError(msg);
         }
-    }, [urlChapterId, chapter?.isPaidLocked, loadComments]);
+    }, [urlChapterId, story?.commentsDisabled, chapter?.isPaidLocked, loadComments]);
 
     const handleLikeComment = useCallback(async (commentId) => {
         if (!urlChapterId || !user?.id) return;
@@ -354,7 +359,7 @@ export function ChapterReader({ onBack }) {
         }
     }, [urlChapterId, user?.id, unlocking, chapter?.isPaidLocked, refreshChapterUnlockedState, showToast]);
 
-    const storyForNav = story || { title: '', author: '' };
+    const storyForNav = story || { title: '', author: '', commentsDisabled: false };
     const chapterForNav = chapter || {
         number: 0,
         title: '',
@@ -630,6 +635,7 @@ export function ChapterReader({ onBack }) {
                 commentsLoading={commentsLoading}
                 commentError={commentError}
                 isLoggedIn={!!user?.id && !chapter?.isPaidLocked}
+                commentsDisabled={!!storyForNav.commentsDisabled}
                 onSubmitComment={handleSubmitComment}
                 onLikeComment={handleLikeComment}
                 onReportComment={handleReportComment}

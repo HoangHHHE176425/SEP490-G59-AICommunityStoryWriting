@@ -20,6 +20,9 @@ namespace Repositories.Implementations
         public Task AddAcceptanceAsync(author_policy_acceptances row)
             => AuthorPolicyAcceptanceDAO.Instance.AddAcceptanceAsync(_context, row);
 
+        public Task UpdateAcceptanceAsync(author_policy_acceptances row)
+            => AuthorPolicyAcceptanceDAO.Instance.UpdateAcceptanceAsync(_context, row);
+
         public Task<int> CountByPolicyAsync(Guid policyId)
             => AuthorPolicyAcceptanceDAO.Instance.CountByPolicyAsync(_context, policyId);
     }

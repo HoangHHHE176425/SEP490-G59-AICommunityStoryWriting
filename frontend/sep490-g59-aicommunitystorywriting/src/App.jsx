@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { AdminProtectedRoute } from './components/admin/AdminProtectedRoute';
 import { AuthSessionHandler } from './components/auth/AuthSessionHandler';
+import { AuthorPolicyResignGuard } from './components/auth/AuthorPolicyResignGuard';
 import Homepage from './pages/homepage/Homepage';
 import { StoryDetail } from './pages/story-detail/StoryDetail';
 import { AdminPage } from './pages/admin/AdminPage';
@@ -29,6 +30,7 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <AuthSessionHandler />
+        <AuthorPolicyResignGuard />
         <ScrollToTop />
         <Routes>
           <Route path="/" element={<AboutUs />} />

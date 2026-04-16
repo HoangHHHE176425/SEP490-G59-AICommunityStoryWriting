@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Shield, AlertCircle, CheckCircle2, Clock3 } from 'lucide-react';
 import { Header } from '../../components/homepage/Header';
 import { Footer } from '../../components/homepage/Footer';
-import { getActivePolicy, getMyAuthorPolicyStatus } from '../../api/policy/policyApi';
+import { acceptAuthorPolicy, getActivePolicy, getMyAuthorPolicyStatus } from '../../api/policy/policyApi';
 import { getAuthorOnboardingStatus } from '../../api/account/accountApi';
 import { PolicyBody } from '../../components/policy/PolicyBody';
 import { useAuth } from '../../contexts/AuthContext';
@@ -11,9 +11,10 @@ import { useAuth } from '../../contexts/AuthContext';
 export default function PolicyPage() {
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
-    const { isAuthenticated, becomeAuthor } = useAuth();
+    const { isAuthenticated, becomeAuthor, fetchProfile } = useAuth();
 
     const fromBecomeAuthor = (searchParams.get('from') ?? '').toLowerCase() === 'become-author';
+    const fromResign = (searchParams.get('from') ?? '').toLowerCase() === 'resign';
     const nextPath = searchParams.get('next') || '/author';
 
     const type = useMemo(() => {
@@ -64,7 +65,7 @@ export default function PolicyPage() {
     }, [type]);
 
     useEffect(() => {
-        if (!fromBecomeAuthor || !isAuthenticated) {
+        if ((!fromBecomeAuthor && !fromResign) || !isAuthenticated) {
             setOnboarding(null);
             setAuthorPolicyStatus(null);
             return;
@@ -75,11 +76,15 @@ export default function PolicyPage() {
         setSubmitError('');
         setSubmitSuccess('');
 
-        Promise.all([
-            getAuthorOnboardingStatus(),
-            getMyAuthorPolicyStatus('AUTHOR'),
-        ])
-            .then(([onboardingData, authorStatus]) => {
+        const loadStatus = fromBecomeAuthor
+            ? Promise.all([
+                getAuthorOnboardingStatus(),
+                getMyAuthorPolicyStatus('AUTHOR'),
+            ]).then(([onboardingData, authorStatus]) => ({ onboardingData, authorStatus }))
+            : getMyAuthorPolicyStatus('AUTHOR').then((authorStatus) => ({ onboardingData: null, authorStatus }));
+
+        loadStatus
+            .then(({ onboardingData, authorStatus }) => {
                 if (!alive) return;
                 setOnboarding(onboardingData);
                 setAuthorPolicyStatus(authorStatus);
@@ -100,7 +105,7 @@ export default function PolicyPage() {
         return () => {
             alive = false;
         };
-    }, [fromBecomeAuthor, isAuthenticated]);
+    }, [fromBecomeAuthor, fromResign, isAuthenticated]);
 
     const missingRequirements = onboarding?.missingRequirements ?? [];
     const canSubmitBecomeAuthor =
@@ -155,6 +160,45 @@ export default function PolicyPage() {
         setTimeout(() => navigate(nextPath), 800);
     };
 
+    const handleAcceptResignPolicy = async () => {
+        if (!isAuthenticated) {
+            navigate('/login');
+            return;
+        }
+        if (!policy?.id) {
+            setSubmitError('Không tìm thấy policy để ký lại.');
+            return;
+        }
+
+        setSubmitting(true);
+        setSubmitError('');
+        setSubmitSuccess('');
+
+        const acceptRes = await acceptAuthorPolicy(policy.id);
+        if (!acceptRes?.success) {
+            setSubmitError(acceptRes?.message || 'Không thể ký lại điều khoản tác giả.');
+            setSubmitting(false);
+            return;
+        }
+
+        try {
+            await fetchProfile();
+        } catch {
+            // Ignore profile refresh errors, user can still continue.
+        }
+
+        try {
+            const authorStatus = await getMyAuthorPolicyStatus('AUTHOR');
+            setAuthorPolicyStatus(authorStatus);
+        } catch {
+            // Ignore status refresh errors.
+        }
+
+        setSubmitSuccess('Bạn đã ký lại policy tác giả thành công.');
+        setSubmitting(false);
+        setTimeout(() => navigate(nextPath), 700);
+    };
+
     return (
         <div className="min-h-screen bg-background-light dark:bg-background-dark flex flex-col">
             <Header />
@@ -162,13 +206,15 @@ export default function PolicyPage() {
             {/* Page Header */}
             <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 py-8">
                 <div className="max-w-[1280px] mx-auto px-4">
-                    <button
-                        onClick={() => navigate(-1)}
-                        className="mb-4 flex items-center gap-2 text-white hover:text-gray-100 transition-colors"
-                    >
-                        <ArrowLeft className="w-5 h-5" />
-                        <span>Quay lại</span>
-                    </button>
+                    {!fromResign ? (
+                        <button
+                            onClick={() => navigate(-1)}
+                            className="mb-4 flex items-center gap-2 text-white hover:text-gray-100 transition-colors"
+                        >
+                            <ArrowLeft className="w-5 h-5" />
+                            <span>Quay lại</span>
+                        </button>
+                    ) : null}
                     <div className="flex items-center gap-3">
                         <div className="w-12 h-12 bg-white/95 rounded-xl flex items-center justify-center shadow-sm">
                             <Shield className="w-6 h-6 text-emerald-500" />
@@ -347,6 +393,40 @@ export default function PolicyPage() {
                                         )}
                                     </>
                                 )}
+                            </div>
+                        )}
+
+                        {fromResign && (
+                            <div className="rounded-2xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 p-5 space-y-4">
+                                <div className="flex items-start gap-3">
+                                    <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+                                    <div>
+                                        <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                                            Yêu cầu ký lại policy tác giả
+                                        </h3>
+                                        <p className="text-sm text-slate-700 dark:text-slate-200">
+                                            Policy tác giả đã được cập nhật. Bạn cần ký lại phiên bản mới để tiếp tục dùng các chức năng dành cho tác giả.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-sm">
+                                    <p className="text-slate-600 dark:text-slate-300">
+                                        Trạng thái hiện tại:{' '}
+                                        <span className="font-semibold text-slate-900 dark:text-white">
+                                            {authorPolicyStatus?.hasAccepted ? 'Đã ký policy hiện hành' : 'Chưa ký policy hiện hành'}
+                                        </span>
+                                    </p>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={handleAcceptResignPolicy}
+                                    disabled={submitting}
+                                    className="w-full px-6 py-3 bg-gradient-to-r from-[#13EC5B] to-[#11D350] text-white rounded-xl hover:shadow-[0_0_20px_rgba(19,236,91,0.5)] transition-all font-bold disabled:opacity-60 disabled:cursor-not-allowed"
+                                >
+                                    {submitting ? 'Đang xử lý...' : 'Tôi đồng ý và ký lại'}
+                                </button>
                             </div>
                         )}
 

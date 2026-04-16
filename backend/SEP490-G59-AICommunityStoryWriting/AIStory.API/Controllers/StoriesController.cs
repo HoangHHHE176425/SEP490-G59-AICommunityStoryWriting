@@ -74,7 +74,7 @@ namespace AIStory.API.Controllers
         /// <summary>Tạo story mới - Chỉ AUTHOR</summary>
         [HttpPost]
         [Consumes("multipart/form-data")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public async Task<IActionResult> Create([FromForm] CreateStoryRequestDto request)
         {
             try
@@ -763,7 +763,7 @@ namespace AIStory.API.Controllers
         /// <summary>Cập nhật story (với hỗ trợ upload ảnh) - Chỉ AUTHOR (chỉ được sửa story của chính mình)</summary>
         [HttpPut("{id:guid}")]
         [Consumes("multipart/form-data")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public async Task<IActionResult> Update(Guid id, [FromForm] UpdateStoryWithImageRequestDto request)
         {
             try
@@ -861,7 +861,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Xóa story - Chỉ AUTHOR (chỉ được xóa story của chính mình)</summary>
         [HttpDelete("{id:guid}")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Delete(Guid id)
         {
             try
@@ -881,7 +881,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Publish story - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/publish")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Publish(Guid id)
         {
             try
@@ -921,7 +921,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Unpublish story - Chỉ AUTHOR</summary>
         [HttpPost("{id:guid}/unpublish")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult Unpublish(Guid id)
         {
             try
@@ -937,7 +937,7 @@ namespace AIStory.API.Controllers
 
         /// <summary>Xem lý do từ chối truyện - Chỉ AUTHOR (chỉ truyện của mình).</summary>
         [HttpGet("{id:guid}/rejection-reason")]
-        [Authorize(Roles = "AUTHOR")]
+        [Authorize(Policy = "AuthorStrict")]
         public IActionResult GetRejectionReason(Guid id)
         {
             try

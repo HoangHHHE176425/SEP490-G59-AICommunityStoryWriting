@@ -18,6 +18,29 @@ import { getChapterReviewContent } from '../../../api/moderator/moderatorApi';
 import { getChapters } from '../../../api/chapter/chapterApi';
 import { localDateTimeInputToIsoUtc } from '../../../utils/moderatorReviewSla';
 import { formatApiDateTimeVietnamVi } from '../../../utils/apiDateTime';
+import { sanitizeRichTextHtml } from '../../../utils/richText';
+
+/**
+ * Nội dung chương từ editor thường là HTML; hiển thị trong modal phải render HTML (đã khử script/on*).
+ * Chuỗi thuần vẫn dùng pre-wrap như trước.
+ */
+function renderEscalationModalChapterBody(raw, bodyStyle) {
+    const trimmed = String(raw ?? '').trim();
+    if (!trimmed) {
+        return <div style={bodyStyle}>—</div>;
+    }
+    const hasHtmlTag = /<[a-z][\s\S]*>/i.test(trimmed);
+    if (hasHtmlTag) {
+        const html = sanitizeRichTextHtml(trimmed) || '<p>—</p>';
+        return (
+            <div
+                style={{ ...bodyStyle, whiteSpace: 'normal' }}
+                dangerouslySetInnerHTML={{ __html: html }}
+            />
+        );
+    }
+    return <div style={{ ...bodyStyle, whiteSpace: 'pre-wrap' }}>{trimmed}</div>;
+}
 
 /** Khi từ chối đơn escalation/compliance: ghi chú admin tối thiểu số từ. */
 const ADMIN_REJECT_NOTE_MIN_WORDS = 50;
@@ -1678,7 +1701,6 @@ export function ReviewEscalationsManagement() {
                                             {(() => {
                                                 const d = resolveChapterPreview.data;
                                                 const origTitle = d.originalTitle ?? d.OriginalTitle ?? '—';
-                                                const origContent = (d.originalContent ?? d.OriginalContent ?? '').trim() || '—';
                                                 const pending = d.pendingVersions ?? d.PendingVersions ?? [];
                                                 const hasPv = Boolean(d.hasPendingVersion ?? d.HasPendingVersion) && pending.length > 0;
                                                 const kindExt = String(resolveRow.requestKind ?? resolveRow.RequestKind ?? '').toUpperCase().includes('EXTEND');
@@ -1703,9 +1725,11 @@ export function ReviewEscalationsManagement() {
                                                         <div style={{ fontWeight: 600, color: T.title, marginBottom: 6 }}>
                                                             {v.titleSnapshot ?? v.TitleSnapshot ?? '—'}
                                                         </div>
-                                                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: T.title }}>
-                                                            {(v.contentSnapshot ?? v.ContentSnapshot ?? '').trim() || '—'}
-                                                        </div>
+                                                        {renderEscalationModalChapterBody(v.contentSnapshot ?? v.ContentSnapshot ?? '', {
+                                                            wordBreak: 'break-word',
+                                                            color: T.title,
+                                                            lineHeight: 1.55,
+                                                        })}
                                                     </div>
                                                 ));
 
@@ -1718,7 +1742,10 @@ export function ReviewEscalationsManagement() {
                                                         <div style={{ marginBottom: hasPv ? 12 : 0 }}>
                                                             <div style={{ fontWeight: 600, color: T.slate, marginBottom: 4 }}>Bản đang duyệt</div>
                                                             <div style={{ fontWeight: 600, color: T.title, marginBottom: 6 }}>{origTitle}</div>
-                                                            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: T.title }}>{origContent}</div>
+                                                            {renderEscalationModalChapterBody(
+                                                                d.originalContent ?? d.OriginalContent ?? '',
+                                                                { wordBreak: 'break-word', color: T.title, lineHeight: 1.55 },
+                                                            )}
                                                         </div>
                                                         {hasPv ? versionBlocks : null}
                                                     </>
