@@ -101,7 +101,23 @@ public static class EmbeddingHelper
         var response = await PostWithRetryOn429Async(http, $"{baseUrl}/embeddings", jsonBytes, cancellationToken);
         var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
         using var doc = JsonDocument.Parse(responseJson);
-        var data = doc.RootElement.GetProperty("data");
+        if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+        {
+            string? providerError = null;
+            if (doc.RootElement.TryGetProperty("error", out var errorEl))
+            {
+                if (errorEl.ValueKind == JsonValueKind.Object && errorEl.TryGetProperty("message", out var msgEl))
+                    providerError = msgEl.GetString();
+                else if (errorEl.ValueKind == JsonValueKind.String)
+                    providerError = errorEl.GetString();
+                else
+                    providerError = errorEl.GetRawText();
+            }
+
+            var snippet = responseJson.Length > 500 ? responseJson[..500] + "..." : responseJson;
+            throw new InvalidOperationException(
+                $"Embedding API trả về schema không hợp lệ (thiếu 'data').{(string.IsNullOrWhiteSpace(providerError) ? "" : " Chi tiết: " + providerError)} Payload: {snippet}");
+        }
         var results = new List<float[]>(data.GetArrayLength());
         foreach (var item in data.EnumerateArray())
         {
