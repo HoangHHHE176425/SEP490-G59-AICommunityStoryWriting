@@ -133,11 +133,14 @@ namespace Services.Implementations
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var dtoList = BuildUniqueSuggestionDtos(suggestions, existingTitles);
 
+            Guid? usageLogChapterId = chapters.LastOrDefault()?.id;
             if (request.ChapterId.HasValue)
             {
                 var targetChapter = _chapterRepository.GetById(request.ChapterId.Value);
                 if (targetChapter != null && targetChapter.story_id != request.StoryId)
                     throw new InvalidOperationException("ChapterId không khớp truyện.");
+                if (targetChapter != null)
+                    usageLogChapterId = targetChapter.id;
                 foreach (var dto in dtoList)
                 {
                     var json = JsonSerializer.Serialize(dto);
@@ -163,7 +166,7 @@ namespace Services.Implementations
             {
                 user_id = authorUserId,
                 story_id = request.StoryId,
-                chapter_id = request.ChapterId ?? chapters.LastOrDefault()?.id,
+                chapter_id = usageLogChapterId,
                 action_type = ActionType,
                 model_name = model,
                 prompt_tokens = promptTokens,
