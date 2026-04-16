@@ -153,7 +153,13 @@ namespace Services.Implementations
                 var searchLower = query.Search.ToLower();
                 storiesQuery = storiesQuery.Where(s =>
                     s.title.ToLower().Contains(searchLower) ||
-                    (s.summary != null && s.summary.ToLower().Contains(searchLower)));
+                    (s.summary != null && s.summary.ToLower().Contains(searchLower)) ||
+                    (s.author != null && (
+                        (s.author.email != null && s.author.email.ToLower().Contains(searchLower)) ||
+                        (s.author.user_profiles != null &&
+                         s.author.user_profiles.nickname != null &&
+                         s.author.user_profiles.nickname.ToLower().Contains(searchLower))
+                    )));
             }
 
             if (query.CategoryId.HasValue)

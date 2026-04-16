@@ -15,7 +15,10 @@ export function getCommentRoleBadge(userRole, userCreatedAtIso) {
         return { label: 'Kiểm duyệt viên', className: 'bg-violet-600 text-white' };
     }
     if (r === 'COMPLIANCE') {
-        return { label: 'Tuân thủ', className: 'bg-orange-600 text-white' };
+        return { label: 'Xử lý vi phạm viên', className: 'bg-orange-600 text-white' };
+    }
+    if (r === 'STAFF') {
+        return { label: 'Nhân sự hệ thống', className: 'bg-slate-600 text-white' };
     }
 
     // USER hoặc role khác không map → coi như độc giả / thành viên
