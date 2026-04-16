@@ -95,37 +95,80 @@ public static class EmbeddingHelper
         using var http = new HttpClient();
         http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         http.Timeout = TimeSpan.FromSeconds(120);
-        var payload = new { input = texts, model };
+        // OpenAI API supports both string and string[]; some OpenAI-compatible gateways are picky.
+        var payload = new { input = texts.Length == 1 ? (object)texts[0] : texts, model };
         var json = JsonSerializer.Serialize(payload);
         var jsonBytes = Encoding.UTF8.GetBytes(json);
         var response = await PostWithRetryOn429Async(http, $"{baseUrl}/embeddings", jsonBytes, cancellationToken);
         var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
-        using var doc = JsonDocument.Parse(responseJson);
-        if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+
+        try
         {
-            var snippet = responseJson.Length > 800 ? responseJson[..800] + "..." : responseJson;
+            using var doc = JsonDocument.Parse(responseJson);
+            var root = doc.RootElement;
+
+            // Common error shape for OpenAI-compatible APIs.
+            if (root.TryGetProperty("error", out var err))
+            {
+                var snippet = responseJson.Length > 1200 ? responseJson[..1200] + "..." : responseJson;
+                throw new InvalidOperationException(
+                    $"Embedding API trả về lỗi. BaseUrl={baseUrl}, Model={model}. Response: {snippet}");
+            }
+
+            // OpenAI embeddings: { data: [ { embedding: [...] }, ... ] }
+            if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+            {
+                var results = new List<float[]>(data.GetArrayLength());
+                foreach (var item in data.EnumerateArray())
+                {
+                    if (!item.TryGetProperty("embedding", out var embedding) || embedding.ValueKind != JsonValueKind.Array)
+                        continue;
+                    var vec = new List<float>();
+                    foreach (var e in embedding.EnumerateArray())
+                        vec.Add((float)e.GetDouble());
+                    if (vec.Count > 0)
+                        results.Add(vec.ToArray());
+                }
+                if (results.Count > 0)
+                    return results;
+            }
+
+            // Some gateways return: { embeddings: [ [..], [..] ] } or { embedding: [..] }.
+            if (root.TryGetProperty("embeddings", out var embArr) && embArr.ValueKind == JsonValueKind.Array)
+            {
+                var results = new List<float[]>();
+                foreach (var item in embArr.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Array) continue;
+                    var vec = new List<float>();
+                    foreach (var e in item.EnumerateArray())
+                        vec.Add((float)e.GetDouble());
+                    if (vec.Count > 0) results.Add(vec.ToArray());
+                }
+                if (results.Count > 0) return results;
+            }
+
+            if (root.TryGetProperty("embedding", out var single) && single.ValueKind == JsonValueKind.Array)
+            {
+                var vec = new List<float>();
+                foreach (var e in single.EnumerateArray())
+                    vec.Add((float)e.GetDouble());
+                if (vec.Count > 0) return new List<float[]> { vec.ToArray() };
+            }
+
+            {
+                var snippet = responseJson.Length > 1200 ? responseJson[..1200] + "..." : responseJson;
+                throw new InvalidOperationException(
+                    "Embedding API trả về payload không hợp lệ (không tìm thấy vector embedding). " +
+                    $"BaseUrl={baseUrl}, Model={model}. Response: {snippet}");
+            }
+        }
+        catch (JsonException je)
+        {
+            var snippet = responseJson.Length > 1200 ? responseJson[..1200] + "..." : responseJson;
             throw new InvalidOperationException(
-                "Embedding API trả về payload không hợp lệ (thiếu mảng 'data'). " +
-                $"BaseUrl={baseUrl}, Model={model}. Response: {snippet}");
+                $"Embedding API trả về nội dung không phải JSON hợp lệ. BaseUrl={baseUrl}, Model={model}. Response: {snippet}", je);
         }
-        var results = new List<float[]>(data.GetArrayLength());
-        foreach (var item in data.EnumerateArray())
-        {
-            if (!item.TryGetProperty("embedding", out var embedding) || embedding.ValueKind != JsonValueKind.Array)
-                continue;
-            var vec = new List<float>();
-            foreach (var e in embedding.EnumerateArray())
-                vec.Add((float)e.GetDouble());
-            if (vec.Count > 0)
-                results.Add(vec.ToArray());
-        }
-        if (results.Count == 0)
-        {
-            throw new InvalidOperationException(
-                "Embedding API không trả về vector hợp lệ trong trường 'data.embedding'. " +
-                $"BaseUrl={baseUrl}, Model={model}.");
-        }
-        return results;
     }
 
     /// <summary>POST request; nếu 429 thì đợi (Retry-After hoặc mặc định) rồi thử lại, tối đa MaxRetriesOn429 lần. Mỗi lần thử dùng body mới (byte[]) vì HttpContent chỉ gửi được một lần.</summary>
@@ -150,7 +193,13 @@ public static class EmbeddingHelper
                 }
                 throw new InvalidOperationException("API embedding trả 429 (quá nhiều request) sau vài lần thử. Vui lòng đợi 2–3 phút rồi gọi lại POST /api/ai/index-rag.");
             }
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                var snippet = body.Length > 1200 ? body[..1200] + "..." : body;
+                throw new InvalidOperationException(
+                    $"Embedding API trả {(int)response.StatusCode} ({response.StatusCode}). Url={url}. Response: {snippet}");
+            }
             return response;
         }
         throw new InvalidOperationException("API embedding lỗi. Vui lòng thử lại sau.");
