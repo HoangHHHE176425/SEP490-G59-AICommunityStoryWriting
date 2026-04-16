@@ -17,6 +17,8 @@ namespace Services.Implementations
     {
         /// <summary>Gắn vào <see cref="InvalidOperationException.Data"/> khi cần client xác nhận xóa kèm version (409).</summary>
         internal const string DeleteRequiresVersionsConfirmationCode = "CHAPTER_DELETE_VERSIONS_CONFIRM_REQUIRED";
+        private const int MinPaidCoinPrice = 10;
+        private const int MaxPaidCoinPrice = 100;
 
         private readonly IChapterRepository _chapterRepository;
         private readonly IChapterVersionRepository _versionRepository;
@@ -113,9 +115,9 @@ namespace Services.Implementations
 
             // Validate coin price based on access type
             var coinPrice = request.CoinPrice ?? 0;
-            if (accessType == "PAID" && coinPrice <= 0)
+            if (accessType == "PAID" && (coinPrice < MinPaidCoinPrice || coinPrice > MaxPaidCoinPrice))
             {
-                throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+                throw new ArgumentException($"Giá chương trả phí phải trong khoảng {MinPaidCoinPrice}-{MaxPaidCoinPrice} xu.");
             }
             if (accessType == "PAID" && (story.total_views ?? 0) < 500)
             {
@@ -460,9 +462,9 @@ namespace Services.Implementations
 
                 // Validate coin price based on access type
                 var coinPrice = request.CoinPrice ?? chapter.coin_price ?? 0;
-                if (accessType == "PAID" && coinPrice <= 0)
+                if (accessType == "PAID" && (coinPrice < MinPaidCoinPrice || coinPrice > MaxPaidCoinPrice))
                 {
-                    throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+                    throw new ArgumentException($"Giá chương trả phí phải trong khoảng {MinPaidCoinPrice}-{MaxPaidCoinPrice} xu.");
                 }
                 if (accessType == "PAID" && !string.Equals(chapter.access_type, "PAID", StringComparison.OrdinalIgnoreCase))
                 {
@@ -483,9 +485,9 @@ namespace Services.Implementations
                 // If only coin price is updated, validate based on current access type
                 var currentAccessType = chapter.access_type?.ToUpper() ?? "FREE";
                 var coinPrice = request.CoinPrice.Value;
-                if (currentAccessType == "PAID" && coinPrice <= 0)
+                if (currentAccessType == "PAID" && (coinPrice < MinPaidCoinPrice || coinPrice > MaxPaidCoinPrice))
                 {
-                    throw new ArgumentException("Coin price must be greater than 0 for PAID chapters.");
+                    throw new ArgumentException($"Giá chương trả phí phải trong khoảng {MinPaidCoinPrice}-{MaxPaidCoinPrice} xu.");
                 }
                 if (currentAccessType == "FREE" && coinPrice > 0)
                 {

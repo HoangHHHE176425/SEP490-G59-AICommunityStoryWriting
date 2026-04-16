@@ -300,6 +300,33 @@ public static class StoryReportDAO
             ));
     }
 
+    /// <summary>
+    /// Khi đã đóng hết ticket mở (NEW/IN_REVIEW) của truyện, xóa contributor cycle cũ
+    /// để vòng báo cáo mới không kéo theo người báo cáo từ các đợt trước.
+    /// </summary>
+    public static int ClearContributorsIfNoOpenReports(Guid storyId)
+    {
+        using var context = new StoryPlatformDbContext();
+        var hasOpen = context.reports.AsNoTracking().Any(r =>
+            r.target_type == StoryTargetType
+            && r.target_id == storyId
+            && r.status != null
+            && (
+                r.status.Trim().ToUpper().StartsWith("NEW")
+                || r.status.Trim().ToUpper().StartsWith("IN_REVIEW")
+            ));
+        if (hasOpen) return 0;
+
+        var rows = context.story_report_contributors
+            .Where(c => c.story_id == storyId)
+            .ToList();
+        if (rows.Count == 0) return 0;
+
+        context.story_report_contributors.RemoveRange(rows);
+        context.SaveChanges();
+        return rows.Count;
+    }
+
     public static int ReopenInReviewReportsForAssignee(Guid storyId, Guid assigneeId)
     {
         using var context = new StoryPlatformDbContext();
