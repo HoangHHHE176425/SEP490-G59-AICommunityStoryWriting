@@ -285,7 +285,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     const [suggestWarning, setSuggestWarning] = useState(null);
     const [suggestWarningCache, setSuggestWarningCache] = useState(null);
     const [suggestError, setSuggestError] = useState(null);
-    const [aiUsageLimit, setAiUsageLimit] = useState(null);
+    const [, setAiUsageLimit] = useState(null);
     const [copiedSuggestionIndex, setCopiedSuggestionIndex] = useState(null);
     const copySuggestionFeedbackRef = useRef(null);
 
@@ -302,41 +302,30 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
     const loadAiUsageLimit = async () => {
         try {
             const data = await getAiUsageLimit();
-            setAiUsageLimit({
-                suggestNextChapter: {
-                    limitPerDay: Number(data?.suggestNextChapter?.limitPerDay ?? 0) || 0,
-                    usedInWindow: Number(data?.suggestNextChapter?.usedInWindow ?? 0) || 0,
-                    remaining: Number(data?.suggestNextChapter?.remaining ?? 0) || 0,
-                    resetsAtUtc: data?.suggestNextChapter?.resetsAtUtc ?? null,
-                },
-                coCreate: {
-                    limitPerDay: Number(data?.coCreate?.limitPerDay ?? 0) || 0,
-                    usedInWindow: Number(data?.coCreate?.usedInWindow ?? 0) || 0,
-                    remaining: Number(data?.coCreate?.remaining ?? 0) || 0,
-                    resetsAtUtc: data?.coCreate?.resetsAtUtc ?? null,
-                },
-                coCreateAvailable: Boolean(data?.coCreateAvailable),
-            });
+            setAiUsageLimit(data ?? null);
         } catch {
             // ignore (user có thể chưa đăng nhập / BE lỗi)
             setAiUsageLimit(null);
         }
     };
 
-    const decrementCoCreateUsageOptimistic = () => {
-        setAiUsageLimit((prev) => {
-            if (!prev || !prev.coCreate) return prev;
-            const currentRemaining = Number(prev.coCreate.remaining ?? 0) || 0;
-            const currentUsed = Number(prev.coCreate.usedInWindow ?? 0) || 0;
-            return {
-                ...prev,
-                coCreate: {
-                    ...prev.coCreate,
-                    remaining: Math.max(0, currentRemaining - 1),
-                    usedInWindow: currentUsed + 1,
-                },
-            };
-        });
+    const hasRemainingAuthorAiToken = (usage) => {
+        const budget = usage?.authorTokenBudget ?? null;
+        if (!budget) return true;
+        if (budget.unlimitedLifetime) return true;
+        return Number(budget.tokensRemainingLifetime ?? 0) > 0;
+    };
+
+    const ensureAuthorTokenForAi = async () => {
+        const latest = await getAiUsageLimit();
+        setAiUsageLimit(latest ?? null);
+        if (!hasRemainingAuthorAiToken(latest)) {
+            const msg = 'Bạn đã dùng hết token AI khả dụng. Vui lòng liên hệ quản trị viên để được cấp thêm token.';
+            showToast(msg, 'error');
+            setSuggestError(msg);
+            return false;
+        }
+        return true;
     };
 
     // Popup đồng sáng tác (AI gợi ý chương): bước 1 = nhập ý tưởng, bước 2 = xem kết quả + đồng ý
@@ -623,6 +612,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             );
             return;
         }
+        if (!(await ensureAuthorTokenForAi())) return;
 
         setSuggestLoading(true);
         setSuggestions([]);
@@ -657,14 +647,13 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                 : null;
             setSuggestWarning(draftContextWarning);
             setSuggestWarningCache(draftContextWarning);
-            // Cập nhật số lượt còn lại sau khi gọi AI thành công
-            loadAiUsageLimit();
         } catch (err) {
             const status = err?.response?.status;
             const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi gợi ý AI.';
             if (status === 429) {
-                showToast('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.', 'error');
-                setSuggestError('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.');
+                const tokenMsg = msg || 'Bạn đã dùng hết token AI khả dụng.';
+                showToast(tokenMsg, 'error');
+                setSuggestError(tokenMsg);
             } else if (status === 403) {
                 showToast(msg || 'Chỉ tác giả của truyện mới được sử dụng tính năng này.', 'error');
                 setSuggestError(msg || 'Chỉ tác giả của truyện mới được sử dụng tính năng này.');
@@ -735,14 +724,20 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             return;
         }
         const idea = useCoCreatePrompt ? (coCreateIdea || '').trim() : '';
+        if (!(await ensureAuthorTokenForAi())) return;
         setCoCreateContextWarning(null);
         setCoCreateLoading(true);
         try {
+            // Chủ động yêu cầu BE index RAG trước khi đồng sáng tác.
+            // Nếu index lỗi tạm thời, vẫn cho phép gọi co-create để BE tự trả thông báo phù hợp.
+            try {
+                await indexRag(storyId);
+            } catch {
+                // best-effort: không chặn luồng co-create
+            }
             const chapterOrderIndex = (Number(chapterData.number) || 1) - 1;
             const chapterIdForAi = chapter?.id ?? chapter?.Id ?? null;
             const data = await coCreate(storyId, idea || null, { chapterOrderIndex, chapterId: chapterIdForAi });
-            // Trừ ngay trên UI để người dùng thấy số lượt giảm tức thì.
-            decrementCoCreateUsageOptimistic();
             // Đồng bộ lại với BE (không chặn UI).
             loadAiUsageLimit();
             const ctxWarnCo = pickAiContextWarning(data);
@@ -757,7 +752,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
         } catch (err) {
             const status = err?.response?.status;
             const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi AI hỗ trợ.';
-            if (status === 429) showToast('Bạn đã gọi AI quá nhiều lần. Vui lòng thử lại sau.', 'error');
+            if (status === 429) showToast(msg || 'Bạn đã dùng hết token AI khả dụng.', 'error');
             else if (status === 403) showToast(msg || 'Chỉ tác giả của truyện mới được sử dụng.', 'error');
             else showToast(msg, 'error');
         } finally {
@@ -935,7 +930,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
             return;
         }
 
-        // AI check khi lưu: chỉ kiểm tra từ cấm/chính sách.
+        // check banned words khi lưu: chỉ kiểm tra từ cấm/chính sách.
         try {
             setChapterCheckModal({ open: false, loading: true, data: null, error: null, mode: 'banned' });
             const res = await checkBannedWords({
@@ -2488,15 +2483,11 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                         <>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
+                                                AI gợi ý
                                             </span>
                                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', backgroundColor: '#e2e8f0', color: '#64748b', fontSize: '0.875rem', fontWeight: 600, borderRadius: '9999px' }}>
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý chương{aiUsageLimit
-                                                    ? (aiUsageLimit.coCreateAvailable
-                                                        ? ` (${aiUsageLimit.coCreate?.remaining ?? 0}/${aiUsageLimit.coCreate?.limitPerDay ?? 0})`
-                                                        : ' (—/—)')
-                                                    : ''}
+                                                AI gợi ý chương
                                             </span>
                                         </>
                                     ) : (
@@ -2509,7 +2500,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                 className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-primary/10"
                                             >
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý{aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
+                                                AI gợi ý
                                             </button>
                                             <button
                                                 type="button"
@@ -2531,11 +2522,7 @@ export function ChapterEditorPage({ story, chapter, isCreateMode = false, source
                                                 className="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary text-sm font-bold rounded-full hover:bg-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-primary/10"
                                             >
                                                 <Sparkles style={{ width: '14px', height: '14px' }} />
-                                                AI gợi ý chương{aiUsageLimit
-                                                    ? (aiUsageLimit.coCreateAvailable
-                                                        ? ` (${aiUsageLimit.coCreate?.remaining ?? 0}/${aiUsageLimit.coCreate?.limitPerDay ?? 0})`
-                                                        : ' (—/—)')
-                                                    : ''}
+                                                AI gợi ý chương
                                             </button>
                                         </>
                                     )}

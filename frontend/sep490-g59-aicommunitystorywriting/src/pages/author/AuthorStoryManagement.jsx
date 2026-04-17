@@ -18,6 +18,7 @@ import { useToast } from '../../components/author/story-editor/Toast';
 import { Pagination } from '../../components/pagination/Pagination';
 import { setAuthorChapterListActive } from '../../utils/authorUiFlags';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { getAiUsageLimit } from '../../api/ai/aiApi';
 
 function mapStoryFromApi(item) {
     const status = item.status || item.Status || '';
@@ -310,6 +311,9 @@ export function AuthorStoryManagement({ onBack }) {
     const [followersTotalCount, setFollowersTotalCount] = useState(0);
     const [followersSearchInput, setFollowersSearchInput] = useState('');
     const [followersSearchKeyword, setFollowersSearchKeyword] = useState('');
+    const [authorAiBudget, setAuthorAiBudget] = useState(null);
+    const [authorAiBudgetLoading, setAuthorAiBudgetLoading] = useState(false);
+    const [authorAiBudgetError, setAuthorAiBudgetError] = useState(null);
 
     // Danh sách tài khoản ngân hàng (load từ backend)
     const [bankAccounts, setBankAccounts] = useState([]);
@@ -519,6 +523,36 @@ export function AuthorStoryManagement({ onBack }) {
         if (!showFollowersModal) return;
         loadFollowers(followersPage, followersSearchKeyword);
     }, [showFollowersModal, followersPage, followersSearchKeyword, loadFollowers]);
+
+    useEffect(() => {
+        if (!authorId) {
+            setAuthorAiBudget(null);
+            setAuthorAiBudgetError(null);
+            setAuthorAiBudgetLoading(false);
+            return;
+        }
+        if (activeView !== 'profile') return;
+        let cancelled = false;
+        const loadBudget = async () => {
+            setAuthorAiBudgetLoading(true);
+            setAuthorAiBudgetError(null);
+            try {
+                const data = await getAiUsageLimit();
+                if (cancelled) return;
+                setAuthorAiBudget(data?.authorTokenBudget ?? null);
+            } catch (e) {
+                if (cancelled) return;
+                setAuthorAiBudget(null);
+                setAuthorAiBudgetError(e?.response?.data?.message || e?.message || 'Không tải được token AI.');
+            } finally {
+                if (!cancelled) setAuthorAiBudgetLoading(false);
+            }
+        };
+        loadBudget();
+        return () => {
+            cancelled = true;
+        };
+    }, [authorId, activeView]);
 
     useEffect(() => {
         if (activeView !== 'bank-accounts' && activeView !== 'history') return;
@@ -760,6 +794,19 @@ export function AuthorStoryManagement({ onBack }) {
         totalViews: stories.reduce((acc, s) => acc + (Number(s.totalViews) || 0), 0),
         followers: profileFollowersCount,
     };
+    const authorAiUnlimited = !!(authorAiBudget?.unlimitedLifetime);
+    const authorAiRemainingText = authorAiBudgetLoading
+        ? '...'
+        : (authorAiUnlimited
+            ? 'Không giới hạn'
+            : Number(authorAiBudget?.tokensRemainingLifetime ?? 0).toLocaleString('vi-VN'));
+    const authorAiUsed = Number(authorAiBudget?.tokensUsed ?? 0);
+    const authorAiLimit = authorAiBudget?.tokenLimit;
+    const authorAiLimitNumber = Number(authorAiLimit);
+    const hasFiniteAuthorAiLimit = Number.isFinite(authorAiLimitNumber) && authorAiLimitNumber > 0;
+    const authorAiUsedPercent = hasFiniteAuthorAiLimit
+        ? Math.max(0, Math.min(100, Math.round((authorAiUsed / authorAiLimitNumber) * 100)))
+        : null;
 
     const handleCreateStory = () => {
         if (isAuthorWritingSuspended) {
@@ -1918,7 +1965,8 @@ export function AuthorStoryManagement({ onBack }) {
                                         { icon: List, color: '#7c3aed', bg: '#f5f3ff', label: 'Chương đã đăng', value: userStats.totalChapters },
                                         { icon: Eye, color: '#0ea5e9', bg: '#f0f9ff', label: 'Lượt xem (tổng)', value: userStats.totalViews.toLocaleString('vi-VN') },
                                         { icon: Heart, color: '#e11d48', bg: '#fff1f2', label: 'Người theo dõi', value: userStats.followers },
-                                    ].map(({ icon: Icon, color, bg, label, value }) => (
+                                        { icon: Coins, color: '#b45309', bg: '#fffbeb', label: 'Token AI còn lại', value: authorAiRemainingText, hint: authorAiUnlimited ? `Đã dùng: ${authorAiUsed.toLocaleString('vi-VN')}` : `Đã dùng: ${authorAiUsed.toLocaleString('vi-VN')} / Hạn mức: ${(hasFiniteAuthorAiLimit ? authorAiLimitNumber.toLocaleString('vi-VN') : 'Không giới hạn')}`, isTokenCard: true },
+                                    ].map(({ icon: Icon, color, bg, label, value, hint, isTokenCard }) => (
                                         <div
                                             key={label}
                                             style={{
@@ -1947,9 +1995,35 @@ export function AuthorStoryManagement({ onBack }) {
                                             <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.35rem', fontWeight: 500 }}>
                                                 {label}
                                             </div>
+                                            {hint && (
+                                                <div style={{ fontSize: '0.6875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                                                    {hint}
+                                                </div>
+                                            )}
+                                            {isTokenCard && !authorAiUnlimited && authorAiUsedPercent != null && (
+                                                <div style={{ marginTop: '0.5rem' }}>
+                                                    <div style={{ height: '6px', borderRadius: '9999px', backgroundColor: '#f1f5f9', overflow: 'hidden' }}>
+                                                        <div
+                                                            style={{
+                                                                height: '100%',
+                                                                width: `${authorAiUsedPercent}%`,
+                                                                background: 'linear-gradient(90deg, #f59e0b 0%, #f97316 100%)',
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <div style={{ marginTop: '0.25rem', fontSize: '0.6875rem', color: '#94a3b8' }}>
+                                                        Đã dùng {authorAiUsedPercent}%
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
+                                {authorAiBudgetError && (
+                                    <p style={{ margin: 0, marginTop: '-0.5rem', marginBottom: '1rem', fontSize: '0.75rem', color: '#dc2626' }}>
+                                        {authorAiBudgetError}
+                                    </p>
+                                )}
 
                                 <div style={{
                                     display: 'flex',

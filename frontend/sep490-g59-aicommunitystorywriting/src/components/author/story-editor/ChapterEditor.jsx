@@ -178,7 +178,7 @@ export function ChapterEditor({
     const [coCreateLoading, setCoCreateLoading] = useState(false);
     const [coCreateResult, setCoCreateResult] = useState(null);
     const [coCreateContextWarning, setCoCreateContextWarning] = useState(null);
-    const [aiUsageLimit, setAiUsageLimit] = useState(null);
+    const [, setAiUsageLimit] = useState(null);
 
     const storyId = story?.id ?? story?.Id ?? null;
     const chapterIdRaw = chapter?.id ?? chapter?.Id ?? null;
@@ -237,40 +237,27 @@ export function ChapterEditor({
     const loadAiUsageLimit = async () => {
         try {
             const data = await getAiUsageLimit();
-            setAiUsageLimit({
-                suggestNextChapter: {
-                    limitPerDay: Number(data?.suggestNextChapter?.limitPerDay ?? 0) || 0,
-                    usedInWindow: Number(data?.suggestNextChapter?.usedInWindow ?? 0) || 0,
-                    remaining: Number(data?.suggestNextChapter?.remaining ?? 0) || 0,
-                    resetsAtUtc: data?.suggestNextChapter?.resetsAtUtc ?? null,
-                },
-                coCreate: {
-                    limitPerDay: Number(data?.coCreate?.limitPerDay ?? 0) || 0,
-                    usedInWindow: Number(data?.coCreate?.usedInWindow ?? 0) || 0,
-                    remaining: Number(data?.coCreate?.remaining ?? 0) || 0,
-                    resetsAtUtc: data?.coCreate?.resetsAtUtc ?? null,
-                },
-                coCreateAvailable: Boolean(data?.coCreateAvailable),
-            });
+            setAiUsageLimit(data ?? null);
         } catch {
             setAiUsageLimit(null);
         }
     };
 
-    const decrementCoCreateUsageOptimistic = () => {
-        setAiUsageLimit((prev) => {
-            if (!prev || !prev.coCreate) return prev;
-            const currentRemaining = Number(prev.coCreate.remaining ?? 0) || 0;
-            const currentUsed = Number(prev.coCreate.usedInWindow ?? 0) || 0;
-            return {
-                ...prev,
-                coCreate: {
-                    ...prev.coCreate,
-                    remaining: Math.max(0, currentRemaining - 1),
-                    usedInWindow: currentUsed + 1,
-                },
-            };
-        });
+    const hasRemainingAuthorAiToken = (usage) => {
+        const budget = usage?.authorTokenBudget ?? null;
+        if (!budget) return true;
+        if (budget.unlimitedLifetime) return true;
+        return Number(budget.tokensRemainingLifetime ?? 0) > 0;
+    };
+
+    const ensureAuthorTokenForAi = async () => {
+        const latest = await getAiUsageLimit();
+        setAiUsageLimit(latest ?? null);
+        if (!hasRemainingAuthorAiToken(latest)) {
+            showToast('Bạn đã dùng hết token AI khả dụng. Vui lòng liên hệ quản trị viên để được cấp thêm token.', 'error');
+            return false;
+        }
+        return true;
     };
 
     useEffect(() => {
@@ -313,6 +300,7 @@ export function ChapterEditor({
             );
             return;
         }
+        if (!(await ensureAuthorTokenForAi())) return;
         if (type === 'paragraph') {
             setSuggestions([]);
             setSuggestWarning(null);
@@ -329,11 +317,10 @@ export function ChapterEditor({
                         ? 'Lưu ý: Chương liền trước hiện vẫn ở trạng thái bản nháp. AI có thể chưa bám sát đầy đủ mạch mới nhất, bạn nên dùng gợi ý này để tham khảo và chỉnh sửa thêm.'
                         : null
                 );
-                loadAiUsageLimit();
             } catch (err) {
                 const status = err?.response?.status;
                 const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi gợi ý AI.';
-                if (status === 429) showToast('Bạn đã gọi gợi ý quá nhiều lần. Vui lòng thử lại sau.', 'error');
+                if (status === 429) showToast(msg || 'Bạn đã dùng hết token AI khả dụng.', 'error');
                 else if (status === 403) showToast(msg || 'Chỉ tác giả mới được sử dụng tính năng này.', 'error');
                 else showToast(msg, 'error');
                 setSuggestWarning(null);
@@ -366,13 +353,12 @@ export function ChapterEditor({
             showToast('Vui lòng nhập ý tưởng của bạn.', 'error');
             return;
         }
+        if (!(await ensureAuthorTokenForAi())) return;
         setCoCreateContextWarning(null);
         setCoCreateLoading(true);
         try {
             const chapterOrderIndex = (Number(chapter?.number) || 1) - 1;
             const data = await coCreate(storyId, idea, { chapterOrderIndex, chapterId: chapterIdForAi });
-            // Trừ ngay trên UI để người dùng thấy số lượt giảm tức thì.
-            decrementCoCreateUsageOptimistic();
             const ctxWarnCo = pickAiContextWarning(data);
             setCoCreateContextWarning(
                 ctxWarnCo
@@ -382,12 +368,11 @@ export function ChapterEditor({
             setCoCreateResult(data);
             setShowCoCreateIdeaPopup(false);
             setShowCoCreateResultPopup(true);
-            // Đồng bộ lại với BE (không chặn UI).
             loadAiUsageLimit();
         } catch (err) {
             const status = err?.response?.status;
             const msg = err?.response?.data?.message ?? err?.message ?? 'Lỗi khi gọi AI hỗ trợ.';
-            if (status === 429) showToast('Bạn đã gọi AI quá nhiều lần. Vui lòng thử lại sau.', 'error');
+            if (status === 429) showToast(msg || 'Bạn đã dùng hết token AI khả dụng.', 'error');
             else if (status === 403) showToast(msg || 'Chỉ tác giả mới được sử dụng.', 'error');
             else showToast(msg, 'error');
         } finally {
@@ -1047,7 +1032,6 @@ export function ChapterEditor({
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
                                             AI gợi ý
-                                            {aiUsageLimit ? ` (${aiUsageLimit.suggestNextChapter?.remaining ?? 0}/${aiUsageLimit.suggestNextChapter?.limitPerDay ?? 0})` : ''}
                                         </button>
                                         <button
                                             type="button"
@@ -1058,11 +1042,6 @@ export function ChapterEditor({
                                         >
                                             <Sparkles style={{ width: '14px', height: '14px' }} />
                                             AI gợi ý chương
-                                            {aiUsageLimit
-                                                ? (aiUsageLimit.coCreateAvailable
-                                                    ? ` (${aiUsageLimit.coCreate?.remaining ?? 0}/${aiUsageLimit.coCreate?.limitPerDay ?? 0})`
-                                                    : ' (—/—)')
-                                                : ''}
                                         </button>
                                         <button
                                             type="button"
