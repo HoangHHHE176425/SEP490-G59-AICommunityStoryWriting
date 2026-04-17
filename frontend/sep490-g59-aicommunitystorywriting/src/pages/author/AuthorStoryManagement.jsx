@@ -1842,9 +1842,9 @@ export function AuthorStoryManagement({ onBack }) {
                                         Rút tối thiểu <strong>{MIN_WITHDRAW_COINS.toLocaleString('vi-VN')} coin</strong> (khoảng{' '}
                                         {formatVnd(MIN_WITHDRAW_VND)}).
                                         {withdrawBalanceNum != null &&
-                                        Number.isFinite(withdrawBalanceNum) &&
-                                        withdrawBalanceNum > 0 &&
-                                        withdrawBalanceNum < MIN_WITHDRAW_COINS ? (
+                                            Number.isFinite(withdrawBalanceNum) &&
+                                            withdrawBalanceNum > 0 &&
+                                            withdrawBalanceNum < MIN_WITHDRAW_COINS ? (
                                             <span style={{ display: 'block', color: '#b45309', marginTop: '0.35rem', fontWeight: 500 }}>
                                                 Số dư hiện tại ({withdrawBalanceNum.toLocaleString('vi-VN')} coin) chưa đủ mức rút tối
                                                 thiểu.
@@ -1962,41 +1962,42 @@ export function AuthorStoryManagement({ onBack }) {
                                     ].map((item) => {
                                         const IconComp = item.icon;
                                         return (
-                                        <div
-                                            key={item.label}
-                                            style={{
-                                                borderRadius: '14px',
-                                                border: '1px solid #e2e8f0',
-                                                padding: '1rem',
-                                                background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
-                                            }}
-                                        >
-                                            <div style={{
-                                                width: '40px',
-                                                height: '40px',
-                                                borderRadius: '12px',
-                                                backgroundColor: item.bg,
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                marginBottom: '0.65rem',
-                                            }}
+                                            <div
+                                                key={item.label}
+                                                style={{
+                                                    borderRadius: '14px',
+                                                    border: '1px solid #e2e8f0',
+                                                    padding: '1rem',
+                                                    background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+                                                }}
                                             >
-                                                <IconComp style={{ width: '20px', height: '20px', color: item.color }} />
-                                            </div>
-                                            <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
-                                                {item.value}
-                                            </div>
-                                            <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.35rem', fontWeight: 500 }}>
-                                                {item.label}
-                                            </div>
-                                            {item.hint && (
-                                                <div style={{ fontSize: '0.6875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
-                                                    {item.hint}
+                                                <div style={{
+                                                    width: '40px',
+                                                    height: '40px',
+                                                    borderRadius: '12px',
+                                                    backgroundColor: item.bg,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    marginBottom: '0.65rem',
+                                                }}
+                                                >
+                                                    <IconComp style={{ width: '20px', height: '20px', color: item.color }} />
                                                 </div>
-                                            )}
-                                        </div>
-                                    )})}
+                                                <div style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                                                    {item.value}
+                                                </div>
+                                                <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '0.35rem', fontWeight: 500 }}>
+                                                    {item.label}
+                                                </div>
+                                                {item.hint && (
+                                                    <div style={{ fontSize: '0.6875rem', color: '#94a3b8', marginTop: '0.25rem' }}>
+                                                        {item.hint}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
                                 </div>
                                 {authorAiBudgetError && (
                                     <p style={{ margin: 0, marginTop: '-0.5rem', marginBottom: '1rem', fontSize: '0.75rem', color: '#dc2626' }}>
@@ -3210,234 +3211,234 @@ export function AuthorStoryManagement({ onBack }) {
                             </div>
 
                             {historyModalTab === 'donate' && (
-                            <>
-                            <div style={{
-                                backgroundColor: '#f0fdf4',
-                                borderRadius: '14px',
-                                padding: '1rem 1.15rem',
-                                border: '1px solid #bbf7d0',
-                                marginBottom: '1.25rem',
-                            }}
-                            >
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                <>
                                     <div style={{
-                                        width: '40px', height: '40px', borderRadius: '12px', backgroundColor: '#dcfce7',
-                                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                        backgroundColor: '#f0fdf4',
+                                        borderRadius: '14px',
+                                        padding: '1rem 1.15rem',
+                                        border: '1px solid #bbf7d0',
+                                        marginBottom: '1.25rem',
                                     }}
                                     >
-                                        <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
-                                    </div>
-                                    <div>
-                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 70% cho tác giả, 30% nền tảng</div>
-                                        <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
-                                            Các khoản <b>Donate</b> trong lịch sử là phần tác giả nhận sau khi nền tảng trừ <b>30%</b> phí.
+                                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
+                                            <div style={{
+                                                width: '40px', height: '40px', borderRadius: '12px', backgroundColor: '#dcfce7',
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                            }}
+                                            >
+                                                <Percent style={{ width: '20px', height: '20px', color: '#16a34a' }} />
+                                            </div>
+                                            <div>
+                                                <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#166534', marginBottom: '0.25rem' }}>Tỷ lệ chia sẻ: 70% cho tác giả, 30% nền tảng</div>
+                                                <div style={{ fontSize: '0.8125rem', color: '#166534', lineHeight: 1.5 }}>
+                                                    Các khoản <b>Donate</b> trong lịch sử là phần tác giả nhận sau khi nền tảng trừ <b>30%</b> phí.
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                </div>
-                            </div>
 
-                            <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                                    <thead>
-                                        <tr style={{ backgroundColor: '#f8fafc' }}>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỜI GIAN</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>LOẠI</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>SỐ COIN</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỰC NHẬN</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>GHI CHÚ</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {authorActivityLoading ? (
-                                            <tr>
-                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
-                                            </tr>
-                                        ) : authorActivityError ? (
-                                            <tr>
-                                                <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorActivityError}</td>
-                                            </tr>
-                                        ) : authorActivityItems.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={5} style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: '#64748b' }}>Chưa có giao dịch nào.</td>
-                                            </tr>
-                                        ) : (
-                                            authorActivityItems.map((item) => {
-                                                const createdAt = item.createdAt ?? item.CreatedAt;
-                                                const timeStr = createdAt
-                                                    ? new Date(createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-                                                    : '—';
-                                                const typeLabel = (item.type || item.Type) === 'WITHDRAW' ? 'Rút tiền' : 'Donate';
-                                                const amount = item.amount ?? item.Amount ?? 0;
-                                                const isWithdraw = (item.type || item.Type) === 'WITHDRAW';
-                                                const withdrawStatusRaw = item.withdrawStatus ?? item.WithdrawStatus;
-                                                const statusUpper = String(withdrawStatusRaw ?? '').toUpperCase();
-                                                const netReceived = isWithdraw
-                                                    ? (statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? Number(amount) : 0)
-                                                    : Math.max(0, Number(amount) - Math.floor(Number(amount) * 0.3));
-                                                const statusLabel =
-                                                    statusUpper === 'PENDING' ? 'Chờ xử lý' :
-                                                        statusUpper === 'PENDING_REVIEW' ? 'Chờ xét duyệt' :
-                                                            statusUpper === 'PROCESSING' ? 'Đang xử lý' :
-                                                                statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? 'Hoàn thành' :
-                                                                    statusUpper === 'FAILED' ? 'Thất bại' :
-                                                                        statusUpper === 'CANCELLED' ? 'Đã hủy' :
-                                                                            statusUpper || '—';
-                                                const note = isWithdraw
-                                                    ? (['PENDING', 'PENDING_REVIEW', 'PROCESSING'].includes(statusUpper)
-                                                        ? statusLabel
-                                                        : (item.note ?? item.Note) || statusLabel)
-                                                    : (item.senderDisplayName ?? item.SenderDisplayName
-                                                        ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}`
-                                                        : (item.note ?? item.Note) || '—');
-                                                const canCancelWithdraw = isWithdraw && (statusUpper === 'PENDING' || statusUpper === 'PENDING_REVIEW');
-                                                const vndAmount = Number(amount) * COIN_RATE_VND;
-                                                const vndNet = netReceived * COIN_RATE_VND;
-                                                return (
-                                                    <tr key={item.id ?? item.Id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{timeStr}</td>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{typeLabel}</td>
-                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: (item.type || item.Type) === 'WITHDRAW' ? '#dc2626' : '#15803d' }}>
-                                                            <div>{(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin</div>
-                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndAmount)}</div>
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, color: (item.type || item.Type) === 'WITHDRAW' ? '#b91c1c' : '#16a34a' }}>
-                                                            <div>
-                                                                {isWithdraw ? (netReceived > 0 ? `+${Number(netReceived).toLocaleString()}` : '—') : `+${Number(netReceived).toLocaleString()}`} coin
-                                                            </div>
-                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                                                                {isWithdraw ? (netReceived > 0 ? `≈ ${formatVnd(vndNet)}` : '—') : `≈ ${formatVnd(vndNet)}`}
-                                                            </div>
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#64748b', maxWidth: '280px' }}>
-                                                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</div>
-                                                                {canCancelWithdraw && (
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => handleCancelWithdraw(item.id ?? item.Id)}
-                                                                        style={{
-                                                                            alignSelf: 'flex-start',
-                                                                            padding: '0.35rem 0.75rem',
-                                                                            borderRadius: '10px',
-                                                                            border: '1px solid #fecaca',
-                                                                            backgroundColor: '#fef2f2',
-                                                                            color: '#b91c1c',
-                                                                            fontSize: '0.75rem',
-                                                                            fontWeight: 700,
-                                                                            cursor: 'pointer',
-                                                                        }}
-                                                                    >
-                                                                        Hủy
-                                                                    </button>
-                                                                )}
-                                                            </div>
-                                                        </td>
+                                    <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                            <thead>
+                                                <tr style={{ backgroundColor: '#f8fafc' }}>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỜI GIAN</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>LOẠI</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>SỐ COIN</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỰC NHẬN</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>GHI CHÚ</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {authorActivityLoading ? (
+                                                    <tr>
+                                                        <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
                                                     </tr>
-                                                );
-                                            })
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                            </>
+                                                ) : authorActivityError ? (
+                                                    <tr>
+                                                        <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorActivityError}</td>
+                                                    </tr>
+                                                ) : authorActivityItems.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={5} style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: '#64748b' }}>Chưa có giao dịch nào.</td>
+                                                    </tr>
+                                                ) : (
+                                                    authorActivityItems.map((item) => {
+                                                        const createdAt = item.createdAt ?? item.CreatedAt;
+                                                        const timeStr = createdAt
+                                                            ? new Date(createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                                            : '—';
+                                                        const typeLabel = (item.type || item.Type) === 'WITHDRAW' ? 'Rút tiền' : 'Donate';
+                                                        const amount = item.amount ?? item.Amount ?? 0;
+                                                        const isWithdraw = (item.type || item.Type) === 'WITHDRAW';
+                                                        const withdrawStatusRaw = item.withdrawStatus ?? item.WithdrawStatus;
+                                                        const statusUpper = String(withdrawStatusRaw ?? '').toUpperCase();
+                                                        const netReceived = isWithdraw
+                                                            ? (statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? Number(amount) : 0)
+                                                            : Math.max(0, Number(amount) - Math.floor(Number(amount) * 0.3));
+                                                        const statusLabel =
+                                                            statusUpper === 'PENDING' ? 'Chờ xử lý' :
+                                                                statusUpper === 'PENDING_REVIEW' ? 'Chờ xét duyệt' :
+                                                                    statusUpper === 'PROCESSING' ? 'Đang xử lý' :
+                                                                        statusUpper === 'COMPLETED' || statusUpper === 'SUCCESS' ? 'Hoàn thành' :
+                                                                            statusUpper === 'FAILED' ? 'Thất bại' :
+                                                                                statusUpper === 'CANCELLED' ? 'Đã hủy' :
+                                                                                    statusUpper || '—';
+                                                        const note = isWithdraw
+                                                            ? (['PENDING', 'PENDING_REVIEW', 'PROCESSING'].includes(statusUpper)
+                                                                ? statusLabel
+                                                                : (item.note ?? item.Note) || statusLabel)
+                                                            : (item.senderDisplayName ?? item.SenderDisplayName
+                                                                ? `${item.senderDisplayName ?? item.SenderDisplayName}${item.note ?? item.Note ? ` — ${item.note || item.Note}` : ''}`
+                                                                : (item.note ?? item.Note) || '—');
+                                                        const canCancelWithdraw = isWithdraw && (statusUpper === 'PENDING' || statusUpper === 'PENDING_REVIEW');
+                                                        const vndAmount = Number(amount) * COIN_RATE_VND;
+                                                        const vndNet = netReceived * COIN_RATE_VND;
+                                                        return (
+                                                            <tr key={item.id ?? item.Id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{timeStr}</td>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{typeLabel}</td>
+                                                                <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: (item.type || item.Type) === 'WITHDRAW' ? '#dc2626' : '#15803d' }}>
+                                                                    <div>{(item.type || item.Type) === 'WITHDRAW' ? '-' : '+'}{Number(amount).toLocaleString()} coin</div>
+                                                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndAmount)}</div>
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, color: (item.type || item.Type) === 'WITHDRAW' ? '#b91c1c' : '#16a34a' }}>
+                                                                    <div>
+                                                                        {isWithdraw ? (netReceived > 0 ? `+${Number(netReceived).toLocaleString()}` : '—') : `+${Number(netReceived).toLocaleString()}`} coin
+                                                                    </div>
+                                                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                                                                        {isWithdraw ? (netReceived > 0 ? `≈ ${formatVnd(vndNet)}` : '—') : `≈ ${formatVnd(vndNet)}`}
+                                                                    </div>
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#64748b', maxWidth: '280px' }}>
+                                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                                                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{note}</div>
+                                                                        {canCancelWithdraw && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => handleCancelWithdraw(item.id ?? item.Id)}
+                                                                                style={{
+                                                                                    alignSelf: 'flex-start',
+                                                                                    padding: '0.35rem 0.75rem',
+                                                                                    borderRadius: '10px',
+                                                                                    border: '1px solid #fecaca',
+                                                                                    backgroundColor: '#fef2f2',
+                                                                                    color: '#b91c1c',
+                                                                                    fontSize: '0.75rem',
+                                                                                    fontWeight: 700,
+                                                                                    cursor: 'pointer',
+                                                                                }}
+                                                                            >
+                                                                                Hủy
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </>
                             )}
 
                             {historyModalTab === 'unlock' && (
-                            <>
-                            <div style={{
-                                backgroundColor: '#f0f9ff',
-                                borderRadius: '14px',
-                                padding: '1rem 1.15rem',
-                                border: '1px solid #bae6fd',
-                                marginBottom: '1.25rem',
-                            }}
-                            >
-                                <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#0369a1', marginBottom: '0.25rem' }}>Mở khóa chương trả phí</div>
-                                <div style={{ fontSize: '0.8125rem', color: '#0c4a6e', lineHeight: 1.5 }}>
-                                    Mỗi dòng là một lượt độc giả mở khóa chương. <b>Coin đã trả</b> là số coin người đọc bị trừ; <b>Phí NT</b> và <b>Thực nhận</b> theo ghi nhận hệ thống (thu nhập tác giả sau phí nền tảng).
-                                </div>
-                            </div>
-                            <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
-                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                                    <thead>
-                                        <tr style={{ backgroundColor: '#f8fafc' }}>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỜI GIAN</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>TRUYỆN</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>CHƯƠNG</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>COIN ĐÃ TRẢ</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>PHÍ NT</th>
-                                            <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỰC NHẬN</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {authorUnlockLoading ? (
-                                            <tr>
-                                                <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
-                                            </tr>
-                                        ) : authorUnlockError ? (
-                                            <tr>
-                                                <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorUnlockError}</td>
-                                            </tr>
-                                        ) : authorUnlockItems.length === 0 ? (
-                                            <tr>
-                                                <td colSpan={6} style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: '#64748b' }}>Chưa có lượt mở khóa nào.</td>
-                                            </tr>
-                                        ) : (
-                                            authorUnlockItems.map((row, idx) => {
-                                                const unlockedAt = row.unlockedAt ?? row.UnlockedAt;
-                                                const timeStr = unlockedAt
-                                                    ? new Date(unlockedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-                                                    : '—';
-                                                const storyTitle = row.storyTitle ?? row.StoryTitle ?? '—';
-                                                const chapterTitle = row.chapterTitle ?? row.ChapterTitle ?? '—';
-                                                const coinsPaid = Number(row.coinsPaid ?? row.CoinsPaid ?? 0);
-                                                const platformFee = Math.round(Number(row.platformFee ?? row.PlatformFee ?? 0));
-                                                const netAmount = Math.round(Number(row.netAmount ?? row.NetAmount ?? 0));
-                                                const vndPaid = coinsPaid * COIN_RATE_VND;
-                                                const vndNet = netAmount * COIN_RATE_VND;
-                                                const rowKey = row.purchaseId ?? row.PurchaseId ?? idx;
-                                                return (
-                                                    <tr key={String(rowKey)} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{timeStr}</td>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151', maxWidth: '200px' }}>
-                                                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={storyTitle}>{storyTitle}</div>
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', color: '#374151', maxWidth: '180px' }}>
-                                                            <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={chapterTitle}>{chapterTitle}</div>
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#0f766e' }}>
-                                                            <div>{coinsPaid.toLocaleString()} coin</div>
-                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndPaid)}</div>
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', color: '#92400e' }}>
-                                                            {platformFee.toLocaleString()} coin
-                                                        </td>
-                                                        <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
-                                                            <div>
-                                                                +{netAmount.toLocaleString()} coin
-                                                            </div>
-                                                            <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndNet)}</div>
-                                                        </td>
+                                <>
+                                    <div style={{
+                                        backgroundColor: '#f0f9ff',
+                                        borderRadius: '14px',
+                                        padding: '1rem 1.15rem',
+                                        border: '1px solid #bae6fd',
+                                        marginBottom: '1.25rem',
+                                    }}
+                                    >
+                                        <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#0369a1', marginBottom: '0.25rem' }}>Mở khóa chương trả phí</div>
+                                        <div style={{ fontSize: '0.8125rem', color: '#0c4a6e', lineHeight: 1.5 }}>
+                                            Mỗi dòng là một lượt độc giả mở khóa chương. <b>Coin đã trả</b> là số coin người đọc bị trừ; <b>Phí NT</b> và <b>Thực nhận</b> theo ghi nhận hệ thống (thu nhập tác giả sau phí nền tảng).
+                                        </div>
+                                    </div>
+                                    <div style={{ borderRadius: '14px', border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+                                            <thead>
+                                                <tr style={{ backgroundColor: '#f8fafc' }}>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỜI GIAN</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>TRUYỆN</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'left', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>CHƯƠNG</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>COIN ĐÃ TRẢ</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>PHÍ NT</th>
+                                                    <th style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#475569', fontSize: '0.75rem' }}>THỰC NHẬN</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {authorUnlockLoading ? (
+                                                    <tr>
+                                                        <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Đang tải...</td>
                                                     </tr>
-                                                );
-                                            })
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                            {!authorUnlockLoading && !authorUnlockError && authorUnlockTotalCount > AUTHOR_UNLOCK_PAGE_SIZE && (
-                                <div style={{ marginTop: '1rem' }}>
-                                    <Pagination
-                                        currentPage={authorUnlockPage}
-                                        totalPages={Math.max(1, Math.ceil(authorUnlockTotalCount / AUTHOR_UNLOCK_PAGE_SIZE))}
-                                        totalItems={authorUnlockTotalCount}
-                                        itemsPerPage={AUTHOR_UNLOCK_PAGE_SIZE}
-                                        onPageChange={(p) => loadAuthorUnlockHistory(p)}
-                                        itemLabel="lượt mở khóa"
-                                    />
-                                </div>
-                            )}
-                            </>
+                                                ) : authorUnlockError ? (
+                                                    <tr>
+                                                        <td colSpan={6} style={{ padding: '2rem', textAlign: 'center', color: '#dc2626' }}>{authorUnlockError}</td>
+                                                    </tr>
+                                                ) : authorUnlockItems.length === 0 ? (
+                                                    <tr>
+                                                        <td colSpan={6} style={{ padding: '2.5rem 1.5rem', textAlign: 'center', color: '#64748b' }}>Chưa có lượt mở khóa nào.</td>
+                                                    </tr>
+                                                ) : (
+                                                    authorUnlockItems.map((row, idx) => {
+                                                        const unlockedAt = row.unlockedAt ?? row.UnlockedAt;
+                                                        const timeStr = unlockedAt
+                                                            ? new Date(unlockedAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                                            : '—';
+                                                        const storyTitle = row.storyTitle ?? row.StoryTitle ?? '—';
+                                                        const chapterTitle = row.chapterTitle ?? row.ChapterTitle ?? '—';
+                                                        const coinsPaid = Number(row.coinsPaid ?? row.CoinsPaid ?? 0);
+                                                        const platformFee = Math.round(Number(row.platformFee ?? row.PlatformFee ?? 0));
+                                                        const netAmount = Math.round(Number(row.netAmount ?? row.NetAmount ?? 0));
+                                                        const vndPaid = coinsPaid * COIN_RATE_VND;
+                                                        const vndNet = netAmount * COIN_RATE_VND;
+                                                        const rowKey = row.purchaseId ?? row.PurchaseId ?? idx;
+                                                        return (
+                                                            <tr key={String(rowKey)} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#374151' }}>{timeStr}</td>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#374151', maxWidth: '200px' }}>
+                                                                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={storyTitle}>{storyTitle}</div>
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', color: '#374151', maxWidth: '180px' }}>
+                                                                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={chapterTitle}>{chapterTitle}</div>
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 600, color: '#0f766e' }}>
+                                                                    <div>{coinsPaid.toLocaleString()} coin</div>
+                                                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndPaid)}</div>
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', textAlign: 'right', color: '#92400e' }}>
+                                                                    {platformFee.toLocaleString()} coin
+                                                                </td>
+                                                                <td style={{ padding: '0.85rem 1rem', textAlign: 'right', fontWeight: 700, color: '#16a34a' }}>
+                                                                    <div>
+                                                                        +{netAmount.toLocaleString()} coin
+                                                                    </div>
+                                                                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>≈ {formatVnd(vndNet)}</div>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {!authorUnlockLoading && !authorUnlockError && authorUnlockTotalCount > AUTHOR_UNLOCK_PAGE_SIZE && (
+                                        <div style={{ marginTop: '1rem' }}>
+                                            <Pagination
+                                                currentPage={authorUnlockPage}
+                                                totalPages={Math.max(1, Math.ceil(authorUnlockTotalCount / AUTHOR_UNLOCK_PAGE_SIZE))}
+                                                totalItems={authorUnlockTotalCount}
+                                                itemsPerPage={AUTHOR_UNLOCK_PAGE_SIZE}
+                                                onPageChange={(p) => loadAuthorUnlockHistory(p)}
+                                                itemLabel="lượt mở khóa"
+                                            />
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>
